@@ -379,8 +379,18 @@ func (e ExperienceEventV0) Validate() error {
 	if strings.TrimSpace(e.InputHash) != "" && len(e.InputHash) != 64 {
 		return SchemaValidationError{Path: "inputHash", Reason: "must be 64 hex chars"}
 	}
+	if strings.TrimSpace(e.InputHash) != "" {
+		if _, err := hex.DecodeString(e.InputHash); err != nil {
+			return SchemaValidationError{Path: "inputHash", Reason: "must be valid hex"}
+		}
+	}
 	if strings.TrimSpace(e.OutputHash) != "" && len(e.OutputHash) != 64 {
 		return SchemaValidationError{Path: "outputHash", Reason: "must be 64 hex chars"}
+	}
+	if strings.TrimSpace(e.OutputHash) != "" {
+		if _, err := hex.DecodeString(e.OutputHash); err != nil {
+			return SchemaValidationError{Path: "outputHash", Reason: "must be valid hex"}
+		}
 	}
 	if e.CreatedAt.IsZero() {
 		return SchemaValidationError{Path: "createdAt", Reason: "required"}
