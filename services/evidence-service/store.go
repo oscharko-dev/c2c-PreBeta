@@ -189,37 +189,30 @@ func mergeArtifacts(dst, src *Artifacts) {
 	}
 }
 
+// cloneManifest produces a deep-enough copy that callers can safely mutate
+// any returned manifest without affecting the store. Slice fields are
+// re-allocated, pointer fields are re-allocated, and inner slices on
+// referenced structs (TransformationPass.InputRef, RuntimeVersion.Ref) are
+// also cloned. DataReference itself contains only value-typed fields so a
+// struct copy is sufficient there.
 func cloneManifest(m *EvidencePackManifest) *EvidencePackManifest {
 	if m == nil {
 		return nil
 	}
 	copyManifest := *m
-	if m.Artifacts.SourceCobol != nil {
-		copyManifest.Artifacts.SourceCobol = append([]DataReference{}, m.Artifacts.SourceCobol...)
-	}
-	if m.Artifacts.TransformationPasses != nil {
-		copyManifest.Artifacts.TransformationPasses = append([]TransformationPass{}, m.Artifacts.TransformationPasses...)
-	}
-	if m.Artifacts.ModelInvocations != nil {
-		copyManifest.Artifacts.ModelInvocations = append([]ModelInvocationRef{}, m.Artifacts.ModelInvocations...)
-	}
-	if m.Artifacts.BuildTestResults != nil {
-		copyManifest.Artifacts.BuildTestResults = append([]DataReference{}, m.Artifacts.BuildTestResults...)
-	}
-	if m.Artifacts.SBOM != nil {
-		copyManifest.Artifacts.SBOM = append([]DataReference{}, m.Artifacts.SBOM...)
-	}
-	if m.Artifacts.LicenseReports != nil {
-		copyManifest.Artifacts.LicenseReports = append([]DataReference{}, m.Artifacts.LicenseReports...)
-	}
-	if m.Artifacts.ExperienceEvents != nil {
-		copyManifest.Artifacts.ExperienceEvents = append([]DataReference{}, m.Artifacts.ExperienceEvents...)
-	}
+	copyManifest.Artifacts = cloneArtifacts(m.Artifacts)
 	if m.OpenAssumptions != nil {
 		copyManifest.OpenAssumptions = append([]OpenAssumption{}, m.OpenAssumptions...)
 	}
 	if m.UnsupportedFeatures != nil {
-		copyManifest.UnsupportedFeatures = append([]UnsupportedFeature{}, m.UnsupportedFeatures...)
+		copyManifest.UnsupportedFeatures = make([]UnsupportedFeature, len(m.UnsupportedFeatures))
+		for i, uf := range m.UnsupportedFeatures {
+			copyManifest.UnsupportedFeatures[i] = uf
+			if uf.SourceRef != nil {
+				ref := *uf.SourceRef
+				copyManifest.UnsupportedFeatures[i].SourceRef = &ref
+			}
+		}
 	}
 	if m.Exports != nil {
 		copyManifest.Exports = append([]ExportRecord{}, m.Exports...)
@@ -228,4 +221,65 @@ func cloneManifest(m *EvidencePackManifest) *EvidencePackManifest {
 	copyManifest.Validation.MissingArtifacts = append([]string{}, m.Validation.MissingArtifacts...)
 	copyManifest.Validation.Messages = append([]string{}, m.Validation.Messages...)
 	return &copyManifest
+}
+
+func cloneArtifacts(a Artifacts) Artifacts {
+	out := Artifacts{}
+	if a.SourceCobol != nil {
+		out.SourceCobol = append([]DataReference{}, a.SourceCobol...)
+	}
+	if a.CorpusMetadata != nil {
+		ref := *a.CorpusMetadata
+		out.CorpusMetadata = &ref
+	}
+	if a.SemanticIR != nil {
+		ref := *a.SemanticIR
+		out.SemanticIR = &ref
+	}
+	if a.TransformationPasses != nil {
+		out.TransformationPasses = make([]TransformationPass, len(a.TransformationPasses))
+		for i, p := range a.TransformationPasses {
+			out.TransformationPasses[i] = p
+			if p.InputRef != nil {
+				ref := *p.InputRef
+				out.TransformationPasses[i].InputRef = &ref
+			}
+		}
+	}
+	if a.GeneratedJava != nil {
+		ref := *a.GeneratedJava
+		out.GeneratedJava = &ref
+	}
+	if a.RuntimeVersion != nil {
+		rv := *a.RuntimeVersion
+		if rv.Ref != nil {
+			ref := *rv.Ref
+			rv.Ref = &ref
+		}
+		out.RuntimeVersion = &rv
+	}
+	if a.ModelInvocations != nil {
+		out.ModelInvocations = append([]ModelInvocationRef{}, a.ModelInvocations...)
+	}
+	if a.BuildTestResults != nil {
+		out.BuildTestResults = append([]DataReference{}, a.BuildTestResults...)
+	}
+	if a.SBOM != nil {
+		out.SBOM = append([]DataReference{}, a.SBOM...)
+	}
+	if a.LicenseReports != nil {
+		out.LicenseReports = append([]DataReference{}, a.LicenseReports...)
+	}
+	if a.HarnessEvents != nil {
+		ref := *a.HarnessEvents
+		out.HarnessEvents = &ref
+	}
+	if a.TrajectoryLedger != nil {
+		ref := *a.TrajectoryLedger
+		out.TrajectoryLedger = &ref
+	}
+	if a.ExperienceEvents != nil {
+		out.ExperienceEvents = append([]DataReference{}, a.ExperienceEvents...)
+	}
+	return out
 }

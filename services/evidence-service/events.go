@@ -23,29 +23,53 @@ const (
 	ActorService                 = "evidence-service"
 )
 
-// HarnessEvent is the v0 envelope contract enforced by the agentic harness.
-// We only keep the subset of fields evidence-service is responsible for; the
-// harness itself can normalize the rest when the event is forwarded via
-// POST /v0/events.
+// EventCost mirrors the optional cost block on agentic-harness-core's
+// EventEnvelopeV0.cost. Kept as a value-on-the-wire so emitting "no cost"
+// stays one nil pointer.
+type EventCost struct {
+	Currency string  `json:"currency,omitempty"`
+	Amount   float64 `json:"amount"`
+	Unit     string  `json:"unit,omitempty"`
+}
+
+// EvidenceEventPayload is the typed payload shape evidence-service writes
+// onto every event. Keeping this strongly-typed (instead of map[string]any)
+// prevents accidental drift into untyped fields and makes downstream
+// consumers parse against a stable contract.
+type EvidenceEventPayload struct {
+	PackID     string           `json:"packId"`
+	RunID      string           `json:"runId"`
+	WorkflowID string           `json:"workflowId,omitempty"`
+	Status     string           `json:"status"`
+	Validation ValidationResult `json:"validation"`
+}
+
+// HarnessEvent mirrors the v0 envelope contract enforced by
+// agentic-harness-core/types.go EventEnvelopeV0. The optional ErrorClass,
+// LatencyMs, and Cost fields are kept here so an emitted event can be
+// forwarded verbatim to POST /v0/events without a re-shape step.
 type HarnessEvent struct {
-	SchemaVersion    string         `json:"schemaVersion"`
-	EventID          string         `json:"eventId"`
-	EventType        string         `json:"eventType"`
-	Service          string         `json:"service"`
-	RunID            string         `json:"runId"`
-	StepID           int64          `json:"stepId"`
-	Actor            string         `json:"actor"`
-	Capability       string         `json:"capability"`
-	DataClass        string         `json:"dataClass"`
-	RedactionProfile string         `json:"redactionProfile"`
-	PolicyDecision   string         `json:"policyDecision"`
-	Status           string         `json:"status"`
-	StateTransition  string         `json:"stateTransition"`
-	InputRef         DataReference  `json:"inputRef"`
-	OutputRef        DataReference  `json:"outputRef"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	Payload          map[string]any `json:"payload,omitempty"`
-	RelatedRecords   []string       `json:"relatedRecords,omitempty"`
+	SchemaVersion    string                `json:"schemaVersion"`
+	EventID          string                `json:"eventId"`
+	EventType        string                `json:"eventType"`
+	Service          string                `json:"service"`
+	RunID            string                `json:"runId"`
+	StepID           int64                 `json:"stepId"`
+	Actor            string                `json:"actor"`
+	Capability       string                `json:"capability"`
+	DataClass        string                `json:"dataClass"`
+	RedactionProfile string                `json:"redactionProfile"`
+	PolicyDecision   string                `json:"policyDecision"`
+	Status           string                `json:"status"`
+	StateTransition  string                `json:"stateTransition"`
+	ErrorClass       string                `json:"errorClass,omitempty"`
+	LatencyMs        *int64                `json:"latencyMs,omitempty"`
+	Cost             *EventCost            `json:"cost,omitempty"`
+	InputRef         DataReference         `json:"inputRef"`
+	OutputRef        DataReference         `json:"outputRef"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	Payload          *EvidenceEventPayload `json:"payload,omitempty"`
+	RelatedRecords   []string              `json:"relatedRecords,omitempty"`
 }
 
 type EventSink interface {
@@ -187,9 +211,6 @@ func normalize(event HarnessEvent, nextID uint64) HarnessEvent {
 	}
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = now
-	}
-	if event.Payload == nil {
-		event.Payload = map[string]any{}
 	}
 	return event
 }

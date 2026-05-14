@@ -24,6 +24,47 @@ const (
 	maxRequestBodyBytes = 1 << 20
 )
 
+// HealthResponse is the typed shape of GET /v0/health.
+type HealthResponse struct {
+	Status  string `json:"status"`
+	Service string `json:"service"`
+}
+
+// ReadyResponse is the typed shape of GET /v0/ready.
+type ReadyResponse struct {
+	Status        string    `json:"status"`
+	Service       string    `json:"service"`
+	PackCount     int       `json:"packCount"`
+	SchemaVersion string    `json:"schemaVersion"`
+	Capability    string    `json:"capability"`
+	LastUpdatedAt time.Time `json:"lastUpdatedAt"`
+}
+
+// ValidateResponse is the typed shape of POST /v0/packs/{id}/validate.
+type ValidateResponse struct {
+	PackID     string           `json:"packId"`
+	RunID      string           `json:"runId"`
+	Validation ValidationResult `json:"validation"`
+}
+
+// IncompletePackResponse is the typed 422 response when an export is
+// refused because required artifacts are missing.
+type IncompletePackResponse struct {
+	Error      string           `json:"error"`
+	Validation ValidationResult `json:"validation"`
+}
+
+// ExportResponse is the typed shape of POST /v0/packs/{id}/export.
+type ExportResponse struct {
+	Pack   *EvidencePackManifest `json:"pack"`
+	Export ExportRecord          `json:"export"`
+}
+
+// ErrorResponse is the typed shape of every {"error": "..."} body.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
 type Service struct {
 	store    *PackStore
 	exporter *Exporter
@@ -73,10 +114,7 @@ func (s *Service) healthHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"service": ServiceName,
-	})
+	writeJSON(w, http.StatusOK, HealthResponse{Status: "ok", Service: ServiceName})
 }
 
 func (s *Service) readyHandler(w http.ResponseWriter, r *http.Request) {
@@ -84,13 +122,13 @@ func (s *Service) readyHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":         "ready",
-		"service":        ServiceName,
-		"packCount":      len(s.store.List()),
-		"schemaVersion":  SchemaVersionV0,
-		"capability":     CapabilityEvidence,
-		"lastUpdatedAt":  time.Now().UTC(),
+	writeJSON(w, http.StatusOK, ReadyResponse{
+		Status:        "ready",
+		Service:       ServiceName,
+		PackCount:     len(s.store.List()),
+		SchemaVersion: SchemaVersionV0,
+		Capability:    CapabilityEvidence,
+		LastUpdatedAt: time.Now().UTC(),
 	})
 }
 
@@ -177,10 +215,10 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 		if !result.OK {
 			statusCode = http.StatusUnprocessableEntity
 		}
-		writeJSON(w, statusCode, map[string]any{
-			"packId":     manifest.PackID,
-			"runId":      manifest.RunID,
-			"validation": result,
+		writeJSON(w, statusCode, ValidateResponse{
+			PackID:     manifest.PackID,
+			RunID:      manifest.RunID,
+			Validation: result,
 		})
 	case "export":
 		if r.Method != http.MethodPost {
@@ -204,9 +242,9 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 		// Validation must pass before export so consumers never receive a
 		// pack that misses the W0 required artifact set.
 		if !manifest.Validation.OK {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-				"error":      "pack is incomplete and cannot be exported",
-				"validation": manifest.Validation,
+			writeJSON(w, http.StatusUnprocessableEntity, IncompletePackResponse{
+				Error:      "pack is incomplete and cannot be exported",
+				Validation: manifest.Validation,
 			})
 			return
 		}
@@ -223,9 +261,9 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 		if err := s.emitPackEvent(updated, EventTypePackExported, "pack.exported"); err != nil {
 			log.Printf("event emission failed: %v", err)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"pack":   updated,
-			"export": record,
+		writeJSON(w, http.StatusOK, ExportResponse{
+			Pack:   updated,
+			Export: record,
 		})
 	default:
 		writeError(w, http.StatusNotFound, "invalid pack operation")
@@ -246,12 +284,12 @@ func (s *Service) eventsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) emitPackEvent(manifest *EvidencePackManifest, eventType, transition string) error {
-	payload := map[string]any{
-		"packId":     manifest.PackID,
-		"runId":      manifest.RunID,
-		"workflowId": manifest.WorkflowID,
-		"status":     manifest.Status,
-		"validation": manifest.Validation,
+	payload := &EvidenceEventPayload{
+		PackID:     manifest.PackID,
+		RunID:      manifest.RunID,
+		WorkflowID: manifest.WorkflowID,
+		Status:     manifest.Status,
+		Validation: manifest.Validation,
 	}
 	inputRef, err := NewDataReference(
 		fmt.Sprintf("urn:c2c/evidence/%s/manifest-input", manifest.PackID),
@@ -268,15 +306,15 @@ func (s *Service) emitPackEvent(manifest *EvidencePackManifest, eventType, trans
 		return err
 	}
 	event := HarnessEvent{
-		EventType:        eventType,
-		RunID:            manifest.RunID,
-		StepID:           s.stepSeq.next(manifest.RunID),
-		Status:           manifest.Status,
-		StateTransition:  transition,
-		InputRef:         inputRef,
-		OutputRef:        outputRef,
-		Payload:          payload,
-		RelatedRecords:   []string{"urn:c2c/evidence/" + manifest.PackID},
+		EventType:       eventType,
+		RunID:           manifest.RunID,
+		StepID:          s.stepSeq.next(manifest.RunID),
+		Status:          manifest.Status,
+		StateTransition: transition,
+		InputRef:        inputRef,
+		OutputRef:       outputRef,
+		Payload:         payload,
+		RelatedRecords:  []string{"urn:c2c/evidence/" + manifest.PackID},
 	}
 	_, err = s.events.Emit(event)
 	return err
@@ -315,14 +353,25 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	return nil
 }
 
+// writeJSON marshals first, then writes the status and body. Buffering up
+// front means an encode failure surfaces as a 500 instead of a 200 with a
+// truncated body — useful if a future caller passes a value that the
+// stdlib encoder rejects (cyclic struct, NaN, etc.).
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"failed to encode response"}`))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	_, _ = w.Write(body)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+	writeJSON(w, status, ErrorResponse{Error: message})
 }
 
 func statusForValidationError(err error) int {
