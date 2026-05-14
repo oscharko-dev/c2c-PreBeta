@@ -12,15 +12,26 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Reproduces registry entries marked as true Golden Masters with GnuCOBOL.
- * Only checked-in corpus sources are eligible; request-provided source paths
- * cannot escape the repository corpus directory.
+ * Reproduces registry entries marked as true Golden Masters with GnuCOBOL, and
+ * — for Issue #92 — compiles and executes arbitrary UI-provided COBOL source
+ * to produce an executable oracle for stdout comparison.
+ * <p>
+ * Registry reproduction restricts COBOL source paths to the repository
+ * corpus directory. Inline source from a build-test request is written to an
+ * isolated temp directory and executed there with the COBOL toolchain.
  */
 final class CobolRuntimeExecutor {
 
     private static final long DEFAULT_TIMEOUT_MS = Duration.ofSeconds(10).toMillis();
+    private static final int MAX_SOURCE_BYTES = 1_048_576;
+    private static final Pattern PROGRAM_ID_PATTERN =
+            Pattern.compile("(?im)^\\s*PROGRAM-ID\\s*\\.\\s*([A-Za-z][A-Za-z0-9_-]{0,62})\\s*\\.");
+    private static final Pattern MODULE_NAME_PATTERN =
+            Pattern.compile("[A-Za-z][A-Za-z0-9_-]{0,62}");
 
     private CobolRuntimeExecutor() {
     }
@@ -70,6 +81,93 @@ final class CobolRuntimeExecutor {
         } finally {
             GeneratedProjectMaterializer.deleteRecursively(workingRoot);
         }
+    }
+
+    /**
+     * Compile and execute an arbitrary COBOL source text and capture stdout.
+     * <p>
+     * Used by the build-test runner when a request supplies an
+     * {@code oracle.mode = "cobol-runtime"} oracle. The caller is responsible
+     * for comparing the captured stdout against generated Java stdout.
+     *
+     * @param requestedProgramId the program id from the request (used as the
+     *                           module name passed to {@code cobcrun}); if
+     *                           blank, the {@code PROGRAM-ID} declared in the
+     *                           source text is used
+     * @param sourceText         the full COBOL source to compile and run
+     * @param timeoutMs          per-process wall-clock budget for compile and
+     *                           run
+     * @return a structured {@link OracleRun} describing availability, compile,
+     *         run, stdout, stderr, and diagnostics
+     */
+    static OracleRun executeSource(String requestedProgramId, String sourceText, long timeoutMs) {
+        long effectiveTimeoutMs = timeoutMs <= 0 ? DEFAULT_TIMEOUT_MS : timeoutMs;
+        if (sourceText == null || sourceText.isBlank()) {
+            return OracleRun.invalidInput("oracle.sourceText is required");
+        }
+        if (sourceText.getBytes(StandardCharsets.UTF_8).length > MAX_SOURCE_BYTES) {
+            return OracleRun.invalidInput(
+                    "oracle.sourceText exceeds maximum size of " + MAX_SOURCE_BYTES + " bytes");
+        }
+
+        String moduleName;
+        try {
+            moduleName = resolveModuleName(requestedProgramId, sourceText);
+        } catch (IllegalArgumentException e) {
+            return OracleRun.invalidInput(e.getMessage());
+        }
+
+        String cobcCommand = cobcCommand();
+        String cobcrunCommand = cobcrunCommand();
+        VersionResult cobcVersion = versionOf(cobcCommand);
+        VersionResult cobcrunVersion = versionOf(cobcrunCommand);
+        if (cobcVersion.exitCode() != 0 || cobcrunVersion.exitCode() != 0) {
+            return OracleRun.unavailable(moduleName, cobcVersion.firstLine(), cobcrunVersion.firstLine());
+        }
+
+        Path workingRoot = null;
+        try {
+            workingRoot = Files.createTempDirectory("c2c-cobol-oracle-");
+            Path source = workingRoot.resolve(moduleName + ".cbl");
+            Files.writeString(source, sourceText, StandardCharsets.UTF_8);
+            Path modulePath = workingRoot.resolve(moduleFileName(moduleName));
+
+            CommandResult compile = runCommand(List.of(
+                    cobcCommand, "-m", "-o", modulePath.toString(), source.toString()),
+                    workingRoot, Map.of(), effectiveTimeoutMs);
+            if (compile.exitCode() != 0) {
+                return OracleRun.compileFailed(moduleName, compile,
+                        cobcVersion.firstLine(), cobcrunVersion.firstLine());
+            }
+
+            Map<String, String> env = Map.of("COB_LIBRARY_PATH", workingRoot.toString());
+            CommandResult run = runCommand(List.of(cobcrunCommand, moduleName),
+                    workingRoot, env, effectiveTimeoutMs);
+            return OracleRun.ran(moduleName, compile, run,
+                    cobcVersion.firstLine(), cobcrunVersion.firstLine());
+        } catch (IOException e) {
+            return OracleRun.ioError(moduleName, e.getMessage(),
+                    cobcVersion.firstLine(), cobcrunVersion.firstLine());
+        } finally {
+            GeneratedProjectMaterializer.deleteRecursively(workingRoot);
+        }
+    }
+
+    private static String resolveModuleName(String requestedProgramId, String sourceText) {
+        String candidate = requestedProgramId == null ? "" : requestedProgramId.trim();
+        if (!candidate.isEmpty()) {
+            if (!MODULE_NAME_PATTERN.matcher(candidate).matches()) {
+                throw new IllegalArgumentException(
+                        "oracle programId is not a safe COBOL module name: " + requestedProgramId);
+            }
+            return candidate;
+        }
+        Matcher matcher = PROGRAM_ID_PATTERN.matcher(sourceText);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        throw new IllegalArgumentException(
+                "oracle.sourceText does not declare a PROGRAM-ID and no programId was provided");
     }
 
     private static Path resolveCorpusSource(Path repoRoot, String relativePath) {
@@ -276,6 +374,92 @@ final class CobolRuntimeExecutor {
             String path = source == null ? "" : source.toString();
             int marker = path.indexOf("/corpus/");
             return marker >= 0 ? path.substring(marker + 1) : path;
+        }
+    }
+
+    /**
+     * Result of {@link #executeSource(String, String, long)}.
+     *
+     * <p>{@link #attempted} is {@code false} only when the request is rejected
+     * before the toolchain is consulted (e.g. empty source). Otherwise the
+     * record always reports the toolchain version strings observed so the
+     * caller can include them in diagnostics.
+     */
+    record OracleRun(boolean attempted, boolean available, boolean compileOk,
+                     boolean ran, boolean runOk, int compileExitCode, int exitCode,
+                     String stdout, String stderr, long durationMs, String reason,
+                     String moduleName, String cobcVersion, String cobcrunVersion) {
+
+        static OracleRun invalidInput(String reason) {
+            return new OracleRun(false, false, false, false, false,
+                    -1, -1, "", "", 0, reason, "", "", "");
+        }
+
+        static OracleRun unavailable(String moduleName, String cobcVersion, String cobcrunVersion) {
+            return new OracleRun(true, false, false, false, false,
+                    -1, -1, "", "",
+                    0,
+                    "GnuCOBOL cobc/cobcrun are not available on this host",
+                    moduleName, cobcVersion, cobcrunVersion);
+        }
+
+        static OracleRun compileFailed(String moduleName, CommandResult compile,
+                                       String cobcVersion, String cobcrunVersion) {
+            return new OracleRun(true, true, false, false, false,
+                    compile.exitCode(), -1, "", compile.stderr(),
+                    compile.durationMs(),
+                    "cobc failed to compile the oracle source",
+                    moduleName, cobcVersion, cobcrunVersion);
+        }
+
+        static OracleRun ran(String moduleName, CommandResult compile, CommandResult run,
+                             String cobcVersion, String cobcrunVersion) {
+            boolean runOk = run.exitCode() == 0;
+            String reason = runOk
+                    ? ""
+                    : (run.reason() == null || run.reason().isBlank()
+                            ? "cobcrun exited with code " + run.exitCode()
+                            : run.reason());
+            return new OracleRun(true, true, true, true, runOk,
+                    compile.exitCode(), run.exitCode(),
+                    run.stdout() == null ? "" : run.stdout(),
+                    run.stderr() == null ? "" : run.stderr(),
+                    compile.durationMs() + run.durationMs(),
+                    reason, moduleName, cobcVersion, cobcrunVersion);
+        }
+
+        static OracleRun ioError(String moduleName, String message,
+                                 String cobcVersion, String cobcrunVersion) {
+            return new OracleRun(true, true, false, false, false,
+                    -1, -1, "", "",
+                    0,
+                    message == null || message.isBlank()
+                            ? "I/O error while preparing or running the oracle"
+                            : message,
+                    moduleName, cobcVersion, cobcrunVersion);
+        }
+
+        Map<String, Object> toMap() {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("mode", "cobol-runtime");
+            map.put("attempted", attempted);
+            map.put("available", available);
+            map.put("compileOk", compileOk);
+            map.put("ran", ran);
+            map.put("runOk", runOk);
+            map.put("compileExitCode", compileExitCode);
+            map.put("exitCode", exitCode);
+            map.put("stdout", stdout == null ? "" : stdout);
+            map.put("stderr", stderr == null ? "" : stderr);
+            map.put("stdoutSha256", HashUtil.sha256(stdout == null ? "" : stdout));
+            map.put("durationMs", durationMs);
+            map.put("reason", reason == null ? "" : reason);
+            map.put("moduleName", moduleName == null ? "" : moduleName);
+            map.put("compiler", "cobc");
+            map.put("runtime", "cobcrun");
+            map.put("cobcVersion", cobcVersion == null ? "" : cobcVersion);
+            map.put("cobcrunVersion", cobcrunVersion == null ? "" : cobcrunVersion);
+            return map;
         }
     }
 

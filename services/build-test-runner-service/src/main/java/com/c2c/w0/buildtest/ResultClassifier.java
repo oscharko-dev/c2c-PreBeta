@@ -27,6 +27,10 @@ final class ResultClassifier {
     static final String STATUS_GOLDEN_MASTER_REPRODUCTION_FAILED = "golden-master-reproduction-failed";
     static final String STATUS_MISSING_GOLDEN_MASTER = "missing-golden-master";
     static final String STATUS_SKIPPED = "skipped";
+    static final String STATUS_ORACLE_UNAVAILABLE = "oracle-unavailable";
+    static final String STATUS_ORACLE_COMPILE_FAILED = "oracle-cobol-compile-failed";
+    static final String STATUS_ORACLE_RUN_FAILED = "oracle-cobol-run-failed";
+    static final String STATUS_ORACLE_INVALID = "oracle-invalid";
 
     static final String CLASS_MATCH = "match";
     static final String CLASS_DIV_KNOWN = "divergence-known-w0-coverage-gap";
@@ -37,6 +41,10 @@ final class ResultClassifier {
     static final String CLASS_RUN_ERROR = "run-error";
     static final String CLASS_SKIPPED = "skipped-no-execution";
     static final String CLASS_MISSING_GOLDEN_MASTER = "missing-golden-master";
+    static final String CLASS_ORACLE_UNAVAILABLE = "oracle-unavailable";
+    static final String CLASS_ORACLE_COMPILE_ERROR = "oracle-cobol-compile-error";
+    static final String CLASS_ORACLE_RUN_ERROR = "oracle-cobol-run-error";
+    static final String CLASS_ORACLE_INVALID = "oracle-invalid-request";
 
     private ResultClassifier() {
     }
@@ -78,6 +86,34 @@ final class ResultClassifier {
     static Map<String, Object> trueGoldenMasterMismatch(String summary) {
         return classification(STATUS_GOLDEN_MASTER_REPRODUCTION_FAILED,
                 CLASS_TRUE_GM_MISMATCH, summary);
+    }
+
+    static Map<String, Object> oracleUnavailable(String summary) {
+        return classification(STATUS_ORACLE_UNAVAILABLE, CLASS_ORACLE_UNAVAILABLE,
+                summary == null || summary.isBlank()
+                        ? "GnuCOBOL toolchain (cobc/cobcrun) is unavailable; cannot prove equivalence."
+                        : summary);
+    }
+
+    static Map<String, Object> oracleCompileError(String summary) {
+        return classification(STATUS_ORACLE_COMPILE_FAILED, CLASS_ORACLE_COMPILE_ERROR,
+                summary == null || summary.isBlank()
+                        ? "cobc failed to compile the UI-provided COBOL source."
+                        : summary);
+    }
+
+    static Map<String, Object> oracleRunError(String summary) {
+        return classification(STATUS_ORACLE_RUN_FAILED, CLASS_ORACLE_RUN_ERROR,
+                summary == null || summary.isBlank()
+                        ? "cobcrun failed to execute the UI-provided COBOL module."
+                        : summary);
+    }
+
+    static Map<String, Object> oracleInvalid(String summary) {
+        return classification(STATUS_ORACLE_INVALID, CLASS_ORACLE_INVALID,
+                summary == null || summary.isBlank()
+                        ? "Oracle request is invalid."
+                        : summary);
     }
 
     static Map<String, Object> classification(String status, String classifier, String summary) {
