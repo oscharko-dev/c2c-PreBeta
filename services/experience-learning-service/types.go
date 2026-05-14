@@ -80,27 +80,6 @@ var allowedEventStatuses = map[string]struct{}{
 	statusIgnored:  {},
 }
 
-var allowedPatternStates = map[string]struct{}{
-	"starting":          {},
-	"completed":         {},
-	"failed":            {},
-	"aborted":           {},
-	"accepted":          {},
-	"rejected":          {},
-	"timeout":           {},
-	"validation":        {},
-	"validation_ok":     {},
-	"validation_failed": {},
-	"started":           {},
-	"invoked":           {},
-	"ok":                {},
-	"output-divergence": {},
-	"compile-failed":    {},
-	"run-failed":        {},
-	"missing-golden-master": {},
-	"skipped":           {},
-}
-
 var allowedPolicyModes = map[string]struct{}{
 	defaultPolicyMode: {},
 }
@@ -204,9 +183,6 @@ func (e EventEnvelopeV0) Validate() error {
 	}
 	if strings.TrimSpace(e.Status) == "" {
 		return SchemaValidationError{Path: "status", Reason: "required"}
-	}
-	if _, ok := allowedPatternStates[strings.ToLower(e.Status)]; !ok {
-		return SchemaValidationError{Path: "status", Reason: "unsupported"}
 	}
 	if strings.TrimSpace(e.StateTransition) == "" {
 		return SchemaValidationError{Path: "stateTransition", Reason: "required"}

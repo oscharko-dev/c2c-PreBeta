@@ -90,6 +90,13 @@ def _collect_files_changed(base: str, head: str) -> list[str]:
     return [line for line in output.splitlines() if line.strip()]
 
 
+def _collect_files_worktree() -> list[str]:
+    output = _run_git("ls-files", "--cached", "--others", "--exclude-standard")
+    if not output:
+        return []
+    return [line for line in output.splitlines() if line.strip()]
+
+
 def scan_staged() -> list[tuple[str, int, str, str]]:
     findings = []
     for file_path in _collect_files_staged():
@@ -132,6 +139,29 @@ def scan_changed(base: str, head: str) -> list[tuple[str, int, str, str]]:
     return findings
 
 
+def scan_worktree() -> list[tuple[str, int, str, str]]:
+    findings = []
+    root = Path.cwd()
+    for file_path in _collect_files_worktree():
+        if _file_has_forbidden_path(file_path):
+            findings.append((file_path, 0, "forbidden-path", "forbidden credential file path"))
+            continue
+
+        path = root / file_path
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if _is_binary(content):
+            continue
+
+        for i, line in enumerate(content.splitlines(), start=1):
+            for pattern, kind in SECRET_PATTERNS:
+                if pattern.search(line):
+                    findings.append((file_path, i, kind, _mask_line(line)))
+    return findings
+
+
 def _format_findings(findings: list[tuple[str, int, str, str]]) -> str:
     lines = ["Potential credential material detected:"]
     for path, line_no, kind, snippet in findings:
@@ -147,11 +177,14 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--staged", action="store_true", help="Scan only staged files")
     mode.add_argument("--base", dest="base", help="Base ref to compare against, e.g. origin/dev")
+    mode.add_argument("--worktree", action="store_true", help="Scan tracked files in the current worktree")
     parser.add_argument("--head", default="HEAD", help="Head ref to compare against (default: HEAD)")
     args = parser.parse_args()
 
     if args.staged:
         findings = scan_staged()
+    elif args.worktree:
+        findings = scan_worktree()
     else:
         if not args.base:
             parser.error(" --base is required when not using --staged")

@@ -135,11 +135,11 @@ trap. On a warm Maven cache the full run takes ~15 s on a developer laptop.
    `unchanged_output`, then append explicit controlled `failed → completed`
    and `accepted` Harness events so `retry` and `accepted_pattern` are also
    evidenced.
-9. Snapshot the harness `/v0/events` ledger. Normalize statuses to the
-   experience-learning pattern enum (`ok`, `failed`, `started`, …;
-   `starting → started`, `output-divergence → failed`). POST to
-   `experience-learning-service` `/v0/harness-events`. Auto-analyze runs on
-   ingest and produces experience events.
+9. Snapshot the harness `/v0/events` ledger and POST the raw harness event
+   envelopes to `experience-learning-service` `/v0/harness-events`.
+   Experience Learning maps harness statuses such as `starting` and
+   `output-divergence` internally before analysis. Auto-analyze runs on ingest
+   and produces experience events.
 10. POST the per-program trajectory ledgers to `/v0/trajectory-ledgers`.
 11. Compute and emit `var/w0-demo/scorecard.md`.
 
@@ -255,5 +255,5 @@ lsof -nP -i :8190 -i :8191 -i :8192 -i :8181 -i :8182 -i :8183 -i :8184
 | `address already in use` on `:8190` (or any demo port) | Previous run left a Go binary alive. | `lsof -nP -i :<port>` → `kill <pid>`. |
 | Maven test runs blow up the demo time | Tests were not skipped. | The demo uses `-DskipTests` on purpose — full tests run in CI. |
 | `wait_http` times out | Java service hasn't finished starting / Maven warm cache cold. | Check `var/w0-demo/logs/<service>.log` for the actual error. |
-| `experience-learning harness-event ingest failed (HTTP 400)` | A new event type from a service has a `status` the experience-learning enum does not yet allow. | Add the mapping to the `jq` normalization block in `scripts/w0-demo.sh` and file a follow-up in [`w0-followups.md`](w0-followups.md). |
+| `experience-learning harness-event ingest failed (HTTP 400)` | A service emitted a malformed harness event or a status outside the Harness Event Envelope status contract. | Add the missing harness status to `experience-learning-service` validation and analysis mapping, then file a follow-up in [`w0-followups.md`](w0-followups.md) if the producer contract changed. |
 | `classification: "divergence-unknown"` reported | A program is not in `fixtures/golden-master/index.json`, or generated output no longer matches an undeclared fixture. This is a **release-gate fail**. | Register an intentionally divergent fixture with a rationale only if the divergence is expected; otherwise treat it as a generator bug. |
