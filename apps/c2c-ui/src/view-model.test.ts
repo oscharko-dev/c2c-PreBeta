@@ -44,9 +44,11 @@ test('runStatusLine formats run summary fields', () => {
     programId: 'BRNCH01',
     status: 'completed',
     mode: 'mock',
+    productMode: 'mock',
     message: 'mock run completed',
     policyDecision: 'allow',
     evidenceRefs: [],
+    orchestratorRunId: '',
     createdAt: '2026-05-14T00:00:00.000Z',
     updatedAt: '2026-05-14T00:00:01.000Z',
   };

@@ -347,6 +347,78 @@ test('starting a run in mock mode returns a completed run with mock evidence', a
   }
 });
 
+test('starting a run surfaces orchestrator failures instead of silently falling back to mock', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const failingOrchestrator: OrchestratorClient = {
+    enabled: true,
+    async startRun() {
+      throw new Error('upstream offline');
+    },
+    async startTransformRun() {
+      return undefined;
+    },
+    async getRun() {
+      return undefined;
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: failingOrchestrator,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const failed = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(failed.status, 502);
+    assert.match((failed.body as { error: string }).error, /upstream offline/);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('starting a run with orchestrator non-2xx response returns 502 and creates no run', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const rejectingOrchestrator: OrchestratorClient = {
+    enabled: true,
+    async startRun() {
+      return { status: 500, body: { error: 'orchestrator internal error' } };
+    },
+    async startTransformRun() {
+      return undefined;
+    },
+    async getRun() {
+      return undefined;
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: rejectingOrchestrator,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const failed = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(failed.status, 502);
+    assert.match((failed.body as { error: string }).error, /500/);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
 test('starting a run in live mode proxies the orchestrator and syncs status on get', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
@@ -365,8 +437,16 @@ test('starting a run in live mode proxies the orchestrator and syncs status on g
       body: { programId: 'BRNCH01' },
     });
     assert.equal(started.status, 201);
-    const startedBody = started.body as { runId: string; mode: string; status: string };
+    const startedBody = started.body as {
+      runId: string;
+      mode: string;
+      status: string;
+      productMode: string;
+      orchestratorRunId: string;
+    };
     assert.equal(startedBody.mode, 'live');
+    assert.equal(startedBody.productMode, 'live');
+    assert.equal(startedBody.orchestratorRunId, 'live-run-1');
     assert.equal(calls.startRun, 1);
 
     const fetched = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`);

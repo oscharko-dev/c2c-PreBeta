@@ -7,6 +7,7 @@ import unittest
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.harness import DataReference, HarnessFailure
 from orchestrator_service.workflow import (
+    CapabilityMissingError,
     W0RunContext,
     W0WorkflowRunner,
     StepExecutionError,
@@ -326,6 +327,109 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         failed_events = [event for event in gateway.posted_events if event.get("stateTransition") == "step.failed"]
         self.assertGreater(len(retry_events), 0)
         self.assertGreater(len(failed_events), 0)
+
+
+    def test_workflow_emits_accepted_and_completed_lifecycle_events(self):
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+        )
+
+        runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        event_types = [event.get("eventType") for event in gateway.posted_events]
+        self.assertIn("orchestrator.workflow.accepted", event_types)
+        self.assertIn("orchestrator.workflow.completed", event_types)
+        self.assertNotIn("orchestrator.workflow.failed", event_types)
+        run_updates = [entry[1] for entry in gateway.updated_runs]
+        self.assertEqual(run_updates[0], "updating")
+        self.assertEqual(run_updates[-1], "completed")
+
+    def test_workflow_emits_failed_lifecycle_event_when_step_errors(self):
+        gateway = StubGateway(
+            self._base_capabilities(),
+            self._base_responses(),
+            fail_parse_attempts=4,
+        )
+        runner = W0WorkflowRunner(config=self._base_config(max_retries=0), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+        )
+
+        with self.assertRaises(StepExecutionError):
+            runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        event_types = [event.get("eventType") for event in gateway.posted_events]
+        self.assertIn("orchestrator.workflow.accepted", event_types)
+        self.assertIn("orchestrator.workflow.failed", event_types)
+        self.assertEqual(gateway.updated_runs[-1][1], "failed")
+        failure_message = gateway.updated_runs[-1][3]
+        self.assertIn("failed", failure_message.lower())
+
+    def test_missing_capability_marks_run_failed_with_diagnostic(self):
+        capabilities = self._base_capabilities()
+        del capabilities["evidence.writer"]
+
+        class MissingCapabilityGateway(StubGateway):
+            def get_capability(self, capability_id):
+                self.calls.append(("get_capability", capability_id))
+                if capability_id == "evidence.writer":
+                    raise RuntimeError("capability evidence.writer not found")
+                return dict(self.capabilities[capability_id])
+
+        gateway = MissingCapabilityGateway(capabilities, self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+        )
+
+        with self.assertRaises(CapabilityMissingError) as ctx:
+            runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        self.assertIn("evidence.writer", str(ctx.exception))
+        self.assertEqual(gateway.updated_runs[-1][1], "failed")
+        diagnostic_message = gateway.updated_runs[-1][3]
+        self.assertIn("evidence.writer", diagnostic_message)
+        event_types = [event.get("eventType") for event in gateway.posted_events]
+        self.assertIn("orchestrator.workflow.failed", event_types)
+
+    def test_evidence_step_failure_marks_run_failed_and_does_not_succeed(self):
+        responses = self._base_responses()
+        gateway = StubGateway(self._base_capabilities(), responses)
+
+        original_invoke = gateway.invoke_capability
+
+        def invoke_with_evidence_failure(capability, payload):
+            if capability["id"] == "evidence.writer":
+                raise HarnessFailure(503, "evidence backend unavailable")
+            return original_invoke(capability, payload)
+
+        gateway.invoke_capability = invoke_with_evidence_failure
+        runner = W0WorkflowRunner(config=self._base_config(max_retries=0), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+        )
+
+        with self.assertRaises(StepExecutionError):
+            runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        self.assertEqual(gateway.updated_runs[-1][1], "failed")
+        event_types = [event.get("eventType") for event in gateway.posted_events]
+        self.assertIn("orchestrator.workflow.failed", event_types)
+        self.assertNotIn("orchestrator.workflow.completed", event_types)
 
 
 class DataReferenceTests(unittest.TestCase):
