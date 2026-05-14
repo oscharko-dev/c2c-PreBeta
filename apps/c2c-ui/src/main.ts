@@ -282,15 +282,15 @@ function renderBuildTest(state: UiState): void {
     diagWrap.style.marginTop = '6px';
     const label = document.createElement('div');
     label.style.fontWeight = '600';
-    label.textContent = 'Diagnostics:';
+    label.textContent = `Diagnostics (${summary.diagnostics.length}):`;
     diagWrap.appendChild(label);
     const list = document.createElement('ul');
     list.className = 'bare';
-    for (const entry of summary.diagnostics.slice(0, 8)) {
+    for (const entry of summary.diagnostics) {
       const li = document.createElement('li');
-      const level = typeof entry.level === 'string' ? entry.level : 'info';
-      const code = typeof entry.code === 'string' ? entry.code : '';
-      const message = typeof entry.message === 'string' ? entry.message : '';
+      const level = entry.level || 'info';
+      const code = entry.code || '';
+      const message = entry.message || '';
       li.textContent = `[${level}] ${code ? `${code}: ` : ''}${message}`;
       list.appendChild(li);
     }

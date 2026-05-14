@@ -7,6 +7,9 @@ import { AddressInfo } from 'node:net';
 
 import { createApp } from './server';
 import { createRunStore } from './run-store';
+import { PLACEHOLDER_JAVA_MARKERS, findPlaceholderMarker } from './placeholder-markers';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
 import type { SampleDetail, SampleRegistry, SampleSummary } from './samples';
 import {
   createEvidenceClient,
@@ -288,6 +291,29 @@ async function fetchJson(url: string, init?: { method?: string; body?: unknown }
     req.end();
   });
 }
+
+test('placeholder marker list is non-empty and exposes the documented W0 stubs', () => {
+  assert.ok(PLACEHOLDER_JAVA_MARKERS.length >= 2);
+  assert.equal(findPlaceholderMarker('public class C {}'), null);
+  assert.equal(findPlaceholderMarker('// W0-STUB BRNCH01'), 'W0-STUB');
+  assert.equal(findPlaceholderMarker('Synthetic W0 generated-Java stub here'), 'Synthetic W0 generated-Java stub');
+});
+
+test('BFF and UI placeholder marker lists are kept in sync', () => {
+  // The UI ships its own copy of the placeholder marker list because the two
+  // packages do not share a TypeScript module. The lists must remain byte
+  // identical so the BFF safeguard matches the UI fallback exactly.
+  const uiCopyPath = path.resolve(__dirname, '..', '..', '..', 'apps', 'c2c-ui', 'src', 'placeholder-markers.ts');
+  assert.ok(fs.existsSync(uiCopyPath), `UI placeholder-markers.ts not found at ${uiCopyPath}`);
+  const uiSource = fs.readFileSync(uiCopyPath, 'utf8');
+  for (const marker of PLACEHOLDER_JAVA_MARKERS) {
+    const literal = `'${marker}'`;
+    assert.ok(
+      uiSource.includes(literal),
+      `UI placeholder-markers.ts is out of sync: missing marker ${literal}`,
+    );
+  }
+});
 
 test('health endpoint reports service name', async () => {
   const handler = createApp({
@@ -823,6 +849,73 @@ test('live generated endpoint exposes outputRef, diagnostics, and rejects placeh
       assert.doesNotMatch(content, /W0-STUB/, 'placeholder marker detected in generated Java for a successful run');
       assert.doesNotMatch(content, /Synthetic W0/, 'placeholder marker detected in generated Java for a successful run');
     }
+  } finally {
+    await server.close();
+  }
+});
+
+test('live generated endpoint downgrades successful runs containing placeholder Java to incomplete', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  // Simulate a misbehaving upstream that returns a "complete" envelope but
+  // the generated Java still contains the W0-STUB placeholder marker. The
+  // BFF must refuse to surface this as `status: 'generated'`.
+  const placeholderJava = [
+    '// Synthetic W0 generated-Java stub for programId=CASE01.',
+    'package c2c.w0.generated;',
+    'public final class CASE01 {',
+    '    public static void main(String[] args) {',
+    '        System.out.println("W0-STUB CASE01");',
+    '    }',
+    '}',
+  ].join('\n');
+  const { client: orch } = stubOrchestrator({
+    generated: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        entryClass: 'CASE01',
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        fileCount: 1,
+        files: { 'src/main/java/c2c/CASE01.java': placeholderJava },
+        unsupportedFeatures: [],
+        openAssumptions: [],
+        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    assert.equal(generated.status, 200);
+    const body = generated.body as {
+      status: string;
+      missingArtifacts: string[];
+      placeholderViolation: { path: string; marker: string };
+      note: string;
+    };
+    assert.equal(body.status, 'incomplete');
+    assert.ok(body.missingArtifacts.includes('real-generated-java'));
+    assert.equal(body.placeholderViolation.marker, 'W0-STUB');
+    assert.equal(body.placeholderViolation.path, 'src/main/java/c2c/CASE01.java');
+    assert.match(body.note, /Placeholder marker/);
   } finally {
     await server.close();
   }

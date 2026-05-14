@@ -15,6 +15,7 @@ import {
   type OrchestratorClient,
 } from './upstream';
 import { coerceLiveStatus, createRunStore, type RunStore, type StoredRun } from './run-store';
+import { findPlaceholderInFiles } from './placeholder-markers';
 
 const STATIC_MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -311,17 +312,30 @@ function normalizeOutputRef(raw: unknown): OutputRef | null {
   return ref;
 }
 
-function normalizeDiagnostics(raw: unknown): Array<Record<string, unknown>> {
+interface Diagnostic {
+  level: string;
+  code: string;
+  message: string;
+}
+
+function normalizeDiagnostics(raw: unknown): Diagnostic[] {
   if (!Array.isArray(raw)) return [];
-  const out: Array<Record<string, unknown>> = [];
+  const out: Diagnostic[] = [];
   for (const entry of raw) {
     const record = asRecord(entry);
-    if (record) out.push(record);
+    if (!record) continue;
+    out.push({
+      level: asString(record.level),
+      code: asString(record.code),
+      message: asString(record.message),
+    });
   }
   return out;
 }
 
-function classifyGeneratedStatus(missing: string[], runStatus: string | undefined): 'generated' | 'unsupported' | 'skipped' {
+type GeneratedStatus = 'generated' | 'unsupported' | 'skipped' | 'incomplete';
+
+function classifyGeneratedStatus(missing: string[], runStatus: string | undefined): GeneratedStatus {
   if (missing.length === 0) return 'generated';
   if (runStatus === 'failed') return 'unsupported';
   return 'skipped';
@@ -400,11 +414,23 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
     for (const [key, value] of Object.entries(filesRaw)) {
       if (typeof value === 'string') files[key] = value;
     }
-    const status = classifyGeneratedStatus(missing, runStatus);
+    let status: GeneratedStatus = classifyGeneratedStatus(missing, runStatus);
     const generationResponse = asRecord(envelope.generationResponse);
     const outputRef = normalizeOutputRef(envelope.generationResponseRef);
     const diagnostics = normalizeDiagnostics(generationResponse?.diagnostics);
     const entryFilePath = asString(envelope.entryFilePath);
+    let missingArtifacts = missing;
+    let placeholderViolation: { path: string; marker: string } | null = null;
+    if (status === 'generated') {
+      const hit = findPlaceholderInFiles(files);
+      if (hit) {
+        // Safeguard (Issue #85): never let placeholder Java reach the UI as a
+        // successful product run. Downgrade to incomplete and mark the offence.
+        status = 'incomplete';
+        placeholderViolation = { path: hit.path, marker: hit.marker };
+        missingArtifacts = [...missingArtifacts, 'real-generated-java'];
+      }
+    }
     return {
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),
@@ -416,11 +442,15 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
       fileCount: asNumber(envelope.fileCount) ?? Object.keys(files).length,
       unsupportedFeatures: Array.isArray(envelope.unsupportedFeatures) ? envelope.unsupportedFeatures : [],
       openAssumptions: Array.isArray(envelope.openAssumptions) ? envelope.openAssumptions : [],
-      missingArtifacts: missing,
+      missingArtifacts,
       orchestratorRunId: liveRunId,
       outputRef,
       generationResponseRef: envelope.generationResponseRef ?? null,
       diagnostics,
+      ...(placeholderViolation ? { placeholderViolation } : {}),
+      ...(placeholderViolation
+        ? { note: `Placeholder marker "${placeholderViolation.marker}" detected in ${placeholderViolation.path}; refusing to serve as product output.` }
+        : {}),
     };
   } catch (err) {
     return {
