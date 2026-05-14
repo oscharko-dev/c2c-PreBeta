@@ -58,6 +58,7 @@ public final class ServiceApp {
     static void handleGenerate(HttpExchange exchange,
                                TargetJavaGenerationService service,
                                String eventEndpoint) throws IOException {
+        String runId = "run-unknown";
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendText(exchange, 405, "method not allowed");
             return;
@@ -79,18 +80,26 @@ public final class ServiceApp {
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> request = JSON.readValue(body, Map.class);
+            runId = String.valueOf(request.getOrDefault("runId", runId));
+            emitEvent(eventEndpoint, Map.of("runId", runId, "status", "started"));
             Map<String, Object> response = service.generate(request);
             int status = "ok".equals(response.get("status")) ? 200 : 422;
             sendJson(exchange, status, response);
             emitEvent(eventEndpoint, response);
         } catch (IllegalArgumentException e) {
-            sendJson(exchange, 400, Map.of("status", "failed", "error", e.getMessage()));
+            Map<String, Object> failed = Map.of("status", "failed", "runId", runId, "error", e.getMessage());
+            sendJson(exchange, 400, failed);
+            emitEvent(eventEndpoint, failed);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            sendJson(exchange, 400, Map.of("status", "failed",
-                    "error", "malformed JSON: " + (e.getOriginalMessage() == null ? "parse error" : e.getOriginalMessage())));
+            Map<String, Object> failed = Map.of("status", "failed", "runId", runId,
+                    "error", "malformed JSON: " + (e.getOriginalMessage() == null ? "parse error" : e.getOriginalMessage()));
+            sendJson(exchange, 400, failed);
+            emitEvent(eventEndpoint, failed);
         } catch (Exception e) {
-            sendJson(exchange, 500, Map.of("status", "failed",
-                    "error", e.getMessage() == null ? "unknown" : e.getMessage()));
+            Map<String, Object> failed = Map.of("status", "failed", "runId", runId,
+                    "error", e.getMessage() == null ? "unknown" : e.getMessage());
+            sendJson(exchange, 500, failed);
+            emitEvent(eventEndpoint, failed);
         }
     }
 
@@ -122,6 +131,7 @@ public final class ServiceApp {
             String status = String.valueOf(response.get("status"));
             String eventType = switch (status) {
                 case "ok" -> "target.java.generate.completed";
+                case "started" -> "target.java.generate.started";
                 default -> "target.java.generate.failed";
             };
             // An "unsupported" sub-event is emitted in addition when the response
@@ -152,7 +162,7 @@ public final class ServiceApp {
         event.put("eventType", eventType);
         event.put("service", SERVICE_NAME);
         event.put("runId", response.get("runId"));
-        event.put("stepId", 1);
+        event.put("stepId", 0);
         event.put("actor", SERVICE_NAME);
         event.put("capability", TargetJavaGenerationService.CAPABILITY);
         event.put("dataClass", "generator");

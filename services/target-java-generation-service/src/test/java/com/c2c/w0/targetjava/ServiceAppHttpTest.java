@@ -13,6 +13,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +94,37 @@ class ServiceAppHttpTest {
     }
 
     @Test
+    void emitsStartedAndCompletedHarnessEvents() throws Exception {
+        List<Map<String, Object>> captured = new ArrayList<>();
+        HttpServer eventServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        eventServer.createContext("/v0/events", exchange -> {
+            captured.add(JSON.readValue(exchange.getRequestBody(), Map.class));
+            exchange.sendResponseHeaders(202, -1);
+            exchange.close();
+        });
+        eventServer.start();
+        try {
+            String eventEndpoint = "http://127.0.0.1:" + eventServer.getAddress().getPort() + "/v0/events";
+            HttpServer local = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            local.createContext("/v0/generate", exchange ->
+                    ServiceApp.handleGenerate(exchange, new TargetJavaGenerationService(), eventEndpoint));
+            local.start();
+            try {
+                Map<String, Object> body = Map.of("runId", "run-events", "ir", smallIr("EVENTDEMO"));
+                int status = postToPort(local.getAddress().getPort(), "/v0/generate",
+                        JSON.writeValueAsString(body), "application/json");
+                assertEquals(200, status);
+            } finally {
+                local.stop(0);
+            }
+        } finally {
+            eventServer.stop(0);
+        }
+        assertTrue(captured.stream().anyMatch(e -> "target.java.generate.started".equals(e.get("eventType"))));
+        assertTrue(captured.stream().anyMatch(e -> "target.java.generate.completed".equals(e.get("eventType"))));
+    }
+
+    @Test
     void concurrentGenerateCallsProduceIdenticalOutputRefs() throws Exception {
         TargetJavaGenerationService service = new TargetJavaGenerationService();
         Map<String, Object> ir = smallIr("CONC01");
@@ -120,7 +152,11 @@ class ServiceAppHttpTest {
     }
 
     private int post(String path, String body, String contentType) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) URI.create("http://127.0.0.1:" + port + path)
+        return postToPort(port, path, body, contentType);
+    }
+
+    private static int postToPort(int targetPort, String path, String body, String contentType) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) URI.create("http://127.0.0.1:" + targetPort + path)
                 .toURL().openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);

@@ -56,6 +56,11 @@ class JavaProjectGeneratorTest {
         assertEquals("semantic-ir-v0", traceJson.get("irVersion"));
         assertEquals("DEMO01", traceJson.get("programId"));
         assertNotNull(traceJson.get("files"));
+        @SuppressWarnings("unchecked")
+        Map<String, List<String>> fileTrace = (Map<String, List<String>>) traceJson.get("files");
+        assertTrue(fileTrace.containsKey(result.entryFilePath()));
+        assertTrue(fileTrace.get(result.entryFilePath()).contains("s-display-1"));
+        assertTrue(fileTrace.get(result.entryFilePath()).contains("s-stop-1"));
     }
 
     @Test
