@@ -15,6 +15,8 @@ services = {
     "python": root / "services" / "python" / "w0-service",
     "typescript": root / "services" / "typescript" / "w0-service",
     "java": root / "services" / "java" / "w0-service",
+    "java-cobol-parser": root / "services" / "cobol-parser-service",
+    "java-semantic-ir": root / "services" / "semantic-ir-service",
 }
 
 manifest = {

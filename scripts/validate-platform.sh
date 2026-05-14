@@ -7,6 +7,8 @@ REQUIRED_DIRS=(
   "services/python/w0-service"
   "services/typescript/w0-service"
   "services/java/w0-service"
+  "services/cobol-parser-service"
+  "services/semantic-ir-service"
 )
 
 for d in "${REQUIRED_DIRS[@]}"; do
@@ -45,7 +47,18 @@ for f in \
   services/java/w0-service/pom.xml \
   services/java/w0-service/src/main/java/com/c2c/w0/service/ServiceApp.java \
   services/java/w0-service/src/test/java/com/c2c/w0/service/ServiceAppTest.java \
-  services/java/w0-service/Dockerfile
+  services/java/w0-service/Dockerfile \
+  services/cobol-parser-service/pom.xml \
+  services/cobol-parser-service/src/main/java/com/c2c/w0/parser/CobolParser.java \
+  services/cobol-parser-service/src/main/java/com/c2c/w0/parser/ServiceApp.java \
+  services/cobol-parser-service/src/test/java/com/c2c/w0/parser/CobolParserTest.java \
+  services/cobol-parser-service/Dockerfile \
+  services/semantic-ir-service/pom.xml \
+  services/semantic-ir-service/src/main/java/com/c2c/w0/semanticir/SemanticIrService.java \
+  services/semantic-ir-service/src/main/java/com/c2c/w0/semanticir/ServiceApp.java \
+  services/semantic-ir-service/src/test/java/com/c2c/w0/semanticir/SemanticIrServiceTest.java \
+  services/semantic-ir-service/Dockerfile \
+  schemas/semantic-ir-v0.json
  do
   if [ ! -f "$f" ]; then
     echo "Missing required file: $f" >&2
