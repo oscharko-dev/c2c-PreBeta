@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from hashlib import sha256
+from pathlib import Path
 
+from orchestrator_service.artifacts import RunArtifactStore
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.harness import DataReference, HarnessFailure
 from orchestrator_service.workflow import (
@@ -433,6 +438,140 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         event_types = [event.get("eventType") for event in gateway.posted_events]
         self.assertIn("orchestrator.workflow.failed", event_types)
         self.assertNotIn("orchestrator.workflow.completed", event_types)
+
+
+class WorkflowArtifactPersistenceTests(unittest.TestCase):
+    """Workflow persists run-scoped artifacts on success and failure paths."""
+
+    @staticmethod
+    def _config():
+        return W0WorkflowRunnerTests._base_config()  # reuse helper
+
+    def _runner_with_store(self, gateway, *, max_retries: int = 0):
+        store_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(store_dir.cleanup)
+        store = RunArtifactStore(store_dir.name, created_by="orchestrator-service-test")
+        config = W0WorkflowRunnerTests._base_config(max_retries=max_retries)
+        runner = W0WorkflowRunner(config=config, gateway=gateway, artifact_store=store)
+        return runner, store, Path(store_dir.name)
+
+    def test_successful_run_persists_all_required_artifacts(self):
+        gateway = StubGateway(W0WorkflowRunnerTests._base_capabilities(), W0WorkflowRunnerTests._base_responses())
+        runner, store, root = self._runner_with_store(gateway)
+        context = W0RunContext(
+            run_id="run-Z1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt=None,
+        )
+
+        runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        run_dir = root / "run-Z1"
+        for relpath in [
+            "source.cbl",
+            "source-ref.json",
+            "parse-output.json",
+            "semantic-ir-output.json",
+            "semantic-ir.json",
+            "generation-response.json",
+            "generated-project/src/CASE01.java",
+            "build-test-result.json",
+            "trajectory-ledger.json",
+            "evidence-pack-manifest.json",
+            "model-policy-skipped.json",
+            "run-summary.json",
+            "artifacts-index.json",
+        ]:
+            self.assertTrue((run_dir / relpath).is_file(), f"missing artifact {relpath}")
+
+        # Source content equals the in-memory source text byte-for-byte.
+        on_disk_source = (run_dir / "source.cbl").read_bytes()
+        self.assertEqual(on_disk_source, b"IDENTIFICATION DIVISION.")
+
+        # Generated Java retrieved via store equals the canonical bytes written.
+        generated = (run_dir / "generated-project/src/CASE01.java").read_text("utf-8")
+        self.assertEqual(generated, "class CASE01 {}")
+
+        # Artifact index records sha256 == sha256(bytes on disk) for parse-output.
+        index = json.loads((run_dir / "artifacts-index.json").read_text("utf-8"))
+        parse_entry = next(entry for entry in index["artifacts"] if entry["path"] == "parse-output.json")
+        on_disk_parse = (run_dir / "parse-output.json").read_bytes()
+        self.assertEqual(parse_entry["sha256"], sha256(on_disk_parse).hexdigest())
+        self.assertEqual(parse_entry["byteSize"], len(on_disk_parse))
+        for required_key in ("uri", "sha256", "byteSize", "mimeType", "kind", "createdBy", "createdAt", "runId", "workflowId"):
+            self.assertIn(required_key, parse_entry)
+
+        # Evidence pack manifest mirrors the evidence-service response.
+        evidence = json.loads((run_dir / "evidence-pack-manifest.json").read_text("utf-8"))
+        self.assertEqual(evidence["status"], "complete")
+        self.assertEqual(evidence["packId"], "pack-run-1")
+
+        summary = json.loads((run_dir / "run-summary.json").read_text("utf-8"))
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(summary["programId"], "CASE01")
+        self.assertIn("write-evidence", summary["completedSteps"])
+
+    def test_failed_run_persists_partial_artifacts_and_failure_summary(self):
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = StubGateway(W0WorkflowRunnerTests._base_capabilities(), responses)
+
+        original_invoke = gateway.invoke_capability
+
+        def invoke_with_generator_failure(capability, payload):
+            if capability["id"] == "java.generator":
+                raise HarnessFailure(503, "generator backend unavailable")
+            return original_invoke(capability, payload)
+
+        gateway.invoke_capability = invoke_with_generator_failure
+        runner, _store, root = self._runner_with_store(gateway, max_retries=0)
+        context = W0RunContext(
+            run_id="run-Z2",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+        )
+
+        with self.assertRaises(StepExecutionError):
+            runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        run_dir = root / "run-Z2"
+        for relpath in [
+            "source.cbl",
+            "source-ref.json",
+            "parse-output.json",
+            "semantic-ir-output.json",
+            "run-summary.json",
+        ]:
+            self.assertTrue((run_dir / relpath).is_file(), f"missing partial artifact {relpath}")
+        # Generator artifacts should not exist because the step failed.
+        self.assertFalse((run_dir / "generation-response.json").exists())
+        self.assertFalse((run_dir / "build-test-result.json").exists())
+        self.assertFalse((run_dir / "evidence-pack-manifest.json").exists())
+
+        summary = json.loads((run_dir / "run-summary.json").read_text("utf-8"))
+        self.assertEqual(summary["status"], "failed")
+        self.assertIn("generate-java", summary.get("failedStep", "") or "")
+
+    def test_model_prompt_persists_invocation_ledger(self):
+        gateway = StubGateway(W0WorkflowRunnerTests._base_capabilities(), W0WorkflowRunnerTests._base_responses())
+        runner, _store, root = self._runner_with_store(gateway)
+        context = W0RunContext(
+            run_id="run-Z3",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt="explain safe migration",
+        )
+
+        runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        run_dir = root / "run-Z3"
+        self.assertTrue((run_dir / "model-invocation-ledger.json").is_file())
+        self.assertFalse((run_dir / "model-policy-skipped.json").exists())
+        invocation = json.loads((run_dir / "model-invocation-ledger.json").read_text("utf-8"))
+        self.assertEqual(invocation["status"], "completed")
 
 
 class DataReferenceTests(unittest.TestCase):

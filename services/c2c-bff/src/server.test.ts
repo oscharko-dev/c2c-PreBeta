@@ -52,7 +52,15 @@ function stubSamples(items: SampleDetail[]): SampleRegistry {
   };
 }
 
-function stubOrchestrator(): {
+interface ArtifactStubResponses {
+  generated?: UpstreamResponse;
+  buildTest?: UpstreamResponse;
+  evidence?: UpstreamResponse;
+  events?: UpstreamResponse;
+  artifacts?: UpstreamResponse;
+}
+
+function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
   client: OrchestratorClient;
   calls: {
     startRun: number;
@@ -64,6 +72,11 @@ function stubOrchestrator(): {
       sourceName?: string;
       options?: unknown;
     }>;
+    getGenerated: number;
+    getBuildTest: number;
+    getEvidence: number;
+    getEvents: number;
+    getArtifacts: number;
   };
 } {
   const calls = {
@@ -76,6 +89,11 @@ function stubOrchestrator(): {
       sourceName?: string;
       options?: unknown;
     }>,
+    getGenerated: 0,
+    getBuildTest: 0,
+    getEvidence: 0,
+    getEvents: 0,
+    getArtifacts: 0,
   };
   const client: OrchestratorClient = {
     enabled: true,
@@ -130,6 +148,26 @@ function stubOrchestrator(): {
         },
       };
     },
+    async getArtifacts() {
+      calls.getArtifacts += 1;
+      return artifactResponses.artifacts;
+    },
+    async getGenerated() {
+      calls.getGenerated += 1;
+      return artifactResponses.generated;
+    },
+    async getBuildTest() {
+      calls.getBuildTest += 1;
+      return artifactResponses.buildTest;
+    },
+    async getEvidence() {
+      calls.getEvidence += 1;
+      return artifactResponses.evidence;
+    },
+    async getEvents() {
+      calls.getEvents += 1;
+      return artifactResponses.events;
+    },
   };
   return { client, calls };
 }
@@ -144,6 +182,21 @@ function disabledOrchestrator(): OrchestratorClient {
       return undefined;
     },
     async getRun() {
+      return undefined;
+    },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated() {
+      return undefined;
+    },
+    async getBuildTest() {
+      return undefined;
+    },
+    async getEvidence() {
+      return undefined;
+    },
+    async getEvents() {
       return undefined;
     },
   };
@@ -395,6 +448,21 @@ test('starting a run surfaces orchestrator failures instead of silently falling 
     async getRun() {
       return undefined;
     },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated() {
+      return undefined;
+    },
+    async getBuildTest() {
+      return undefined;
+    },
+    async getEvidence() {
+      return undefined;
+    },
+    async getEvents() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
@@ -431,6 +499,21 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
     async getRun() {
       return undefined;
     },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated() {
+      return undefined;
+    },
+    async getBuildTest() {
+      return undefined;
+    },
+    async getEvidence() {
+      return undefined;
+    },
+    async getEvents() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
@@ -453,7 +536,7 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
   }
 });
 
-test('starting a run in live mode proxies the orchestrator and syncs status on get', async () => {
+test('starting a run in live mode proxies the orchestrator, syncs status, and reports incomplete artifacts when orchestrator has no data yet', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
@@ -492,10 +575,186 @@ test('starting a run in live mode proxies the orchestrator and syncs status on g
 
     const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
     assert.equal(generated.status, 200);
-    const genBody = generated.body as { mode: string; status: string; note: string };
+    const genBody = generated.body as { mode: string; status: string; missingArtifacts: string[] };
     assert.equal(genBody.mode, 'live');
-    assert.equal(genBody.status, 'skipped');
-    assert.match(genBody.note, /Live generated-Java retrieval/);
+    assert.equal(genBody.status, 'incomplete');
+    assert.deepEqual(genBody.missingArtifacts, ['generation-response']);
+    assert.equal(calls.getGenerated, 1);
+
+    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    assert.equal(buildTest.status, 200);
+    const btBody = buildTest.body as { mode: string; status: string; classification: string; missingArtifacts: string[] };
+    assert.equal(btBody.mode, 'live');
+    assert.equal(btBody.status, 'incomplete');
+    assert.equal(btBody.classification, 'skipped-no-execution');
+    assert.deepEqual(btBody.missingArtifacts, ['build-test-result']);
+    assert.equal(calls.getBuildTest, 1);
+
+    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    assert.equal(evidence.status, 200);
+    const evBody = evidence.body as { mode: string; status: string; packId: string; missingArtifacts: string[] };
+    assert.equal(evBody.mode, 'live');
+    assert.equal(evBody.status, 'incomplete');
+    assert.equal(evBody.packId, '');
+    assert.deepEqual(evBody.missingArtifacts, ['evidence-pack-manifest']);
+    assert.equal(calls.getEvidence, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test('live generated/build-test/evidence endpoints return real artifact contents when orchestrator has persisted them', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const generatedJava = 'package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) {}\n}\n';
+  const buildResult = {
+    status: 'ok',
+    classification: 'match',
+    actualOutput: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n',
+    outputRef: { uri: 'file:///run/build-test/output.txt', sha256: 'b'.repeat(64), byteSize: 32 },
+    programId: 'CASE01',
+  };
+  const evidenceManifest = {
+    runId: 'live-run-1',
+    workflowId: 'w0-migration-v0',
+    status: 'complete',
+    packId: 'epk-live-1',
+    artifacts: { sourceCobol: [], generatedJava: { uri: 'file:///run/generated.java' } },
+  };
+  const trajectoryEvents = [
+    { type: 'parse-cobol.executed', status: 'ok', message: 'parse complete', createdAt: '2026-05-14T10:00:00Z' },
+    { type: 'generate-java.executed', status: 'ok', message: 'java generated', createdAt: '2026-05-14T10:00:05Z' },
+  ];
+  const { client: orch, calls } = stubOrchestrator({
+    generated: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        entryClass: 'CASE01',
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        fileCount: 1,
+        files: { 'src/main/java/c2c/CASE01.java': generatedJava },
+        unsupportedFeatures: [],
+        openAssumptions: [],
+        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+      },
+    },
+    buildTest: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        kind: 'build-test-result',
+        data: buildResult,
+        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
+      },
+    },
+    evidence: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        data: evidenceManifest,
+        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'd'.repeat(64), byteSize: 512 },
+      },
+    },
+    events: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        events: trajectoryEvents,
+      },
+    },
+    artifacts: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        artifacts: [
+          { uri: 'file:///run/source.cbl', sha256: 'a'.repeat(64), byteSize: 64, kind: 'source', path: 'source.cbl', name: 'source.cbl' },
+        ],
+        createdAt: '2026-05-14T10:00:00Z',
+        updatedAt: '2026-05-14T10:00:30Z',
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(started.status, 201);
+    const startedBody = started.body as { runId: string };
+
+    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    assert.equal(generated.status, 200);
+    const genBody = generated.body as { mode: string; status: string; files: Record<string, string>; entryClass: string };
+    assert.equal(genBody.mode, 'live');
+    assert.equal(genBody.status, 'generated');
+    assert.equal(genBody.entryClass, 'CASE01');
+    assert.equal(genBody.files['src/main/java/c2c/CASE01.java'], generatedJava);
+    assert.equal(calls.getGenerated, 1);
+
+    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    assert.equal(buildTest.status, 200);
+    const btBody = buildTest.body as { mode: string; status: string; classification: string; actualOutput: string };
+    assert.equal(btBody.mode, 'live');
+    assert.equal(btBody.status, 'ok');
+    assert.equal(btBody.classification, 'match');
+    assert.match(btBody.actualOutput, /APPROVED-COUNT=2/);
+
+    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    assert.equal(evidence.status, 200);
+    const evBody = evidence.body as { mode: string; status: string; packId: string; manifestUri: string; missingArtifacts: string[] };
+    assert.equal(evBody.mode, 'live');
+    assert.equal(evBody.status, 'complete');
+    assert.equal(evBody.packId, 'epk-live-1');
+    assert.equal(evBody.manifestUri, 'file:///run/evidence-pack-manifest.json');
+    assert.deepEqual(evBody.missingArtifacts, []);
+
+    const events = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/events`);
+    assert.equal(events.status, 200);
+    const evtBody = events.body as { mode: string; events: Array<{ type: string }>; missingArtifacts: string[] };
+    assert.equal(evtBody.mode, 'live');
+    assert.equal(evtBody.events.length, 2);
+    assert.equal(evtBody.events[0]?.type, 'parse-cobol.executed');
+    assert.deepEqual(evtBody.missingArtifacts, []);
+
+    const artifacts = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts`);
+    assert.equal(artifacts.status, 200);
+    const artBody = artifacts.body as { mode: string; artifacts: Array<{ path: string }>; programId: string };
+    assert.equal(artBody.mode, 'live');
+    assert.equal(artBody.programId, 'BRNCH01');
+    assert.equal(artBody.artifacts.length, 1);
+    assert.equal(artBody.artifacts[0]?.path, 'source.cbl');
   } finally {
     await server.close();
   }
@@ -594,6 +853,7 @@ test('transform derives program id, calls orchestrator, and returns the full tra
       buildTest: `/api/v0/runs/${body.runId}/build-test`,
       evidence: `/api/v0/runs/${body.runId}/evidence`,
       events: `/api/v0/runs/${body.runId}/events`,
+      artifacts: `/api/v0/runs/${body.runId}/artifacts`,
     });
   } finally {
     await server.close();
@@ -640,6 +900,21 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
     async getRun() {
       return undefined;
     },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated() {
+      return undefined;
+    },
+    async getBuildTest() {
+      return undefined;
+    },
+    async getEvidence() {
+      return undefined;
+    },
+    async getEvents() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
@@ -672,6 +947,21 @@ test('transform does not create a run when the orchestrator throws', async () =>
       throw new Error('boom');
     },
     async getRun() {
+      return undefined;
+    },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated() {
+      return undefined;
+    },
+    async getBuildTest() {
+      return undefined;
+    },
+    async getEvidence() {
+      return undefined;
+    },
+    async getEvents() {
       return undefined;
     },
   };

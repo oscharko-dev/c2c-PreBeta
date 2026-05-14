@@ -545,6 +545,7 @@ start_orchestrator() {
     ORCHESTRATOR_EVIDENCE_CAPABILITY_ENDPOINT="$EVIDENCE_URL/v0/packs" \
     ORCHESTRATOR_MODEL_GATEWAY_CAPABILITY_ENDPOINT="$MODEL_GATEWAY_URL/v0/invoke" \
     ORCHESTRATOR_MODEL_GATEWAY_MODEL_ID="${C2C_LOCAL_MODEL_GATEWAY_MODEL_ID:-gpt-oss-120b}" \
+    C2C_RUN_ARTIFACT_ROOT="${C2C_RUN_ARTIFACT_ROOT:-$VAR_DIR/runs}" \
     PYTHONPATH="$ROOT_DIR/services/orchestrator-service/src" \
     -- \
     python3 -m orchestrator_service.main

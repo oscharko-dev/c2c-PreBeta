@@ -79,6 +79,116 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /v0/runs/{runId}/artifacts:
+    get:
+      summary: List persisted artifacts for a run
+      description: >
+        Returns the run-scoped artifacts index (`artifacts-index.json`)
+        recorded under the configured `C2C_RUN_ARTIFACT_ROOT`. Every entry
+        carries `uri`, `sha256`, `byteSize`, `mimeType`, `kind`, `createdBy`,
+        `createdAt`, `runId`, and `workflowId`. The hash is computed from the
+        exact bytes persisted on disk.
+      operationId: listRunArtifacts
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Artifact index
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactsResponse" }
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/generated:
+    get:
+      summary: Retrieve generated Java for a run
+      description: >
+        Returns the persisted Java project files together with the
+        generation-response metadata. Files are read from disk and equal the
+        exact bytes recorded in `generated-project/`.
+      operationId: getRunGenerated
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Generated artifact envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GeneratedResponse" }
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/build-test:
+    get:
+      summary: Retrieve persisted build/test result for a run
+      operationId: getRunBuildTest
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Build/test artifact envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactEnvelope" }
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/evidence:
+    get:
+      summary: Retrieve persisted Evidence Pack manifest for a run
+      operationId: getRunEvidence
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Evidence-pack manifest envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactEnvelope" }
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/events:
+    get:
+      summary: Retrieve persisted trajectory ledger for a run
+      operationId: getRunEvents
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Trajectory-ledger envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventsResponse" }
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   schemas:
     HealthResponse:
@@ -180,6 +290,116 @@ components:
         byte_size:
           type: integer
           example: 1024
+    ArtifactMetadata:
+      type: object
+      required: [uri, sha256, byteSize, mimeType, kind, createdBy, createdAt, runId, workflowId, path, name]
+      properties:
+        uri: { type: string, description: file:// URI of the persisted artifact }
+        sha256: { type: string, description: SHA-256 over the exact bytes persisted }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        runId: { type: string }
+        workflowId: { type: string }
+        path: { type: string, description: Path relative to the run artifact directory }
+        name: { type: string }
+    ArtifactsResponse:
+      type: object
+      required: [runId, workflowId, artifacts]
+      properties:
+        runId: { type: string }
+        workflowId: { type: string }
+        programId: { type: string }
+        runStatus: { type: string, enum: [starting, updating, completed, failed, incomplete] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        artifacts:
+          type: array
+          items: { $ref: "#/components/schemas/ArtifactMetadata" }
+        summary:
+          type: object
+          additionalProperties: true
+    ArtifactEnvelope:
+      type: object
+      required: [runId, workflowId, status, missingArtifacts]
+      properties:
+        runId: { type: string }
+        workflowId: { type: string }
+        programId: { type: string }
+        runStatus: { type: string }
+        status: { type: string, enum: [complete, incomplete] }
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        data:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        artifactRef:
+          oneOf:
+            - $ref: "#/components/schemas/ArtifactMetadata"
+            - type: 'null'
+        kind: { type: string }
+    GeneratedResponse:
+      type: object
+      required: [runId, workflowId, status, missingArtifacts, files]
+      properties:
+        runId: { type: string }
+        workflowId: { type: string }
+        programId: { type: string }
+        runStatus: { type: string }
+        status: { type: string, enum: [complete, incomplete] }
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        entryClass: { type: string }
+        entryFilePath: { type: string }
+        fileCount: { type: integer, minimum: 0 }
+        files:
+          type: object
+          additionalProperties: { type: string }
+        unsupportedFeatures:
+          type: array
+          items: { type: string }
+        openAssumptions:
+          type: array
+          items: { type: string }
+        generationResponse:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        generationResponseRef:
+          oneOf:
+            - $ref: "#/components/schemas/ArtifactMetadata"
+            - type: 'null'
+        fileRefs:
+          type: array
+          items: { $ref: "#/components/schemas/ArtifactMetadata" }
+    EventsResponse:
+      type: object
+      required: [runId, workflowId, status, events]
+      properties:
+        runId: { type: string }
+        workflowId: { type: string }
+        programId: { type: string }
+        runStatus: { type: string }
+        status: { type: string, enum: [complete, incomplete] }
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        trajectoryRef:
+          oneOf:
+            - $ref: "#/components/schemas/ArtifactMetadata"
+            - type: 'null'
     ErrorResponse:
       type: object
       required: [error]

@@ -2,13 +2,35 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import threading
 import time
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import PurePosixPath
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+
+def _iso_now() -> str:
+    return datetime.datetime.now(tz=datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+from .artifacts import (
+    KIND_BUILD_TEST_RESULT,
+    KIND_EVIDENCE_PACK_MANIFEST,
+    KIND_GENERATED_PROJECT_FILE,
+    KIND_GENERATION_RESPONSE,
+    KIND_MODEL_INVOCATION_LEDGER,
+    KIND_MODEL_POLICY_SKIPPED,
+    KIND_PARSE_OUTPUT,
+    KIND_SEMANTIC_IR,
+    KIND_SEMANTIC_IR_OUTPUT,
+    KIND_SOURCE,
+    KIND_SOURCE_REF,
+    KIND_TRAJECTORY_LEDGER,
+    NullArtifactStore,
+    RunArtifactStore,
+)
 from .config import OrchestratorConfig
 from .harness import DataReference, HarnessFailure, HarnessGateway
 
@@ -150,6 +172,39 @@ def _first_non_empty_mapping(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _iter_generated_files(generated_project: Mapping[str, Any]):
+    if not isinstance(generated_project, Mapping):
+        return
+    files = generated_project.get("files")
+    if not isinstance(files, Mapping):
+        return
+    for raw_path, raw_content in files.items():
+        path = str(raw_path).lstrip("/\\")
+        if not path or ".." in PurePosixPath(path).parts:
+            continue
+        if isinstance(raw_content, str):
+            yield path, raw_content
+        elif raw_content is None:
+            yield path, ""
+        else:
+            yield path, str(raw_content)
+
+
+def _failed_step_from_exception(exc: BaseException) -> Optional[str]:
+    text = str(exc).lower()
+    for marker in (
+        ("parse-cobol", "parse-cobol"),
+        ("generate-ir", "generate-ir"),
+        ("generate-java", "generate-java"),
+        ("compile-test-java", "compile-test-java"),
+        ("model-guidance", "model-guidance"),
+        ("write-evidence", "write-evidence"),
+    ):
+        if marker[0] in text:
+            return marker[1]
+    return None
+
+
 def _coerce_output_ref(payload: Mapping[str, Any], fallback_uri: str, fallback_payload: Any) -> DataReference:
     raw = _first_non_empty_mapping(payload.get("outputRef"))
     if raw:
@@ -164,9 +219,15 @@ def _coerce_output_ref(payload: Mapping[str, Any], fallback_uri: str, fallback_p
 class W0WorkflowRunner:
     """Execute the W0 migration workflow through Harness capabilities."""
 
-    def __init__(self, config: OrchestratorConfig, gateway: HarnessGateway):
+    def __init__(
+        self,
+        config: OrchestratorConfig,
+        gateway: HarnessGateway,
+        artifact_store: Optional[RunArtifactStore] = None,
+    ):
         self.config = config
         self.gateway = gateway
+        self.artifact_store = artifact_store if artifact_store is not None else NullArtifactStore()
         self._step_lock = threading.Lock()
         self._step_id_by_run: Dict[str, int] = {}
         self._capability_cache: Dict[str, Dict[str, Any]] = {}
@@ -177,8 +238,67 @@ class W0WorkflowRunner:
         evidence_refs: list[str] = list(context.evidence_refs)
         step_results: list[WorkflowStepResult] = []
         model_output = None
+        program_id: Optional[str] = None
+        completed_steps: list[str] = []
+        artifact_refs: list[Dict[str, Any]] = []
+
+        def _record_artifact(meta: Any) -> None:
+            if meta is None:
+                return
+            try:
+                payload = meta.to_dict()
+            except AttributeError:
+                return
+            artifact_refs.append(payload)
+
+        def _write_summary(status: str, *, message: str, failed_step: Optional[str] = None) -> None:
+            summary = {
+                "runId": context.run_id,
+                "workflowId": context.workflow_id,
+                "requester": context.requester,
+                "status": status,
+                "message": message,
+                "programId": program_id,
+                "completedSteps": list(completed_steps),
+                "failedStep": failed_step,
+                "evidenceRefs": list(evidence_refs),
+                "artifactCount": len(artifact_refs),
+                "createdBy": self.config.service_name,
+                "updatedAt": _iso_now(),
+            }
+            _record_artifact(self.artifact_store.update_summary(context.run_id, context.workflow_id, summary))
 
         try:
+            self.artifact_store.init_run(
+                context.run_id,
+                context.workflow_id,
+                requester=context.requester,
+            )
+            _record_artifact(
+                self.artifact_store.write_text(
+                    context.run_id,
+                    context.workflow_id,
+                    "source.cbl",
+                    source_text,
+                    kind=KIND_SOURCE,
+                    mime_type="text/x-cobol",
+                )
+            )
+            _record_artifact(
+                self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "source-ref.json",
+                    {
+                        "runId": context.run_id,
+                        "workflowId": context.workflow_id,
+                        "inputRef": _as_reference_payload(input_reference),
+                        "rawInputRef": dict(input_ref),
+                    },
+                    kind=KIND_SOURCE_REF,
+                )
+            )
+            _write_summary("starting", message="orchestrator workflow accepted")
             self._emit_workflow_decision_event(
                 context,
                 "orchestrator.workflow.accepted",
@@ -192,6 +312,7 @@ class W0WorkflowRunner:
                 evidence_refs=evidence_refs,
                 policy_decision=POLICY_ALLOW,
             )
+            _write_summary("updating", message="orchestrator workflow started")
 
             parse_capability = self._require_capability(context.run_id, self.config.parse_capability_id)
             ir_capability = self._require_capability(context.run_id, self.config.ir_capability_id)
@@ -223,6 +344,18 @@ class W0WorkflowRunner:
             )
             step_results.append(parse_output)
             evidence_refs.append(parse_output.output_ref.uri)
+            _record_artifact(
+                self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "parse-output.json",
+                    dict(parse_output.payload),
+                    kind=KIND_PARSE_OUTPUT,
+                )
+            )
+            program_id = self._resolve_program_id(parse_output.payload) or program_id
+            completed_steps.append("parse-cobol")
+            _write_summary("updating", message="parse-cobol completed")
 
             ir_output = self._invoke_step(
                 context,
@@ -248,6 +381,29 @@ class W0WorkflowRunner:
             if not source_ref_from_ir:
                 source_ref_from_ir = _as_reference_payload(parse_output.output_ref)
 
+            _record_artifact(
+                self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "semantic-ir-output.json",
+                    dict(ir_output.payload),
+                    kind=KIND_SEMANTIC_IR_OUTPUT,
+                )
+            )
+            if ir_document:
+                _record_artifact(
+                    self.artifact_store.write_json(
+                        context.run_id,
+                        context.workflow_id,
+                        "semantic-ir.json",
+                        dict(ir_document),
+                        kind=KIND_SEMANTIC_IR,
+                    )
+                )
+            program_id = self._resolve_program_id(parse_output.payload, ir_output.payload) or program_id
+            completed_steps.append("generate-ir")
+            _write_summary("updating", message="generate-ir completed")
+
             generator_output = self._invoke_step(
                 context,
                 "generate-java",
@@ -266,7 +422,31 @@ class W0WorkflowRunner:
             evidence_refs.append(generator_output.output_ref.uri)
 
             generated_project = _first_non_empty_mapping(generator_output.payload.get("generatedProject"))
-            program_id = self._resolve_program_id(parse_output.payload, ir_output.payload, generator_output.payload)
+            program_id = (
+                self._resolve_program_id(parse_output.payload, ir_output.payload, generator_output.payload)
+                or program_id
+            )
+            _record_artifact(
+                self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "generation-response.json",
+                    dict(generator_output.payload),
+                    kind=KIND_GENERATION_RESPONSE,
+                )
+            )
+            for file_path, file_content in _iter_generated_files(generated_project):
+                _record_artifact(
+                    self.artifact_store.write_text(
+                        context.run_id,
+                        context.workflow_id,
+                        f"generated-project/{file_path}",
+                        file_content,
+                        kind=KIND_GENERATED_PROJECT_FILE,
+                    )
+                )
+            completed_steps.append("generate-java")
+            _write_summary("updating", message="generate-java completed")
 
             build_test_input = {
                 "schemaVersion": "v0",
@@ -288,6 +468,17 @@ class W0WorkflowRunner:
             )
             step_results.append(build_test_output)
             evidence_refs.append(build_test_output.output_ref.uri)
+            _record_artifact(
+                self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "build-test-result.json",
+                    dict(build_test_output.payload),
+                    kind=KIND_BUILD_TEST_RESULT,
+                )
+            )
+            completed_steps.append("compile-test-java")
+            _write_summary("updating", message="compile-test-java completed")
 
             if context.model_prompt:
                 model_capability = self._require_capability(
@@ -327,10 +518,49 @@ class W0WorkflowRunner:
                 )
                 step_results.append(model_output_step)
                 model_output = model_output_step.payload
+                _record_artifact(
+                    self.artifact_store.write_json(
+                        context.run_id,
+                        context.workflow_id,
+                        "model-invocation-ledger.json",
+                        dict(model_output),
+                        kind=KIND_MODEL_INVOCATION_LEDGER,
+                    )
+                )
+                completed_steps.append("model-guidance")
+                _write_summary("updating", message="model-guidance completed")
+            else:
+                _record_artifact(
+                    self.artifact_store.write_json(
+                        context.run_id,
+                        context.workflow_id,
+                        "model-policy-skipped.json",
+                        {
+                            "runId": context.run_id,
+                            "workflowId": context.workflow_id,
+                            "modelId": _text(getattr(self.config, "model_gateway_model_id", None))
+                            or DEFAULT_MODEL_ID,
+                            "status": "skipped",
+                            "reason": "no modelPrompt provided by requester",
+                            "createdBy": self.config.service_name,
+                            "createdAt": _iso_now(),
+                        },
+                        kind=KIND_MODEL_POLICY_SKIPPED,
+                    )
+                )
 
             trajectory_payload = self._fetch_trajectory_ledger(context.run_id)
             trajectory_ref = _coerce_output_ref(trajectory_payload, f"urn:orchestrator/{context.run_id}/trajectory", {})
             evidence_refs.append(trajectory_ref.uri)
+            _record_artifact(
+                self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "trajectory-ledger.json",
+                    dict(trajectory_payload),
+                    kind=KIND_TRAJECTORY_LEDGER,
+                )
+            )
 
             evidence_payload = self._build_evidence_payload(
                 context=context,
@@ -359,6 +589,16 @@ class W0WorkflowRunner:
             )
             step_results.append(evidence_output)
             evidence_refs.append(evidence_output.output_ref.uri)
+            _record_artifact(
+                self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "evidence-pack-manifest.json",
+                    dict(evidence_output.payload),
+                    kind=KIND_EVIDENCE_PACK_MANIFEST,
+                )
+            )
+            completed_steps.append("write-evidence")
 
             self._emit_workflow_decision_event(
                 context,
@@ -373,12 +613,14 @@ class W0WorkflowRunner:
                 evidence_refs=evidence_refs,
                 policy_decision=POLICY_ALLOW,
             )
+            _write_summary("completed", message="W0 migration workflow completed")
             return {
                 "runId": context.run_id,
                 "workflowId": context.workflow_id,
                 "status": "completed",
                 "evidencePack": evidence_output.payload,
                 "stepCount": len(step_results),
+                "artifacts": list(artifact_refs),
             }
         except Exception as exc:
             self._emit_workflow_decision_event(
@@ -386,15 +628,25 @@ class W0WorkflowRunner:
                 "orchestrator.workflow.failed",
                 str(exc),
             )
+            failure_message = f"W0 migration workflow failed: {exc}"
+            failed_step = (
+                "missing-capability"
+                if isinstance(exc, CapabilityMissingError)
+                else _failed_step_from_exception(exc)
+            )
             try:
                 self.gateway.update_run(
                     context.run_id,
                     "failed",
                     updated_by=self.config.service_name,
-                    message=f"W0 migration workflow failed: {exc}",
+                    message=failure_message,
                     evidence_refs=evidence_refs,
                     policy_decision=POLICY_ALLOW,
                 )
+            except Exception:
+                pass
+            try:
+                _write_summary("failed", message=failure_message, failed_step=failed_step)
             except Exception:
                 pass
             if isinstance(exc, StepExecutionError):

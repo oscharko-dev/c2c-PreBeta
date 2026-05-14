@@ -230,6 +230,37 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/runs/{runId}/artifacts:
+    get:
+      summary: List persisted artifacts and metadata for the run
+      description: >
+        Proxies the orchestrator artifact index. Each artifact entry includes
+        uri, sha256, byteSize, mimeType, kind, createdBy, createdAt, runId,
+        workflowId, path, name. Missing artifacts are reported as
+        `missingArtifacts`; the BFF never fabricates a successful response.
+      operationId: getRunArtifacts
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunArtifactsView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: orchestrator failure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
 components:
   schemas:
     HealthResponse:
@@ -303,13 +334,14 @@ components:
 
     RunLinks:
       type: object
-      required: [self, generated, buildTest, evidence, events]
+      required: [self, generated, buildTest, evidence, events, artifacts]
       properties:
         self: { type: string }
         generated: { type: string }
         buildTest: { type: string }
         evidence: { type: string }
         events: { type: string }
+        artifacts: { type: string }
 
     TransformResponse:
       type: object
@@ -342,9 +374,10 @@ components:
         mode: { type: string, enum: [live, mock] }
         status:
           type: string
-          enum: [generated, unsupported, skipped]
+          enum: [generated, unsupported, skipped, incomplete]
         entryClass: { type: string }
         entryFilePath: { type: string }
+        fileCount: { type: integer, minimum: 0 }
         files:
           type: object
           additionalProperties: { type: string }
@@ -354,6 +387,14 @@ components:
         openAssumptions:
           type: array
           items: { type: string }
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        orchestratorRunId: { type: string }
+        generationResponseRef:
+          oneOf:
+            - $ref: "#/components/schemas/RunArtifactMetadata"
+            - type: 'null'
         note: { type: string }
 
     BuildTestView:
@@ -374,6 +415,7 @@ components:
               golden-master-reproduction-failed,
               missing-golden-master,
               skipped,
+              incomplete,
             ]
         classification:
           type: string
@@ -408,6 +450,48 @@ components:
         missingArtifacts:
           type: array
           items: { type: string }
+        orchestratorRunId: { type: string }
+        artifactRef:
+          oneOf:
+            - $ref: "#/components/schemas/RunArtifactMetadata"
+            - type: 'null'
+        note: { type: string }
+
+    RunArtifactMetadata:
+      type: object
+      required: [uri, sha256, byteSize, mimeType, kind, createdBy, createdAt, runId, workflowId, path, name]
+      properties:
+        uri: { type: string }
+        sha256: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        runId: { type: string }
+        workflowId: { type: string }
+        path: { type: string }
+        name: { type: string }
+
+    RunArtifactsView:
+      type: object
+      required: [runId, mode, artifacts]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, mock] }
+        orchestratorRunId: { type: string }
+        artifacts:
+          type: array
+          items: { $ref: "#/components/schemas/RunArtifactMetadata" }
+        summary:
+          type: object
+          additionalProperties: true
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
         note: { type: string }
 
     RunEventsView:

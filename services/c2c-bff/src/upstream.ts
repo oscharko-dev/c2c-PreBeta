@@ -96,6 +96,11 @@ export interface OrchestratorClient {
     options?: unknown;
   }): Promise<UpstreamResponse | undefined>;
   getRun(runId: string): Promise<UpstreamResponse | undefined>;
+  getArtifacts(runId: string): Promise<UpstreamResponse | undefined>;
+  getGenerated(runId: string): Promise<UpstreamResponse | undefined>;
+  getBuildTest(runId: string): Promise<UpstreamResponse | undefined>;
+  getEvidence(runId: string): Promise<UpstreamResponse | undefined>;
+  getEvents(runId: string): Promise<UpstreamResponse | undefined>;
 }
 
 export interface EvidenceClient {
@@ -116,8 +121,30 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       async getRun() {
         return undefined;
       },
+      async getArtifacts() {
+        return undefined;
+      },
+      async getGenerated() {
+        return undefined;
+      },
+      async getBuildTest() {
+        return undefined;
+      },
+      async getEvidence() {
+        return undefined;
+      },
+      async getEvents() {
+        return undefined;
+      },
     };
   }
+  const getRunScopedArtifact = async (runId: string, segment: string): Promise<UpstreamResponse | undefined> => {
+    const safe = encodeURIComponent(runId);
+    return http.request(`${baseUrl}/v0/runs/${safe}/${segment}`, {
+      method: 'GET',
+      timeoutMs,
+    });
+  };
   return {
     enabled: true,
     async startRun({ programId, cobolSourcePath, requester }) {
@@ -167,6 +194,21 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
         method: 'GET',
         timeoutMs,
       });
+    },
+    async getArtifacts(runId: string) {
+      return getRunScopedArtifact(runId, 'artifacts');
+    },
+    async getGenerated(runId: string) {
+      return getRunScopedArtifact(runId, 'generated');
+    },
+    async getBuildTest(runId: string) {
+      return getRunScopedArtifact(runId, 'build-test');
+    },
+    async getEvidence(runId: string) {
+      return getRunScopedArtifact(runId, 'evidence');
+    },
+    async getEvents(runId: string) {
+      return getRunScopedArtifact(runId, 'events');
     },
   };
 }

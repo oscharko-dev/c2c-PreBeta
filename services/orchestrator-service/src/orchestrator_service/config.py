@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+from .artifacts import DEFAULT_RUN_ARTIFACT_ROOT
 
 
 DEFAULT_LISTEN_ADDR = "0.0.0.0:8084"
@@ -121,6 +124,7 @@ class OrchestratorConfig:
     harness_token: str = ""
     service_name: str = "orchestrator-service"
     model_gateway_model_id: str = DEFAULT_MODEL_GATEWAY_MODEL_ID
+    run_artifact_root: str = DEFAULT_RUN_ARTIFACT_ROOT
 
 
 def _read_env_int(name: str, default: int) -> int:
@@ -176,6 +180,14 @@ def load_config() -> OrchestratorConfig:
         model_gateway_model_id = DEFAULT_MODEL_GATEWAY_MODEL_ID
     harness_token = os.environ.get("ORCHESTRATOR_HARNESS_TOKEN", "").strip()
 
+    run_artifact_root_raw = os.environ.get(
+        "C2C_RUN_ARTIFACT_ROOT",
+        os.environ.get("ORCHESTRATOR_RUN_ARTIFACT_ROOT", DEFAULT_RUN_ARTIFACT_ROOT),
+    ).strip()
+    if not run_artifact_root_raw:
+        run_artifact_root_raw = DEFAULT_RUN_ARTIFACT_ROOT
+    run_artifact_root = str(Path(run_artifact_root_raw).expanduser())
+
     if not parse_capability_id or not ir_capability_id or not generator_capability_id or not build_test_capability_id or not evidence_capability_id or not model_gateway_capability_id:
         raise ValueError("capability ids are required")
 
@@ -206,6 +218,7 @@ def load_config() -> OrchestratorConfig:
         w0_capabilities=w0_capabilities,
         harness_token=harness_token,
         model_gateway_model_id=model_gateway_model_id,
+        run_artifact_root=run_artifact_root,
     )
 
 

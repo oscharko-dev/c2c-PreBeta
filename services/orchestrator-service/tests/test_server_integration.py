@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 import time
 import unittest
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -325,9 +327,22 @@ def _start_server(handler_cls) -> tuple[HTTPServer, int, threading.Thread]:
     return server, server.server_port, thread
 
 
+def _rmtree(path: str) -> None:
+    import shutil
+    shutil.rmtree(path, ignore_errors=True)
+
+
 class OrchestratorIntegrationTests(unittest.TestCase):
+    def _create_orchestrator(self, host: str, mock_port: int):
+        artifact_root = tempfile.mkdtemp(prefix="orchestrator-artifacts-")
+        self.addCleanup(_rmtree, artifact_root)
+        server, runner = self._create_orchestrator_with_root(host, mock_port, artifact_root)
+        # expose for tests that want to inspect on-disk artifacts
+        self._artifact_root = artifact_root
+        return server, runner
+
     @staticmethod
-    def _create_orchestrator(host: str, mock_port: int):
+    def _create_orchestrator_with_root(host: str, mock_port: int, artifact_root: str):
         config = OrchestratorConfig(
             listen_addr=f"{host}:0",
             harness_base_url=f"http://{host}:{mock_port}",
@@ -341,6 +356,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             build_test_capability_id="java.build-test",
             evidence_capability_id="evidence.writer",
             model_gateway_capability_id="model-gateway",
+            run_artifact_root=artifact_root,
             w0_capabilities=(
                 {"id": "cobol.parse", "name": "COBOL Parser", "owner": "parser-service", "dataClass": "parser", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/parse"},
                 {"id": "cobol.ir", "name": "Semantic IR", "owner": "ir-service", "dataClass": "generator", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/ir"},
@@ -567,6 +583,129 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 self.assertEqual(run_response.status, 503)
             finally:
                 connection.close()
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+
+    def test_artifact_endpoints_serve_persisted_run_outputs(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: Optional[HTTPServer] = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            MockHarnessHandler.state = state
+            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps(
+                        {
+                            "requester": "integration",
+                            "inputRef": {
+                                "uri": "urn:integration/main.cob",
+                                "source": "IDENTIFICATION DIVISION.",
+                            },
+                        }
+                    ),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 201)
+                run_id = json.loads(response.read().decode("utf-8"))["run"]["runId"]
+            finally:
+                connection.close()
+
+            status = ""
+            for _ in range(60):
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request("GET", f"/v0/runs/{run_id}")
+                    resp = connection.getresponse()
+                    body = json.loads(resp.read().decode("utf-8"))
+                    status = body.get("status", "")
+                finally:
+                    connection.close()
+                if status in {"completed", "failed"}:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(status, "completed")
+
+            def _fetch_json(path: str):
+                conn = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    conn.request("GET", path)
+                    r = conn.getresponse()
+                    return r.status, json.loads(r.read().decode("utf-8"))
+                finally:
+                    conn.close()
+
+            # artifacts list returns metadata for every persisted artifact
+            status_code, artifacts = _fetch_json(f"/v0/runs/{run_id}/artifacts")
+            self.assertEqual(status_code, 200)
+            paths = sorted(entry["path"] for entry in artifacts["artifacts"])
+            for required in [
+                "source.cbl",
+                "source-ref.json",
+                "parse-output.json",
+                "semantic-ir-output.json",
+                "semantic-ir.json",
+                "generation-response.json",
+                "build-test-result.json",
+                "evidence-pack-manifest.json",
+                "trajectory-ledger.json",
+                "run-summary.json",
+            ]:
+                self.assertIn(required, paths, msg=f"missing artifact in index: {required}")
+            for entry in artifacts["artifacts"]:
+                for required_key in ("uri", "sha256", "byteSize", "mimeType", "kind", "createdBy", "createdAt", "runId", "workflowId"):
+                    self.assertIn(required_key, entry, msg=f"artifact entry missing {required_key}: {entry}")
+
+            # Generated endpoint exposes file content equal to the persisted Java
+            status_code, generated = _fetch_json(f"/v0/runs/{run_id}/generated")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(generated["status"], "complete")
+            self.assertIn("src/CASE01.java", generated["files"])
+            self.assertEqual(generated["files"]["src/CASE01.java"], "class CASE01 {}")
+
+            # Build/test endpoint returns the build-test-result.json content
+            status_code, build_test = _fetch_json(f"/v0/runs/{run_id}/build-test")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(build_test["status"], "complete")
+            self.assertEqual(build_test["data"]["status"], "ok")
+            self.assertEqual(build_test["artifactRef"]["path"], "build-test-result.json")
+
+            # Evidence endpoint returns the evidence-pack-manifest
+            status_code, evidence = _fetch_json(f"/v0/runs/{run_id}/evidence")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(evidence["status"], "complete")
+            self.assertEqual(evidence["artifactRef"]["path"], "evidence-pack-manifest.json")
+
+            # Events endpoint returns the trajectory-ledger contents
+            status_code, events = _fetch_json(f"/v0/runs/{run_id}/events")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(events["status"], "complete")
+            self.assertIsInstance(events["events"], list)
+
+            # Unknown run returns 404
+            status_code, missing = _fetch_json("/v0/runs/run-missing/artifacts")
+            self.assertEqual(status_code, 404)
+
+            # On-disk hashes match recorded metadata
+            for entry in artifacts["artifacts"]:
+                run_dir = Path(self._artifact_root) / run_id
+                on_disk = (run_dir / entry["path"]).read_bytes()
+                from hashlib import sha256
+                self.assertEqual(entry["sha256"], sha256(on_disk).hexdigest(), msg=f"sha256 mismatch for {entry['path']}")
+                self.assertEqual(entry["byteSize"], len(on_disk))
         finally:
             mock_server.shutdown()
             mock_server.server_close()
