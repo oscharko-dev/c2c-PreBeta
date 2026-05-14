@@ -1,0 +1,205 @@
+openapi: 3.0.4
+info:
+  title: agentic-harness-core API
+  version: 0.1.0
+  description: |
+    Wave 0 control-plane for capability and run-state orchestration.
+servers:
+  - url: /v0
+paths:
+  /health:
+    get:
+      summary: Health probe
+      responses:
+        "200":
+          description: Service healthy
+  /ready:
+    get:
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Service ready
+  /capabilities:
+    get:
+      summary: List all capabilities
+      responses:
+        "200":
+          description: Capability list
+    post:
+      summary: Register a capability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/capability-catalog.schema.json"
+      responses:
+        "201":
+          description: Registered
+        "403":
+          description: Policy blocked registration
+  /capabilities/{id}:
+    get:
+      summary: Get capability by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Capability instance
+  /capabilities/{id}/validate:
+    post:
+      summary: Validate capability by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Valid capability
+  /runs:
+    get:
+      summary: List all runs
+      responses:
+        "200":
+          description: Run list
+    post:
+      summary: Start a migration run
+      responses:
+        "201":
+          description: Run started
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunCreateRequest"
+  /runs/{runId}:
+    get:
+      summary: Get run state by id
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Run state
+    patch:
+      summary: Update run state
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunUpdateRequest"
+      responses:
+        "200":
+          description: Run updated
+  /mcp-servers:
+    get:
+      summary: List registered MCP servers
+      responses:
+        "200":
+          description: MCP server list
+    post:
+      summary: Register MCP server metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/mcp-server-registry.schema.json"
+      responses:
+        "201":
+          description: MCP server registered
+  /mcp-servers/{id}:
+    get:
+      summary: Get MCP server metadata
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: MCP server
+  /events:
+    get:
+      summary: Retrieve harness events
+      responses:
+        "200":
+          description: Event list
+  /policy/decide:
+    post:
+      summary: Explicitly evaluate a policy action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyRequest"
+      responses:
+        "200":
+          description: Policy permit
+        "403":
+          description: Policy block
+components:
+  schemas:
+    RunCreateRequest:
+      type: object
+      required:
+        - workflowId
+      properties:
+        workflowId:
+          type: string
+        requester:
+          type: string
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+    RunUpdateRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [starting, updating, completed, failed]
+        updatedBy:
+          type: string
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+        policyDecision:
+          type: string
+        message:
+          type: string
+    PolicyRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+        actor:
+          type: string
+        target:
+          type: object
+          additionalProperties:
+            type: string

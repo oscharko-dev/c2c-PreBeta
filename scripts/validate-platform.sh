@@ -3,6 +3,7 @@ set -euo pipefail
 
 REQUIRED_DIRS=(
   "services/go/w0-service"
+  "services/agentic-harness-core"
   "services/python/w0-service"
   "services/typescript/w0-service"
   "services/java/w0-service"
@@ -28,6 +29,9 @@ for f in \
   services/go/w0-service/main.go \
   services/go/w0-service/main_test.go \
   services/go/w0-service/Dockerfile \
+  services/agentic-harness-core/main.go \
+  services/agentic-harness-core/main_test.go \
+  services/agentic-harness-core/Dockerfile \
   services/python/w0-service/requirements.txt \
   services/python/w0-service/src/c2c_service.py \
   services/python/w0-service/src/cli.py \
