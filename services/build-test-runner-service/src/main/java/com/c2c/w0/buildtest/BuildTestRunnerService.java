@@ -58,6 +58,9 @@ public final class BuildTestRunnerService {
         boolean skipExecution = booleanFlag(options.get("skipExecution"), false);
         boolean compareOutput = booleanFlag(options.get("compareOutput"), true);
         long timeoutMs = clampTimeout(longValue(options.get("timeoutMs"), 5000L));
+        Map<String, Object> oracleSpec = mapOrEmpty(request.get("oracle"));
+        boolean oracleEnabled = isCobolRuntimeOracle(oracleSpec);
+        long oracleTimeoutMs = clampTimeout(longValue(oracleSpec.get("timeoutMs"), timeoutMs));
 
         Map<String, Object> response = newEnvelope(request, programId);
         List<Map<String, Object>> diagnostics = new ArrayList<>();
@@ -127,7 +130,16 @@ public final class BuildTestRunnerService {
                 applyClassification(response, ResultClassifier.compileFailure());
                 response.put("execution", emptyExecution());
                 response.put("tests", emptyTests());
-                attachGoldenMaster(response, programId, request);
+                if (oracleEnabled) {
+                    response.put("oracle", oracleSkippedMap(oracleSpec,
+                            "java-compile-failed; oracle not executed"));
+                    response.put("goldenMaster", Map.of(
+                            "resolved", false,
+                            "source", "oracle.cobol-runtime",
+                            "note", "Java compile failed before the oracle could be executed."));
+                } else {
+                    attachGoldenMaster(response, programId, request);
+                }
                 response.put("comparison", Map.of(
                         "matched", false,
                         "skipped", true,
@@ -153,7 +165,16 @@ public final class BuildTestRunnerService {
                     diagnostics.add(diagnostic("error", "run-not-started",
                             run.errorMessage() == null ? "execution did not start" : run.errorMessage()));
                     response.put("tests", emptyTests());
-                    attachGoldenMaster(response, programId, request);
+                    if (oracleEnabled) {
+                        response.put("oracle", oracleSkippedMap(oracleSpec,
+                                "java-run-not-started; oracle not executed"));
+                        response.put("goldenMaster", Map.of(
+                                "resolved", false,
+                                "source", "oracle.cobol-runtime",
+                                "note", "Java run did not start before the oracle could be executed."));
+                    } else {
+                        attachGoldenMaster(response, programId, request);
+                    }
                     response.put("comparison", Map.of(
                             "matched", false,
                             "skipped", true,
@@ -172,7 +193,13 @@ public final class BuildTestRunnerService {
             // -- Tests (W0 generator does not yet emit JUnit tests) ----------
             response.put("tests", emptyTests());
 
-            // -- Compare -----------------------------------------------------
+            // -- Oracle comparison (Issue #92) -------------------------------
+            if (oracleEnabled) {
+                return finaliseOracle(response, diagnostics, oracleSpec, run,
+                        skipExecution, compareOutput, oracleTimeoutMs);
+            }
+
+            // -- Compare against Golden Master -------------------------------
             Optional<GoldenMaster.Resolved> golden = GoldenMaster.resolve(
                     programId, mapOrEmpty(request.get("goldenMaster")), repoRoot);
 
@@ -241,6 +268,186 @@ public final class BuildTestRunnerService {
             response.put("outputRef", reference(response));
             return response;
         }
+    }
+
+    private static boolean isCobolRuntimeOracle(Map<String, Object> oracleSpec) {
+        if (oracleSpec == null || oracleSpec.isEmpty()) {
+            return false;
+        }
+        return "cobol-runtime".equals(string(oracleSpec.get("mode"), null));
+    }
+
+    private Map<String, Object> finaliseOracle(Map<String, Object> response,
+                                               List<Map<String, Object>> diagnostics,
+                                               Map<String, Object> oracleSpec,
+                                               GeneratedProgramRunner.RunResult run,
+                                               boolean skipExecution,
+                                               boolean compareOutput,
+                                               long oracleTimeoutMs) {
+        // The oracle owns the goldenMaster slot for this run; the request must
+        // not silently fall through to the registry expectation when the
+        // caller explicitly asked for a UI-supplied COBOL oracle.
+        response.put("goldenMaster", Map.of(
+                "resolved", false,
+                "source", "oracle.cobol-runtime",
+                "note", "Oracle supplied by request.oracle; registry Golden Master not consulted."));
+
+        if (skipExecution) {
+            applyClassification(response, ResultClassifier.skipped("skipExecution=true"));
+            response.put("oracle", oracleSkippedMap(oracleSpec, "options.skipExecution=true"));
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", true,
+                    "reason", "options.skipExecution=true"));
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+        if (run != null && !run.ok()) {
+            // Java ran but exited unsuccessfully; the run-failure classification
+            // was already applied. Do not execute the COBOL oracle — a partial
+            // Java stdout must never be compared against a full COBOL stdout
+            // because that could either fabricate a false match or mask the
+            // real run failure as an oracle divergence.
+            response.put("oracle", oracleSkippedMap(oracleSpec,
+                    "java-run-failed; oracle not executed"));
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", true,
+                    "reason", "run-failed"));
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+        if (!compareOutput) {
+            applyClassification(response, ResultClassifier.classification(
+                    ResultClassifier.STATUS_OK, ResultClassifier.CLASS_SKIPPED,
+                    "compareOutput=false; oracle execution skipped."));
+            response.put("oracle", oracleSkippedMap(oracleSpec, "options.compareOutput=false"));
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", true,
+                    "reason", "options.compareOutput=false"));
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+
+        String programId = string(response.get("programId"), null);
+        String sourceText = string(oracleSpec.get("sourceText"), null);
+        Map<String, Object> oracleSourceRef = mapOrEmpty(oracleSpec.get("sourceRef"));
+
+        CobolRuntimeExecutor.OracleRun oracle =
+                CobolRuntimeExecutor.executeSource(programId, sourceText, oracleTimeoutMs);
+
+        Map<String, Object> oracleMap = oracle.toMap();
+        if (!oracleSourceRef.isEmpty()) {
+            oracleMap.put("sourceRef", oracleSourceRef);
+        }
+        response.put("oracle", oracleMap);
+
+        if (!oracle.attempted()) {
+            diagnostics.add(diagnostic("error", "oracle-invalid-request",
+                    oracle.reason() == null ? "oracle request is invalid" : oracle.reason()));
+            applyClassification(response, ResultClassifier.oracleInvalid(oracle.reason()));
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", true,
+                    "reason", "oracle-invalid-request"));
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+
+        if (!oracle.available()) {
+            diagnostics.add(diagnostic("error", "oracle-unavailable",
+                    "GnuCOBOL (cobc/cobcrun) is not available; cannot prove equivalence"
+                            + " for UI-provided COBOL source."));
+            applyClassification(response, ResultClassifier.oracleUnavailable(null));
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", true,
+                    "reason", "oracle-unavailable"));
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+
+        if (!oracle.compileOk()) {
+            diagnostics.add(diagnostic("error", "oracle-cobol-compile-failed",
+                    "cobc failed to compile the UI-provided COBOL source: " + oracle.reason()));
+            applyClassification(response, ResultClassifier.oracleCompileError(
+                    "cobc failed: exit=" + oracle.compileExitCode()));
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", false,
+                    "reason", "oracle-cobol-compile-failed"));
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+
+        if (!oracle.runOk()) {
+            diagnostics.add(diagnostic("error", "oracle-cobol-run-failed",
+                    "cobcrun did not complete cleanly: " + oracle.reason()));
+            applyClassification(response, ResultClassifier.oracleRunError(
+                    "cobcrun exit=" + oracle.exitCode() + (oracle.reason().isBlank()
+                            ? "" : (": " + oracle.reason()))));
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", false,
+                    "reason", "oracle-cobol-run-failed"));
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+
+        // Both COBOL and Java executed successfully — compare stdout.
+        String javaStdout = run == null ? "" : run.stdout();
+        Map<String, Object> comparison = compareToOracle(javaStdout, oracle.stdout());
+        response.put("comparison", comparison);
+        if (Boolean.TRUE.equals(comparison.get("matched"))) {
+            applyClassification(response, ResultClassifier.match());
+        } else {
+            applyClassification(response, ResultClassifier.divergence(false,
+                    "Generated Java stdout diverges from COBOL oracle stdout."));
+        }
+        response.put("diagnostics", diagnostics);
+        response.put("outputRef", reference(response));
+        return response;
+    }
+
+    private static Map<String, Object> oracleSkippedMap(Map<String, Object> oracleSpec, String reason) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("mode", "cobol-runtime");
+        map.put("attempted", false);
+        map.put("available", false);
+        map.put("compileOk", false);
+        map.put("ran", false);
+        map.put("runOk", false);
+        map.put("reason", reason);
+        Map<String, Object> oracleSourceRef = mapOrEmpty(oracleSpec.get("sourceRef"));
+        if (!oracleSourceRef.isEmpty()) {
+            map.put("sourceRef", oracleSourceRef);
+        }
+        return map;
+    }
+
+    private static Map<String, Object> compareToOracle(String javaStdout, String cobolStdout) {
+        String left = normalise(javaStdout);
+        String right = normalise(cobolStdout);
+        Map<String, Object> comparison = new LinkedHashMap<>();
+        comparison.put("matched", left.equals(right));
+        comparison.put("normalisation", "trim+crlf-to-lf");
+        comparison.put("source", "oracle.cobol-runtime");
+        comparison.put("actualSha256", HashUtil.sha256(javaStdout == null ? "" : javaStdout));
+        comparison.put("expectedSha256", HashUtil.sha256(cobolStdout == null ? "" : cobolStdout));
+        comparison.put("actualLength", javaStdout == null ? 0 : javaStdout.length());
+        comparison.put("expectedLength", cobolStdout == null ? 0 : cobolStdout.length());
+        if (!left.equals(right)) {
+            comparison.put("diff", briefDiff(left, right));
+        }
+        return comparison;
     }
 
     private static Map<String, Object> compareToGoldenMaster(String actual, String expected) {

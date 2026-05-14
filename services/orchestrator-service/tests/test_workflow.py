@@ -233,6 +233,44 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(model_invocation["status"], "skipped")
         self.assertEqual(model_invocation["provider"], "orchestrator")
 
+    def test_build_test_invocation_forwards_cobol_runtime_oracle(self):
+        # Issue #92: the orchestrator must attach the UI-provided COBOL source
+        # as an executable oracle so build-test-runner can prove equivalence
+        # against the exact source the user submitted.
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt=None,
+        )
+
+        cobol_source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. CASE01.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           DISPLAY 'PASS'.\n"
+            "           STOP RUN.\n"
+        )
+        runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": cobol_source},
+        )
+
+        build_test_call = next(
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == "java.build-test"
+        )
+        oracle = build_test_call[2].get("oracle")
+        self.assertIsNotNone(oracle, "build-test-runner request must include an oracle")
+        self.assertEqual(oracle["mode"], "cobol-runtime")
+        self.assertEqual(oracle["sourceText"], cobol_source)
+        self.assertIn("uri", oracle["sourceRef"])
+        self.assertIsInstance(oracle["timeoutMs"], int)
+        self.assertGreater(oracle["timeoutMs"], 0)
+
     def test_skipped_model_invocation_uses_configured_model_id(self):
         gateway = StubGateway(self._base_capabilities(), self._base_responses())
         runner = W0WorkflowRunner(config=self._base_config(model_gateway_model_id="phi-4"), gateway=gateway)

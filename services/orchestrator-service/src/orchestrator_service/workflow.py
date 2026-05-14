@@ -65,6 +65,8 @@ DATA_CLASS_MODEL = "model-gateway"
 DEFAULT_MODEL_ID = "gpt-oss-120b"
 DEFAULT_PROMPT_TEMPLATE_VERSION = "v1"
 DEFAULT_MODEL_TIMEOUT_MS = 15000
+DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS = 5000
+ORACLE_MODE_COBOL_RUNTIME = "cobol-runtime"
 
 
 # noinspection PyClassHasNoInitInspection
@@ -138,6 +140,19 @@ def _extract_source(raw: Mapping[str, Any]) -> str:
     return source
 
 
+def _raw_source(raw: Mapping[str, Any]) -> Optional[str]:
+    """Return the source text exactly as supplied, preserving whitespace.
+
+    Used for the COBOL oracle payload (Issue #92), where fixed-format COBOL
+    requires leading-column whitespace to be retained character-for-character.
+    """
+    for key in ("source", "sourceText", "code"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
 def _build_reference(uri: str, payload: Any) -> DataReference:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return DataReference(uri=uri, sha256=sha256(canonical).hexdigest(), byte_size=len(canonical))
@@ -205,6 +220,29 @@ def _failed_step_from_exception(exc: BaseException) -> Optional[str]:
     return None
 
 
+def _build_cobol_oracle_payload(
+    source_text: Optional[str],
+    input_reference: DataReference,
+    timeout_ms: int,
+) -> Optional[Dict[str, Any]]:
+    """Construct the executable COBOL oracle payload for build-test-runner.
+
+    The oracle lets the runner execute the UI-provided COBOL source with
+    GnuCOBOL and compare its stdout against generated Java stdout (Issue
+    #92). Returns ``None`` when no source text is available, so the runner
+    falls back to registry Golden Master behaviour.
+    """
+    if not source_text or not source_text.strip():
+        return None
+    safe_timeout = timeout_ms if isinstance(timeout_ms, int) and timeout_ms > 0 else DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS
+    return {
+        "mode": ORACLE_MODE_COBOL_RUNTIME,
+        "sourceText": source_text,
+        "sourceRef": _as_reference_payload(input_reference),
+        "timeoutMs": safe_timeout,
+    }
+
+
 def _coerce_output_ref(payload: Mapping[str, Any], fallback_uri: str, fallback_payload: Any) -> DataReference:
     raw = _first_non_empty_mapping(payload.get("outputRef"))
     if raw:
@@ -235,6 +273,7 @@ class W0WorkflowRunner:
     def run(self, context: W0RunContext, input_ref: Mapping[str, Any]) -> Dict[str, Any]:
         input_reference = _normalize_input_ref(input_ref, context.run_id)
         source_text = _extract_source(input_ref)
+        raw_source_text = _raw_source(input_ref) or source_text
         evidence_refs: list[str] = list(context.evidence_refs)
         step_results: list[WorkflowStepResult] = []
         model_output = None
@@ -457,6 +496,13 @@ class W0WorkflowRunner:
                 "generationResponse": generator_output.payload,
                 "sourceRef": _as_reference_payload(generator_output.input_ref),
             }
+            oracle_payload = _build_cobol_oracle_payload(
+                raw_source_text,
+                input_reference,
+                getattr(self.config, "build_test_oracle_timeout_ms", DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS),
+            )
+            if oracle_payload is not None:
+                build_test_input["oracle"] = oracle_payload
 
             build_test_output = self._invoke_step(
                 context,

@@ -95,8 +95,44 @@ components:
           additionalProperties: true
         goldenMaster:
           $ref: "#/components/schemas/GoldenMasterHint"
+        oracle:
+          $ref: "#/components/schemas/OracleRequest"
         options:
           $ref: "#/components/schemas/RunOptions"
+    OracleRequest:
+      type: object
+      description: >
+        Executable oracle for UI-provided COBOL source (Issue #92). When
+        present with mode "cobol-runtime", the runner compiles and executes
+        the supplied COBOL source with GnuCOBOL and compares its stdout
+        against the generated Java stdout instead of consulting the registry
+        Golden Master. If omitted, registry Golden Master behaviour is
+        preserved unchanged.
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [cobol-runtime]
+          description: Oracle backend. Only "cobol-runtime" is supported at W0.
+        sourceText:
+          type: string
+          description: >
+            Full COBOL source to compile with cobc and execute with cobcrun.
+            Required when mode is "cobol-runtime".
+        sourceRef:
+          type: object
+          description: >
+            Optional content-addressed reference to the originating source,
+            echoed back in the response oracle block for evidence packs.
+          properties:
+            uri: { type: string }
+            sha256: { type: string }
+            byteSize: { type: integer }
+        timeoutMs:
+          type: integer
+          minimum: 100
+          maximum: 30000
+          description: Per-process wall-clock budget for cobc and cobcrun.
     GoldenMasterHint:
       type: object
       properties:
@@ -146,7 +182,18 @@ components:
           type: string
         status:
           type: string
-          enum: [ok, compile-failed, run-failed, output-divergence, golden-master-reproduction-failed, missing-golden-master, skipped]
+          enum:
+            - ok
+            - compile-failed
+            - run-failed
+            - output-divergence
+            - golden-master-reproduction-failed
+            - missing-golden-master
+            - skipped
+            - oracle-unavailable
+            - oracle-cobol-compile-failed
+            - oracle-cobol-run-failed
+            - oracle-invalid
         classification:
           type: string
           enum:
@@ -159,6 +206,10 @@ components:
             - run-error
             - skipped-no-execution
             - missing-golden-master
+            - oracle-unavailable
+            - oracle-cobol-compile-error
+            - oracle-cobol-run-error
+            - oracle-invalid-request
         build:
           type: object
         execution:
@@ -226,6 +277,41 @@ components:
                   type: string
                 cobcrunVersion:
                   type: string
+        oracle:
+          type: object
+          description: >
+            Present when the request supplied an executable oracle. The
+            mode field echoes the request mode. The other fields describe
+            availability, compile/run status, captured stdout (and its
+            SHA-256), captured stderr, the resolved COBOL module name, and
+            the toolchain versions used.
+          properties:
+            mode:
+              type: string
+              enum: [cobol-runtime]
+            attempted: { type: boolean }
+            available: { type: boolean }
+            compileOk: { type: boolean }
+            ran: { type: boolean }
+            runOk: { type: boolean }
+            compileExitCode: { type: integer }
+            exitCode: { type: integer }
+            stdout: { type: string }
+            stderr: { type: string }
+            stdoutSha256: { type: string }
+            durationMs: { type: integer }
+            reason: { type: string }
+            moduleName: { type: string }
+            compiler: { type: string }
+            runtime: { type: string }
+            cobcVersion: { type: string }
+            cobcrunVersion: { type: string }
+            sourceRef:
+              type: object
+              properties:
+                uri: { type: string }
+                sha256: { type: string }
+                byteSize: { type: integer }
         comparison:
           type: object
         outputRef:
