@@ -114,6 +114,55 @@ Alternatively:
 make dev-check
 ```
 
+## Product-Mode Local Stack
+
+Start the full local stack from the repository root with one command:
+
+```bash
+./scripts/start-c2c-local.sh
+```
+
+The launcher builds the required artifacts, starts the local capability mesh,
+and serves `apps/c2c-ui/dist` through `c2c-bff`. It uses explicit
+non-conflicting defaults and writes all run state under `var/c2c-local/`:
+
+- Logs: `var/c2c-local/logs/`
+- PIDs: `var/c2c-local/pids/`
+- Ready marker: `var/c2c-local/ready`
+- Harness, experience-learning, evidence, and model-gateway ledgers and
+  artifacts: `var/c2c-local/`
+
+The BFF comes up in live product mode by wiring its orchestrator and evidence
+URLs to the local services. When the stack is ready, the launcher prints
+exactly:
+
+```text
+c2c local application ready: http://127.0.0.1:18089
+```
+
+To stop the stack:
+
+```bash
+./scripts/stop-c2c-local.sh
+```
+
+For CI or other automation, use:
+
+```bash
+./scripts/start-c2c-local.sh --ci
+```
+
+Automation can wait on `var/c2c-local/ready`, then verify `GET /api/v0/health`
+and `GET /api/v0/mode` on the BFF before shutting the stack down.
+
+Launcher overrides are documented in `.env.example`:
+
+- `C2C_LOCAL_VAR_DIR`
+- `C2C_LOCAL_READY_MARKER`
+- `C2C_LOCAL_*_PORT`
+- `C2C_LOCAL_HARNESS_TOKEN`
+- `C2C_LOCAL_MODEL_GATEWAY_ENABLED`
+
 ## CI and quality gates
 
 Pull request CI runs:
