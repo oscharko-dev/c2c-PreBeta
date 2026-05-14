@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * End-to-end W0 smoke verification: for each of the three W0 corpus IR
+ * End-to-end W0 smoke verification: for each of the four W0 corpus IR
  * fixtures, run target-java-generation-service to obtain a Java project, hand
  * it to build-test-runner-service, and assert the build/run path completes
  * with a registered Golden Master comparison.
@@ -44,14 +44,20 @@ class W0SmokeIntegrationTest {
     }
 
     @Test
+    void arith01EndToEnd() throws Exception {
+        runFixture("fixtures/semantic-ir/arithmetic-adjustment-ledger.ir.json", "ARITH01");
+    }
+
+    @Test
     void batch01EndToEnd() throws Exception {
         runFixture("fixtures/semantic-ir/decimal-batch-aggregator.ir.json", "BATCH01");
     }
 
     @Test
-    void allThreeProgramsProduceHashReferencedResults() throws Exception {
+    void allFourProgramsProduceHashReferencedResults() throws Exception {
         for (String[] entry : new String[][]{
                 {"fixtures/semantic-ir/branch-account-guard.ir.json", "BRNCH01"},
+                {"fixtures/semantic-ir/arithmetic-adjustment-ledger.ir.json", "ARITH01"},
                 {"fixtures/semantic-ir/ctrl-decimal-payroll.ir.json", "CTRLDEC01"},
                 {"fixtures/semantic-ir/decimal-batch-aggregator.ir.json", "BATCH01"},
         }) {

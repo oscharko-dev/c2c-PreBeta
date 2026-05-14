@@ -11,6 +11,14 @@
       "rationale": "Expected output was reproduced from corpus/synthetic/programs/branch-account-guard.cbl with GnuCOBOL cobc -m and cobcrun BRNCH01."
     },
     {
+      "programId": "ARITH01",
+      "cobolSource": "corpus/synthetic/programs/arithmetic-adjustment-ledger.cbl",
+      "expectedOutputPath": "corpus/synthetic/fixtures/arithmetic-adjustment-ledger-output.txt",
+      "classification": "synthetic",
+      "knownDivergenceAtW0": false,
+      "rationale": "Synthetic expected output now matches generated Java for the W0 MOVE/SUBTRACT/MULTIPLY/DIVIDE/DISPLAY subset."
+    },
+    {
       "programId": "CTRLDEC01",
       "cobolSource": "corpus/synthetic/programs/ctrl-decimal-payroll.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/ctrl-decimal-payroll-output.txt",
