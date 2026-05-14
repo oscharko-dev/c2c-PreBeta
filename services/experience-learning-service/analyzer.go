@@ -64,7 +64,7 @@ func (a *PatternAnalyzer) AnalyzeRun(runID string, events []EventEnvelopeV0, led
 			Capability:   ev.Capability,
 			InputHash:    ev.InputRef.SHA256,
 			OutputHash:   ev.OutputRef.SHA256,
-			Status:       normalizeStatus(ev.Status),
+			Status:       harnessStatusForAnalysis(ev.Status),
 			BuildOutcome: classifyBuildOutcome(ev),
 		}
 		buckets[key] = append(buckets[key], ev)
@@ -98,7 +98,7 @@ func (a *PatternAnalyzer) AnalyzeRun(runID string, events []EventEnvelopeV0, led
 				InputHash:          ev.InputRef.SHA256,
 				OutputHash:         ev.OutputRef.SHA256,
 				Pattern:            patternAcceptedPattern,
-				PatternFingerprint: PatternKey{Actor: ev.Actor, Capability: ev.Capability, InputHash: ev.InputRef.SHA256, OutputHash: ev.OutputRef.SHA256, Status: normalizeStatus(ev.Status), BuildOutcome: classifyBuildOutcome(ev)}.Fingerprint(),
+				PatternFingerprint: PatternKey{Actor: ev.Actor, Capability: ev.Capability, InputHash: ev.InputRef.SHA256, OutputHash: ev.OutputRef.SHA256, Status: harnessStatusForAnalysis(ev.Status), BuildOutcome: classifyBuildOutcome(ev)}.Fingerprint(),
 				Occurrences:        1,
 				Confidence:         a.clamp(a.policy.Detection.MinConfidenceFailure, a.policy.Detection.MinConfidence, 1.0),
 				FirstStepID:        ev.StepID,
@@ -146,7 +146,7 @@ func analyzeBucket(analyzer *PatternAnalyzer, runID string, key PatternKey, item
 	failed := make([]EventEnvelopeV0, 0)
 	for _, item := range items {
 		outputHashes[item.OutputRef.SHA256] = struct{}{}
-		if strings.EqualFold(item.Status, "failed") {
+		if harnessStatusForAnalysis(item.Status) == "failed" {
 			failed = append(failed, item)
 		}
 	}
@@ -346,10 +346,11 @@ func analyzeBucket(analyzer *PatternAnalyzer, runID string, key PatternKey, item
 	hasFailure := false
 	hasRecovery := false
 	for _, item := range items {
-		if strings.EqualFold(item.Status, "failed") {
+		status := harnessStatusForAnalysis(item.Status)
+		if status == "failed" {
 			hasFailure = true
 		}
-		if hasFailure && strings.EqualFold(item.Status, "completed") {
+		if hasFailure && status == "completed" {
 			hasRecovery = true
 			break
 		}
@@ -427,11 +428,12 @@ func analyzeRetrySequences(analyzer *PatternAnalyzer, runID string, events []Eve
 		failedIndex := -1
 		recoveredIndex := -1
 		for i := range items {
-			if failedIndex == -1 && strings.EqualFold(items[i].Status, "failed") {
+			status := harnessStatusForAnalysis(items[i].Status)
+			if failedIndex == -1 && status == "failed" {
 				failedIndex = i
 				continue
 			}
-			if failedIndex != -1 && strings.EqualFold(items[i].Status, "completed") {
+			if failedIndex != -1 && status == "completed" {
 				recoveredIndex = i
 				break
 			}
@@ -627,11 +629,15 @@ func extractEventIDs(events []EventEnvelopeV0) []string {
 func classifyBuildOutcome(event EventEnvelopeV0) string {
 	eventType := strings.ToLower(event.EventType)
 	dataClass := strings.ToLower(event.DataClass)
+	status := strings.ToLower(strings.TrimSpace(event.Status))
 	outcome := strings.ToLower(payloadText(event.Payload, []string{"outcome", "phase", "stage"}, ""))
-	if strings.Contains(eventType, "test") || dataClass == dataClassTest || outcome == "test" {
+	if status == "compile-failed" || outcome == "compile" || strings.Contains(eventType, "compile") {
+		return "compile"
+	}
+	if status == "run-failed" || status == "output-divergence" || outcome == "test" || strings.Contains(eventType, "test") || dataClass == dataClassTest {
 		return "test"
 	}
-	if strings.Contains(eventType, "compile") || strings.Contains(eventType, "build") || dataClass == dataClassBuildTest || outcome == "compile" {
+	if dataClass == dataClassBuildTest || strings.Contains(eventType, "build") {
 		return "compile"
 	}
 	return ""
@@ -653,8 +659,15 @@ func isAcceptedArtifact(event EventEnvelopeV0) bool {
 	return false
 }
 
-func normalizeStatus(status string) string {
-	return strings.ToLower(strings.TrimSpace(status))
+func harnessStatusForAnalysis(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "starting":
+		return "started"
+	case "output-divergence", "compile-failed", "run-failed":
+		return "failed"
+	default:
+		return strings.ToLower(strings.TrimSpace(status))
+	}
 }
 
 func payloadText(payload map[string]any, keys []string, fallback string) string {

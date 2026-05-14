@@ -11,6 +11,12 @@ import os
 import pathlib
 import subprocess
 
+print("Running repository script tests")
+subprocess.run(
+    ["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "*test*.py"],
+    check=True,
+)
+
 services = [
   "services/python/w0-service",
   "services/orchestrator-service",

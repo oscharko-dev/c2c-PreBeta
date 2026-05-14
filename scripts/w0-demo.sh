@@ -692,20 +692,11 @@ ingest_experience() {
   curl -fsS "$HARNESS_URL/v0/events" >"$snapshot" \
     || fail "failed to snapshot harness events"
 
-  local normalized="$EVENT_DIR/harness-events-observed.json"
-  jq 'map(
-        if .status == "starting" then .status = "started"
-        elif .status == "output-divergence" then .status = "failed"
-        elif .status == "compile-failed" then .status = "failed"
-        elif .status == "run-failed" then .status = "failed"
-        else .
-        end
-      )' "$snapshot" >"$normalized"
   local ingestStatus
   ingestStatus="$(curl -sS -o "$EVENT_DIR/experience-harness-ingest-response.json" \
     -w "%{http_code}" \
     -X POST -H "Content-Type: application/json" \
-    --data-binary "@$normalized" "$EXPERIENCE_URL/v0/harness-events" || echo "000")"
+    --data-binary "@$snapshot" "$EXPERIENCE_URL/v0/harness-events" || echo "000")"
   if [[ "$ingestStatus" != "200" && "$ingestStatus" != "201" ]]; then
     log "harness-event ingest failed (HTTP $ingestStatus); response body:"
     cat "$EVENT_DIR/experience-harness-ingest-response.json" >&2 || true

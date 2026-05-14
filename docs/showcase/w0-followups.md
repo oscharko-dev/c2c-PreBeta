@@ -1,6 +1,6 @@
 # W0 Follow-Ups
 
-Remaining concrete items discovered while assembling the W0 end-to-end demo
+Concrete items discovered while assembling the W0 end-to-end demo
 ([issue #16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16)) that are
 **explicitly deferred** beyond the Epic #1 closure PR. Per the
 [development workflow](../governance/development-workflow.md) governance rule,
@@ -8,25 +8,24 @@ scope expansion is not silently merged — every item below is filed as a
 separate issue so it can be planned, owned, and verified independently.
 
 Each entry includes the symptom seen during the W0 demo run, the contract /
-service involved, and a proposed fix shape. Wave 1 owners may take any item
-without waiting for the others.
+service involved, and the fix shape or current resolution. Wave 1 owners may
+take any open item without waiting for the others.
 
 ## F-W0-01 · `experience-learning-service` `/v0/harness-events` status enum mismatch · [#64](https://github.com/oscharko-dev/c2c-PreBeta/issues/64)
 
 - **Symptom**: harness events with `status` values produced by W0 services
-  (`starting`, `output-divergence`) get `HTTP 400 — status: unsupported`
-  from `experience-learning-service.allowedPatternStates`.
+  (`starting`, `output-divergence`) got `HTTP 400 — status: unsupported`
+  from the experience-learning harness-event validator.
 - **Service(s)**: `experience-learning-service` (`types.go`
-  `allowedPatternStates`), all W0 services emitting harness events.
-- **Current workaround**: the demo normalises statuses client-side via `jq`
-  (`starting → started`, `output-divergence → failed`, etc.) before
-  POSTing.
-- **Proposed fix**: split the enum into a *harness-event status enum*
-  (the union of statuses any capability service actually emits — `ok`,
-  `output-divergence`, `compile-failed`, …) and an *experience-event
-  status enum* (`observed`, `ignored`). Validate against the right one in
-  each ingest path. Add status mapping inside the ingest handler so callers
-  do not need to translate.
+  harness-event status validation), all W0 services emitting harness events.
+- **Resolution**: the service accepts raw Harness Event Envelope statuses
+  and maps known statuses internally for analysis (`starting → started`,
+  `output-divergence` / `compile-failed` / `run-failed → failed`). The W0 demo
+  posts the raw harness ledger directly.
+- **Fix shape**: keep the Harness Event Envelope status as raw producer data
+  while keeping the *experience-event status enum* (`observed`, `ignored`)
+  separate. Add status mapping inside the ingest/analysis path so callers do
+  not need to translate.
 - **Owner**: experience-learning.
 - **Acceptance**: a raw harness event posted to `/v0/harness-events`
   without normalisation is accepted whenever the harness itself accepted
