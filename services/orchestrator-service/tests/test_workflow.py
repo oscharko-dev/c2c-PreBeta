@@ -114,6 +114,11 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             invoked,
             ["cobol.parse", "cobol.ir", "java.generator", "java.build-test", "evidence.writer"],
         )
+        resolved = [entry[1] for entry in gateway.calls if entry[0] == "get_capability"]
+        self.assertEqual(
+            resolved,
+            ["cobol.parse", "cobol.ir", "java.generator", "java.build-test", "evidence.writer"],
+        )
         self.assertEqual(gateway.updated_runs[0][1], "updating")
         self.assertEqual(gateway.updated_runs[-1][1], "completed")
         self.assertGreater(len(gateway.posted_events), 0)
@@ -172,9 +177,16 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         )
 
         with self.assertRaises(StepExecutionError):
-            runner.run(context=context, input_ref={"uri": "urn:source/main.cob"})
+            runner.run(
+                context=context,
+                input_ref={"uri": "urn:source/main.cob", "sha256": "a" * 64, "byteSize": 12},
+            )
 
         self.assertEqual(gateway.updated_runs[-1][1], "failed")
+        retry_events = [event for event in gateway.posted_events if event.get("stateTransition") == "step.retry"]
+        failed_events = [event for event in gateway.posted_events if event.get("stateTransition") == "step.failed"]
+        self.assertGreater(len(retry_events), 0)
+        self.assertGreater(len(failed_events), 0)
 
 
 class DataReferenceTests(unittest.TestCase):
