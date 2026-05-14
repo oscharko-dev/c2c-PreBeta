@@ -39,7 +39,7 @@ class TargetJavaGenerationServiceTest {
         Map<?, ?> generated = (Map<?, ?>) response.get("generatedProject");
         Map<?, ?> files = (Map<?, ?>) generated.get("files");
         assertTrue(files.containsKey("pom.xml"));
-        assertEquals("c2c.generated.demo01.Demo01", generated.get("entryClass"));
+        assertEquals("c2c.generated.case01.Case01", generated.get("entryClass"));
     }
 
     @Test
@@ -113,7 +113,7 @@ class TargetJavaGenerationServiceTest {
         assertEquals("generator", event.get("dataClass"));
         assertEquals("v0", event.get("schemaVersion"));
         Map<?, ?> payload = (Map<?, ?>) event.get("payload");
-        assertEquals("DEMO01", payload.get("programId"));
+        assertEquals("CASE01", payload.get("programId"));
     }
 
     @Test
@@ -130,8 +130,8 @@ class TargetJavaGenerationServiceTest {
     private static Map<String, Object> sampleIr() {
         Map<String, Object> ir = new LinkedHashMap<>();
         ir.put("schemaVersion", "v0");
-        ir.put("irId", "ir-demo01");
-        ir.put("programId", "DEMO01");
+        ir.put("irId", "ir-case01");
+        ir.put("programId", "CASE01");
         ir.put("sourceHash", "abcdef");
         ir.put("sourceKind", "cobol");
         ir.put("symbols", Map.of());

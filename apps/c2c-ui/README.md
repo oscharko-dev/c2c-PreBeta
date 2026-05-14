@@ -8,12 +8,12 @@ on the same origin.
 
 1. **Sample picker** — W0 COBOL samples surfaced by the BFF from the repo
    corpus.
-2. **Harness run status** — orchestrator-reported state, never faked. The
+2. **Harness run status** — orchestrator-reported state, never synthesized. The
    `mode` badge in the header indicates whether the BFF is talking to
    live upstream services or returning documented mock fixtures.
 3. **COBOL ↔ generated Java** — side-by-side view. Unsupported W0
    features and open assumptions are listed under the generated panel so
-   they cannot be hidden by an over-polished demo.
+   they cannot be hidden by an over-polished presentation.
 4. **Build & test** — outcome from `build-test-runner-service` with the
    classification (`match`, `divergence-known-w0-coverage-gap`,
    `divergence-unknown`, etc.) and expected vs actual stdout.
@@ -36,7 +36,7 @@ npm run build
 `npm run build` emits the static bundle to `dist/`. The BFF
 (`services/c2c-bff`) serves that directory under `/` by default.
 
-## Running the demo
+## Running the reference run
 
 The simplest path on a fresh checkout, with no other services running:
 

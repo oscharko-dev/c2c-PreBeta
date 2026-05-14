@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-type fakeProvider struct {
+type stubProvider struct {
 	t      *testing.T
 	output map[string]any
 	err    error
@@ -21,11 +21,11 @@ type fakeProvider struct {
 	mu     sync.Mutex
 }
 
-func (f *fakeProvider) Name() string {
+func (f *stubProvider) Name() string {
 	return ModelProviderFoundryDevelopment
 }
 
-func (f *fakeProvider) Invoke(_ context.Context, _ ModelInvocationRequest, _ ModelMetadata) (ModelInvocationOutput, error) {
+func (f *stubProvider) Invoke(_ context.Context, _ ModelInvocationRequest, _ ModelMetadata) (ModelInvocationOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -146,7 +146,7 @@ func TestResolveGatewayConfigFromEnv_IssueVariables(t *testing.T) {
 
 func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	provider := &fakeProvider{
+	provider := &stubProvider{
 		output: map[string]any{
 			"text": "ok",
 		},
@@ -224,7 +224,7 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 
 func TestModelGatewayService_InvokeWithAuditSinksDisabledSkipsLedgerAndEvent(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	provider := &fakeProvider{
+	provider := &stubProvider{
 		output: map[string]any{"text": "ok"},
 		status: "completed",
 	}
@@ -277,7 +277,7 @@ func TestModelGatewayService_InvokeWithAuditSinksDisabledSkipsLedgerAndEvent(t *
 
 func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	provider := &fakeProvider{
+	provider := &stubProvider{
 		output: map[string]any{"text": "ok"},
 		status: "completed",
 	}
@@ -342,7 +342,7 @@ func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 
 func TestModelGatewayService_RejectsInactiveAllowlistedModel(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	provider := &fakeProvider{
+	provider := &stubProvider{
 		output: map[string]any{"text": "ok"},
 		status: "completed",
 	}
@@ -394,7 +394,7 @@ func TestModelGatewayService_RejectsInactiveAllowlistedModel(t *testing.T) {
 
 func TestModelGatewayService_RejectsMissingPromptTemplateWithoutLedgerFailure(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	provider := &fakeProvider{
+	provider := &stubProvider{
 		output: map[string]any{"text": "ok"},
 		status: "completed",
 	}
@@ -451,7 +451,7 @@ func TestModelGatewayService_RejectsMissingPromptTemplateWithoutLedgerFailure(t 
 
 func TestModelGatewayService_HealthMetadataContainsRuntimePolicy(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
-	provider := &fakeProvider{}
+	provider := &stubProvider{}
 	service := newGatewayServiceForTest(now, provider, ModelMetadata{
 		ID:                        "foundry-gpt",
 		DeploymentName:            "foundry-dep",

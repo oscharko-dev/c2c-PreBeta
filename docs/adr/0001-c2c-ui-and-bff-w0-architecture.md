@@ -1,13 +1,12 @@
-# ADR 0001: c2c-ui and c2c-bff for the W0 demo surface
+# ADR 0001: c2c-ui and c2c-bff for the W0 reference run surface
 
 **Date**: 2026-05-14
 **Status**: Accepted
 
 ## Context
 
-Issue #15 (`[W0-13] Build c2c-ui and c2c-bff v0 for the first end-to-end
-demo`) requires a user-facing surface for the walking skeleton. An expert
-demoing the harness needs to:
+Issue #15 requires a user-facing surface for the first end-to-end W0 workflow.
+An expert using the harness needs to:
 
 - Pick a sample COBOL program from the W0 corpus.
 - Run the migration pipeline through the orchestrator (not by calling
@@ -30,7 +29,7 @@ We introduce two new packages:
 1. **`services/c2c-bff/`** — TypeScript, Node 20, zero runtime dependencies.
    A small HTTP facade that:
 
-   - Serves the c2c-ui static bundle under `/` and the demo API under
+   - Serves the c2c-ui static bundle under `/` and the reference-run API under
      `/api/v0/*`.
    - Brokers all calls to upstream capability services
      (`orchestrator-service`, `evidence-service`,
@@ -38,7 +37,7 @@ We introduce two new packages:
      `cobol-parser-service`, `semantic-ir-service`,
      `agentic-harness-core`). The UI never calls these directly.
    - Falls back to a documented mock mode when upstream services are
-     unreachable, so a developer can run the demo on a fresh checkout
+     unreachable, so a developer can run the reference run on a fresh checkout
      without standing up the full mesh. Mock responses are labelled
      `mode: "mock"` on every payload.
 
@@ -60,19 +59,19 @@ The BFF API is documented in `services/c2c-bff/openapi.yaml`.
   factored into a shared workspace; W0 keeps them duplicated to stay
   restrained.
 - **Why zero runtime deps?** Matches the rest of W0. Avoids SBOM noise and
-  supply-chain surface area for a demo surface. `tsc` is a build-time only
+  supply-chain surface area for a readiness-validation surface. `tsc` is a build-time only
   devDependency.
 - **Why no React/Vite/bundler?** Engineering Notes in the issue: "Keep the
   UI functional and restrained. This is a tool surface, not a marketing
   page." A bundler stack would also expand the SBOM/licence surface.
 - **Why mock mode?** The issue accepts "local services OR documented mocks"
-  as the demo path. Mock mode is explicit, labelled, and only kicks in when
+  as the reference-run path. Mock mode is explicit, labelled, and only kicks in when
   the upstream URL is empty or unreachable — never silently in front of a
   working service.
 
 ## Consequences
 
-- A reviewer can run the demo with `npm install && npm run start` inside
+- A reviewer can run the reference run with `npm install && npm run start` inside
   `services/c2c-bff/` against a fresh checkout, with no other services up.
 - A reviewer running the full mesh will see real orchestrator/evidence
   responses via the same UI, because the BFF proxies live when reachable.
@@ -87,7 +86,7 @@ The BFF API is documented in `services/c2c-bff/openapi.yaml`.
 
 ## References
 
-- Issue #15 ([W0-13] Build c2c-ui and c2c-bff v0 for the first end-to-end demo)
+- Issue #15 (c2c-ui and c2c-bff for the first end-to-end validation)
 - Issue #14 (Evidence Pack v0)
 - Issue #13 (build-test-runner v0)
 - `docs/governance/development-workflow.md`

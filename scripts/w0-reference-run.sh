@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# W0 end-to-end demo orchestrator.
+# W0 end-to-end validation orchestrator.
 #
 # Drives the full COBOL-to-Java W0 walking skeleton through the real W0
 # capability services (parser, semantic-ir, target-java-generation,
 # build-test-runner, agentic-harness-core, evidence-service,
 # experience-learning-service) over HTTP, captures every artifact under
-# var/w0-demo/, builds a real Evidence Pack manifest per program, ingests
+# var/w0-reference-run/, builds a real Evidence Pack manifest per program, ingests
 # harness events into experience-learning, and emits a scorecard.
 #
 # Issue: #16 (W0-14)
-# Runbook: docs/showcase/w0-demo-runbook.md
+# Runbook: docs/showcase/w0-reference-runbook.md
 # Release gate: docs/release/w0-release-gate.md
 
 set -euo pipefail
@@ -17,7 +17,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-ENV_FILE="${W0_DEMO_ENV_FILE:-$ROOT_DIR/.env}"
+ENV_FILE="${W0_REFERENCE_RUN_ENV_FILE:-$ROOT_DIR/.env}"
 if [[ -f "$ENV_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -25,23 +25,23 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
-VAR_DIR="${W0_DEMO_VAR_DIR:-$ROOT_DIR/var/w0-demo}"
+VAR_DIR="${W0_REFERENCE_RUN_VAR_DIR:-$ROOT_DIR/var/w0-reference-run}"
 LOG_DIR="$VAR_DIR/logs"
 PID_DIR="$VAR_DIR/pids"
 ARTIFACTS_DIR="$VAR_DIR/artifacts"
 EXPORTS_DIR="$VAR_DIR/exports"
 EVENT_DIR="$VAR_DIR/events"
 
-# Service ports — picked outside the W0 service defaults so the demo can run
+# Service ports — picked outside the W0 service defaults so the reference run can run
 # alongside any service a developer is hand-running.
-HARNESS_PORT="${W0_DEMO_HARNESS_PORT:-8190}"
-EVIDENCE_PORT="${W0_DEMO_EVIDENCE_PORT:-8191}"
-EXPERIENCE_PORT="${W0_DEMO_EXPERIENCE_PORT:-8192}"
-PARSER_PORT="${W0_DEMO_PARSER_PORT:-8181}"
-IR_PORT="${W0_DEMO_IR_PORT:-8182}"
-GENERATOR_PORT="${W0_DEMO_GENERATOR_PORT:-8183}"
-BTR_PORT="${W0_DEMO_BTR_PORT:-8184}"
-MODEL_GATEWAY_PORT="${W0_DEMO_MODEL_GATEWAY_PORT:-8193}"
+HARNESS_PORT="${W0_REFERENCE_RUN_HARNESS_PORT:-8190}"
+EVIDENCE_PORT="${W0_REFERENCE_RUN_EVIDENCE_PORT:-8191}"
+EXPERIENCE_PORT="${W0_REFERENCE_RUN_EXPERIENCE_PORT:-8192}"
+PARSER_PORT="${W0_REFERENCE_RUN_PARSER_PORT:-8181}"
+IR_PORT="${W0_REFERENCE_RUN_IR_PORT:-8182}"
+GENERATOR_PORT="${W0_REFERENCE_RUN_GENERATOR_PORT:-8183}"
+BTR_PORT="${W0_REFERENCE_RUN_BTR_PORT:-8184}"
+MODEL_GATEWAY_PORT="${W0_REFERENCE_RUN_MODEL_GATEWAY_PORT:-8193}"
 
 HARNESS_URL="http://127.0.0.1:${HARNESS_PORT}"
 EVIDENCE_URL="http://127.0.0.1:${EVIDENCE_PORT}"
@@ -51,20 +51,20 @@ IR_URL="http://127.0.0.1:${IR_PORT}"
 GENERATOR_URL="http://127.0.0.1:${GENERATOR_PORT}"
 BTR_URL="http://127.0.0.1:${BTR_PORT}"
 MODEL_GATEWAY_URL="http://127.0.0.1:${MODEL_GATEWAY_PORT}"
-HARNESS_TOKEN="${W0_DEMO_HARNESS_TOKEN:-w0-demo-local-control-plane-token}"
+HARNESS_TOKEN="${W0_REFERENCE_RUN_HARNESS_TOKEN:-w0-reference-run-local-control-plane-token}"
 HARNESS_AUTH_HEADERS=(
   -H "Authorization: Bearer ${HARNESS_TOKEN}"
-  -H "X-Harness-Actor: w0-demo"
+  -H "X-Harness-Actor: w0-reference-run"
   -H "X-Harness-Role: orchestrator"
 )
 
 START_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-RUN_TAG="${W0_DEMO_RUN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
-MODEL_GATEWAY_ENABLED="${W0_DEMO_MODEL_GATEWAY_ENABLED:-true}"
-MODEL_GATEWAY_MODEL_ID="${W0_DEMO_MODEL_GATEWAY_MODEL_ID:-${C2C_MODEL_DEFAULT_DEPLOYMENT:-gpt-oss-120b}}"
-MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION="${W0_DEMO_MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION:-v1}"
-MODEL_GATEWAY_TIMEOUT_MS="${W0_DEMO_MODEL_GATEWAY_TIMEOUT_MS:-15000}"
-MODEL_GATEWAY_COMPLETION_LIMIT="${W0_DEMO_MODEL_GATEWAY_COMPLETION_LIMIT:-1}"
+RUN_TAG="${W0_REFERENCE_RUN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
+MODEL_GATEWAY_ENABLED="${W0_REFERENCE_RUN_MODEL_GATEWAY_ENABLED:-true}"
+MODEL_GATEWAY_MODEL_ID="${W0_REFERENCE_RUN_MODEL_GATEWAY_MODEL_ID:-${C2C_MODEL_DEFAULT_DEPLOYMENT:-gpt-oss-120b}}"
+MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION="${W0_REFERENCE_RUN_MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION:-v1}"
+MODEL_GATEWAY_TIMEOUT_MS="${W0_REFERENCE_RUN_MODEL_GATEWAY_TIMEOUT_MS:-15000}"
+MODEL_GATEWAY_COMPLETION_LIMIT="${W0_REFERENCE_RUN_MODEL_GATEWAY_COMPLETION_LIMIT:-1}"
 MODEL_GATEWAY_COMPLETED_COUNT=0
 
 # All three documented W0 corpus programs unless the caller asks for a subset.
@@ -73,9 +73,9 @@ DEFAULT_PROGRAMS=(
   "CTRLDEC01:corpus/synthetic/programs/ctrl-decimal-payroll.cbl"
   "BATCH01:corpus/synthetic/programs/decimal-batch-aggregator.cbl"
 )
-if [[ -n "${W0_DEMO_PROGRAMS:-}" ]]; then
+if [[ -n "${W0_REFERENCE_RUN_PROGRAMS:-}" ]]; then
   # shellcheck disable=SC2206
-  IFS=',' read -ra PROGRAMS <<<"${W0_DEMO_PROGRAMS}"
+  IFS=',' read -ra PROGRAMS <<<"${W0_REFERENCE_RUN_PROGRAMS}"
 else
   PROGRAMS=("${DEFAULT_PROGRAMS[@]}")
 fi
@@ -83,8 +83,8 @@ fi
 rm -rf "$LOG_DIR" "$PID_DIR" "$ARTIFACTS_DIR" "$EXPORTS_DIR" "$EVENT_DIR" "$VAR_DIR/bin"
 mkdir -p "$VAR_DIR" "$LOG_DIR" "$PID_DIR" "$ARTIFACTS_DIR" "$EXPORTS_DIR" "$EVENT_DIR"
 
-log()  { printf '[w0-demo] %s\n' "$*" >&2; }
-fail() { printf '[w0-demo][error] %s\n' "$*" >&2; exit 1; }
+log()  { printf '[w0-reference-run] %s\n' "$*" >&2; }
+fail() { printf '[w0-reference-run][error] %s\n' "$*" >&2; exit 1; }
 
 is_truthy() {
   case "${1,,}" in
@@ -347,17 +347,17 @@ post_controlled_harness_event() {
     --arg emptySha "$emptySha" \
     '{schemaVersion:"v0",
       eventType:$eventType,
-      service:"w0-demo",
+      service:"w0-reference-run",
       runId:$runId,
-      actor:"w0-demo",
+      actor:"w0-reference-run",
       capability:"evidence.writer",
       dataClass:"evidence",
       redactionProfile:"harness-control-plane",
       policyDecision:"policy allow",
       status:$status,
       stateTransition:$stateTransition,
-      inputRef:{uri:"urn:c2c/w0-demo/controlled/input", sha256:$emptySha, byteSize:0},
-      outputRef:{uri:"urn:c2c/w0-demo/controlled/output", sha256:$emptySha, byteSize:0},
+      inputRef:{uri:"urn:c2c/w0-reference-run/controlled/input", sha256:$emptySha, byteSize:0},
+      outputRef:{uri:"urn:c2c/w0-reference-run/controlled/output", sha256:$emptySha, byteSize:0},
       payload:{controlled:true, accepted:($status == "accepted")}}' \
   | curl -fsS -X POST -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
       --data-binary @- "$HARNESS_URL/v0/events" >/dev/null \
@@ -419,7 +419,7 @@ run_program() {
   local runRegistration="$outDir/00-run-create-response.json"
   curl -fsS -X POST -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
     --data "$(jq -n --arg w "$workflowId" --arg p "$programId" \
-                '{workflowId:$w, requester:"w0-demo", evidenceRefs:[("urn:c2c/cobol/" + $p)]}')" \
+                '{workflowId:$w, requester:"w0-reference-run", evidenceRefs:[("urn:c2c/cobol/" + $p)]}')" \
     "$HARNESS_URL/v0/runs" >"$runRegistration" \
     || fail "$programId: harness run create failed"
   local runId
@@ -518,7 +518,7 @@ run_program() {
     modelResponse="$outDir/10-model-invocation-response.json"
     jq -n \
       --arg runId "$runId" \
-      --arg actor "w0-demo" \
+      --arg actor "w0-reference-run" \
       --arg modelId "$MODEL_GATEWAY_MODEL_ID" \
       --arg dataClass "model-gateway" \
       --arg promptTemplateVersion "$MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION" \
@@ -594,7 +594,7 @@ run_program() {
   jq -n \
     --arg runId "$runId" \
     --arg workflowId "$workflowId" \
-    --arg summary "W0 demo run for $programId" \
+    --arg summary "W0 reference run for $programId" \
     --argjson sourceCobol "[$sourceRef]" \
     --argjson semanticIr "$irRef" \
     --argjson generatedJava "$genRef" \
@@ -605,7 +605,7 @@ run_program() {
     '{runId:$runId,
       workflowId:$workflowId,
       summary:$summary,
-      createdBy:"w0-demo",
+      createdBy:"w0-reference-run",
       artifacts:{
         sourceCobol:$sourceCobol,
         semanticIr:$semanticIr,
@@ -660,8 +660,8 @@ run_program() {
   curl -fsS -X PATCH -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
     --data "$(jq -n --arg pack "$packId" \
         '{status:"completed",
-          updatedBy:"w0-demo",
-          message:"W0 demo workflow completed",
+          updatedBy:"w0-reference-run",
+          message:"W0 reference run workflow completed",
           policyDecision:"policy allow",
           evidenceRefs:[("urn:c2c/evidence/" + $pack)]}')" \
     "$HARNESS_URL/v0/runs/$runId" \
@@ -721,7 +721,7 @@ run_controlled_repeat_scenario() {
   local runRegistration="$outDir/00-run-create-response.json"
   curl -fsS -X POST -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
     --data "$(jq -n --arg w "$workflowId" \
-                '{workflowId:$w, requester:"w0-demo-controlled", evidenceRefs:[]}')" \
+                '{workflowId:$w, requester:"w0-reference-run-controlled", evidenceRefs:[]}')" \
     "$HARNESS_URL/v0/runs" >"$runRegistration" \
     || fail "controlled scenario: harness run create failed"
   local runId
@@ -835,9 +835,9 @@ write_scorecard() {
   finishedAt="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
   {
-    echo "# W0 Demo Scorecard"
+    echo "# W0 Reference Run Scorecard"
     echo
-    echo "_Generated by \`scripts/w0-demo.sh\`. Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16)._"
+    echo "_Generated by \`scripts/w0-reference-run.sh\`. Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16)._"
     echo
     echo "- Run tag: \`$RUN_TAG\`"
     echo "- Started:  $START_AT"
@@ -872,12 +872,12 @@ write_scorecard() {
     echo
     echo "## Artifacts"
     echo
-    echo "- Per-program request/response captures: \`var/w0-demo/artifacts/<programId>/\`"
-    echo "- Per-program Evidence Pack manifest:    \`var/w0-demo/artifacts/<programId>/16-evidence-manifest.json\`"
-    echo "- Per-program exported pack directory:   \`var/w0-demo/exports/<packId>/\`"
-    echo "- Harness Event ledger (raw):            \`var/w0-demo/events/harness-events.jsonl\`"
-    echo "- Experience Event ledger (raw):         \`var/w0-demo/events/experience-events.jsonl\`"
-    echo "- Trajectory ledger per program:         \`var/w0-demo/artifacts/<programId>/11-trajectory-ledger.json\`"
+    echo "- Per-program request/response captures: \`var/w0-reference-run/artifacts/<programId>/\`"
+    echo "- Per-program Evidence Pack manifest:    \`var/w0-reference-run/artifacts/<programId>/16-evidence-manifest.json\`"
+    echo "- Per-program exported pack directory:   \`var/w0-reference-run/exports/<packId>/\`"
+    echo "- Harness Event ledger (raw):            \`var/w0-reference-run/events/harness-events.jsonl\`"
+    echo "- Experience Event ledger (raw):         \`var/w0-reference-run/events/experience-events.jsonl\`"
+    echo "- Trajectory ledger per program:         \`var/w0-reference-run/artifacts/<programId>/11-trajectory-ledger.json\`"
   } >"$scorecard"
 
   log "scorecard written to $scorecard"
@@ -889,7 +889,7 @@ write_scorecard() {
 # ----------------------------------------------------------------------------
 
 main() {
-  log "W0 demo starting (run tag: $RUN_TAG, var dir: $VAR_DIR)"
+  log "W0 reference run starting (run tag: $RUN_TAG, var dir: $VAR_DIR)"
   build_java
 
   start_harness
@@ -914,7 +914,7 @@ main() {
   ingest_experience
   write_scorecard
 
-  log "W0 demo complete."
+  log "W0 reference run complete."
 }
 
 main "$@"

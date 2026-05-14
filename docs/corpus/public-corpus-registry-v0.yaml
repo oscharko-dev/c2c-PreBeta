@@ -36,7 +36,7 @@ items:
     w0_suitability:
       level: S1
       rationale: "Includes control flow plus decimal arithmetic and structured output for deterministic golden master."
-      demo_candidate: true
+      reference_run_candidate: true
     golden_master:
       strategy: "line-compare output snapshot"
       tolerances: "strict"
@@ -73,7 +73,7 @@ items:
     w0_suitability:
       level: S1
       rationale: "Complex branching without external dependencies validates control-flow breadth for W0."
-      demo_candidate: false
+      reference_run_candidate: false
     golden_master:
       strategy: "line-compare output snapshot"
       tolerances: "strict"
@@ -110,7 +110,7 @@ items:
     w0_suitability:
       level: S1
       rationale: "Covers multi-row aggregate style behavior and arithmetic correctness under fixed decimals."
-      demo_candidate: false
+      reference_run_candidate: false
     golden_master:
       strategy: "line-compare output snapshot"
       tolerances: "strict"
@@ -123,7 +123,7 @@ future_candidates:
     status: deferred
     notes: "Large public application; classify as post-W0 due to file I/O and integration complexity."
   - id: W0-OUT-02
-    name: "CardDemo public sample"
+    name: "Card public sample"
     source_type: public-reference
     status: deferred
     notes: "UI and transaction wiring patterns not supported in W0."

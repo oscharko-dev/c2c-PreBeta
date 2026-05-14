@@ -185,7 +185,7 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                         "runId": payload.get("runId", "run-unknown"),
                         "workflowId": payload.get("workflowId", "w0-migration-v0"),
                         "program": {
-                            "programId": "DEMO01",
+                            "programId": "CASE01",
                             "sourceHash": "a" * 64,
                         },
                         "sourceRef": {
@@ -211,8 +211,8 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                         },
                         "ir": {
                             "schemaVersion": "v0",
-                            "programId": "DEMO01",
-                            "irId": "ir-DEMO01",
+                            "programId": "CASE01",
+                            "irId": "ir-CASE01",
                         },
                         "outputRef": {"uri": "urn:ir-output"},
                     },
@@ -231,10 +231,10 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                             "byteSize": 12,
                         },
                         "generatedProject": {
-                            "entryClass": "DEMO01",
-                            "entryFilePath": "src/DEMO01.java",
+                            "entryClass": "CASE01",
+                            "entryFilePath": "src/CASE01.java",
                             "fileCount": 1,
-                            "files": {"src/DEMO01.java": "class DEMO01 {}"},
+                            "files": {"src/CASE01.java": "class CASE01 {}"},
                         },
                         "outputRef": {"uri": "urn:generated-java"},
                     },
@@ -247,7 +247,7 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                         "status": "ok",
                         "runId": payload.get("runId", "run-unknown"),
                         "workflowId": payload.get("workflowId", "w0-migration-v0"),
-                        "programId": "DEMO01",
+                        "programId": "CASE01",
                         "outputRef": {"uri": "urn:build-output"},
                     },
                 )

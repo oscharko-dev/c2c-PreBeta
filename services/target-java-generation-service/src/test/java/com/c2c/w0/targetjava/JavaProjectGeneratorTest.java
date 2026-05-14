@@ -45,7 +45,7 @@ class JavaProjectGeneratorTest {
         String entry = result.files().get(result.entryFilePath());
         assertNotNull(entry, "entry java file should be present at " + result.entryFilePath());
         assertTrue(entry.contains("public final class"));
-        assertTrue(entry.contains("PROGRAM_ID = \"DEMO01\""));
+        assertTrue(entry.contains("PROGRAM_ID = \"CASE01\""));
         assertTrue(entry.contains("CobolField"));
         assertTrue(entry.contains("PictureSpec.parse"));
 
@@ -54,7 +54,7 @@ class JavaProjectGeneratorTest {
         Map<?, ?> traceJson = JSON.readValue(trace, Map.class);
         assertEquals("target-generator-contract-v0", traceJson.get("contractVersion"));
         assertEquals("semantic-ir-v0", traceJson.get("irVersion"));
-        assertEquals("DEMO01", traceJson.get("programId"));
+        assertEquals("CASE01", traceJson.get("programId"));
         assertNotNull(traceJson.get("files"));
         @SuppressWarnings("unchecked")
         Map<String, List<String>> fileTrace = (Map<String, List<String>>) traceJson.get("files");
@@ -201,8 +201,8 @@ class JavaProjectGeneratorTest {
     private static Map<String, Object> irWithFieldsAndStatements() {
         Map<String, Object> ir = new LinkedHashMap<>();
         ir.put("schemaVersion", "v0");
-        ir.put("irId", "ir-demo01");
-        ir.put("programId", "DEMO01");
+        ir.put("irId", "ir-case01");
+        ir.put("programId", "CASE01");
         ir.put("sourceHash", "abcdef");
         ir.put("sourceKind", "cobol");
         ir.put("symbols", Map.of());

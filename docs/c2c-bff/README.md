@@ -1,16 +1,16 @@
 # c2c-bff and c2c-ui
 
-W0 surface for the c2c walking skeleton demo. Two packages, one demo path:
+W0 surface for the c2c walking skeleton. Two packages, one reference-run path:
 
 - [`services/c2c-bff`](../../services/c2c-bff) — TypeScript/Node 20 HTTP
   facade that brokers all UI calls to the W0 capability mesh.
 - [`apps/c2c-ui`](../../apps/c2c-ui) — TypeScript/vanilla-DOM static
   bundle served by the BFF.
 
-This document is the entrypoint for reviewers, walks through the demo
+This document is the entrypoint for reviewers, walks through the reference run
 flow, and records the open assumptions a reviewer should expect.
 
-## Demo flow
+## Reference Run flow
 
 1. Open the UI. The header shows whether the BFF is in `mock` or `live`
    mode based on `C2C_ORCHESTRATOR_URL` and `C2C_EVIDENCE_URL`.
@@ -28,7 +28,7 @@ flow, and records the open assumptions a reviewer should expect.
 6. Evidence Pack v0: the UI shows the manifest reference and the list
    of missing artifacts.
 
-## Local demo
+## Local validation run
 
 ```bash
 # 1. Build the UI bundle.

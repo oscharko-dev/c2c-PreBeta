@@ -15,7 +15,7 @@ The W0 corpus is intentionally narrow and deterministic so that we can validate 
   - `IF`, `ELSE`, `EVALUATE`
   - `PERFORM` / `PERFORM UNTIL`
   - `CALL` only in a documented no-op shim pattern (single stub call allowed)
-  - Paragraph navigation (`GO TO` only for synthetic demo compatibility, no deep branching)
+  - Paragraph navigation (`GO TO` only for synthetic reference-run compatibility, no deep branching)
 - Minimal decimal handling in fixed-point `PIC S9(n)V99` and integer-like numeric fields.
 - Straightforward control flow (single-level nesting) and non-concurrent execution.
 - Reproducible expected output (deterministic golden master).
@@ -44,8 +44,8 @@ The W0 corpus is intentionally narrow and deterministic so that we can validate 
 - Require deterministic ordering and stable formatting.
 - Snapshot artifacts live adjacent to sample inputs in `corpus/synthetic/fixtures`.
 
-## W0 Demo Candidate Criteria
-A demo candidate must include at least:
+## W0 Reference Run Candidate Criteria
+A reference-run candidate must include at least:
 - one control-flow construct (`IF`, `EVALUATE`, or `PERFORM UNTIL`), and
 - at least one decimal or field-semantic operation (`PIC S9(.. )V..` arithmetic or scale-sensitive computation).
 

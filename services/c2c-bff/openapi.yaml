@@ -7,7 +7,7 @@ info:
     (orchestrator-service, evidence-service, build-test-runner-service,
     target-java-generation-service, cobol-parser-service, semantic-ir-service,
     agentic-harness-core). Returns a documented mock response set when
-    upstream services are not reachable so the demo runs on a fresh checkout.
+    upstream services are not reachable so the reference run is available on a fresh checkout.
 
 servers:
   - url: http://localhost:8090

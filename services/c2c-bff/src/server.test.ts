@@ -26,7 +26,7 @@ const FIXED_SAMPLE_2: SampleDetail = {
   knownDivergenceAtW0: false,
 };
 
-function fakeSamples(items: SampleDetail[]): SampleRegistry {
+function stubSamples(items: SampleDetail[]): SampleRegistry {
   const byId = new Map(items.map((item) => [item.programId, item]));
   return {
     list(): SampleSummary[] {
@@ -43,7 +43,7 @@ function fakeSamples(items: SampleDetail[]): SampleRegistry {
   };
 }
 
-function fakeOrchestrator(): { client: OrchestratorClient; calls: { startRun: number; getRun: number } } {
+function stubOrchestrator(): { client: OrchestratorClient; calls: { startRun: number; getRun: number } } {
   const calls = { startRun: 0, getRun: 0 };
   const client: OrchestratorClient = {
     enabled: true,
@@ -184,7 +184,7 @@ async function fetchJson(url: string, init?: { method?: string; body?: unknown }
 test('health endpoint reports service name', async () => {
   const handler = createApp({
     config: baseConfig,
-    samples: fakeSamples([FIXED_SAMPLE]),
+    samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore: createRunStore(),
@@ -200,10 +200,10 @@ test('health endpoint reports service name', async () => {
 });
 
 test('mode endpoint flips with upstream enabled-ness', async () => {
-  const { client: orch } = fakeOrchestrator();
+  const { client: orch } = stubOrchestrator();
   const handler = createApp({
     config: baseConfig,
-    samples: fakeSamples([FIXED_SAMPLE]),
+    samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore: createRunStore(),
@@ -221,7 +221,7 @@ test('mode endpoint flips with upstream enabled-ness', async () => {
 test('samples list and detail return registry contents', async () => {
   const handler = createApp({
     config: baseConfig,
-    samples: fakeSamples([FIXED_SAMPLE, FIXED_SAMPLE_2]),
+    samples: stubSamples([FIXED_SAMPLE, FIXED_SAMPLE_2]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore: createRunStore(),
@@ -249,7 +249,7 @@ test('samples list and detail return registry contents', async () => {
 });
 
 test('starting a run in mock mode returns a completed run with mock evidence', async () => {
-  const samples = fakeSamples([FIXED_SAMPLE]);
+  const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const handler = createApp({
     config: baseConfig,
@@ -302,9 +302,9 @@ test('starting a run in mock mode returns a completed run with mock evidence', a
 });
 
 test('starting a run in live mode proxies the orchestrator and syncs status on get', async () => {
-  const samples = fakeSamples([FIXED_SAMPLE]);
+  const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
-  const { client: orch, calls } = fakeOrchestrator();
+  const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
     samples,
@@ -344,7 +344,7 @@ test('starting a run in live mode proxies the orchestrator and syncs status on g
 test('rejects malformed run start bodies', async () => {
   const handler = createApp({
     config: baseConfig,
-    samples: fakeSamples([FIXED_SAMPLE]),
+    samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore: createRunStore(),
@@ -364,7 +364,7 @@ test('rejects malformed run start bodies', async () => {
 test('returns 404 for unknown api paths and run ids', async () => {
   const handler = createApp({
     config: baseConfig,
-    samples: fakeSamples([FIXED_SAMPLE]),
+    samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore: createRunStore(),

@@ -1,13 +1,19 @@
-#!/usr/bin/env python3
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export C2C_SBOM_ROOT="$ROOT_DIR"
+exec python3 - "$@" <<'PY'
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-root = Path(__file__).resolve().parents[1]
+root = Path(os.environ["C2C_SBOM_ROOT"])
 out_dir = root / "artifacts"
 out_dir.mkdir(exist_ok=True)
 
@@ -133,3 +139,4 @@ with open(license_file, "w", encoding="utf-8") as fh:
         sort_keys=True,
     )
 print(f"Wrote {license_file}")
+PY

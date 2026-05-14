@@ -2,35 +2,35 @@
   "schemaVersion": "v0",
   "capability": "evidence.pack",
   "service": "evidence-service",
-  "packId": "epk-run-2-0002",
-  "runId": "run-2",
+  "packId": "epk-run-1-0001",
+  "runId": "run-1",
   "workflowId": "w0-migration-v0",
   "wave": "w0",
   "status": "complete",
-  "summary": "W0 demo run for CTRLDEC01",
-  "createdAt": "2026-05-14T11:18:17.162732Z",
-  "createdBy": "w0-demo",
+  "summary": "W0 reference run for BRNCH01",
+  "createdAt": "2026-05-14T11:18:16.739495Z",
+  "createdBy": "w0-reference-run",
   "artifacts": {
     "sourceCobol": [
       {
-        "uri": "urn:c2c/cobol/CTRLDEC01",
-        "sha256": "c61683c95fc180d8a74a0a5fe8dc2460f7b4b029b49942d0f55ba234b3c562fe",
-        "byteSize": 939,
+        "uri": "urn:c2c/cobol/BRNCH01",
+        "sha256": "3d7315ada91339e8a119a7eef4cb564e2dde114c5d21fc34866b7acefeaf7602",
+        "byteSize": 1333,
         "mimeType": "text/x-cobol",
         "kind": "evidence-input"
       }
     ],
     "semanticIr": {
-      "uri": "urn:c2c/semantic-ir/CTRLDEC01/run-2",
-      "sha256": "db06a532cd6b50cc91e85ba010c11e13edeccc38c38eda17d5789e2522f34505",
-      "byteSize": 13520,
+      "uri": "urn:c2c/semantic-ir/BRNCH01/run-1",
+      "sha256": "c4a080240ca48e0a1ae45ed1bbc19511e1967b151663863201f2ca706be2f59f",
+      "byteSize": 23689,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },
     "generatedJava": {
-      "uri": "urn:c2c/generated-java/CTRLDEC01/run-2",
-      "sha256": "419c607868c442c81fc43bc3a650eea62b40a25e26cbe95159074f0a46cb92df",
-      "byteSize": 10008,
+      "uri": "urn:c2c/generated-java/BRNCH01/run-1",
+      "sha256": "fc231bf080c72a9cc3c8dab5fbf07ea76ecfae77a9f3261c2e2043c497f5fb47",
+      "byteSize": 12372,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },
@@ -39,13 +39,13 @@
     },
     "modelInvocations": [
       {
-        "invocationId": "inv-run-2-noop",
+        "invocationId": "inv-run-1-noop",
         "modelId": "none",
         "provider": "observation-only",
         "status": "skipped",
         "ledgerRef": {
-          "uri": "urn:c2c/model-invocations/run-2",
-          "sha256": "86ef8c9184a8d2494b443992c3bf5640c03512af791555a552583ff6ee0e38ef",
+          "uri": "urn:c2c/model-invocations/run-1",
+          "sha256": "cbdb006fb249f9bcd9c134cbcf7188c4bdb08314fe27da2200f74b049a8d5c01",
           "byteSize": 170,
           "mimeType": "application/json",
           "kind": "evidence-input"
@@ -54,24 +54,24 @@
     ],
     "buildTestResults": [
       {
-        "uri": "urn:c2c/build-test/CTRLDEC01/run-2",
-        "sha256": "eaee3ec1dbe8afb3bd780c43b59d85388b31a5a49502209fb78b5e479b58d024",
-        "byteSize": 2005,
+        "uri": "urn:c2c/build-test/BRNCH01/run-1",
+        "sha256": "a0bc4c017959aa356178f89264754f44c8ce6d4724a2fe38783583015d38d236",
+        "byteSize": 2727,
         "mimeType": "application/json",
         "kind": "evidence-input"
       }
     ],
     "harnessEvents": {
-      "uri": "urn:c2c/harness-events/run-2",
-      "sha256": "47428a7c3b681fad5e698e7dbd8895ae0925983772f10c5b47ef0a8208c9198a",
-      "byteSize": 16616,
+      "uri": "urn:c2c/harness-events/run-1",
+      "sha256": "c3f645ef3a35131f578d9265c3415cfbf2d7a90a569f8fc0373a1c69188bdb25",
+      "byteSize": 9906,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },
     "trajectoryLedger": {
-      "uri": "urn:c2c/trajectory-ledger/run-2",
-      "sha256": "ab695ada3f1bb48dc176d6ddefd08ece835386689829280e84a0f24a0cce541b",
-      "byteSize": 4519,
+      "uri": "urn:c2c/trajectory-ledger/run-1",
+      "sha256": "8ecae855679a6afe8ebb49edff14d27a792406af3f8cb8b267b65126c22c032c",
+      "byteSize": 5709,
       "mimeType": "application/json",
       "kind": "evidence-input"
     }
@@ -97,10 +97,10 @@
   "exports": [
     {
       "format": "directory",
-      "uri": "urn:c2c/evidence-export/epk-run-2-0002",
-      "sha256": "2b66f41c24d713ee0af2f69905080db8c9c95c38faa6f16d1d02ee0a79c3f4df",
-      "byteSize": 2936,
-      "createdAt": "2026-05-14T11:18:17.195624Z"
+      "uri": "urn:c2c/evidence-export/epk-run-1-0001",
+      "sha256": "48ea61bdb2c69bb32b0e59583988fd9fffef84cfe3b918269b45fb2cfcfb2a5d",
+      "byteSize": 2926,
+      "createdAt": "2026-05-14T11:18:16.773477Z"
     }
   ]
 }

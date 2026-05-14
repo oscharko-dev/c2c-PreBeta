@@ -12,11 +12,11 @@ function mkTempRepo(): string {
   fs.mkdirSync(path.join(root, 'corpus', 'synthetic', 'programs'), { recursive: true });
   fs.mkdirSync(path.join(root, 'corpus', 'synthetic', 'fixtures'), { recursive: true });
   fs.writeFileSync(
-    path.join(root, 'corpus', 'synthetic', 'programs', 'demo-prog.cbl'),
-    '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMO01.\n',
+    path.join(root, 'corpus', 'synthetic', 'programs', 'reference-prog.cbl'),
+    '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CASE01.\n',
   );
   fs.writeFileSync(
-    path.join(root, 'corpus', 'synthetic', 'fixtures', 'demo-prog-output.txt'),
+    path.join(root, 'corpus', 'synthetic', 'fixtures', 'reference-prog-output.txt'),
     'HELLO=1\n',
   );
   fs.writeFileSync(
@@ -25,12 +25,12 @@ function mkTempRepo(): string {
       schemaVersion: 'v0',
       entries: [
         {
-          programId: 'DEMO01',
-          cobolSource: 'corpus/synthetic/programs/demo-prog.cbl',
-          expectedOutputPath: 'corpus/synthetic/fixtures/demo-prog-output.txt',
+          programId: 'CASE01',
+          cobolSource: 'corpus/synthetic/programs/reference-prog.cbl',
+          expectedOutputPath: 'corpus/synthetic/fixtures/reference-prog-output.txt',
           classification: 'synthetic',
           knownDivergenceAtW0: false,
-          rationale: 'demo-only fixture for sample-registry tests',
+          rationale: 'reference-run fixture for sample-registry tests',
         },
       ],
     }),
@@ -44,15 +44,15 @@ test('loadSampleRegistry exposes list and detail derived from the golden master 
     const registry = loadSampleRegistry(root);
     const list = registry.list();
     assert.equal(list.length, 1);
-    assert.equal(list[0]?.programId, 'DEMO01');
+    assert.equal(list[0]?.programId, 'CASE01');
     assert.equal(list[0]?.knownDivergenceAtW0, false);
 
-    const detail = registry.get('DEMO01');
-    assert.ok(detail, 'expected DEMO01 to be present');
-    assert.equal(detail?.programId, 'DEMO01');
-    assert.match(detail?.cobolSource ?? '', /PROGRAM-ID\. DEMO01/);
+    const detail = registry.get('CASE01');
+    assert.ok(detail, 'expected CASE01 to be present');
+    assert.equal(detail?.programId, 'CASE01');
+    assert.match(detail?.cobolSource ?? '', /PROGRAM-ID\. CASE01/);
     assert.equal(detail?.expectedOutput, 'HELLO=1\n');
-    assert.equal(detail?.cobolSourcePath, 'corpus/synthetic/programs/demo-prog.cbl');
+    assert.equal(detail?.cobolSourcePath, 'corpus/synthetic/programs/reference-prog.cbl');
 
     assert.equal(registry.get('UNKNOWN'), undefined);
   } finally {

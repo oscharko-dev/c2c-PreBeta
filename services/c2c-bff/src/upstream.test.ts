@@ -65,7 +65,7 @@ test('orchestrator client posts the expected payload shape', async () => {
       assert.equal(orch.enabled, true);
       const response = await orch.startRun({
         programId: 'BRNCH01',
-        cobolSourcePath: 'corpus/synthetic/programs/demo.cbl',
+        cobolSourcePath: 'corpus/synthetic/programs/reference.cbl',
         requester: 'unit-test',
       });
       assert.ok(response);

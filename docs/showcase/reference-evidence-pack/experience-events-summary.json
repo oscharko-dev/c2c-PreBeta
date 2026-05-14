@@ -2,7 +2,7 @@
   {
     "eventId": "xel-20260514-12",
     "runId": "run-4",
-    "actor": "w0-demo",
+    "actor": "w0-reference-run",
     "capability": "evidence.writer",
     "status": "observed",
     "pattern": "accepted_pattern",
@@ -52,7 +52,7 @@
   {
     "eventId": "xel-20260514-11",
     "runId": "run-4",
-    "actor": "w0-demo",
+    "actor": "w0-reference-run",
     "capability": "evidence.writer",
     "status": "observed",
     "pattern": "retry",
