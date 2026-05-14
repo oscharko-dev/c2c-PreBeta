@@ -88,12 +88,17 @@ public final class TargetJavaGenerationService {
         if (request.get("ir") instanceof Map<?, ?> ir) {
             return new LinkedHashMap<>((Map<String, Object>) ir);
         }
-        Object irOutput = request.get("irOutput");
-        if (irOutput instanceof Map<?, ?> outer) {
+        if (request.containsKey("irOutput")) {
+            Object irOutput = request.get("irOutput");
+            if (!(irOutput instanceof Map<?, ?> outer)) {
+                throw new IllegalArgumentException("irOutput must be an object");
+            }
             Object inner = ((Map<String, Object>) outer).get("ir");
             if (inner instanceof Map<?, ?> map) {
                 return new LinkedHashMap<>((Map<String, Object>) map);
             }
+            throw new IllegalArgumentException(
+                    "irOutput.ir is required when irOutput is provided");
         }
         if (request.containsKey("schemaVersion") && request.containsKey("programId")
                 && request.containsKey("statements")) {

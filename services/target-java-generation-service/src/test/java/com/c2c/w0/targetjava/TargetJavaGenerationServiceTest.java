@@ -65,6 +65,14 @@ class TargetJavaGenerationServiceTest {
     }
 
     @Test
+    void rejectsIrOutputWithoutInnerIr() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> service.generate(Map.of("runId", "run-x", "irOutput", Map.of("runId", "run-x"))));
+        assertTrue(exception.getMessage().contains("irOutput.ir"),
+                "expected explicit message about irOutput.ir, got: " + exception.getMessage());
+    }
+
+    @Test
     void failedStatusOnUnsupportedSchemaVersion() {
         Map<String, Object> ir = sampleIr();
         ir.put("schemaVersion", "v1");

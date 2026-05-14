@@ -23,6 +23,10 @@ public final class ServiceApp {
 
     private static final String SERVICE_NAME = TargetJavaGenerationService.SERVICE_NAME;
     private static final int DEFAULT_PORT = 8083;
+    // 4 MB matches the operational ceiling we set elsewhere in W0 for capability
+    // services; IR documents for the W0 corpus are kilobytes, so this gives
+    // headroom while preventing memory exhaustion from a malicious caller.
+    static final int MAX_REQUEST_BYTES = 4 * 1024 * 1024;
     private static final ObjectMapper JSON = new ObjectMapper()
             .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
 
@@ -51,26 +55,63 @@ public final class ServiceApp {
         Thread.currentThread().join();
     }
 
-    private static void handleGenerate(HttpExchange exchange,
-                                       TargetJavaGenerationService service,
-                                       String eventEndpoint) throws IOException {
+    static void handleGenerate(HttpExchange exchange,
+                               TargetJavaGenerationService service,
+                               String eventEndpoint) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendText(exchange, 405, "method not allowed");
             return;
         }
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType != null && !contentType.toLowerCase().contains("application/json")) {
+            sendJson(exchange, 415, Map.of("status", "failed",
+                    "error", "content-type must be application/json"));
+            return;
+        }
+        byte[] body;
+        try {
+            body = readBoundedBody(exchange);
+        } catch (RequestTooLargeException e) {
+            sendJson(exchange, 413, Map.of("status", "failed",
+                    "error", "request body exceeds " + MAX_REQUEST_BYTES + " bytes"));
+            return;
+        }
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> request = JSON.readValue(exchange.getRequestBody(), Map.class);
+            Map<String, Object> request = JSON.readValue(body, Map.class);
             Map<String, Object> response = service.generate(request);
             int status = "ok".equals(response.get("status")) ? 200 : 422;
             sendJson(exchange, status, response);
             emitEvent(eventEndpoint, response);
         } catch (IllegalArgumentException e) {
             sendJson(exchange, 400, Map.of("status", "failed", "error", e.getMessage()));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            sendJson(exchange, 400, Map.of("status", "failed",
+                    "error", "malformed JSON: " + (e.getOriginalMessage() == null ? "parse error" : e.getOriginalMessage())));
         } catch (Exception e) {
             sendJson(exchange, 500, Map.of("status", "failed",
                     "error", e.getMessage() == null ? "unknown" : e.getMessage()));
         }
+    }
+
+    static byte[] readBoundedBody(HttpExchange exchange) throws IOException {
+        try (var input = exchange.getRequestBody();
+             var out = new java.io.ByteArrayOutputStream()) {
+            byte[] buf = new byte[8192];
+            int total = 0;
+            int read;
+            while ((read = input.read(buf)) != -1) {
+                total += read;
+                if (total > MAX_REQUEST_BYTES) {
+                    throw new RequestTooLargeException();
+                }
+                out.write(buf, 0, read);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    static final class RequestTooLargeException extends IOException {
     }
 
     static void emitEvent(String endpoint, Map<String, Object> response) {
