@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.c2c</groupId>
+  <artifactId>build-test-runner-service</artifactId>
+  <version>0.1.0</version>
+
+  <name>build-test-runner-service</name>
+  <description>
+    W0 capability service that compiles and runs generated Java projects
+    produced by target-java-generation-service, captures structured build/test
+    results, compares stdout against documented Golden Master outputs, and
+    emits Harness/Experience events with hash-referenced evidence for the
+    Evidence Pack v0.
+  </description>
+
+  <properties>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <c2c.runtime.version>0.1.0</c2c.runtime.version>
+    <c2c.target.generation.version>0.1.0</c2c.target.generation.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.17.2</version>
+    </dependency>
+    <dependency>
+      <groupId>com.c2c</groupId>
+      <artifactId>c2c-target-java-runtime</artifactId>
+      <version>${c2c.runtime.version}</version>
+    </dependency>
+    <!--
+      target-java-generation-service is an optional test-scope dependency: the
+      W0 smoke integration test re-runs the generator against the IR fixtures
+      to obtain a project to verify, then hands the output to this service.
+      The runner itself does NOT depend on the generator at runtime.
+    -->
+    <dependency>
+      <groupId>com.c2c</groupId>
+      <artifactId>target-java-generation-service</artifactId>
+      <version>${c2c.target.generation.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.5.3</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.c2c.w0.buildtest.ServiceApp</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

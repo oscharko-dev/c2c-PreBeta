@@ -58,7 +58,16 @@ for f in \
   services/semantic-ir-service/src/main/java/com/c2c/w0/semanticir/ServiceApp.java \
   services/semantic-ir-service/src/test/java/com/c2c/w0/semanticir/SemanticIrServiceTest.java \
   services/semantic-ir-service/Dockerfile \
-  schemas/semantic-ir-v0.json
+  services/build-test-runner-service/pom.xml \
+  services/build-test-runner-service/openapi.yaml \
+  services/build-test-runner-service/Dockerfile \
+  services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/BuildTestRunnerService.java \
+  services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/ServiceApp.java \
+  services/build-test-runner-service/src/test/java/com/c2c/w0/buildtest/BuildTestRunnerServiceTest.java \
+  services/build-test-runner-service/src/test/java/com/c2c/w0/buildtest/W0SmokeIntegrationTest.java \
+  fixtures/golden-master/index.json \
+  schemas/semantic-ir-v0.json \
+  schemas/build-test-result-v0.json
  do
   if [ ! -f "$f" ]; then
     echo "Missing required file: $f" >&2

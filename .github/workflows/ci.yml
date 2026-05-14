@@ -77,3 +77,13 @@ jobs:
         if: hashFiles('services/target-java-generation-service/pom.xml') != ''
         working-directory: services/target-java-generation-service
         run: mvn -B -ntp verify
+
+      - name: Install target-java-generation-service to local repo
+        if: hashFiles('services/build-test-runner-service/pom.xml') != ''
+        working-directory: services/target-java-generation-service
+        run: mvn -B -ntp -DskipTests install
+
+      - name: Build build-test-runner-service (W0 smoke verification path)
+        if: hashFiles('services/build-test-runner-service/pom.xml') != ''
+        working-directory: services/build-test-runner-service
+        run: mvn -B -ntp verify
