@@ -234,6 +234,10 @@ vendor/
 services/agentic-harness-core/data/*.jsonl
 services/evidence-service/data/
 
+# W0 demo orchestrator output (logs, captured artifacts, exports, ledgers).
+# Reproducible from `scripts/w0-demo.sh`; never commit these.
+var/
+
 # Local generated supply-chain/build outputs
 artifacts/*.json
 **/dependency-reduced-pom.xml

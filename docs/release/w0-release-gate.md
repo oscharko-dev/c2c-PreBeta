@@ -1,0 +1,162 @@
+# W0 Release Gate
+
+This document is the go / no-go checklist for closing Wave 0 and starting
+Wave 1 planning. Every item must be evidenced by a real artifact the reviewer
+can re-derive from the repository. Nothing on this gate may be marked done
+purely on a verbal claim or a screenshot.
+
+> Issue: [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) ·
+> Parent epic: [#1](https://github.com/oscharko-dev/c2c-PreBeta/issues/1) ·
+> Companion: [W0 demo runbook](../showcase/w0-demo-runbook.md),
+> [W0 scorecard](../showcase/w0-scorecard.md),
+> [W0 follow-ups](../showcase/w0-followups.md).
+
+## Decision
+
+| Field | Value |
+|-------|-------|
+| Status | **GO for Wave 1 planning** as of the run tag below. |
+| Recorded run tag | `20260514T090008Z` |
+| Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [sample-evidence-pack/](../showcase/sample-evidence-pack/), CI on `dev` |
+| Sign-off | Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) closing comment links to this document. |
+
+Wave 1 planning may proceed under the explicit constraints in
+[§ "What is *not* ready"](#what-is-not-ready). Wave 1 is **not** authorised
+to remove or weaken any of the W0 acceptance bars below.
+
+## What is ready
+
+### 1. Repeatable end-to-end walking skeleton
+
+- [x] A fresh developer can run `./scripts/w0-demo.sh` from a clean checkout
+      and reproduce the entire COBOL-to-Java workflow against the documented
+      W0 corpus without standing up any external infrastructure. Wall-clock
+      ~15 s after a warm Maven cache.
+      _Evidence_: [`scripts/w0-demo.sh`](../../scripts/w0-demo.sh) and
+      [w0-demo-runbook.md](../showcase/w0-demo-runbook.md).
+- [x] The runbook documents every service, port, and environment variable.
+      _Evidence_: [w0-demo-runbook.md](../showcase/w0-demo-runbook.md).
+
+### 2. Real COBOL-to-Java transformation through every W0 service
+
+- [x] Every program in the W0 corpus exits the chain with a compiled Java
+      project, a runtime execution result, and a hash-referenced
+      Build/Test Result conforming to
+      [`schemas/build-test-result-v0.json`](../../schemas/build-test-result-v0.json).
+      _Evidence_: [`docs/showcase/sample-evidence-pack/BRNCH01-build-test-result.json`](../showcase/sample-evidence-pack/BRNCH01-build-test-result.json).
+- [x] Generated Java compiles cleanly for **3 / 3** W0 programs.
+      _Evidence_: scorecard "Generated Java compiled cleanly" row.
+
+### 3. Documented coverage gaps, not silent failures
+
+- [x] All three W0 corpus programs end with
+      `classification == divergence-known-w0-coverage-gap`. The runner
+      cross-references [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
+      entries that pre-declare `knownDivergenceAtW0: true` and a rationale.
+      An undocumented divergence (`divergence-unknown`) would fail this gate.
+      _Evidence_: scorecard "Per-program results" table.
+
+### 4. Evidence Pack v0 fully validated end-to-end
+
+- [x] Every run produces an Evidence Pack manifest that satisfies
+      [`schemas/evidence-pack-manifest-v0.json`](../../schemas/evidence-pack-manifest-v0.json),
+      with `status == complete` and `validation.ok == true`.
+      _Evidence_: [`docs/showcase/sample-evidence-pack/BRNCH01-evidence-pack.json`](../showcase/sample-evidence-pack/BRNCH01-evidence-pack.json).
+- [x] Each manifest references source COBOL, Semantic IR, generated Java,
+      build/test result, Harness Events ledger, model invocations,
+      and trajectory ledger by URI + sha256 — no raw secrets, prompts, or
+      generated source embedded in the bundle.
+      _Evidence_: manifest `artifacts.*` block.
+- [x] Export round-trips deterministically to a directory under
+      `EVIDENCE_EXPORT_DIR` and the export reference is added back to the
+      manifest with its own sha256.
+      _Evidence_: manifest `exports[0]`.
+
+### 5. Harness Event Envelope coverage across the critical path
+
+- [x] Every workflow step posts an envelope-conformant event to the harness
+      `/v0/events` endpoint. The scorecard's "Harness Event Envelope ledger
+      entries captured" metric is non-zero (32 across 4 demo runs).
+      _Evidence_: scorecard "Aggregate metrics" table.
+- [x] Each Evidence Pack manifest carries a `harnessEvents` ref whose
+      sha256 matches the harness snapshot taken at that point in the run.
+      _Evidence_: per-program manifests under [`sample-evidence-pack/`](../showcase/sample-evidence-pack/).
+
+### 6. Experience Events on controlled scenarios
+
+- [x] The demo runs a controlled "BRNCH01 ×2" scenario and the
+      experience-learning analyzer emits at least one event per
+      `{success, failure, retry, repeated-action}` outcome class:
+      `repeat_action`, `unchanged_output`, `test_failure`, `repeated_failure`
+      patterns are all present in the captured run.
+      _Evidence_: [`sample-evidence-pack/experience-events-summary.json`](../showcase/sample-evidence-pack/experience-events-summary.json).
+
+### 7. Honest about model-gateway scope
+
+- [x] No model-gateway call is made during W0. Every Evidence Pack manifest
+      carries an explicit `modelInvocations[0].status = "skipped"` ledger
+      entry pointing at an observation-only ledger so the bundle records
+      that fact instead of hiding it.
+      _Evidence_: manifest `artifacts.modelInvocations` block.
+
+### 8. CI baseline green
+
+- [x] `.github/workflows/ci.yml` covers shell syntax, Python compile,
+      Java verify (runtime lib + four capability services), Go test, Node
+      build/test on c2c-bff and c2c-ui. All gates pass on `dev` at the
+      merge of #15 (the merge that this PR diverges from).
+      _Evidence_: GitHub Actions on `dev`.
+
+### 9. Governance hygiene
+
+- [x] No source for this issue lives outside an issue/PR. Branch:
+      `claude/issue-16-w0-demo-release-gate`. PR linked back to issue #16
+      with `Resolves #16`.
+- [x] No TODOs or temporary workarounds were merged. Any deferred work is
+      filed as an explicit follow-up under
+      [`docs/showcase/w0-followups.md`](../showcase/w0-followups.md).
+
+## What is *not* ready (and what must not be claimed)
+
+- **Production readiness.** W0 is a walking skeleton with synthetic corpus
+  fixtures. No customer source has ever been ingested. Marketing must not
+  claim "production-ready"; the README and the
+  [release gate scope](#scope) constrain the narrative.
+- **COBOL coverage beyond the W0 subset.** The generator does not yet
+  translate `PERFORM`, `EVALUATE`, `IF`, `ADD`, or `COMPUTE`. Generated
+  programs diverge from Golden Master output by design; the gate accepts
+  `divergence-known-w0-coverage-gap` only.
+- **True `cobcrun` golden masters.** All W0 fixtures are documented as
+  `synthetic`. Hosting `cobc` in CI and re-running fixtures under it is a
+  Wave 1 task — see [`w0-followups.md`](../showcase/w0-followups.md).
+- **Model gateway.** Zero model calls in W0. Wave 1 will exercise
+  `model-gateway-service` end-to-end with a documented allowlist.
+- **Harness-driven orchestration semantics.** The W0 orchestrator-service
+  exists (Python) and exposes the W0 contract, but the demo drives services
+  directly over HTTP rather than through harness capability invocation
+  because (a) capability registration for parser/generator/build-test is
+  forbidden by default policy and (b) the harness's
+  `/v0/runs/{id}/ledger` endpoint requires unique `stepId`s across services,
+  which today's services do not yet supply. Both are tracked.
+
+## Scope
+
+- **In scope for W0**: parse → IR → Java generation → compile + run → Evidence
+  Pack v0 + Harness ledger + Experience Learning analysis for three
+  documented synthetic COBOL programs.
+- **Out of scope for W0**: Wave 1 feature implementation, customer pilot
+  onboarding, claims of production readiness, true `cobcrun` reproduction,
+  model-gateway exercise, multi-tenant authentication.
+
+## Re-evidencing this gate
+
+A reviewer can re-derive every "ready" item by running:
+
+```bash
+./scripts/bootstrap.sh
+./scripts/w0-demo.sh
+cat var/w0-demo/scorecard.md
+```
+
+and comparing the produced scorecard and per-program manifests against the
+committed snapshots in [`docs/showcase/`](../showcase/).
