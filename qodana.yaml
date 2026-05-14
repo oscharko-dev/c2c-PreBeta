@@ -49,7 +49,7 @@ exclude:
   # (record pre-seeded) even on error, so accessing validated.record on
   # the err != nil path is safe. The //goland:noinspection comment in
   # source is not honoured by the qodana-go linter image.
-  - name: GoDfaErrorMayBeNotNil
+  - name: GoDfaInspectionRunner
     paths:
       - services/go/model-gateway-service/server.go
 
