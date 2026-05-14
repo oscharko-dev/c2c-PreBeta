@@ -303,11 +303,12 @@ test('generatedSummary surfaces fetch errors', () => {
   assert.match(summary.headline, /network down/);
 });
 
-test('generatedSummary suppresses mock placeholder output', () => {
-  const summary = generatedSummary(makeGenerated({ mode: 'mock' }), makeRun(), undefined);
+test('generatedSummary suppresses diagnostic-fixture output and never labels it as product', () => {
+  const summary = generatedSummary(makeGenerated({ mode: 'diagnostic-fixture' }), makeRun(), undefined);
   assert.equal(summary.isProductOutput, false);
   assert.equal(summary.viewerState, 'empty');
-  assert.match(summary.headline, /Mock placeholder/);
+  assert.match(summary.headline, /Diagnostic fixture/);
+  assert.doesNotMatch(summary.headline, /generated Java/i);
   assert.doesNotMatch(summary.paneText, /class Generated/);
 });
 
@@ -339,12 +340,17 @@ test('buildTestSummary reports idle while waiting for first result', () => {
   assert.equal(buildTestSummary(undefined, makeRun(), undefined).headline.includes('pending'), true);
 });
 
-test('buildTestSummary does not label mock placeholder data as success', () => {
-  const summary = buildTestSummary(makeBuildTest({ mode: 'mock', status: 'ok' }), makeRun(), undefined);
-  assert.equal(summary.status, 'mock');
-  assert.equal(summary.classification, 'mock');
+test('buildTestSummary does not label diagnostic-fixture data as a build/test match', () => {
+  const summary = buildTestSummary(
+    makeBuildTest({ mode: 'diagnostic-fixture', status: 'ok' }),
+    makeRun(),
+    undefined,
+  );
+  assert.equal(summary.status, 'diagnostic-fixture');
+  assert.equal(summary.classification, 'diagnostic-fixture');
   assert.equal(summary.isProductResult, false);
-  assert.match(summary.headline, /Mock placeholder/);
+  assert.match(summary.headline, /Diagnostic fixture/);
+  assert.doesNotMatch(summary.headline, /match/i);
 });
 
 test('buildTestSummary surfaces real classification', () => {
@@ -354,11 +360,16 @@ test('buildTestSummary surfaces real classification', () => {
   assert.equal(summary.isProductResult, true);
 });
 
-test('evidenceSummary does not label mock placeholder as complete', () => {
-  const summary = evidenceSummary(makeEvidence({ mode: 'mock', status: 'complete' }), makeRun(), undefined);
-  assert.equal(summary.status, 'mock');
+test('evidenceSummary does not label diagnostic-fixture as a complete Evidence Pack', () => {
+  const summary = evidenceSummary(
+    makeEvidence({ mode: 'diagnostic-fixture', status: 'complete' }),
+    makeRun(),
+    undefined,
+  );
+  assert.equal(summary.status, 'diagnostic-fixture');
   assert.equal(summary.isProductResult, false);
-  assert.match(summary.headline, /Mock placeholder/);
+  assert.match(summary.headline, /Diagnostic fixture/);
+  assert.doesNotMatch(summary.headline, /complete/i);
 });
 
 test('evidenceSummary exposes manifest, export and missing artifacts when live', () => {
@@ -478,9 +489,9 @@ test('evidenceSummary exposes manifestHash, validationStatus and exportRef in li
 });
 
 test('limitationsSummary lists generator-reported issues only in live mode', () => {
-  const mock = limitationsSummary(makeGenerated({ mode: 'mock', unsupportedFeatures: ['x'] }), makeRun());
-  assert.deepEqual(mock.unsupportedFeatures, []);
-  assert.equal(mock.state, 'idle');
+  const fixture = limitationsSummary(makeGenerated({ mode: 'diagnostic-fixture', unsupportedFeatures: ['x'] }), makeRun());
+  assert.deepEqual(fixture.unsupportedFeatures, []);
+  assert.equal(fixture.state, 'idle');
 
   const live = limitationsSummary(makeGenerated({ unsupportedFeatures: ['a'], openAssumptions: ['b'] }), makeRun());
   assert.deepEqual(live.unsupportedFeatures, ['a']);

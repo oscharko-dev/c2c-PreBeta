@@ -10,7 +10,7 @@ export interface BffConfig {
   evidenceUrl: string;
   upstreamTimeoutMs: number;
   transformSourceMaxBytes: number;
-  diagnosticMode: boolean;
+  enableDiagnosticFixtures: boolean;
 }
 
 const SERVICE_NAME = 'c2c-bff';
@@ -85,6 +85,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, packageRoot: st
     evidenceUrl: env.C2C_EVIDENCE_URL?.trim() ?? '',
     upstreamTimeoutMs: parseTimeoutMs(env.C2C_UPSTREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS),
     transformSourceMaxBytes: parseSizeBytes(env.C2C_TRANSFORM_SOURCE_MAX_BYTES, DEFAULT_TRANSFORM_SOURCE_MAX_BYTES),
-    diagnosticMode: parseBoolFlag(env.C2C_DIAGNOSTIC_MODE),
+    enableDiagnosticFixtures: parseBoolFlag(env.C2C_ENABLE_DIAGNOSTIC_FIXTURES),
   };
 }

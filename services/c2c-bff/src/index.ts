@@ -5,8 +5,9 @@ function main(): void {
   const config = loadConfig();
   startServer({ config });
   const upstreamSummary = [
-    `orchestrator=${config.orchestratorUrl ? config.orchestratorUrl : 'mock'}`,
-    `evidence=${config.evidenceUrl ? config.evidenceUrl : 'mock'}`,
+    `orchestrator=${config.orchestratorUrl ? config.orchestratorUrl : 'unset'}`,
+    `evidence=${config.evidenceUrl ? config.evidenceUrl : 'unset'}`,
+    `diagnosticFixtures=${config.enableDiagnosticFixtures ? 'enabled' : 'disabled'}`,
   ].join(' ');
   // eslint-disable-next-line no-console
   console.log(

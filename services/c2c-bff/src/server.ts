@@ -159,13 +159,17 @@ function serveStatic(res: http.ServerResponse, staticRoot: string, requestedPath
   return true;
 }
 
+function productModeOf(stored: StoredRun): 'live' | 'unavailable' {
+  return stored.mode === 'live' ? 'live' : 'unavailable';
+}
+
 function runSummary(stored: StoredRun): Record<string, unknown> {
   return {
     runId: stored.runId,
     programId: stored.programId,
     status: stored.status,
     mode: stored.mode,
-    productMode: stored.mode,
+    productMode: productModeOf(stored),
     message: stored.message,
     policyDecision: stored.policyDecision,
     evidenceRefs: stored.evidenceRefs,
@@ -227,34 +231,37 @@ function resolveTransformProgramId(sourceText: string, requestedProgramId?: stri
   return extractProgramIdFromSourceText(sourceText);
 }
 
-function mockGeneratedView(stored: StoredRun): Record<string, unknown> {
-  if (!stored.mock) return {};
+function diagnosticFixtureGeneratedView(stored: StoredRun): Record<string, unknown> {
+  if (!stored.fixture) return {};
   return {
     runId: stored.runId,
     programId: stored.programId,
-    mode: 'mock',
-    ...stored.mock.generated,
+    mode: 'diagnostic-fixture',
+    productMode: 'unavailable',
+    ...stored.fixture.generated,
   };
 }
 
-function mockBuildTestView(stored: StoredRun): Record<string, unknown> {
-  if (!stored.mock) return {};
+function diagnosticFixtureBuildTestView(stored: StoredRun): Record<string, unknown> {
+  if (!stored.fixture) return {};
   return {
     runId: stored.runId,
     programId: stored.programId,
-    mode: 'mock',
+    mode: 'diagnostic-fixture',
+    productMode: 'unavailable',
     expectedOutput: stored.sample.expectedOutput,
-    ...stored.mock.buildTest,
+    ...stored.fixture.buildTest,
   };
 }
 
-function mockEvidenceView(stored: StoredRun): Record<string, unknown> {
-  if (!stored.mock) return {};
+function diagnosticFixtureEvidenceView(stored: StoredRun): Record<string, unknown> {
+  if (!stored.fixture) return {};
   return {
     runId: stored.runId,
     programId: stored.programId,
-    mode: 'mock',
-    ...stored.mock.evidence,
+    mode: 'diagnostic-fixture',
+    productMode: 'unavailable',
+    ...stored.fixture.evidence,
   };
 }
 
@@ -271,6 +278,7 @@ function incompleteEnvelope(
     runId: stored.runId,
     programId: stored.programId,
     mode: stored.mode,
+    productMode: productModeOf(stored),
     status: 'incomplete',
     missingArtifacts: missing,
     note,
@@ -435,6 +443,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),
       mode: 'live',
+      productMode: status === 'generated' && !placeholderViolation ? 'live' : 'unavailable',
       status,
       entryClass: asString(envelope.entryClass),
       entryFilePath,
@@ -549,6 +558,7 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),
       mode: 'live',
+      productMode: status === 'ok' ? 'live' : 'unavailable',
       status,
       classification,
       compileStatus: deriveCompileStatus(data, status),
@@ -663,6 +673,7 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),
       mode: 'live',
+      productMode: status === 'complete' ? 'live' : 'unavailable',
       status,
       packId,
       manifestUri,
@@ -692,6 +703,7 @@ async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClien
       runId: stored.runId,
       programId: stored.programId,
       mode: stored.mode,
+      productMode: productModeOf(stored),
       events: [],
       missingArtifacts: ['trajectory-ledger'],
       note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
@@ -704,6 +716,7 @@ async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClien
         runId: stored.runId,
         programId: stored.programId,
         mode: stored.mode,
+        productMode: productModeOf(stored),
         events: [],
         missingArtifacts: ['trajectory-ledger'],
         note: 'Orchestrator did not return a trajectory ledger for this run.',
@@ -718,6 +731,7 @@ async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClien
       runId: stored.runId,
       programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
       mode: 'live',
+      productMode: 'live',
       events,
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
@@ -727,6 +741,7 @@ async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClien
       runId: stored.runId,
       programId: stored.programId,
       mode: stored.mode,
+      productMode: productModeOf(stored),
       events: [],
       missingArtifacts: ['trajectory-ledger'],
       note: err instanceof Error ? err.message : 'orchestrator request failed',
@@ -938,19 +953,19 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           }
         }
 
-        if (!config.diagnosticMode) {
+        if (!config.enableDiagnosticFixtures) {
           jsonResponse(res, 503, {
             error:
-              'orchestrator URL is required for product runs; set C2C_ORCHESTRATOR_URL or enable C2C_DIAGNOSTIC_MODE=1 to use documented mock fixtures',
+              'product mode not ready: orchestrator URL is required (set C2C_ORCHESTRATOR_URL). Developer-only diagnostic fixtures can be opted into with C2C_ENABLE_DIAGNOSTIC_FIXTURES=true; the resulting run is labelled diagnostic-fixture and is never a product result.',
           });
           return;
         }
 
-        const stored = runStore.create(sample, 'mock');
+        const stored = runStore.create(sample, 'diagnostic-fixture');
         const completed = runStore.update(stored.runId, {
           status: 'completed',
-          message: 'mock run completed; outputs are documented fixtures (C2C_DIAGNOSTIC_MODE)',
-          evidenceRefs: [stored.mock?.evidence.manifestUri ?? ''],
+          message: 'diagnostic fixture run completed (C2C_ENABLE_DIAGNOSTIC_FIXTURES); not a product result',
+          evidenceRefs: [stored.fixture?.evidence.manifestUri ?? ''],
         }) ?? stored;
         res.writeHead(201, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
         res.end(JSON.stringify(runSummary(completed)));
@@ -988,8 +1003,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        if (stored.mode === 'mock' && stored.mock) {
-          jsonResponse(res, 200, mockGeneratedView(stored));
+        if (stored.mode === 'diagnostic-fixture' && stored.fixture) {
+          jsonResponse(res, 200, diagnosticFixtureGeneratedView(stored));
           return;
         }
         jsonResponse(res, 200, await liveGeneratedView(stored, orchestrator));
@@ -1004,8 +1019,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        if (stored.mode === 'mock' && stored.mock) {
-          jsonResponse(res, 200, mockBuildTestView(stored));
+        if (stored.mode === 'diagnostic-fixture' && stored.fixture) {
+          jsonResponse(res, 200, diagnosticFixtureBuildTestView(stored));
           return;
         }
         jsonResponse(res, 200, await liveBuildTestView(stored, orchestrator));
@@ -1020,8 +1035,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        if (stored.mode === 'mock' && stored.mock) {
-          jsonResponse(res, 200, mockEvidenceView(stored));
+        if (stored.mode === 'diagnostic-fixture' && stored.fixture) {
+          jsonResponse(res, 200, diagnosticFixtureEvidenceView(stored));
           return;
         }
         jsonResponse(res, 200, await liveEvidenceView(stored, orchestrator));
@@ -1036,11 +1051,12 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        if (stored.mode === 'mock') {
+        if (stored.mode === 'diagnostic-fixture') {
           jsonResponse(res, 200, {
             runId: stored.runId,
             programId: stored.programId,
             mode: stored.mode,
+            productMode: 'unavailable',
             events: [],
           });
           return;
@@ -1057,13 +1073,14 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        if (stored.mode === 'mock') {
+        if (stored.mode === 'diagnostic-fixture') {
           jsonResponse(res, 200, {
             runId: stored.runId,
             programId: stored.programId,
-            mode: 'mock',
+            mode: 'diagnostic-fixture',
+            productMode: 'unavailable',
             artifacts: [],
-            note: 'Mock runs do not persist on-disk artifacts.',
+            note: 'Diagnostic-fixture runs do not persist on-disk artifacts; not a product result.',
           });
           return;
         }
@@ -1073,6 +1090,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             runId: stored.runId,
             programId: stored.programId,
             mode: 'live',
+            productMode: 'unavailable',
             artifacts: [],
             missingArtifacts: ['artifacts-index'],
             note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
@@ -1086,6 +1104,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               runId: stored.runId,
               programId: stored.programId,
               mode: 'live',
+              productMode: 'unavailable',
               artifacts: [],
               missingArtifacts: ['artifacts-index'],
               orchestratorRunId: liveRunId,
@@ -1098,6 +1117,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             runId: stored.runId,
             programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
             mode: 'live',
+            productMode: 'live',
             orchestratorRunId: liveRunId,
             artifacts: Array.isArray(envelope.artifacts) ? envelope.artifacts : [],
             summary: envelope.summary ?? null,

@@ -178,7 +178,7 @@ export function runStatusLine(run: RunSummary | undefined): RunStatusLine {
     completed: 'completed',
     failed: 'failed',
   };
-  const productMode = run.productMode ?? run.mode;
+  const productMode = run.productMode ?? (run.mode === 'live' ? 'live' : 'unavailable');
   const primary = `[${productMode}] ${labels[run.status]} · ${run.runId} · program=${run.programId}`;
   const secondary = [
     run.message,
@@ -307,11 +307,11 @@ export function generatedSummary(
   }
   if (generated.mode !== 'live') {
     return {
-      headline: 'Mock placeholder · not product output',
-      note: generated.note || 'BFF returned mock data because no live orchestrator is configured.',
+      headline: 'Diagnostic fixture · not product output',
+      note: generated.note || 'BFF returned a diagnostic fixture; product mode requires a live orchestrator.',
       isProductOutput: false,
       viewerState: 'empty',
-      paneText: 'No product output. Mock placeholder suppressed because orchestrator is not live.',
+      paneText: 'No product output. Diagnostic fixture suppressed because product mode is not ready.',
     };
   }
   if (generated.status !== 'generated') {
@@ -374,8 +374,8 @@ export function generatedSummary(
 }
 
 export interface BuildTestSummary {
-  status: BuildTestView['status'] | 'idle' | 'mock';
-  classification: BuildTestView['classification'] | 'mock' | '';
+  status: BuildTestView['status'] | 'idle' | 'diagnostic-fixture';
+  classification: BuildTestView['classification'] | 'diagnostic-fixture' | '';
   headline: string;
   note: string;
   isProductResult: boolean;
@@ -400,10 +400,10 @@ export function buildTestSummary(
   }
   if (view.mode !== 'live') {
     return {
-      status: 'mock',
-      classification: 'mock',
-      headline: 'Mock placeholder · not product result',
-      note: view.note || 'BFF returned mock data because no live orchestrator is configured.',
+      status: 'diagnostic-fixture',
+      classification: 'diagnostic-fixture',
+      headline: 'Diagnostic fixture · not product result',
+      note: view.note || 'BFF returned a diagnostic fixture; product mode requires a live orchestrator.',
       isProductResult: false,
       diagnostics: [],
     };
@@ -433,7 +433,7 @@ export function buildTestSummary(
 }
 
 export interface EvidenceSummary {
-  status: EvidenceView['status'] | 'idle' | 'mock';
+  status: EvidenceView['status'] | 'idle' | 'diagnostic-fixture';
   headline: string;
   manifestUri: string;
   exportUri: string;
@@ -469,12 +469,12 @@ export function evidenceSummary(
   }
   if (view.mode !== 'live') {
     return {
-      status: 'mock',
-      headline: 'Mock placeholder · not product result',
+      status: 'diagnostic-fixture',
+      headline: 'Diagnostic fixture · not product result',
       manifestUri: '',
       exportUri: '',
       missing: view.missingArtifacts,
-      note: view.note || 'BFF returned mock data because no live orchestrator is configured.',
+      note: view.note || 'BFF returned a diagnostic fixture; product mode requires a live orchestrator.',
       isProductResult: false,
     };
   }
@@ -515,7 +515,7 @@ export function limitationsSummary(
       state: 'idle',
       unsupportedFeatures: [],
       openAssumptions: [],
-      headline: 'Mock placeholder · not product result.',
+      headline: 'Diagnostic fixture · not product result.',
     };
   }
   const unsupported = generated.unsupportedFeatures ?? [];

@@ -232,7 +232,7 @@ const baseConfig: BffConfig = {
   evidenceUrl: '',
   upstreamTimeoutMs: 1_000,
   transformSourceMaxBytes: 1_000_000,
-  diagnosticMode: false,
+  enableDiagnosticFixtures: false,
 };
 
 interface RunningServer {
@@ -382,7 +382,7 @@ test('samples list and detail return registry contents', async () => {
   }
 });
 
-test('starting a run rejects with 503 when orchestrator is missing and diagnostic mode is off', async () => {
+test('product mode rejects POST /api/v0/runs with 503 when orchestrator is missing and diagnostic fixtures are not enabled', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const handler = createApp({
@@ -399,19 +399,20 @@ test('starting a run rejects with 503 when orchestrator is missing and diagnosti
       body: { programId: 'BRNCH01' },
     });
     assert.equal(blocked.status, 503);
-    assert.match((blocked.body as { error: string }).error, /orchestrator URL/i);
-    assert.match((blocked.body as { error: string }).error, /C2C_DIAGNOSTIC_MODE/);
+    assert.match((blocked.body as { error: string }).error, /product mode not ready/i);
+    assert.match((blocked.body as { error: string }).error, /C2C_ORCHESTRATOR_URL/);
+    assert.match((blocked.body as { error: string }).error, /C2C_ENABLE_DIAGNOSTIC_FIXTURES/);
     assert.equal(runStore.list().length, 0);
   } finally {
     await server.close();
   }
 });
 
-test('starting a run in diagnostic mock mode returns a completed run with mock evidence', async () => {
+test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, and productMode is unavailable', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const handler = createApp({
-    config: { ...baseConfig, diagnosticMode: true },
+    config: { ...baseConfig, enableDiagnosticFixtures: true },
     samples,
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
@@ -424,8 +425,15 @@ test('starting a run in diagnostic mock mode returns a completed run with mock e
       body: { programId: 'BRNCH01' },
     });
     assert.equal(started.status, 201);
-    const runBody = started.body as { runId: string; mode: string; status: string; evidenceRefs: string[] };
-    assert.equal(runBody.mode, 'mock');
+    const runBody = started.body as {
+      runId: string;
+      mode: string;
+      productMode: string;
+      status: string;
+      evidenceRefs: string[];
+    };
+    assert.equal(runBody.mode, 'diagnostic-fixture');
+    assert.equal(runBody.productMode, 'unavailable');
     assert.equal(runBody.status, 'completed');
     assert.ok(runBody.evidenceRefs.length > 0);
 
@@ -433,26 +441,31 @@ test('starting a run in diagnostic mock mode returns a completed run with mock e
     assert.equal(generated.status, 200);
     const genBody = generated.body as {
       mode: string;
+      productMode: string;
       status: string;
       files: Record<string, string>;
       unsupportedFeatures: string[];
     };
-    assert.equal(genBody.mode, 'mock');
+    assert.equal(genBody.mode, 'diagnostic-fixture');
+    assert.equal(genBody.productMode, 'unavailable');
     assert.equal(genBody.status, 'generated');
     assert.ok(Object.keys(genBody.files).length > 0);
     assert.equal(genBody.unsupportedFeatures.length, 0);
 
     const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/build-test`);
     assert.equal(buildTest.status, 200);
-    const btBody = buildTest.body as { status: string; classification: string; expectedOutput: string };
+    const btBody = buildTest.body as { mode: string; productMode: string; status: string; classification: string; expectedOutput: string };
+    assert.equal(btBody.mode, 'diagnostic-fixture');
+    assert.equal(btBody.productMode, 'unavailable');
     assert.equal(btBody.status, 'ok');
     assert.equal(btBody.classification, 'match');
     assert.match(btBody.expectedOutput, /APPROVED-COUNT/);
 
     const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/evidence`);
     assert.equal(evidence.status, 200);
-    const evBody = evidence.body as { mode: string; packId: string; manifestUri: string };
-    assert.equal(evBody.mode, 'mock');
+    const evBody = evidence.body as { mode: string; productMode: string; packId: string; manifestUri: string };
+    assert.equal(evBody.mode, 'diagnostic-fixture');
+    assert.equal(evBody.productMode, 'unavailable');
     assert.ok(evBody.packId.startsWith('epk-'));
     assert.ok(evBody.manifestUri.length > 0);
   } finally {
@@ -588,6 +601,8 @@ test('starting a run in live mode proxies the orchestrator, syncs status, and re
       orchestratorRunId: string;
     };
     assert.equal(startedBody.mode, 'live');
+    // RunSummary.productMode is 'live' whenever stored mode is 'live'; per-artifact
+    // productMode is downgraded to 'unavailable' when upstream payload is incomplete.
     assert.equal(startedBody.productMode, 'live');
     assert.equal(startedBody.orchestratorRunId, 'live-run-1');
     assert.equal(calls.startRun, 1);
@@ -1241,6 +1256,7 @@ test('transform derives program id, calls orchestrator, and returns the full tra
     };
     assert.equal(body.programId, 'HELLO01');
     assert.equal(body.mode, 'live');
+    // TransformResponse extends RunSummary; productMode follows stored mode.
     assert.equal(body.productMode, 'live');
     assert.equal(body.orchestratorRunId, 'live-transform-1');
     assert.equal(body.status, 'updating');
@@ -1513,6 +1529,158 @@ test('returns 404 for unknown api paths and run ids', async () => {
     assert.equal(unknownRun.status, 404);
   } finally {
     await server.close();
+  }
+});
+
+test('product-mode responses never advertise diagnostic-fixture mode or unavailable productMode as a success', async () => {
+  // Configure a live orchestrator that returns persisted artifacts so the BFF
+  // can build a complete product-mode response. The guard scans every payload
+  // for placeholder execution markers and verifies the contained productMode
+  // signal is consistent with the artifact status.
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const generatedJava = 'package c2c;\npublic final class CASE01 { public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); } }\n';
+  const { client: orch } = stubOrchestrator({
+    generated: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        missingArtifacts: [],
+        entryClass: 'CASE01',
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        fileCount: 1,
+        files: { 'src/main/java/c2c/CASE01.java': generatedJava },
+        unsupportedFeatures: [],
+        openAssumptions: [],
+        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+      },
+    },
+    buildTest: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        missingArtifacts: [],
+        kind: 'build-test-result',
+        data: { status: 'ok', classification: 'match', actualOutput: 'APPROVED-COUNT=2\n' },
+        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'b'.repeat(64), byteSize: 32 },
+      },
+    },
+    evidence: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        missingArtifacts: [],
+        data: { packId: 'epk-1', validation: { status: 'valid', missingArtifacts: [] }, exports: [] },
+        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'c'.repeat(64), byteSize: 64 },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(started.status, 201);
+    const startedBody = started.body as { runId: string; mode: string; productMode: string };
+    assert.equal(startedBody.mode, 'live');
+    assert.equal(startedBody.productMode, 'live');
+
+    const endpoints = ['generated', 'build-test', 'evidence', 'events', 'artifacts'];
+    for (const endpoint of endpoints) {
+      const response = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/${endpoint}`);
+      assert.equal(response.status, 200, `${endpoint} must respond 200 for a product run`);
+      const payload = response.body as Record<string, unknown>;
+      assert.equal(payload.mode, 'live', `${endpoint} must report mode=live for a product run`);
+      // Scan the serialized payload for placeholder execution markers.
+      const serialized = JSON.stringify(payload);
+      for (const marker of PLACEHOLDER_JAVA_MARKERS) {
+        assert.ok(
+          !serialized.includes(marker),
+          `${endpoint} product-mode response must not contain placeholder marker "${marker}"`,
+        );
+      }
+      assert.ok(
+        !serialized.includes('diagnostic-fixture'),
+        `${endpoint} product-mode response must not contain the literal "diagnostic-fixture"`,
+      );
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('mock-data module has been quarantined and is not reachable through the product-mode server module graph', () => {
+  // Issue #93: `mock-data.ts` must be deleted or moved into a quarantined
+  // subdirectory so it cannot be imported by product-mode server code.
+  const bffSrc = path.resolve(__dirname, '..', '..', 'c2c-bff', 'src');
+  // The flat `src/mock-data.ts` is gone.
+  assert.equal(
+    fs.existsSync(path.join(bffSrc, 'mock-data.ts')),
+    false,
+    'services/c2c-bff/src/mock-data.ts must be removed; diagnostic fixtures live under diagnostic-fixtures/',
+  );
+  // Product-mode files (server.ts, index.ts) must not import the fixture module.
+  const productFiles = ['server.ts', 'index.ts', 'config.ts', 'upstream.ts'];
+  for (const file of productFiles) {
+    const absolute = path.join(bffSrc, file);
+    if (!fs.existsSync(absolute)) continue;
+    const source = fs.readFileSync(absolute, 'utf8');
+    assert.ok(
+      !/diagnostic-fixtures\/fixture-data/.test(source),
+      `${file} must not import diagnostic-fixtures/fixture-data; only run-store may do so`,
+    );
+    assert.ok(
+      !/from ['"]\.\/mock-data['"]/.test(source),
+      `${file} must not import the legacy mock-data module`,
+    );
+  }
+});
+
+test('W0 browser acceptance fixtures do not enable diagnostic fixtures', () => {
+  // Issue #93: diagnostic fixture mode must not be used by W0 acceptance tests.
+  // We scan likely browser/playwright config locations at the repo root.
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  const candidates = [
+    path.join(repoRoot, '.github', 'workflows'),
+    path.join(repoRoot, 'apps', 'c2c-ui', 'tests'),
+    path.join(repoRoot, 'tests'),
+    path.join(repoRoot, 'e2e'),
+  ];
+  for (const dir of candidates) {
+    if (!fs.existsSync(dir)) continue;
+    const stack: string[] = [dir];
+    while (stack.length > 0) {
+      const next = stack.pop();
+      if (!next) continue;
+      const stat = fs.statSync(next);
+      if (stat.isDirectory()) {
+        for (const entry of fs.readdirSync(next)) {
+          if (entry === 'node_modules' || entry === 'dist' || entry === 'dist-test') continue;
+          stack.push(path.join(next, entry));
+        }
+        continue;
+      }
+      if (!/\.(ya?ml|json|ts|tsx|js|mjs|cjs|sh)$/.test(next)) continue;
+      const text = fs.readFileSync(next, 'utf8');
+      assert.ok(
+        !/C2C_ENABLE_DIAGNOSTIC_FIXTURES\s*[:=]\s*['"]?(?:1|true|yes|on)['"]?/.test(text),
+        `${next} must not enable C2C_ENABLE_DIAGNOSTIC_FIXTURES for browser/acceptance flows`,
+      );
+    }
   }
 });
 

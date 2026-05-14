@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { mockOutcomeFor, type MockRunOutcome } from './mock-data';
+import { diagnosticFixtureOutcomeFor, type DiagnosticFixtureOutcome } from './diagnostic-fixtures/fixture-data';
 import type { SampleDetail } from './samples';
 
 export type RunStatus = 'starting' | 'updating' | 'completed' | 'failed';
-export type RunMode = 'live' | 'mock';
+// `diagnostic-fixture` is an opt-in developer mode (C2C_ENABLE_DIAGNOSTIC_FIXTURES).
+// It is never a product result and is contained out of product-facing DTOs by
+// `productMode` in server responses.
+export type RunMode = 'live' | 'diagnostic-fixture';
 
 export interface StoredRun {
   runId: string;
@@ -16,7 +19,7 @@ export interface StoredRun {
   createdAt: string;
   updatedAt: string;
   sample: SampleDetail;
-  mock?: MockRunOutcome;
+  fixture?: DiagnosticFixtureOutcome;
   liveRunId?: string;
 }
 
@@ -38,13 +41,17 @@ export function createRunStore(now: () => Date = () => new Date(), idFactory: ()
         programId: sample.programId,
         status: initial?.status ?? 'starting',
         mode,
-        message: initial?.message ?? (mode === 'mock' ? 'orchestrator not configured; serving mock run' : 'run accepted by orchestrator'),
+        message:
+          initial?.message ??
+          (mode === 'diagnostic-fixture'
+            ? 'diagnostic fixture run; not a product result'
+            : 'run accepted by orchestrator'),
         policyDecision: initial?.policyDecision ?? '',
         evidenceRefs: initial?.evidenceRefs ?? [],
         createdAt,
         updatedAt: createdAt,
         sample,
-        mock: mode === 'mock' ? mockOutcomeFor(sample, runId) : undefined,
+        fixture: mode === 'diagnostic-fixture' ? diagnosticFixtureOutcomeFor(sample, runId) : undefined,
         liveRunId,
       };
       runs.set(runId, stored);
