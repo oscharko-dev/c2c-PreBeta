@@ -13,7 +13,15 @@ SERVICES=(
   "services/java/w0-service"
   "services/cobol-parser-service"
   "services/semantic-ir-service"
+  "services/target-java-generation-service"
 )
+
+# target-java-generation-service depends on c2c-target-java-runtime, so install
+# the runtime to the local repo before running per-service tests.
+if [ -f "libs/c2c-target-java-runtime/pom.xml" ]; then
+  echo "Installing c2c-target-java-runtime to the local Maven repository"
+  (cd "libs/c2c-target-java-runtime" && mvn -q -DskipTests install)
+fi
 
 for service_dir in "${SERVICES[@]}"; do
   if [ -f "$service_dir/pom.xml" ]; then

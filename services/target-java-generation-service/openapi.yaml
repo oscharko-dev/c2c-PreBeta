@@ -1,0 +1,213 @@
+openapi: 3.1.0
+info:
+  title: target-java-generation-service
+  version: 0.1.0
+  description: >
+    W0 capability service that consumes a validated Semantic IR v0 document and
+    emits a Maven Java project conforming to target-generator-contract-v0. The
+    service refuses to operate on unsupported IR schema versions and on IRs
+    that carry blocker assumptions.
+servers:
+  - url: http://localhost:8083
+    description: local
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v0/generate:
+    post:
+      summary: Generate a Java project from a Semantic IR v0 document
+      operationId: generate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateRequest"
+      responses:
+        "200":
+          description: Generation succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateResponse"
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: IR validation failed or generator refused to emit code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+    GenerateRequest:
+      type: object
+      description: >
+        Caller passes either an IR document directly under "ir" or the full
+        envelope returned by semantic-ir-service under "irOutput".
+      properties:
+        runId:
+          type: string
+        workflowId:
+          type: string
+        sourceRef:
+          $ref: "#/components/schemas/Reference"
+        ir:
+          $ref: "#/components/schemas/SemanticIrV0"
+        irOutput:
+          type: object
+          description: Envelope as returned by semantic-ir-service.
+          properties:
+            runId: { type: string }
+            workflowId: { type: string }
+            sourceRef:
+              $ref: "#/components/schemas/Reference"
+            ir:
+              $ref: "#/components/schemas/SemanticIrV0"
+      oneOf:
+        - required: [ir]
+        - required: [irOutput]
+    GenerateResponse:
+      type: object
+      required: [schemaVersion, status, capability, runId, generatedProject, diagnostics, traceability, outputRef]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        status:
+          type: string
+          enum: [ok, failed]
+        capability:
+          type: string
+          enum: [target.java.generate]
+        runId:
+          type: string
+        workflowId:
+          type: string
+        sourceRef:
+          $ref: "#/components/schemas/Reference"
+        assumptions:
+          type: array
+          items:
+            type: string
+        diagnostics:
+          type: array
+          items:
+            $ref: "#/components/schemas/Diagnostic"
+        generatedProject:
+          $ref: "#/components/schemas/GeneratedProject"
+        traceability:
+          $ref: "#/components/schemas/Traceability"
+        outputRef:
+          $ref: "#/components/schemas/Reference"
+    GeneratedProject:
+      type: object
+      properties:
+        entryClass:
+          type: string
+        entryFilePath:
+          type: string
+        fileCount:
+          type: integer
+        files:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Map of relative file path → UTF-8 file contents. Includes pom.xml,
+            generated Java sources, src/main/resources/c2c-trace.json, and a
+            README.md.
+    Traceability:
+      type: object
+      required: [programId, irId, sourceHash, contractVersion, irVersion, runtimeName, runtimeVersion, files]
+      properties:
+        programId: { type: string }
+        irId: { type: string }
+        sourceHash: { type: string }
+        contractVersion: { type: string }
+        irVersion: { type: string }
+        runtimeName: { type: string }
+        runtimeVersion: { type: string }
+        generatorName: { type: string }
+        generatorVersion: { type: string }
+        files:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    Diagnostic:
+      type: object
+      required: [severity, line, code, message]
+      properties:
+        severity:
+          type: string
+          enum: [error, info, warn]
+        line:
+          type: integer
+        code:
+          type: string
+        message:
+          type: string
+    Reference:
+      type: object
+      required: [uri, sha256, byteSize, mimeType, kind]
+      properties:
+        uri: { type: string }
+        sha256: { type: string }
+        byteSize: { type: integer }
+        mimeType: { type: string }
+        kind: { type: string }
+    ErrorResponse:
+      type: object
+      required: [status, error]
+      properties:
+        status:
+          type: string
+          enum: [failed]
+        error:
+          type: string
+    SemanticIrV0:
+      type: object
+      description: >
+        Full schema defined by schemas/semantic-ir-v0.json. Only the version
+        constant is enforced here; the service validates the rest internally.
+      required: [schemaVersion, irId, programId, sourceHash, sourceKind, fieldLayouts, statements]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        irId: { type: string }
+        programId: { type: string }
+        sourceHash: { type: string }
+        sourceKind:
+          type: string
+          enum: [cobol]
