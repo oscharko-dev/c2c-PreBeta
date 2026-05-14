@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/model-invocation-ledger-v0.json",
+  "title": "Model Invocation Ledger v0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "invocationId",
+    "runId",
+    "modelId",
+    "provider",
+    "dataClass",
+    "promptTemplateVersion",
+    "policyDecision",
+    "status",
+    "latencyMs",
+    "requestRef",
+    "outputRef",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "invocationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "modelId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["foundry-development", "customer-internal-mock"]
+    },
+    "dataClass": {
+      "type": "string",
+      "enum": ["model", "evidence", "rag", "graph", "parser", "generator", "build-test", "test", "model-gateway", "other"]
+    },
+    "promptTemplateVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policyDecision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed", "rejected"]
+    },
+    "latencyMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "requestRef": { "$ref": "#/$defs/dataReference" },
+    "outputRef": { "$ref": "#/$defs/dataReference" },
+    "errorClass": {
+      "type": "string",
+      "minLength": 1
+    },
+    "errorMessage": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parameters": {
+      "type": "object"
+    },
+    "structuredOutput": {
+      "type": "boolean"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "dataReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
