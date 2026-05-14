@@ -2,7 +2,7 @@
 name: Feature / Task
 about: Propose a new feature, implementation task, or chore
 title: ''
-labels: ''
+labels: ['type: task', 'wave: w0', 'status: ready']
 assignees: ''
 ---
 

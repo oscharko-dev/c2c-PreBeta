@@ -11,19 +11,25 @@
 - **Follow-up Issues**: If scope expansion occurs during implementation or a PR review, **do not silently expand scope**. Instead, create a follow-up issue, link it to the current work, and defer the additional scope.
 - **ADRs (Architecture Decision Records)**: Any significant architectural change or technical decision must be documented using our ADR template before or during the issue implementation.
 
+### ADR Workflow
+1. Create a new ADR from `docs/adr/0000-template.md`.
+2. Number it sequentially as `NNNN-short-kebab-title.md` under `docs/adr/`.
+3. Reference the driving issue in the ADR metadata and body.
+4. Link the ADR from the issue and PR that depend on it.
+5. Update ADR status as the decision matures (`Proposed`, `Accepted`, `Superseded`).
+
 ## 3. Labels and Taxonomy (Wave 0)
-For Wave 0, we use a minimal label taxonomy:
-- `type: feature` - New implementations or product features.
-- `type: bug` - Bug fixes and corrections.
-- `type: chore` - Maintenance, CI, and governance work.
-- `type: epic` - Large milestones.
-- `status: ready` - Ready for implementation.
-- `status: blocked` - Blocked by another issue or decision.
+For Wave 0, we use this label taxonomy:
+- `type: epic|task|feature|bug|chore` - Work kind for planning and reporting.
+- `wave: preflight|w0` - Delivery wave classification.
+- `priority: p0|p1|p2` - Urgency for sequencing and triage.
+- `status: ready|blocked|in-progress` - Current execution state.
+- `area: governance|platform|security|orchestrator|experience|corpus` - Primary ownership domain.
 
 **Ownership Expectations**: Issues must have an assigned owner before work begins. The assignee is responsible for driving the issue to completion.
 
 ## 4. Branching and Commits
-- **Branch Naming**: `issue-<issue_number>-<short-description>` (e.g., `issue-2-governance-setup`).
+- **Branch Naming**: `issue-<issue_number>-<short-description>` (e.g., `issue-2-governance-setup`). If an automation namespace is used, preserve the same suffix (e.g., `claude/Issue-2-governance-setup`).
 - **Commit Messages**: Use Conventional Commits and reference the issue number. E.g., `feat: add governance workflow docs (#2)`.
 - **PR Naming**: Similar to commits, `feat: add governance workflow docs (#2)`. PRs should automatically link to the issue they resolve by including `Resolves #<issue_number>` in the description.
 
