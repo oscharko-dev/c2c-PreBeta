@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,16 +112,16 @@ type JSONLFileEventSink struct {
 
 func NewJSONLFileEventSink(path string) (*JSONLFileEventSink, error) {
 	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("event log path is required")
+		return nil, errEventLog("path is required")
 	}
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create event log directory failed: %w", err)
+			return nil, errEventLog("mkdir failed")
 		}
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o640)
 	if err != nil {
-		return nil, fmt.Errorf("open event log file failed: %w", err)
+		return nil, errEventLog("open failed")
 	}
 	sink := &JSONLFileEventSink{
 		InMemoryEventSink: InMemoryEventSink{events: make([]HarnessEvent, 0)},
@@ -133,29 +135,45 @@ func NewJSONLFileEventSink(path string) (*JSONLFileEventSink, error) {
 	return sink, nil
 }
 
+// restore replays the on-disk JSONL into the in-memory sink. Uses
+// bufio.Reader so lines longer than bufio.MaxScanTokenSize do not silently
+// fail startup — a worked W0 manifest payload can exceed 64 KiB when many
+// transformation passes accrue.
 func (s *JSONLFileEventSink) restore() error {
 	if _, err := s.file.Seek(0, 0); err != nil {
-		return fmt.Errorf("seek event log: %w", err)
+		return errEventLog("seek failed")
 	}
-	scanner := bufio.NewScanner(s.file)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	reader := bufio.NewReaderSize(s.file, 1<<16)
+	for lineNo := 1; ; lineNo++ {
+		line, err := reader.ReadString('\n')
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			var event HarnessEvent
+			if uerr := json.Unmarshal([]byte(trimmed), &event); uerr != nil {
+				return errEventLog(fmt.Sprintf("invalid persisted event at line %d", lineNo))
+			}
+			s.events = append(s.events, event)
 		}
-		var event HarnessEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			return fmt.Errorf("invalid persisted event: %w", err)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return errEventLog("read failed")
 		}
-		s.events = append(s.events, event)
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read event log: %w", err)
 	}
 	s.seq.Store(uint64(len(s.events)))
 	_, err := s.file.Seek(0, 2)
-	return err
+	if err != nil {
+		return errEventLog("seek end failed")
+	}
+	return nil
+}
+
+// errEventLog returns a stable, path-free error so log lines emitted by
+// callers never leak the configured filesystem path of the event log to a
+// lower-trust audience.
+func errEventLog(stage string) error {
+	return fmt.Errorf("event-log %s", stage)
 }
 
 func (s *JSONLFileEventSink) Emit(event HarnessEvent) (HarnessEvent, error) {
@@ -167,10 +185,10 @@ func (s *JSONLFileEventSink) Emit(event HarnessEvent) (HarnessEvent, error) {
 		return HarnessEvent{}, err
 	}
 	if _, err := s.file.Write(append(line, '\n')); err != nil {
-		return HarnessEvent{}, fmt.Errorf("append event log: %w", err)
+		return HarnessEvent{}, errEventLog("append failed")
 	}
 	if err := s.file.Sync(); err != nil {
-		return HarnessEvent{}, fmt.Errorf("sync event log: %w", err)
+		return HarnessEvent{}, errEventLog("sync failed")
 	}
 	s.events = append(s.events, event)
 	return event, nil

@@ -32,9 +32,15 @@ type Exporter struct {
 	clock   func() time.Time
 }
 
+// NewExporter normalizes baseDir to an absolute, symlink-resolved path so
+// the containment check against export destinations is deterministic and
+// independent of process cwd. The directory is created on first use.
 func NewExporter(baseDir string) *Exporter {
 	if strings.TrimSpace(baseDir) == "" {
 		baseDir = filepath.Join("data", "evidence-exports")
+	}
+	if abs, err := filepath.Abs(baseDir); err == nil {
+		baseDir = abs
 	}
 	return &Exporter{baseDir: baseDir, clock: func() time.Time { return time.Now().UTC() }}
 }

@@ -63,7 +63,7 @@ attached to the manifest at any point in the run.
 |----------|---------|---------|
 | `EVIDENCE_PORT` | `8080` | HTTP listen port |
 | `EVIDENCE_EVENT_LOG_PATH` | `data/evidence-events-v0.jsonl` | JSONL Harness event sink (falls back to in-memory if the path cannot be opened) |
-| `EVIDENCE_EXPORT_DIR` | `data/evidence-exports` | Root directory for directory/tar exports. Destination paths are constrained to stay under this root. |
+| `EVIDENCE_EXPORT_DIR` | `data/evidence-exports` | Root directory for directory/tar exports. **Recommended to set an absolute path** owned exclusively by the service user; relative values are resolved against the process working directory at startup and the resolved path is then symlink-normalized before the containment check. Destinations passed in API calls must be relative and stay under this root. |
 
 ## Safety constraints
 
@@ -92,9 +92,23 @@ sha256s plus the harness JSONL ledger.
 
 ```bash
 cd services/evidence-service
-go test ./...
-go run .
+go test ./...                          # unit + integration tests
+go test ./... -race                    # race-detector pass
+go test ./... -bench=. -run=^$         # benchmarks (baseline below)
+go run .                               # start service on :8080
 ```
+
+### Performance baseline (Apple M4 Max, Go 1.26)
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|-----------|
+| `BenchmarkPackStoreCreate` | ~2,950 | ~2,370 | 23 |
+| `BenchmarkPackStoreGet` | ~232 | ~1,230 | 8 |
+| `BenchmarkExportDirectory` | ~55,000 | ~13,650 | 97 |
+| `BenchmarkEvaluateValidation` | ~27 | 96 | 1 |
+
+Use these numbers as a regression baseline when bumping the toolchain or
+refactoring hot paths.
 
 ## Sample manifest
 

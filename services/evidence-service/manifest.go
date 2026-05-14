@@ -361,9 +361,11 @@ func ComputeSHA256Hex(value []byte) string {
 }
 
 // NewDataReference hashes the canonical-JSON form of payload and packs it
-// into a DataReference. Use this for in-memory references; for on-disk files
-// callers should pre-hash the bytes and construct the struct directly.
-func NewDataReference(uri string, payload any, mimeType, kind string) (DataReference, error) {
+// into a DataReference. Generic on the payload type so the caller binds to
+// a concrete struct instead of routing an untyped value through the
+// helper. Use this for in-memory references; for on-disk files callers
+// should pre-hash the bytes and construct the struct directly.
+func NewDataReference[T any](uri string, payload T, mimeType, kind string) (DataReference, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return DataReference{}, err

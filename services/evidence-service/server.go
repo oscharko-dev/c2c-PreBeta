@@ -88,6 +88,8 @@ func NewService(eventLogPath, exportRoot string) *Service {
 		if err == nil {
 			sink = persisted
 		} else {
+			// Intentionally do not log the path; the err is already
+			// path-free via errEventLog.
 			log.Printf("event log initialization failed, falling back to memory sink: %v", err)
 		}
 	}
@@ -333,7 +335,10 @@ func (c *stepCounter) next(runID string) int64 {
 
 var errEmptyBody = errors.New("empty request body")
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+// decodeJSON is generic on the request body type so every handler binds to
+// a specific request struct at the call site instead of routing an
+// untyped interface value through the helper.
+func decodeJSON[T any](w http.ResponseWriter, r *http.Request, target *T) error {
 	if r.Body == nil {
 		return errEmptyBody
 	}
@@ -353,11 +358,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	return nil
 }
 
-// writeJSON marshals first, then writes the status and body. Buffering up
-// front means an encode failure surfaces as a 500 instead of a 200 with a
-// truncated body — useful if a future caller passes a value that the
-// stdlib encoder rejects (cyclic struct, NaN, etc.).
-func writeJSON(w http.ResponseWriter, status int, value any) {
+// writeJSON is generic on the response shape; the type parameter pins the
+// payload to a known struct at every call site instead of accepting an
+// untyped interface value. The body is buffered up front so a marshal
+// failure surfaces as a real 500 instead of a truncated 200.
+func writeJSON[T any](w http.ResponseWriter, status int, value T) {
 	body, err := json.Marshal(value)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
