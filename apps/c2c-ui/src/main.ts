@@ -23,6 +23,9 @@ interface UiState {
   generated?: GeneratedView;
   buildTest?: BuildTestView;
   evidence?: EvidenceView;
+  generatedError?: string;
+  buildTestError?: string;
+  evidenceError?: string;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -118,7 +121,7 @@ function renderGenerated(state: UiState): void {
   const unsupportedBlock = el<HTMLDivElement>('unsupported-features');
   const summary = generatedSummary(state.generated);
   if (!state.generated) {
-    setText(pane, summary.headline);
+    setText(pane, state.generatedError ? `Failed to load generated output: ${state.generatedError}` : summary.headline);
     unsupportedBlock.className = 'unsupported empty';
     clearChildren(unsupportedBlock);
     return;
@@ -168,7 +171,7 @@ function renderBuildTest(state: UiState): void {
   clearChildren(node);
 
   if (!state.buildTest) {
-    setText(node, summary.headline);
+    setText(node, state.buildTestError ? `Failed to load build/test output: ${state.buildTestError}` : summary.headline);
     return;
   }
 
@@ -212,7 +215,7 @@ function renderEvidence(state: UiState): void {
   clearChildren(node);
 
   if (!state.evidence) {
-    setText(node, summary.headline);
+    setText(node, state.evidenceError ? `Failed to load evidence output: ${state.evidenceError}` : summary.headline);
     return;
   }
 
@@ -228,6 +231,15 @@ function renderEvidence(state: UiState): void {
     ref.appendChild(label);
     ref.appendChild(document.createTextNode(' ' + summary.manifestUri));
     node.appendChild(ref);
+  }
+  if (state.evidence.exportUri) {
+    const exportRef = document.createElement('div');
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = 'export:';
+    exportRef.appendChild(label);
+    exportRef.appendChild(document.createTextNode(' ' + state.evidence.exportUri));
+    node.appendChild(exportRef);
   }
 
   if (summary.missing.length > 0) {
@@ -262,10 +274,22 @@ function setStartButtonEnabled(enabled: boolean, helpText: string): void {
 
 async function refreshRunDetails(api: BffApi, state: UiState, runId: string): Promise<void> {
   const [generated, buildTest, evidence] = await Promise.all([
-    api.getGenerated(runId).catch(() => undefined),
-    api.getBuildTest(runId).catch(() => undefined),
-    api.getEvidence(runId).catch(() => undefined),
+    api.getGenerated(runId).catch((err) => {
+      state.generatedError = err instanceof Error ? err.message : 'unknown error';
+      return undefined;
+    }),
+    api.getBuildTest(runId).catch((err) => {
+      state.buildTestError = err instanceof Error ? err.message : 'unknown error';
+      return undefined;
+    }),
+    api.getEvidence(runId).catch((err) => {
+      state.evidenceError = err instanceof Error ? err.message : 'unknown error';
+      return undefined;
+    }),
   ]);
+  if (generated) state.generatedError = undefined;
+  if (buildTest) state.buildTestError = undefined;
+  if (evidence) state.evidenceError = undefined;
   state.generated = generated;
   state.buildTest = buildTest;
   state.evidence = evidence;
@@ -319,8 +343,19 @@ async function bootstrap(api: BffApi): Promise<void> {
     try {
       const detail = await api.getSample(programId);
       state.selectedSample = detail;
+      state.run = undefined;
+      state.generated = undefined;
+      state.buildTest = undefined;
+      state.evidence = undefined;
+      state.generatedError = undefined;
+      state.buildTestError = undefined;
+      state.evidenceError = undefined;
       renderSamples(state, onSelect);
       renderCobolPane(state);
+      renderRunStatus(state);
+      renderGenerated(state);
+      renderBuildTest(state);
+      renderEvidence(state);
       setStartButtonEnabled(true, `Ready to run ${programId}.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'failed to load sample';

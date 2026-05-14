@@ -88,6 +88,7 @@ export interface EvidenceView {
   status: EvidenceStatus;
   packId: string;
   manifestUri: string;
+  exportUri?: string;
   missingArtifacts: string[];
   note: string;
 }

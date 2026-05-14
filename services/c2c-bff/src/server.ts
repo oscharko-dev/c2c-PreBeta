@@ -230,6 +230,7 @@ function evidenceView(stored: StoredRun): Record<string, unknown> {
     status: 'incomplete',
     packId: '',
     manifestUri: '',
+    exportUri: '',
     missingArtifacts: [],
     note: 'Live evidence retrieval requires evidence-service to expose a pack id for this run. Use the orchestrator response or evidence-service /v0/packs to look it up.',
   };
