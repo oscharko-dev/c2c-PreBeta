@@ -272,9 +272,15 @@ build_java_runtime() {
 build_java_services() {
   for svc in cobol-parser-service semantic-ir-service target-java-generation-service build-test-runner-service; do
     log "packaging services/$svc"
+    local goal="package"
+    # target-java-generation-service is required as a test dependency for
+    # build-test-runner-service, so install it into the local Maven repo.
+    if [[ "$svc" == "target-java-generation-service" ]]; then
+      goal="install"
+    fi
     (
       cd "$ROOT_DIR/services/$svc"
-      mvn -B -ntp -DskipTests package
+      mvn -B -ntp -DskipTests "$goal"
     ) >"$LOG_DIR/mvn-${svc}.log" 2>&1 || fail "services/$svc package failed (see $LOG_DIR/mvn-${svc}.log)"
   done
 }
