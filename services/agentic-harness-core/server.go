@@ -574,6 +574,18 @@ func (h *HarnessService) emitEvent(event EventEnvelopeV0, tracker *RunStepTracke
 	if event.StepID == 0 {
 		event.StepID = tracker.Next(event.RunID)
 	}
+	if event.SchemaVersion == "" {
+		event.SchemaVersion = EventSchemaVersionV0
+	}
+	if event.EventID == "" {
+		event.EventID = fmt.Sprintf("hev-%d-%d", time.Now().UTC().UnixNano(), event.StepID)
+	}
+	if event.Service == "" {
+		event.Service = ActorSystem
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
 	event, err := h.enrichEventRefs(event)
 	if err != nil {
 		return EventEnvelopeV0{}, err
