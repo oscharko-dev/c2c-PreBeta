@@ -54,7 +54,20 @@ export interface RunSummary {
   updatedAt: string;
 }
 
-export type GeneratedStatus = 'generated' | 'unsupported' | 'skipped';
+export type GeneratedStatus = 'generated' | 'unsupported' | 'skipped' | 'incomplete';
+
+export interface OutputRef {
+  uri: string;
+  sha256: string;
+  byteSize?: number;
+}
+
+export interface Diagnostic {
+  level?: string;
+  code?: string;
+  message?: string;
+  [key: string]: unknown;
+}
 
 export interface GeneratedView {
   runId: string;
@@ -67,6 +80,9 @@ export interface GeneratedView {
   unsupportedFeatures: string[];
   openAssumptions: string[];
   note: string;
+  outputRef?: OutputRef | null;
+  diagnostics?: Diagnostic[];
+  missingArtifacts?: string[];
 }
 
 export type BuildTestStatus =
@@ -75,6 +91,7 @@ export type BuildTestStatus =
   | 'run-failed'
   | 'output-divergence'
   | 'missing-golden-master'
+  | 'incomplete'
   | 'skipped';
 
 export type BuildTestClassification =
@@ -85,6 +102,9 @@ export type BuildTestClassification =
   | 'run-error'
   | 'skipped-no-execution';
 
+export type CompileStatus = 'ok' | 'failed' | 'skipped' | 'unknown';
+export type ExecutionStatus = 'ok' | 'failed' | 'skipped' | 'not-run' | 'unknown';
+
 export interface BuildTestView {
   runId: string;
   programId: string;
@@ -93,11 +113,16 @@ export interface BuildTestView {
   classification: BuildTestClassification;
   expectedOutput: string;
   actualOutput: string;
-  outputRef: string;
+  outputRef: string | OutputRef | null;
   note: string;
+  compileStatus?: CompileStatus;
+  executionStatus?: ExecutionStatus;
+  diagnostics?: Diagnostic[];
+  missingArtifacts?: string[];
 }
 
-export type EvidenceStatus = 'complete' | 'incomplete';
+export type EvidenceStatus = 'complete' | 'incomplete' | 'invalid';
+export type ValidationStatus = 'valid' | 'invalid' | 'incomplete' | 'unknown';
 
 export interface EvidenceView {
   runId: string;
@@ -109,4 +134,7 @@ export interface EvidenceView {
   exportUri?: string;
   missingArtifacts: string[];
   note: string;
+  manifestHash?: string;
+  validationStatus?: ValidationStatus;
+  exportRef?: OutputRef | null;
 }

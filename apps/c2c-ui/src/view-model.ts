@@ -243,12 +243,29 @@ export function pickEntryFile(generated: GeneratedView, preferredPath?: string):
   return { path, content };
 }
 
+export const PLACEHOLDER_JAVA_MARKERS: readonly string[] = [
+  'W0-STUB',
+  'Synthetic W0 generated-Java stub',
+  '// TODO: implement',
+  'PLACEHOLDER',
+];
+
+export function containsPlaceholderMarker(files: Record<string, string>): string | null {
+  for (const content of Object.values(files)) {
+    for (const marker of PLACEHOLDER_JAVA_MARKERS) {
+      if (content.includes(marker)) return marker;
+    }
+  }
+  return null;
+}
+
 export interface GeneratedSummary {
   headline: string;
   note: string;
   isProductOutput: boolean;
   viewerState: 'pending' | 'empty' | 'shown' | 'error';
   paneText: string;
+  placeholderMarker?: string;
 }
 
 export function generatedSummary(
@@ -311,6 +328,15 @@ export function generatedSummary(
         paneText: 'No generator output produced for this run (unsupported features).',
       };
     }
+    if (generated.status === 'incomplete') {
+      return {
+        headline: 'Generated Java unavailable for this run.',
+        note: generated.note,
+        isProductOutput: false,
+        viewerState: 'empty',
+        paneText: 'No product output. Orchestrator has not yet persisted the generation response.',
+      };
+    }
     return {
       headline: 'No generator output produced.',
       note: generated.note,
@@ -326,6 +352,17 @@ export function generatedSummary(
       isProductOutput: false,
       viewerState: 'empty',
       paneText: 'No generator files emitted for this run.',
+    };
+  }
+  const placeholder = containsPlaceholderMarker(generated.files);
+  if (placeholder) {
+    return {
+      headline: 'Refusing to display placeholder Java as a successful run.',
+      note: `Generated Java contains placeholder marker "${placeholder}". The BFF must return real generator output for successful runs.`,
+      isProductOutput: false,
+      viewerState: 'error',
+      paneText: `Refusing to display placeholder Java. Marker "${placeholder}" detected.`,
+      placeholderMarker: placeholder,
     };
   }
   const headlineParts: string[] = [];
@@ -346,6 +383,9 @@ export interface BuildTestSummary {
   headline: string;
   note: string;
   isProductResult: boolean;
+  compileStatus?: BuildTestView['compileStatus'];
+  executionStatus?: BuildTestView['executionStatus'];
+  diagnostics: NonNullable<BuildTestView['diagnostics']>;
 }
 
 export function buildTestSummary(
@@ -354,13 +394,13 @@ export function buildTestSummary(
   error: string | undefined,
 ): BuildTestSummary {
   if (error) {
-    return { status: 'idle', classification: '', headline: `Failed to load build/test: ${error}`, note: '', isProductResult: false };
+    return { status: 'idle', classification: '', headline: `Failed to load build/test: ${error}`, note: '', isProductResult: false, diagnostics: [] };
   }
   if (!view) {
     if (!run) {
-      return { status: 'idle', classification: '', headline: 'No run started.', note: '', isProductResult: false };
+      return { status: 'idle', classification: '', headline: 'No run started.', note: '', isProductResult: false, diagnostics: [] };
     }
-    return { status: 'idle', classification: '', headline: 'Build/test pending…', note: '', isProductResult: false };
+    return { status: 'idle', classification: '', headline: 'Build/test pending…', note: '', isProductResult: false, diagnostics: [] };
   }
   if (view.mode !== 'live') {
     return {
@@ -369,6 +409,19 @@ export function buildTestSummary(
       headline: 'Mock placeholder · not product result',
       note: view.note || 'BFF returned mock data because no live orchestrator is configured.',
       isProductResult: false,
+      diagnostics: [],
+    };
+  }
+  if (view.status === 'incomplete') {
+    return {
+      status: 'incomplete',
+      classification: view.classification,
+      headline: 'Build/test result unavailable for this run.',
+      note: view.note,
+      isProductResult: false,
+      ...(view.compileStatus ? { compileStatus: view.compileStatus } : {}),
+      ...(view.executionStatus ? { executionStatus: view.executionStatus } : {}),
+      diagnostics: view.diagnostics ?? [],
     };
   }
   return {
@@ -377,6 +430,9 @@ export function buildTestSummary(
     headline: `status=${view.status} · classification=${view.classification}`,
     note: view.note,
     isProductResult: true,
+    ...(view.compileStatus ? { compileStatus: view.compileStatus } : {}),
+    ...(view.executionStatus ? { executionStatus: view.executionStatus } : {}),
+    diagnostics: view.diagnostics ?? [],
   };
 }
 
@@ -388,6 +444,9 @@ export interface EvidenceSummary {
   missing: string[];
   note: string;
   isProductResult: boolean;
+  manifestHash?: string;
+  validationStatus?: EvidenceView['validationStatus'];
+  exportRef?: EvidenceView['exportRef'];
 }
 
 export function evidenceSummary(
@@ -423,14 +482,18 @@ export function evidenceSummary(
       isProductResult: false,
     };
   }
+  const exportUri = view.exportRef?.uri ?? view.exportUri ?? '';
   return {
     status: view.status,
     headline: `status=${view.status}${view.packId ? ` · packId=${view.packId}` : ''}`,
     manifestUri: view.manifestUri,
-    exportUri: view.exportUri ?? '',
+    exportUri,
     missing: view.missingArtifacts,
     note: view.note,
     isProductResult: view.status === 'complete',
+    ...(view.manifestHash ? { manifestHash: view.manifestHash } : {}),
+    ...(view.validationStatus ? { validationStatus: view.validationStatus } : {}),
+    ...(view.exportRef ? { exportRef: view.exportRef } : {}),
   };
 }
 

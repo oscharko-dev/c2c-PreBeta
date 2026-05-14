@@ -367,6 +367,90 @@ test('evidenceSummary exposes manifest, export and missing artifacts when live',
   assert.equal(summary.isProductResult, false);
 });
 
+test('generatedSummary refuses to display placeholder Java as a successful product run', () => {
+  const placeholderJava = [
+    '// Synthetic W0 generated-Java stub for programId=BRNCH01.',
+    'package c2c.w0.generated;',
+    'public final class ProgramBrnch01 {',
+    '    public static void main(String[] args) {',
+    '        System.out.println("W0-STUB BRNCH01");',
+    '    }',
+    '}',
+  ].join('\n');
+  const generated = makeGenerated({
+    files: { 'src/main/java/c2c/w0/generated/ProgramBrnch01.java': placeholderJava },
+  });
+  const summary = generatedSummary(generated, makeRun({ status: 'completed' }), undefined);
+  assert.equal(summary.isProductOutput, false);
+  assert.equal(summary.viewerState, 'error');
+  assert.match(summary.headline, /placeholder Java/i);
+  assert.equal(summary.placeholderMarker, 'W0-STUB');
+  assert.doesNotMatch(summary.paneText, /W0-STUB BRNCH01\nclass/);
+});
+
+test('generatedSummary surfaces incomplete status for runs missing generator artifacts', () => {
+  const summary = generatedSummary(
+    makeGenerated({ status: 'incomplete', files: {}, note: 'Orchestrator has not yet persisted generation response.' }),
+    makeRun({ status: 'updating' }),
+    undefined,
+  );
+  assert.equal(summary.isProductOutput, false);
+  assert.equal(summary.viewerState, 'empty');
+  assert.match(summary.headline, /unavailable/i);
+});
+
+test('buildTestSummary reports incomplete-as-not-product when artifacts are missing', () => {
+  const view = makeBuildTest({
+    status: 'incomplete',
+    classification: 'skipped-no-execution',
+    actualOutput: '',
+    compileStatus: 'unknown',
+    executionStatus: 'unknown',
+    note: 'Orchestrator did not return a build/test result for this run.',
+  });
+  const summary = buildTestSummary(view, makeRun({ status: 'updating' }), undefined);
+  assert.equal(summary.status, 'incomplete');
+  assert.equal(summary.isProductResult, false);
+  assert.match(summary.headline, /unavailable/i);
+  assert.equal(summary.compileStatus, 'unknown');
+  assert.equal(summary.executionStatus, 'unknown');
+});
+
+test('buildTestSummary forwards compile/execution status and diagnostics in product runs', () => {
+  const view = makeBuildTest({
+    status: 'ok',
+    classification: 'match',
+    compileStatus: 'ok',
+    executionStatus: 'ok',
+    diagnostics: [
+      { level: 'info', code: 'compile.ok', message: 'compiled' },
+      { level: 'info', code: 'execution.ok', message: 'ran' },
+    ],
+  });
+  const summary = buildTestSummary(view, makeRun({ status: 'completed' }), undefined);
+  assert.equal(summary.isProductResult, true);
+  assert.equal(summary.compileStatus, 'ok');
+  assert.equal(summary.executionStatus, 'ok');
+  assert.equal(summary.diagnostics.length, 2);
+});
+
+test('evidenceSummary exposes manifestHash, validationStatus and exportRef in live mode', () => {
+  const view = makeEvidence({
+    status: 'incomplete',
+    missingArtifacts: ['semanticIr'],
+    manifestHash: 'f'.repeat(64),
+    validationStatus: 'incomplete',
+    exportRef: { uri: 'file:///run/evidence-pack.tar.gz', sha256: 'e'.repeat(64), byteSize: 1024 },
+  });
+  const summary = evidenceSummary(view, makeRun(), undefined);
+  assert.equal(summary.manifestHash, 'f'.repeat(64));
+  assert.equal(summary.validationStatus, 'incomplete');
+  assert.equal(summary.exportUri, 'file:///run/evidence-pack.tar.gz');
+  assert.equal(summary.exportRef?.sha256, 'e'.repeat(64));
+  assert.deepEqual(summary.missing, ['semanticIr']);
+  assert.equal(summary.isProductResult, false);
+});
+
 test('limitationsSummary lists generator-reported issues only in live mode', () => {
   const mock = limitationsSummary(makeGenerated({ mode: 'mock', unsupportedFeatures: ['x'] }), makeRun());
   assert.deepEqual(mock.unsupportedFeatures, []);
