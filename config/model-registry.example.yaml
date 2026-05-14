@@ -1,41 +1,76 @@
 models:
-  - id: "foundry-gpt4-turbo"
-    displayName: "Foundry GPT-4 Turbo"
+  - id: "gpt-oss-120b"
+    displayName: "Foundry gpt-oss-120b"
     provider: "foundry-development"
-    deploymentName: "foundry-gpt4-turbo"
-    modelName: "gpt-4-turbo"
-    version: "2026-01"
-    region: "eastus"
-    catalogAssetId: "catalog://foundry/gpt-4-turbo"
+    deploymentName: "gpt-oss-120b"
+    modelName: "gpt-oss-120b"
+    version: "1"
+    region: "swedencentral"
+    catalogAssetId: "catalog://foundry/gpt-oss-120b"
     lifecycleStatus: "approved"
     licenseStatus: "approved"
     approvalExpiry: "2030-01-01T00:00:00Z"
     allowedDataClasses:
-      - "model"
-      - "evidence"
-    supportedTemplateVersions:
-      - "v1"
-      - "v1-alt"
-    supportsStructuredOutput: true
-    defaultTimeoutMs: 15000
-    capability: "model-generation"
-
-  - id: "foundry-gpt4-mini"
-    displayName: "Foundry GPT-4 Mini"
-    provider: "foundry-development"
-    deploymentName: "foundry-gpt4-mini"
-    modelName: "gpt-4-mini"
-    version: "2026-01"
-    region: "eastus"
-    catalogAssetId: "catalog://foundry/gpt-4-mini"
-    lifecycleStatus: "approved"
-    licenseStatus: "approved"
-    approvalExpiry: "2030-01-01T00:00:00Z"
-    allowedDataClasses:
-      - "model"
-      - "rag"
+      - "model-gateway"
     supportedTemplateVersions:
       - "v1"
     supportsStructuredOutput: false
-    defaultTimeoutMs: 10000
+    defaultTimeoutMs: 15000
+    capability: "model-generation"
+
+  - id: "mistral-large-3"
+    displayName: "Foundry Mistral Large 3"
+    provider: "foundry-development"
+    deploymentName: "mistral-large-3"
+    modelName: "Mistral-Large-3"
+    version: "1"
+    region: "swedencentral"
+    catalogAssetId: "catalog://foundry/mistral-large-3"
+    lifecycleStatus: "approved"
+    licenseStatus: "approved"
+    approvalExpiry: "2030-01-01T00:00:00Z"
+    allowedDataClasses:
+      - "model-gateway"
+    supportedTemplateVersions:
+      - "v1"
+    supportsStructuredOutput: false
+    defaultTimeoutMs: 20000
+    capability: "model-generation"
+
+  - id: "phi-4"
+    displayName: "Foundry Phi-4"
+    provider: "foundry-development"
+    deploymentName: "phi-4"
+    modelName: "Phi-4"
+    version: "7"
+    region: "swedencentral"
+    catalogAssetId: "catalog://foundry/phi-4"
+    lifecycleStatus: "approved"
+    licenseStatus: "approved"
+    approvalExpiry: "2030-01-01T00:00:00Z"
+    allowedDataClasses:
+      - "model-gateway"
+    supportedTemplateVersions:
+      - "v1"
+    supportsStructuredOutput: false
+    defaultTimeoutMs: 15000
+    capability: "model-generation"
+
+  - id: "phi-4-mini-instruct"
+    displayName: "Foundry Phi-4 Mini Instruct"
+    provider: "foundry-development"
+    deploymentName: "phi-4-mini-instruct"
+    modelName: "Phi-4-mini-instruct"
+    version: "1"
+    region: "swedencentral"
+    catalogAssetId: "catalog://foundry/phi-4-mini-instruct"
+    lifecycleStatus: "approved"
+    licenseStatus: "approved"
+    approvalExpiry: "2030-01-01T00:00:00Z"
+    allowedDataClasses:
+      - "model-gateway"
+    supportedTemplateVersions:
+      - "v1"
+    supportsStructuredOutput: false
+    defaultTimeoutMs: 15000
     capability: "model-generation"

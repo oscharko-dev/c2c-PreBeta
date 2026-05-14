@@ -19,22 +19,22 @@ type ModelRegistry struct {
 }
 
 type ModelMetadata struct {
-	ID                         string   `yaml:"id"`
-	DisplayName                string   `yaml:"displayName"`
-	Provider                   string   `yaml:"provider"`
-	DeploymentName             string   `yaml:"deploymentName"`
-	ModelName                  string   `yaml:"modelName"`
-	Version                    string   `yaml:"version"`
-	Region                     string   `yaml:"region"`
-	CatalogAssetID             string   `yaml:"catalogAssetId"`
-	LifecycleStatus            string   `yaml:"lifecycleStatus"`
-	LicenseStatus              string   `yaml:"licenseStatus"`
-	ApprovalExpiry             string   `yaml:"approvalExpiry"`
-	AllowedDataClasses         []string `yaml:"allowedDataClasses"`
-	SupportedTemplateVersions  []string `yaml:"supportedTemplateVersions"`
-	SupportsStructuredOutput   bool     `yaml:"supportsStructuredOutput"`
-	DefaultTimeoutMs           int64    `yaml:"defaultTimeoutMs"`
-	Capability                 string   `yaml:"capability"`
+	ID                        string   `yaml:"id"`
+	DisplayName               string   `yaml:"displayName"`
+	Provider                  string   `yaml:"provider"`
+	DeploymentName            string   `yaml:"deploymentName"`
+	ModelName                 string   `yaml:"modelName"`
+	Version                   string   `yaml:"version"`
+	Region                    string   `yaml:"region"`
+	CatalogAssetID            string   `yaml:"catalogAssetId"`
+	LifecycleStatus           string   `yaml:"lifecycleStatus"`
+	LicenseStatus             string   `yaml:"licenseStatus"`
+	ApprovalExpiry            string   `yaml:"approvalExpiry"`
+	AllowedDataClasses        []string `yaml:"allowedDataClasses"`
+	SupportedTemplateVersions []string `yaml:"supportedTemplateVersions"`
+	SupportsStructuredOutput  bool     `yaml:"supportsStructuredOutput"`
+	DefaultTimeoutMs          int64    `yaml:"defaultTimeoutMs"`
+	Capability                string   `yaml:"capability"`
 }
 
 func (m ModelMetadata) IsActive(now time.Time) bool {
@@ -88,15 +88,16 @@ func (m ModelMetadata) IsDataClassAllowed(dataClass string) bool {
 }
 
 type FoundryDevelopmentAllowlist struct {
-	Mode             string `yaml:"mode"`
+	Mode             string                 `yaml:"mode"`
 	AllowedModelIDs  []string               `yaml:"allowedModelIds"`
-	Foundry          ProviderFoundryConfig    `yaml:"foundry"`
+	Foundry          ProviderFoundryConfig  `yaml:"foundry"`
 	CustomerInternal CustomerInternalConfig `yaml:"customerInternalMock"`
 }
 
 type ProviderFoundryConfig struct {
 	Endpoint  string `yaml:"endpoint"`
 	ApiKeyRef string `yaml:"apiKeyRef"`
+	ApiKey    string `yaml:"apiKey"`
 	TimeoutMs int64  `yaml:"timeoutMs"`
 }
 

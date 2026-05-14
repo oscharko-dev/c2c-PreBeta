@@ -1,8 +1,11 @@
 mode: "foundry-development"
 allowedModelIds:
-  - "foundry-gpt4-turbo"
+  - "gpt-oss-120b"
+  - "mistral-large-3"
+  - "phi-4"
+  - "phi-4-mini-instruct"
 foundry:
-  endpoint: "https://contoso-foundry.openai.azure.com/openai/deployments"
+  endpoint: "https://workspacedevfoundrywnal9xa1.cognitiveservices.azure.com/openai/deployments"
   apiKeyRef: "keyring/foundry/API_KEY"
   timeoutMs: 30000
 customerInternalMock:

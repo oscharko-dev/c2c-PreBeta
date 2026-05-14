@@ -9,7 +9,10 @@ import (
 )
 
 func main() {
-	cfg := resolveGatewayConfigFromEnv()
+	cfg, err := resolveGatewayConfigFromEnv()
+	if err != nil {
+		log.Fatalf("resolve configuration failed: %v", err)
+	}
 	log.Printf("loading model registry from %s", cfg.registryPath)
 	log.Printf("loading allowlist from %s", cfg.allowlistPath)
 
@@ -17,8 +20,23 @@ func main() {
 	if err != nil {
 		log.Fatalf("load allowlist failed: %v", err)
 	}
+	if cfg.modelProvider != "" {
+		allowed.Mode = cfg.modelProvider
+	}
+	if cfg.azureFoundryEndpoint != "" {
+		allowed.Foundry.Endpoint = cfg.azureFoundryEndpoint
+	}
+	if cfg.azureFoundryAPIKey != "" {
+		allowed.Foundry.ApiKey = cfg.azureFoundryAPIKey
+	}
+	if cfg.azureFoundryAPIKeyRef != "" {
+		allowed.Foundry.ApiKeyRef = cfg.azureFoundryAPIKeyRef
+	}
 	if allowed.Mode == "" {
 		allowed.Mode = ModelProviderFoundryDevelopment
+	}
+	if len(cfg.allowedModelDeployments) > 0 {
+		allowed.AllowedModelIDs = cfg.allowedModelDeployments
 	}
 
 	registry, err := LoadModelRegistry(cfg.registryPath)
@@ -50,6 +68,9 @@ func main() {
 	service, err := NewModelGatewayService(registry, allowed, ledger, compositeSink, func() time.Time { return time.Now().UTC() })
 	if err != nil {
 		log.Fatalf("initialize service failed: %v", err)
+	}
+	if err := service.applyGatewayRuntimeConfig(cfg); err != nil {
+		log.Fatalf("configure model gateway runtime failed: %v", err)
 	}
 	defer service.closeSinks()
 
