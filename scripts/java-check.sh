@@ -17,9 +17,12 @@ SERVICES=(
   "services/build-test-runner-service"
 )
 
-# target-java-generation-service depends on c2c-target-java-runtime, so install
-# the runtime to the local repo before running per-service tests.
+# target-java-generation-service depends on c2c-target-java-runtime, so run the
+# runtime tests first and then install it to the local repo before per-service
+# tests.
 if [ -f "libs/c2c-target-java-runtime/pom.xml" ]; then
+  echo "Running Java checks in libs/c2c-target-java-runtime"
+  (cd "libs/c2c-target-java-runtime" && mvn -q test)
   echo "Installing c2c-target-java-runtime to the local Maven repository"
   (cd "libs/c2c-target-java-runtime" && mvn -q -DskipTests install)
 fi
