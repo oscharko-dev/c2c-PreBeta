@@ -65,9 +65,24 @@ for f in \
   services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/ServiceApp.java \
   services/build-test-runner-service/src/test/java/com/c2c/w0/buildtest/BuildTestRunnerServiceTest.java \
   services/build-test-runner-service/src/test/java/com/c2c/w0/buildtest/W0SmokeIntegrationTest.java \
+  services/evidence-service/go.mod \
+  services/evidence-service/main.go \
+  services/evidence-service/manifest.go \
+  services/evidence-service/server.go \
+  services/evidence-service/store.go \
+  services/evidence-service/export.go \
+  services/evidence-service/events.go \
+  services/evidence-service/manifest_test.go \
+  services/evidence-service/server_test.go \
+  services/evidence-service/Dockerfile \
+  services/evidence-service/openapi.yaml \
+  services/evidence-service/README.md \
+  docs/evidence-service/README.md \
+  docs/evidence-service/sample-evidence-pack-manifest.json \
   fixtures/golden-master/index.json \
   schemas/semantic-ir-v0.json \
-  schemas/build-test-result-v0.json
+  schemas/build-test-result-v0.json \
+  schemas/evidence-pack-manifest-v0.json
  do
   if [ ! -f "$f" ]; then
     echo "Missing required file: $f" >&2

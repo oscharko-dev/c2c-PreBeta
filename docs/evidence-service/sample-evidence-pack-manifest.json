@@ -1,0 +1,166 @@
+{
+  "schemaVersion": "v0",
+  "capability": "evidence.pack",
+  "service": "evidence-service",
+  "packId": "epk-run-w0-hello-0001",
+  "runId": "run-w0-hello",
+  "workflowId": "wf-w0-hello",
+  "wave": "w0",
+  "status": "complete",
+  "summary": "Hello-world W0 walking-skeleton evidence pack",
+  "createdAt": "2026-05-14T12:00:00Z",
+  "createdBy": "orchestrator",
+  "artifacts": {
+    "sourceCobol": [
+      {
+        "uri": "urn:c2c/cobol/HELLO.cob",
+        "sha256": "0b174abe338328e339c03991d0f70bfd02b2d25d77b75969b1114b6f1480d496",
+        "byteSize": 7,
+        "mimeType": "application/json",
+        "kind": "evidence-input"
+      }
+    ],
+    "corpusMetadata": {
+      "uri": "urn:c2c/corpus/index",
+      "sha256": "7f40a91a684f87cae2ebb7f2b7ea1c3dd5097b674e122e0fd1fec9ab46a5e8c7",
+      "byteSize": 14,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "semanticIr": {
+      "uri": "urn:c2c/semantic-ir/HELLO",
+      "sha256": "920e348c7b3bc0f6bd6e3d49944b35444904bc7e2bd204bd686dea3d809edeb4",
+      "byteSize": 11,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "transformationPasses": [
+      {
+        "name": "lower",
+        "order": 1,
+        "inputRef": {
+          "uri": "urn:c2c/semantic-ir/HELLO",
+          "sha256": "920e348c7b3bc0f6bd6e3d49944b35444904bc7e2bd204bd686dea3d809edeb4",
+          "byteSize": 11,
+          "mimeType": "application/json",
+          "kind": "evidence-input"
+        },
+        "outputRef": {
+          "uri": "urn:c2c/transform/HELLO/lower",
+          "sha256": "bce1b96c633b89db3fa54b7124f7aa6775863ace0ff9ab8bf6055788cd8868ec",
+          "byteSize": 14,
+          "mimeType": "application/json",
+          "kind": "evidence-input"
+        }
+      }
+    ],
+    "generatedJava": {
+      "uri": "urn:c2c/generated/HELLO.java",
+      "sha256": "c25bf945aaff8fe16826d3c1ef117044d6cc1af8e0e9f0b4162308460a8207a7",
+      "byteSize": 7,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "runtimeVersion": {
+      "id": "c2c-target-java-runtime:v0",
+      "ref": {
+        "uri": "urn:c2c/runtime/v0",
+        "sha256": "901d3f5bd8325daee012fb696f976f5187d4dfba2d700142161511fbc63b7eda",
+        "byteSize": 16,
+        "mimeType": "application/json",
+        "kind": "evidence-input"
+      }
+    },
+    "modelInvocations": [
+      {
+        "invocationId": "inv-1",
+        "modelId": "model-x",
+        "provider": "foundry-development",
+        "promptTemplateVersion": "p-v0",
+        "status": "completed",
+        "ledgerRef": {
+          "uri": "urn:c2c/model-invocation/inv-1",
+          "sha256": "812ca83a63367811c6aa58c3fd69c0b24536eb707def691a2513b7af3e6f1de4",
+          "byteSize": 14,
+          "mimeType": "application/json",
+          "kind": "evidence-input"
+        }
+      }
+    ],
+    "buildTestResults": [
+      {
+        "uri": "urn:c2c/build-test/HELLO/result-1",
+        "sha256": "1aad36b0fb02621b951649811957ba7ad67d4838c2932d02088f7d6e8db74313",
+        "byteSize": 15,
+        "mimeType": "application/json",
+        "kind": "evidence-input"
+      }
+    ],
+    "sbom": [
+      {
+        "uri": "urn:c2c/sbom/HELLO",
+        "sha256": "6c8a832a46b284539ab6f38e432a1fc103c2410f5ce72e3d663e718c206a570f",
+        "byteSize": 13,
+        "mimeType": "application/json",
+        "kind": "evidence-input"
+      }
+    ],
+    "licenseReports": [
+      {
+        "uri": "urn:c2c/license/HELLO",
+        "sha256": "e2484808e4981e3fff6ebb4a1bc702fd9ef35dcbdf3bfab351d52712dfd89429",
+        "byteSize": 16,
+        "mimeType": "application/json",
+        "kind": "evidence-input"
+      }
+    ],
+    "harnessEvents": {
+      "uri": "urn:c2c/harness-events/run-1",
+      "sha256": "0fe5374334e2e79f3955f83343256669b91d74ee3c936aca98b0d7ff730788a4",
+      "byteSize": 15,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "trajectoryLedger": {
+      "uri": "urn:c2c/trajectory/run-1",
+      "sha256": "b917609e5ccd3af15a70448e27a6df195ad224d822c6304549dac585d037217b",
+      "byteSize": 19,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "experienceEvents": [
+      {
+        "uri": "urn:c2c/experience/run-1/evt-1",
+        "sha256": "1b81f465bfb8ee1c2d9320e34a7765f3bb20ec84d66a4d395f4315bae507a6b2",
+        "byteSize": 19,
+        "mimeType": "application/json",
+        "kind": "evidence-input"
+      }
+    ]
+  },
+  "openAssumptions": [
+    {
+      "id": "OA-W0-01",
+      "description": "Golden Master comparison is synthetic for the HELLO program until GnuCOBOL fixtures are generated in-tree.",
+      "owner": "build-test-runner-service"
+    }
+  ],
+  "unsupportedFeatures": [
+    {
+      "feature": "COBOL CALL chains across multiple programs",
+      "context": "W0 single-program corpus only."
+    }
+  ],
+  "validation": {
+    "ok": true,
+    "requiredArtifacts": [
+      "sourceCobol",
+      "semanticIr",
+      "generatedJava",
+      "buildTestResults",
+      "harnessEvents",
+      "modelInvocations"
+    ],
+    "missingArtifacts": []
+  }
+}

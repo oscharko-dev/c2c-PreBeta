@@ -232,6 +232,7 @@ vendor/
 
 # Runtime data artifacts
 services/agentic-harness-core/data/*.jsonl
+services/evidence-service/data/
 
 # Local generated supply-chain/build outputs
 artifacts/*.json

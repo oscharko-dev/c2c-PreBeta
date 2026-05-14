@@ -1,0 +1,291 @@
+openapi: 3.0.3
+info:
+  title: c2c evidence-service
+  version: v0
+  description: |
+    W0 service that produces Evidence Pack manifests for COBOL-to-Java
+    migration runs. A manifest references every artifact (source COBOL,
+    Semantic IR, generated Java, model invocations, build/test results,
+    Harness events, Experience Events, SBOM, license reports) by URI and
+    sha256 so the bundle is reproducible and auditable without exposing raw
+    secrets.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+paths:
+  /v0/health:
+    get:
+      summary: Service health probe
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  service: { type: string }
+
+  /v0/ready:
+    get:
+      summary: Readiness probe with service stats
+      responses:
+        "200":
+          description: ok
+
+  /v0/packs:
+    get:
+      summary: List Evidence Pack manifests
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EvidencePackManifest" }
+    post:
+      summary: Create a new Evidence Pack manifest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInput" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvidencePackManifest" }
+        "400":
+          description: validation error
+
+  /v0/packs/{packId}:
+    parameters:
+      - in: path
+        name: packId
+        required: true
+        schema: { type: string }
+    get:
+      summary: Read manifest by pack id
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvidencePackManifest" }
+        "404": { description: not found }
+    patch:
+      summary: Accrue artifacts onto an existing pack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchInput" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvidencePackManifest" }
+        "400": { description: validation error }
+        "404": { description: not found }
+
+  /v0/packs/{packId}/validate:
+    parameters:
+      - in: path
+        name: packId
+        required: true
+        schema: { type: string }
+    post:
+      summary: Re-evaluate validation rules against the latest manifest
+      responses:
+        "200":
+          description: validation ok
+        "422":
+          description: missing required W0 artifacts
+
+  /v0/packs/{packId}/export:
+    parameters:
+      - in: path
+        name: packId
+        required: true
+        schema: { type: string }
+    post:
+      summary: Export the manifest as a directory or tar archive
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format:
+                  type: string
+                  enum: [directory, tar]
+                destination:
+                  type: string
+                  description: |
+                    Optional relative or absolute path. Absolute paths must
+                    stay inside the configured EVIDENCE_EXPORT_DIR; relative
+                    paths are resolved against it.
+      responses:
+        "200":
+          description: exported
+        "400":
+          description: invalid destination
+        "422":
+          description: pack is incomplete and cannot be exported
+
+  /v0/events:
+    get:
+      summary: List Harness events emitted by this service
+      responses:
+        "200":
+          description: ok
+
+components:
+  schemas:
+    DataReference:
+      type: object
+      required: [uri, sha256, byteSize]
+      properties:
+        uri: { type: string }
+        sha256: { type: string, pattern: "^[0-9a-fA-F]{64}$" }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+
+    CreateInput:
+      type: object
+      required: [runId]
+      properties:
+        runId: { type: string }
+        workflowId: { type: string }
+        summary: { type: string }
+        createdBy: { type: string }
+        artifacts: { $ref: "#/components/schemas/Artifacts" }
+        openAssumptions: { type: array, items: { $ref: "#/components/schemas/OpenAssumption" } }
+        unsupportedFeatures: { type: array, items: { $ref: "#/components/schemas/UnsupportedFeature" } }
+
+    PatchInput:
+      type: object
+      properties:
+        summary: { type: string }
+        artifacts: { $ref: "#/components/schemas/Artifacts" }
+        openAssumptions: { type: array, items: { $ref: "#/components/schemas/OpenAssumption" } }
+        unsupportedFeatures: { type: array, items: { $ref: "#/components/schemas/UnsupportedFeature" } }
+
+    Artifacts:
+      type: object
+      properties:
+        sourceCobol: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+        corpusMetadata: { $ref: "#/components/schemas/DataReference" }
+        semanticIr: { $ref: "#/components/schemas/DataReference" }
+        transformationPasses: { type: array, items: { $ref: "#/components/schemas/TransformationPass" } }
+        generatedJava: { $ref: "#/components/schemas/DataReference" }
+        runtimeVersion: { $ref: "#/components/schemas/RuntimeVersion" }
+        modelInvocations: { type: array, items: { $ref: "#/components/schemas/ModelInvocationRef" } }
+        buildTestResults: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+        sbom: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+        licenseReports: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+        harnessEvents: { $ref: "#/components/schemas/DataReference" }
+        trajectoryLedger: { $ref: "#/components/schemas/DataReference" }
+        experienceEvents: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+
+    TransformationPass:
+      type: object
+      required: [name, outputRef]
+      properties:
+        name: { type: string }
+        order: { type: integer, minimum: 0 }
+        inputRef: { $ref: "#/components/schemas/DataReference" }
+        outputRef: { $ref: "#/components/schemas/DataReference" }
+        policyDecision: { type: string }
+
+    RuntimeVersion:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        ref: { $ref: "#/components/schemas/DataReference" }
+
+    ModelInvocationRef:
+      type: object
+      required: [invocationId, modelId, ledgerRef]
+      properties:
+        invocationId: { type: string }
+        modelId: { type: string }
+        provider: { type: string }
+        promptTemplateVersion: { type: string }
+        status: { type: string }
+        ledgerRef: { $ref: "#/components/schemas/DataReference" }
+
+    OpenAssumption:
+      type: object
+      required: [id, description]
+      properties:
+        id: { type: string }
+        description: { type: string }
+        owner: { type: string }
+
+    UnsupportedFeature:
+      type: object
+      required: [feature]
+      properties:
+        feature: { type: string }
+        context: { type: string }
+        sourceRef: { $ref: "#/components/schemas/DataReference" }
+
+    ValidationResult:
+      type: object
+      required: [ok, requiredArtifacts, missingArtifacts]
+      properties:
+        ok: { type: boolean }
+        requiredArtifacts: { type: array, items: { type: string } }
+        missingArtifacts: { type: array, items: { type: string } }
+        messages: { type: array, items: { type: string } }
+
+    EvidencePackManifest:
+      type: object
+      required:
+        - schemaVersion
+        - capability
+        - service
+        - packId
+        - runId
+        - wave
+        - status
+        - createdAt
+        - artifacts
+        - validation
+      properties:
+        schemaVersion: { type: string, enum: [v0] }
+        capability: { type: string, enum: [evidence.pack] }
+        service: { type: string }
+        packId: { type: string }
+        runId: { type: string }
+        workflowId: { type: string }
+        wave: { type: string, enum: [w0] }
+        status: { type: string, enum: [complete, incomplete, invalid] }
+        summary: { type: string }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        artifacts: { $ref: "#/components/schemas/Artifacts" }
+        openAssumptions: { type: array, items: { $ref: "#/components/schemas/OpenAssumption" } }
+        unsupportedFeatures: { type: array, items: { $ref: "#/components/schemas/UnsupportedFeature" } }
+        validation: { $ref: "#/components/schemas/ValidationResult" }
+        exports:
+          type: array
+          items:
+            type: object
+            required: [format, uri, createdAt]
+            properties:
+              format: { type: string, enum: [directory, tar] }
+              uri: { type: string }
+              sha256: { type: string }
+              byteSize: { type: integer }
+              createdAt: { type: string, format: date-time }
