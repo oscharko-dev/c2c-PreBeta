@@ -209,9 +209,14 @@ function createSourceTextSample(programId: string, sourceText: string, sourceNam
     title: sourceName ? `Transform run from ${sourceName}` : `Transform run for ${programId}`,
     description: 'Synthetic sample created from source text',
     knownDivergenceAtW0: false,
+    supportedInProductMode: true,
+    w0Subset: [],
+    oracleMode: null,
+    knownLimitations: [],
     cobolSource: sourceText,
     cobolSourcePath: `transforms/${programId}.cbl`,
     expectedOutput: '',
+    expectedOutputPath: '',
   };
 }
 
@@ -853,6 +858,14 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const sourceText = sourceTextRaw;
         const programId = resolveTransformProgramId(sourceText, typeof requestedProgramIdRaw === 'string' ? requestedProgramIdRaw : undefined);
         const sourceName = typeof sourceNameRaw === 'string' ? sourceNameRaw : undefined;
+
+        const referenceMatch = samples.get(programId);
+        if (referenceMatch && !referenceMatch.supportedInProductMode) {
+          jsonResponse(res, 400, {
+            error: `reference program ${programId} is not supportedInProductMode; refusing to dispatch through /api/v0/transform`,
+          });
+          return;
+        }
 
         try {
           const upstream = await orchestrator.startTransformRun({

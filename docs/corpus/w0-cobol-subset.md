@@ -50,3 +50,33 @@ A reference-run candidate must include at least:
 - at least one decimal or field-semantic operation (`PIC S9(.. )V..` arithmetic or scale-sensitive computation).
 
 The first W0 candidate must not be a trivial arithmetic-only example.
+
+## Reference-Program Support Contract (Issue #94)
+
+Reference programs surfaced to the c2c-ui are registered in
+[`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json).
+Each entry carries an explicit support contract so the UI cannot present an
+unsupported program as runnable:
+
+| Field | Required | Meaning |
+| ----- | -------- | ------- |
+| `programId` | always | Stable identifier (matches `PROGRAM-ID`). |
+| `title` | always | Human-readable label rendered in the reference loader. |
+| `cobolSource` | always | Repo-relative path to the COBOL source. |
+| `expectedOutputPath` | always | Repo-relative path to the expected stdout. |
+| `classification` | always | `true` (recompiled with GnuCOBOL) or `synthetic` (curated fixture). |
+| `knownDivergenceAtW0` | always | Flag for documented W0 coverage gaps. |
+| `supportedInProductMode` | always | If `true`, the UI may load and run this program through `POST /api/v0/transform`. If `false`, the UI must show it as unavailable and Start must be blocked. |
+| `w0Subset` | when supported | Non-empty list of W0 verbs the program exercises. |
+| `oracleMode` | when supported | Either `cobol-runtime` (recompile + `cobcrun` via build-test-runner) or `synthetic-fixture` (compare against the curated expected output). |
+| `knownLimitations` | always | Free-form notes; required content if `supportedInProductMode` is `false`. |
+| `rationale` | always | How the expected output was produced. |
+
+### Behavioral contract
+
+- The UI may list only `supportedInProductMode: true` programs as runnable. Unsupported entries appear under an `Unavailable` group and cannot be selected.
+- Loading a runnable reference program inserts its COBOL source into the editable left pane. Pressing Start sends that source through `POST /api/v0/transform` exactly like pasted source — there is no shortcut path keyed by `programId`.
+- The BFF refuses with `400` if a `POST /api/v0/transform` request resolves to a registered reference whose `supportedInProductMode` is `false`. This is a server-side safety net for the UI rule.
+- Golden Master fixtures may be used as additional evidence by the build-test runner, but the product path prefers the executable COBOL oracle (`oracleMode: cobol-runtime`) where available.
+
+The four shipped W0 reference programs (`BRNCH01`, `ARITH01`, `CTRLDEC01`, `BATCH01`) are all `supportedInProductMode: true`.

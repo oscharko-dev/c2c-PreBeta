@@ -4,6 +4,7 @@ import type {
   GeneratedView,
   ModeResponse,
   RunSummary,
+  SampleSummary,
   TransformResponse,
 } from './types.js';
 import {
@@ -529,6 +530,46 @@ export function limitationsSummary(
     openAssumptions: open,
     headline: 'Reported by generator for this run:',
   };
+}
+
+export interface ReferenceLoaderOption {
+  programId: string;
+  label: string;
+  disabled: boolean;
+  reason: string;
+}
+
+export interface ReferenceLoaderOptions {
+  supported: ReferenceLoaderOption[];
+  unsupported: ReferenceLoaderOption[];
+}
+
+export function referenceLoaderOptions(samples: readonly SampleSummary[]): ReferenceLoaderOptions {
+  const supported: ReferenceLoaderOption[] = [];
+  const unsupported: ReferenceLoaderOption[] = [];
+  for (const sample of samples) {
+    const tag = sample.knownDivergenceAtW0 ? ' (known W0 divergence)' : '';
+    const label = `${sample.programId} · ${sample.title}${tag}`;
+    if (sample.supportedInProductMode) {
+      supported.push({ programId: sample.programId, label, disabled: false, reason: '' });
+      continue;
+    }
+    const limitations = sample.knownLimitations.length > 0
+      ? sample.knownLimitations.join('; ')
+      : 'not supported in product mode';
+    unsupported.push({
+      programId: sample.programId,
+      label: `${label} — unavailable`,
+      disabled: true,
+      reason: limitations,
+    });
+  }
+  return { supported, unsupported };
+}
+
+export function isReferenceProgramRunnable(sample: SampleSummary | undefined): boolean {
+  if (!sample) return false;
+  return sample.supportedInProductMode === true;
 }
 
 function utf8ByteLength(text: string): number {

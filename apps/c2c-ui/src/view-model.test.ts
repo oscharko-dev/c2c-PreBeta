@@ -8,12 +8,14 @@ import {
   formatPostStartMetadata,
   formatSourceMetadata,
   generatedSummary,
+  isReferenceProgramRunnable,
   limitationsSummary,
   modeBadgeFromResponse,
   pickEntryFile,
   pipelineLine,
   PLACEHOLDER_JAVA_MARKERS,
   productReadiness,
+  referenceLoaderOptions,
   runStatusChip,
   runStatusLine,
   sourceMetadata,
@@ -25,6 +27,7 @@ import type {
   GeneratedView,
   ModeResponse,
   RunSummary,
+  SampleSummary,
   TransformResponse,
 } from './types.js';
 
@@ -503,4 +506,63 @@ test('limitationsSummary lists generator-reported issues only in live mode', () 
 
   const idle = limitationsSummary(undefined, undefined);
   assert.equal(idle.state, 'idle');
+});
+
+function makeSample(overrides: Partial<SampleSummary> = {}): SampleSummary {
+  return {
+    programId: 'REF01',
+    title: 'Reference one',
+    description: 'fixture',
+    knownDivergenceAtW0: false,
+    supportedInProductMode: true,
+    w0Subset: ['DISPLAY'],
+    oracleMode: 'synthetic-fixture',
+    knownLimitations: [],
+    ...overrides,
+  };
+}
+
+test('referenceLoaderOptions splits supported and unsupported reference programs', () => {
+  const supported = makeSample();
+  const unsupported = makeSample({
+    programId: 'UNSUP01',
+    supportedInProductMode: false,
+    w0Subset: [],
+    oracleMode: null,
+    knownLimitations: ['no W0 coverage for FILE handling'],
+  });
+  const result = referenceLoaderOptions([supported, unsupported]);
+  assert.equal(result.supported.length, 1);
+  assert.equal(result.supported[0]?.programId, 'REF01');
+  assert.equal(result.supported[0]?.disabled, false);
+  assert.equal(result.unsupported.length, 1);
+  assert.equal(result.unsupported[0]?.programId, 'UNSUP01');
+  assert.equal(result.unsupported[0]?.disabled, true);
+  assert.match(result.unsupported[0]?.reason ?? '', /FILE handling/);
+  assert.match(result.unsupported[0]?.label ?? '', /unavailable/);
+});
+
+test('referenceLoaderOptions surfaces the knownDivergenceAtW0 tag in the label', () => {
+  const divergent = makeSample({ programId: 'DIV01', knownDivergenceAtW0: true });
+  const result = referenceLoaderOptions([divergent]);
+  assert.match(result.supported[0]?.label ?? '', /known W0 divergence/);
+});
+
+test('referenceLoaderOptions falls back to a generic reason when an unsupported entry has no limitations', () => {
+  const unsupported = makeSample({
+    programId: 'UNSUP02',
+    supportedInProductMode: false,
+    w0Subset: [],
+    oracleMode: null,
+    knownLimitations: [],
+  });
+  const result = referenceLoaderOptions([unsupported]);
+  assert.equal(result.unsupported[0]?.reason, 'not supported in product mode');
+});
+
+test('isReferenceProgramRunnable returns false for missing or unsupported samples', () => {
+  assert.equal(isReferenceProgramRunnable(undefined), false);
+  const unsupported = makeSample({ supportedInProductMode: false });
+  assert.equal(isReferenceProgramRunnable(unsupported), false);
+  assert.equal(isReferenceProgramRunnable(makeSample()), true);
 });

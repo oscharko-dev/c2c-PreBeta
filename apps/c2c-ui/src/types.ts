@@ -8,17 +8,24 @@ export interface ModeResponse {
   evidence: 'live' | 'mock';
 }
 
+export type OracleMode = 'cobol-runtime' | 'synthetic-fixture';
+
 export interface SampleSummary {
   programId: string;
   title: string;
   description: string;
   knownDivergenceAtW0: boolean;
+  supportedInProductMode: boolean;
+  w0Subset: string[];
+  oracleMode: OracleMode | null;
+  knownLimitations: string[];
 }
 
 export interface SampleDetail extends SampleSummary {
   cobolSource: string;
   cobolSourcePath: string;
   expectedOutput: string;
+  expectedOutputPath: string;
 }
 
 export interface TransformRequest {

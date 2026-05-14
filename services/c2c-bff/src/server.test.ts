@@ -27,27 +27,49 @@ const FIXED_SAMPLE: SampleDetail = {
   title: 'Branch approval guard',
   description: 'fixture sample',
   knownDivergenceAtW0: false,
+  supportedInProductMode: true,
+  w0Subset: ['MOVE', 'PERFORM', 'EVALUATE', 'ADD', 'DISPLAY'],
+  oracleMode: 'cobol-runtime',
+  knownLimitations: [],
   cobolSource: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. BRNCH01.\n',
   cobolSourcePath: 'corpus/synthetic/programs/branch-account-guard.cbl',
   expectedOutput: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n',
+  expectedOutputPath: 'corpus/synthetic/fixtures/branch-account-guard-output.txt',
 };
 
 const FIXED_SAMPLE_2: SampleDetail = {
   ...FIXED_SAMPLE,
   programId: 'BATCH01',
   knownDivergenceAtW0: false,
+  w0Subset: ['PERFORM', 'COMPUTE', 'ADD', 'DISPLAY'],
+  oracleMode: 'synthetic-fixture',
 };
 
 function stubSamples(items: SampleDetail[]): SampleRegistry {
   const byId = new Map(items.map((item) => [item.programId, item]));
   return {
     list(): SampleSummary[] {
-      return items.map(({ programId, title, description, knownDivergenceAtW0 }) => ({
-        programId,
-        title,
-        description,
-        knownDivergenceAtW0,
-      }));
+      return items.map(
+        ({
+          programId,
+          title,
+          description,
+          knownDivergenceAtW0,
+          supportedInProductMode,
+          w0Subset,
+          oracleMode,
+          knownLimitations,
+        }) => ({
+          programId,
+          title,
+          description,
+          knownDivergenceAtW0,
+          supportedInProductMode,
+          w0Subset,
+          oracleMode,
+          knownLimitations,
+        }),
+      );
     },
     get(programId: string): SampleDetail | undefined {
       return byId.get(programId);
@@ -352,7 +374,7 @@ test('mode endpoint flips with upstream enabled-ness', async () => {
   }
 });
 
-test('samples list and detail return registry contents', async () => {
+test('samples list and detail return registry contents including reference-program contract', async () => {
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE, FIXED_SAMPLE_2]),
@@ -364,19 +386,126 @@ test('samples list and detail return registry contents', async () => {
   try {
     const list = await fetchJson(`${server.baseUrl}/api/v0/samples`);
     assert.equal(list.status, 200);
-    assert.deepEqual(
-      (list.body as Array<{ programId: string }>).map((entry) => entry.programId).sort(),
-      ['BATCH01', 'BRNCH01'],
-    );
+    const summaries = list.body as Array<{
+      programId: string;
+      supportedInProductMode: boolean;
+      w0Subset: string[];
+      oracleMode: string | null;
+      knownLimitations: string[];
+    }>;
+    assert.deepEqual(summaries.map((entry) => entry.programId).sort(), ['BATCH01', 'BRNCH01']);
+    for (const summary of summaries) {
+      assert.equal(summary.supportedInProductMode, true);
+      assert.ok(summary.w0Subset.length > 0, `${summary.programId} must declare w0Subset`);
+      assert.ok(
+        summary.oracleMode === 'cobol-runtime' || summary.oracleMode === 'synthetic-fixture',
+        `${summary.programId} must declare oracleMode`,
+      );
+      assert.ok(Array.isArray(summary.knownLimitations), `${summary.programId} knownLimitations array`);
+    }
 
     const detail = await fetchJson(`${server.baseUrl}/api/v0/samples/BRNCH01`);
     assert.equal(detail.status, 200);
-    const body = detail.body as { programId: string; expectedOutput: string };
+    const body = detail.body as {
+      programId: string;
+      expectedOutput: string;
+      supportedInProductMode: boolean;
+      w0Subset: string[];
+      oracleMode: string;
+    };
     assert.equal(body.programId, 'BRNCH01');
     assert.match(body.expectedOutput, /APPROVED-COUNT/);
+    assert.equal(body.supportedInProductMode, true);
+    assert.deepEqual(body.w0Subset, ['MOVE', 'PERFORM', 'EVALUATE', 'ADD', 'DISPLAY']);
+    assert.equal(body.oracleMode, 'cobol-runtime');
 
     const missing = await fetchJson(`${server.baseUrl}/api/v0/samples/UNKNOWN`);
     assert.equal(missing.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform refuses to dispatch a programId that maps to an unsupported reference', async () => {
+  const unsupported: SampleDetail = {
+    ...FIXED_SAMPLE,
+    programId: 'UNSUP01',
+    supportedInProductMode: false,
+    w0Subset: [],
+    oracleMode: null,
+    knownLimitations: ['no W0 coverage'],
+  };
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([unsupported]),
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: {
+        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. UNSUP01.\n',
+      },
+    });
+    assert.equal(response.status, 400);
+    const body = response.body as { error: string };
+    assert.match(body.error, /UNSUP01/);
+    assert.match(body.error, /supportedInProductMode/i);
+    assert.equal(calls.startTransformRun.length, 0, 'orchestrator must not be called for unsupported reference');
+  } finally {
+    await server.close();
+  }
+});
+
+test('every shipped reference program is loadable and routes its source through /api/v0/transform', async () => {
+  // Service-level integration: prove the GET /samples/:id → POST /transform path
+  // works for every shipped reference program (Issue #94 acceptance criterion).
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  const { loadSampleRegistry } = await import('./samples');
+  const realRegistry = loadSampleRegistry(repoRoot);
+  const summaries = realRegistry.list().filter((s) => s.supportedInProductMode);
+  assert.ok(summaries.length >= 4, `expected at least 4 runnable reference programs, got ${summaries.length}`);
+
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: realRegistry,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    for (const summary of summaries) {
+      const detailResp = await fetchJson(`${server.baseUrl}/api/v0/samples/${encodeURIComponent(summary.programId)}`);
+      assert.equal(detailResp.status, 200, `GET /samples/${summary.programId} must return 200`);
+      const detail = detailResp.body as { cobolSource: string; programId: string };
+      assert.ok(detail.cobolSource.length > 0, `cobolSource must be present for ${summary.programId}`);
+
+      const before = calls.startTransformRun.length;
+      const transformResp = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+        method: 'POST',
+        body: { sourceText: detail.cobolSource, programId: detail.programId },
+      });
+      assert.equal(transformResp.status, 201, `POST /transform must accept ${summary.programId}`);
+      assert.equal(
+        calls.startTransformRun.length,
+        before + 1,
+        `orchestrator.startTransformRun must be called exactly once for ${summary.programId}`,
+      );
+      const lastCall = calls.startTransformRun[calls.startTransformRun.length - 1];
+      assert.ok(lastCall, 'expected a recorded call');
+      assert.equal(lastCall.programId, detail.programId);
+      assert.equal(
+        lastCall.sourceText,
+        detail.cobolSource,
+        `orchestrator must receive the same source text the UI loaded for ${summary.programId}`,
+      );
+    }
   } finally {
     await server.close();
   }

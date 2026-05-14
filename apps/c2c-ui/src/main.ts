@@ -5,10 +5,12 @@ import {
   formatPostStartMetadata,
   formatSourceMetadata,
   generatedSummary,
+  isReferenceProgramRunnable,
   limitationsSummary,
   pickEntryFile,
   pipelineLine,
   productReadiness,
+  referenceLoaderOptions,
   runStatusChip,
   sourceMetadata,
   startButtonState,
@@ -121,25 +123,40 @@ function renderReferenceLoader(state: UiState): void {
   const select = el<HTMLSelectElement>('reference-loader');
   const previous = select.value;
   clearChildren(select);
+  const options = referenceLoaderOptions(state.samples);
   const placeholder = document.createElement('option');
   placeholder.value = '';
   placeholder.textContent = state.samples.length === 0
     ? state.samplesError
       ? `failed to load: ${state.samplesError}`
       : 'No reference programs available'
-    : 'Load reference program…';
+    : options.supported.length === 0
+      ? 'No runnable reference programs'
+      : 'Load reference program…';
   select.appendChild(placeholder);
   if (state.samplesError) {
     placeholder.disabled = true;
   }
-  for (const sample of state.samples) {
-    const option = document.createElement('option');
-    option.value = sample.programId;
-    const tag = sample.knownDivergenceAtW0 ? ' (known W0 divergence)' : '';
-    option.textContent = `${sample.programId} · ${sample.title}${tag}`;
-    select.appendChild(option);
+  for (const option of options.supported) {
+    const node = document.createElement('option');
+    node.value = option.programId;
+    node.textContent = option.label;
+    select.appendChild(node);
   }
-  if (previous && state.samples.some((s) => s.programId === previous)) {
+  if (options.unsupported.length > 0) {
+    const group = document.createElement('optgroup');
+    group.label = 'Unavailable (not supported in product mode)';
+    for (const option of options.unsupported) {
+      const node = document.createElement('option');
+      node.value = option.programId;
+      node.textContent = option.label;
+      node.disabled = true;
+      node.title = option.reason;
+      group.appendChild(node);
+    }
+    select.appendChild(group);
+  }
+  if (previous && options.supported.some((s) => s.programId === previous)) {
     select.value = previous;
   } else {
     select.value = '';
@@ -515,6 +532,13 @@ async function bootstrap(api: BffApi): Promise<void> {
   referenceLoader.addEventListener('change', async () => {
     const programId = referenceLoader.value;
     if (!programId) return;
+    const summary = state.samples.find((s) => s.programId === programId);
+    if (!isReferenceProgramRunnable(summary)) {
+      state.lastError = `reference program ${programId} is not supported in product mode`;
+      referenceLoader.value = '';
+      renderStartButton(state);
+      return;
+    }
     try {
       const sample = await api.getSample(programId);
       editor.value = sample.cobolSource;
