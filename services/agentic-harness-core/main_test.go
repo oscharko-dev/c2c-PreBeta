@@ -44,7 +44,7 @@ func TestCapabilityRegistryFlow(t *testing.T) {
 		t.Fatalf("expected get 200, got %d", res.StatusCode)
 	}
 
-	res, err = http.Post(server.URL+"/v0/capabilities/cobol.parse/validate", "application/json", bytes.NewReader([]byte(`{}`))
+	res, err = http.Post(server.URL+"/v0/capabilities/cobol.parse/validate", "application/json", bytes.NewReader([]byte(`{}`)))
 	if err != nil {
 		t.Fatalf("validate capability request failed: %v", err)
 	}

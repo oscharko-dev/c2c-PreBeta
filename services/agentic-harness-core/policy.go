@@ -71,6 +71,9 @@ func validateCapabilityFields(cap Capability) error {
 	if cap.DataClass == "" {
 		return RegistryValidationError{Reason: "capability.dataClass is required"}
 	}
+	if _, ok := allowedDataClasses[cap.DataClass]; !ok {
+		return RegistryValidationError{Reason: "capability.dataClass must be one of supported data classes"}
+	}
 	if cap.PolicyProfile == "" {
 		return RegistryValidationError{Reason: "capability.policyProfile is required"}
 	}

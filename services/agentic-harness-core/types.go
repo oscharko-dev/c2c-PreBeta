@@ -378,6 +378,7 @@ type RegisterCapabilityRequest struct {
 }
 
 type RegisterMcpServerRequest struct {
+	CallerRole  string   `json:"callerRole"`
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Endpoint    string   `json:"endpoint"`

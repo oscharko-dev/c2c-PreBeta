@@ -208,15 +208,13 @@ components:
       properties:
         status:
           type: string
-          enum: [starting, updating, completed, failed]
+          enum: [updating, completed, failed]
         updatedBy:
           type: string
         evidenceRefs:
           type: array
           items:
             type: string
-        policyDecision:
-          type: string
         message:
           type: string
     PolicyRequest:

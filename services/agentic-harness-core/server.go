@@ -242,7 +242,22 @@ func (h *HarnessService) mcpServerCollectionHandler(w http.ResponseWriter, r *ht
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
-		server := McpServer{
+			if request.CallerRole == "" {
+				request.CallerRole = "agent"
+			}
+			decision, err := h.policy.Decide(ActionRegisterCapability, request.CallerRole, map[string]string{
+				"id":        request.ID,
+				"dataClass": DataClassOther,
+			})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "policy evaluation failed"})
+				return
+			}
+			if !decision.Allowed {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": decision.Reason})
+				return
+			}
+			server := McpServer{
 			ID:           request.ID,
 			Name:         request.Name,
 			Endpoint:     request.Endpoint,
@@ -275,7 +290,7 @@ func (h *HarnessService) mcpServerCollectionHandler(w http.ResponseWriter, r *ht
 			Capability:       "agentic-harness-core",
 			DataClass:        DataClassOther,
 			RedactionProfile: ProfileControlledByHarness,
-			PolicyDecision:   "allow",
+				PolicyDecision:   decision.Reason,
 			Status:           "ok",
 			StateTransition:  "registry.registered",
 			InputRef:         requestRef,
@@ -520,10 +535,19 @@ func (h *HarnessService) eventsHandler(w http.ResponseWriter, r *http.Request) {
 		if event.SchemaVersion == "" {
 			event.SchemaVersion = EventSchemaVersionV0
 		}
-		if event.RunID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId is required"})
-			return
-		}
+			if event.RunID == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId is required"})
+				return
+			}
+			run, found := h.runStore.Get(event.RunID)
+			if !found {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId not found"})
+				return
+			}
+			if run.Status == StatusCompleted || run.Status == StatusFailed {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "run is already terminal"})
+				return
+			}
 		if event.Service == "" {
 			event.Service = ActorSystem
 		}
