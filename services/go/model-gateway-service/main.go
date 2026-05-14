@@ -32,6 +32,9 @@ func main() {
 	if cfg.azureFoundryAPIKeyRef != "" {
 		allowed.Foundry.ApiKeyRef = cfg.azureFoundryAPIKeyRef
 	}
+	if cfg.azureFoundryAPIVersion != "" {
+		allowed.Foundry.APIVersion = cfg.azureFoundryAPIVersion
+	}
 	if allowed.Mode == "" {
 		allowed.Mode = ModelProviderFoundryDevelopment
 	}

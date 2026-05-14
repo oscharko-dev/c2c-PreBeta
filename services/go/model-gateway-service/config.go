@@ -95,10 +95,11 @@ type FoundryDevelopmentAllowlist struct {
 }
 
 type ProviderFoundryConfig struct {
-	Endpoint  string `yaml:"endpoint"`
-	ApiKeyRef string `yaml:"apiKeyRef"`
-	ApiKey    string `yaml:"apiKey"`
-	TimeoutMs int64  `yaml:"timeoutMs"`
+	Endpoint   string `yaml:"endpoint"`
+	ApiKeyRef  string `yaml:"apiKeyRef"`
+	ApiKey     string `yaml:"apiKey"`
+	APIVersion string `yaml:"apiVersion"`
+	TimeoutMs  int64  `yaml:"timeoutMs"`
 }
 
 type CustomerInternalConfig struct {

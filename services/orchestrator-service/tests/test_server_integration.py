@@ -263,7 +263,24 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                     },
                 )
             elif capability == "model-gateway":
-                self._write_json(200, {"status": "ok", "advice": "Use standard profile."})
+                self._write_json(
+                    200,
+                    {
+                        "invocationId": "mg-integration-1",
+                        "runId": payload.get("runId", "run-unknown"),
+                        "modelId": payload.get("modelId", "gpt-oss-120b"),
+                        "provider": "foundry-development",
+                        "promptTemplateVersion": payload.get("promptTemplateVersion", "v1"),
+                        "status": "completed",
+                        "latencyMs": 1,
+                        "ledgerRef": {
+                            "uri": "urn:model-gateway/invocations/mg-integration-1",
+                            "sha256": "c" * 64,
+                            "byteSize": 256,
+                        },
+                        "output": {"status": "completed"},
+                    },
+                )
             else:
                 self._write_json(404, {"error": "unknown capability"})
             return
@@ -344,6 +361,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
             payload = {
                 "requester": "integration",
+                "modelPrompt": "Summarize safe migration considerations.",
                 "inputRef": {
                     "uri": "urn:integration/main.cob",
                     "source": "IDENTIFICATION DIVISION.",
@@ -384,8 +402,22 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(status_response.status, 200)
             self.assertEqual(
                 sorted(capability for capability, _ in state.capability_invocations),
-                ["build-test", "evidence", "generator", "ir", "parse"],
+                ["build-test", "evidence", "generator", "ir", "model-gateway", "parse"],
             )
+            model_payload = next(
+                payload for capability, payload in state.capability_invocations
+                if capability == "model-gateway"
+            )
+            self.assertEqual(model_payload["modelId"], "gpt-oss-120b")
+            self.assertEqual(model_payload["dataClass"], "model-gateway")
+            evidence_payload = next(
+                payload for capability, payload in state.capability_invocations
+                if capability == "evidence"
+            )
+            model_invocation = evidence_payload["artifacts"]["modelInvocations"][0]
+            self.assertEqual(model_invocation["status"], "completed")
+            self.assertEqual(model_invocation["provider"], "foundry-development")
+            self.assertEqual(model_invocation["ledgerRef"]["sha256"], "c" * 64)
             self.assertEqual(
                 sorted(entry.get("id") for entry in state.capability_registrations),
                 ["cobol.ir", "cobol.parse", "evidence.writer", "java.build-test", "java.generator", "model-gateway"],

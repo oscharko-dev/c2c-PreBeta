@@ -33,8 +33,9 @@ and experience-event summary without standing up the services.
 The W0 showcase is intentionally narrow:
 
 - Three synthetic COBOL programs, no customer source.
-- No model-gateway calls. Each manifest records the absence with a
-  `status: "skipped"` model-invocation entry rather than hiding it.
+- The demo can exercise `model-gateway-service` for a bounded Foundry
+  development invocation; disabled or over-limit runs still record explicit
+  `status: "skipped"` model-invocation entries rather than hiding them.
 - Generated stdout matches the checked-in Golden Master fixtures for the
   selected W0 subset; the acceptance bar is `classification == match`.
 - BRNCH01 is reproduced through GnuCOBOL `cobcrun`; CTRLDEC01 and BATCH01

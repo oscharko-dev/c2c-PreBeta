@@ -44,6 +44,9 @@ type inMemoryLedger struct {
 func (l *inMemoryLedger) Append(record ModelInvocationLedgerV0) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if err := record.Validate(); err != nil {
+		return err
+	}
 	l.entries = append(l.entries, record)
 	return nil
 }
@@ -183,12 +186,29 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rr.Code)
 	}
+	var response ModelInvocationResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected model invocation response json: %v", err)
+	}
 	ledger := service.ledger.(*inMemoryLedger)
 	if len(ledger.entries) != 1 {
 		t.Fatalf("expected one ledger entry, got %d", len(ledger.entries))
 	}
 	if ledger.entries[0].Status != "completed" {
 		t.Fatalf("expected ledger status completed, got %s", ledger.entries[0].Status)
+	}
+	if response.Provider != ModelProviderFoundryDevelopment {
+		t.Fatalf("expected provider %s, got %s", ModelProviderFoundryDevelopment, response.Provider)
+	}
+	if response.PromptTemplateVersion != "v1" {
+		t.Fatalf("expected prompt template v1, got %s", response.PromptTemplateVersion)
+	}
+	ledgerJSON, err := json.Marshal(ledger.entries[0])
+	if err != nil {
+		t.Fatalf("failed to marshal ledger entry: %v", err)
+	}
+	if response.LedgerRef.SHA256 != ComputeSHA256Hex(ledgerJSON) {
+		t.Fatalf("ledgerRef sha does not match persisted ledger entry")
 	}
 	events := service.events.(*inMemoryEventSink)
 	if len(events.events) != 1 {
@@ -199,6 +219,59 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 	}
 	if provider.calls != 1 {
 		t.Fatalf("expected provider call, got %d", provider.calls)
+	}
+}
+
+func TestModelGatewayService_InvokeWithAuditSinksDisabledSkipsLedgerAndEvent(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	provider := &fakeProvider{
+		output: map[string]any{"text": "ok"},
+		status: "completed",
+	}
+	service := newGatewayServiceForTest(now, provider, ModelMetadata{
+		ID:                        "foundry-gpt",
+		DeploymentName:            "foundry-dep",
+		ModelName:                 "gpt-4",
+		Version:                   "2026-01",
+		Provider:                  ModelProviderFoundryDevelopment,
+		LifecycleStatus:           "approved",
+		LicenseStatus:             "approved",
+		ApprovalExpiry:            now.Add(24 * time.Hour).Format(time.RFC3339),
+		AllowedDataClasses:        []string{"model"},
+		SupportedTemplateVersions: []string{"v1"},
+		SupportsStructuredOutput:  false,
+	}, true)
+	service.invocationLedgerEnabled = false
+	service.harnessEventEmissionEnabled = false
+
+	payload := ModelInvocationRequest{
+		RunID:                 "run-1",
+		ModelID:               "foundry-gpt",
+		Actor:                 "agent-1",
+		DataClass:             "model",
+		PromptTemplateVersion: "v1",
+		Prompt:                "Hello",
+		TimeoutMs:             1000,
+		Parameters:            map[string]any{},
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
+	req.Header.Set("content-type", "application/json")
+	rr := httptest.NewRecorder()
+
+	service.invokeHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("expected provider call, got %d", provider.calls)
+	}
+	if len(service.ledger.(*inMemoryLedger).entries) != 0 {
+		t.Fatalf("expected no ledger entries when ledger is disabled")
+	}
+	if len(service.events.(*inMemoryEventSink).events) != 0 {
+		t.Fatalf("expected no events when event emission is disabled")
 	}
 }
 
@@ -242,6 +315,9 @@ func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected status 403, got %d", rr.Code)
 	}
+	if !strings.Contains(rr.Body.String(), "modelId is not in allowlist") {
+		t.Fatalf("expected allowlist error response, got %s", rr.Body.String())
+	}
 	ledger := service.ledger.(*inMemoryLedger)
 	if len(ledger.entries) != 1 {
 		t.Fatalf("expected one ledger entry, got %d", len(ledger.entries))
@@ -251,6 +327,125 @@ func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 	}
 	if provider.calls != 0 {
 		t.Fatalf("expected no provider call, got %d", provider.calls)
+	}
+	events := service.events.(*inMemoryEventSink)
+	if len(events.events) != 1 {
+		t.Fatalf("expected one rejection event, got %d", len(events.events))
+	}
+	if events.events[0].PolicyDecision != policyDecisionDeny {
+		t.Fatalf("expected policy deny, got %s", events.events[0].PolicyDecision)
+	}
+	if events.events[0].StateTransition != "validate.rejected" {
+		t.Fatalf("expected validate.rejected transition, got %s", events.events[0].StateTransition)
+	}
+}
+
+func TestModelGatewayService_RejectsInactiveAllowlistedModel(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	provider := &fakeProvider{
+		output: map[string]any{"text": "ok"},
+		status: "completed",
+	}
+	service := newGatewayServiceForTest(now, provider, ModelMetadata{
+		ID:                        "foundry-gpt",
+		DeploymentName:            "foundry-dep",
+		ModelName:                 "gpt-4",
+		Version:                   "2026-01",
+		Provider:                  ModelProviderFoundryDevelopment,
+		LifecycleStatus:           "approved",
+		LicenseStatus:             "approved",
+		ApprovalExpiry:            now.Add(-24 * time.Hour).Format(time.RFC3339),
+		AllowedDataClasses:        []string{"model"},
+		SupportedTemplateVersions: []string{"v1"},
+		SupportsStructuredOutput:  false,
+	}, true)
+
+	payload := ModelInvocationRequest{
+		RunID:                 "run-1",
+		ModelID:               "foundry-gpt",
+		Actor:                 "agent-1",
+		DataClass:             "model",
+		PromptTemplateVersion: "v1",
+		Prompt:                "Hello",
+		TimeoutMs:             1000,
+		Parameters:            map[string]any{},
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
+	req.Header.Set("content-type", "application/json")
+	rr := httptest.NewRecorder()
+
+	service.invokeHandler(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", rr.Code)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("expected no provider call, got %d", provider.calls)
+	}
+	ledger := service.ledger.(*inMemoryLedger)
+	if len(ledger.entries) != 1 {
+		t.Fatalf("expected one ledger entry, got %d", len(ledger.entries))
+	}
+	if ledger.entries[0].Status != statusRejected {
+		t.Fatalf("expected rejected ledger status, got %s", ledger.entries[0].Status)
+	}
+}
+
+func TestModelGatewayService_RejectsMissingPromptTemplateWithoutLedgerFailure(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	provider := &fakeProvider{
+		output: map[string]any{"text": "ok"},
+		status: "completed",
+	}
+	service := newGatewayServiceForTest(now, provider, ModelMetadata{
+		ID:                        "foundry-gpt",
+		DeploymentName:            "foundry-dep",
+		ModelName:                 "gpt-4",
+		Version:                   "2026-01",
+		Provider:                  ModelProviderFoundryDevelopment,
+		LifecycleStatus:           "approved",
+		LicenseStatus:             "approved",
+		ApprovalExpiry:            now.Add(24 * time.Hour).Format(time.RFC3339),
+		AllowedDataClasses:        []string{"model"},
+		SupportedTemplateVersions: []string{"v1"},
+		SupportsStructuredOutput:  false,
+	}, true)
+
+	payload := ModelInvocationRequest{
+		RunID:      "run-1",
+		ModelID:    "foundry-gpt",
+		Actor:      "agent-1",
+		DataClass:  "model",
+		Prompt:     "Hello",
+		TimeoutMs:  1000,
+		Parameters: map[string]any{},
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
+	req.Header.Set("content-type", "application/json")
+	rr := httptest.NewRecorder()
+
+	service.invokeHandler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d with body %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "promptTemplateVersion is required") {
+		t.Fatalf("expected prompt template error response, got %s", rr.Body.String())
+	}
+	if provider.calls != 0 {
+		t.Fatalf("expected no provider call, got %d", provider.calls)
+	}
+	ledger := service.ledger.(*inMemoryLedger)
+	if len(ledger.entries) != 1 {
+		t.Fatalf("expected one ledger entry, got %d", len(ledger.entries))
+	}
+	if ledger.entries[0].Status != statusRejected {
+		t.Fatalf("expected rejected ledger status, got %s", ledger.entries[0].Status)
+	}
+	if ledger.entries[0].PromptTemplate != defaultTemplateVersion {
+		t.Fatalf("expected default prompt template on rejected ledger, got %s", ledger.entries[0].PromptTemplate)
 	}
 }
 

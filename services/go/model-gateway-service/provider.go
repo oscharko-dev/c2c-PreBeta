@@ -22,11 +22,12 @@ type ModelProvider interface {
 }
 
 type FoundryAdapter struct {
-	Endpoint  string
-	ApiKeyRef string
-	ApiKey    string
-	TimeoutMs int64
-	Client    *http.Client
+	Endpoint   string
+	ApiKeyRef  string
+	ApiKey     string
+	APIVersion string
+	TimeoutMs  int64
+	Client     *http.Client
 }
 
 func NewFoundryAdapter(cfg ProviderFoundryConfig) (*FoundryAdapter, error) {
@@ -45,12 +46,17 @@ func NewFoundryAdapter(cfg ProviderFoundryConfig) (*FoundryAdapter, error) {
 	if err != nil || reqURL.Scheme == "" || reqURL.Host == "" {
 		return nil, fmt.Errorf("foundry endpoint must be a valid absolute URL")
 	}
+	apiVersion := strings.TrimSpace(cfg.APIVersion)
+	if apiVersion == "" {
+		apiVersion = "2024-05-01-preview"
+	}
 	return &FoundryAdapter{
-		Endpoint:  cfg.Endpoint,
-		ApiKeyRef: cfg.ApiKeyRef,
-		ApiKey:    cfg.ApiKey,
-		TimeoutMs: cfg.TimeoutMs,
-		Client:    &http.Client{},
+		Endpoint:   strings.TrimRight(cfg.Endpoint, "/"),
+		ApiKeyRef:  cfg.ApiKeyRef,
+		ApiKey:     cfg.ApiKey,
+		APIVersion: apiVersion,
+		TimeoutMs:  cfg.TimeoutMs,
+		Client:     &http.Client{},
 	}, nil
 }
 
@@ -63,20 +69,32 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 	defer cancel()
 
 	payload := map[string]any{
-		"modelId": model.ID,
-		"deployment": model.DeploymentName,
-		"version": model.Version,
-		"prompt": request.Prompt,
-		"timeoutMs": request.TimeoutMs,
-		"templateVersion": request.PromptTemplateVersion,
-		"structuredOutput": request.StructuredOutput,
-		"parameters": request.Parameters,
+		"messages": []map[string]string{
+			{
+				"role":    "system",
+				"content": "Provide concise, audit-safe migration guidance. Do not include secrets or raw source payloads.",
+			},
+			{
+				"role":    "user",
+				"content": request.Prompt,
+			},
+		},
+	}
+	if temperature, ok := request.Parameters["temperature"]; ok {
+		payload["temperature"] = temperature
+	}
+	if maxTokens, ok := request.Parameters["max_tokens"]; ok {
+		payload["max_tokens"] = maxTokens
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return ModelInvocationOutput{}, fmt.Errorf("marshal foundry request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.Endpoint+"/v1/invoke", bytes.NewReader(raw))
+	invokeURL, err := f.invokeURL(model)
+	if err != nil {
+		return ModelInvocationOutput{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, invokeURL, bytes.NewReader(raw))
 	if err != nil {
 		return ModelInvocationOutput{}, fmt.Errorf("build foundry request: %w", err)
 	}
@@ -103,7 +121,58 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 	if s, ok := parsed["status"].(string); ok && s != "" {
 		status = s
 	}
-	return ModelInvocationOutput{Data: parsed, Status: status, Metadata: map[string]any{"provider": f.Name()}}, nil
+	output := map[string]any{
+		"provider":   f.Name(),
+		"modelId":    model.ID,
+		"deployment": model.DeploymentName,
+	}
+	if text := firstChatCompletionText(parsed); text != "" {
+		output["text"] = text
+	}
+	return ModelInvocationOutput{Data: output, Status: status, Metadata: map[string]any{"provider": f.Name()}}, nil
+}
+
+func (f *FoundryAdapter) invokeURL(model ModelMetadata) (string, error) {
+	parsed, err := url.Parse(f.Endpoint)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("foundry endpoint must be a valid absolute URL")
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	deployment := url.PathEscape(model.DeploymentName)
+	if deployment == "" {
+		return "", fmt.Errorf("foundry deployment name required")
+	}
+	if strings.Contains(path, "/openai/deployments") {
+		parsed.Path = path + "/" + deployment + "/chat/completions"
+	} else {
+		parsed.Path = path + "/openai/deployments/" + deployment + "/chat/completions"
+	}
+	query := parsed.Query()
+	if strings.TrimSpace(f.APIVersion) != "" {
+		query.Set("api-version", f.APIVersion)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func firstChatCompletionText(payload map[string]any) string {
+	choices, ok := payload["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		return ""
+	}
+	first, ok := choices[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+	message, ok := first["message"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	content, ok := message["content"].(string)
+	if !ok {
+		return ""
+	}
+	return content
 }
 
 type CustomerInternalMockAdapter struct {

@@ -292,6 +292,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		record := validated.record
 		record.InvocationID = invocationID
 		record.RunID = request.RunID
+		record.Provider = s.allowlist.Mode
 		if strings.TrimSpace(record.RunID) == "" {
 			record.RunID = "unknown-run"
 		}
@@ -300,6 +301,9 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		}
 		if strings.TrimSpace(record.DataClass) == "" {
 			record.DataClass = DataClassModelGateway
+		}
+		if strings.TrimSpace(record.PromptTemplate) == "" {
+			record.PromptTemplate = defaultTemplateVersion
 		}
 		record.PolicyDecision = policyDecisionDeny
 		record.Status = statusRejected
@@ -365,6 +369,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	errorClass := ""
 	errorMessage := ""
 	if invokeErr != nil {
+		outputStatus = statusFailed
 		errorClass = "provider"
 		errorMessage = invokeErr.Error()
 	} else {
@@ -394,6 +399,12 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	record.ErrorClass = errorClass
 	record.ErrorMessage = errorMessage
 	record.CreatedAt = now
+
+	ledgerRef, refErr := ComputeSHA256RefWithURI(fmt.Sprintf("urn:model-gateway/invocations/%s", invocationID), record)
+	if refErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to compute ledger hash"})
+		return
+	}
 
 	if err := s.appendLedgerRecord(record); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -442,12 +453,15 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, ModelInvocationResponse{
-		InvocationID: invocationID,
-		RunID:        request.RunID,
-		ModelID:      request.ModelID,
-		Status:       outputStatus,
-		LatencyMs:    latencyMs,
-		Output:       outputData,
+		InvocationID:          invocationID,
+		RunID:                 request.RunID,
+		ModelID:               request.ModelID,
+		Provider:              validated.model.Provider,
+		PromptTemplateVersion: request.PromptTemplateVersion,
+		Status:                outputStatus,
+		LatencyMs:             latencyMs,
+		LedgerRef:             ledgerRef,
+		Output:                outputData,
 	})
 }
 
