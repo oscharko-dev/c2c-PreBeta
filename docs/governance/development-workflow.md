@@ -29,7 +29,8 @@ For Wave 0, we use a minimal label taxonomy:
 
 ## 5. Code Review Expectations
 - PRs must pass all CI checks before merge.
-- At least one approval is required from a project maintainer or owner.
+- For a one-owner project, PRs are merged by the issue owner after passing CI.
+- For a multi-owner project, at least one explicit approver is required.
 - PRs must focus exclusively on the linked issue. Scope creep will be rejected, and the author will be asked to create a follow-up issue.
 
 ## 6. Definition of Ready (DoR) - Wave 0
