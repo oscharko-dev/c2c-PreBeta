@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>c2c — COBOL-to-Code W0 demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>c2c · COBOL-to-Code · W0 walking skeleton</h1>
+      <div class="mode-badge" id="mode-badge" aria-live="polite" data-mode="loading">
+        loading mode…
+      </div>
+    </header>
+
+    <main class="app-main" id="app">
+      <section class="panel" aria-labelledby="picker-title">
+        <h2 id="picker-title">1. Select a COBOL sample</h2>
+        <p class="panel-help">
+          Samples come from the repo corpus and are surfaced by the BFF. No
+          customer source is uploaded in W0.
+        </p>
+        <div id="sample-picker" class="sample-picker" role="listbox" aria-label="W0 samples">
+          loading samples…
+        </div>
+        <div class="action-row">
+          <button type="button" id="start-run" disabled>
+            Start migration run
+          </button>
+          <span class="action-help" id="start-help">Pick a sample first.</span>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="status-title">
+        <h2 id="status-title">2. Harness run status</h2>
+        <p class="panel-help">
+          Status is reported by the orchestrator-service in live mode, or
+          deterministic fixtures in mock mode. The UI does not invent state.
+        </p>
+        <div id="run-status" class="run-status" data-state="idle">
+          No run yet. Pick a sample and start a run.
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="diff-title">
+        <h2 id="diff-title">3. COBOL ↔ generated Java</h2>
+        <p class="panel-help">
+          Side-by-side view. Unsupported W0 features are listed below the
+          generated panel and are not hidden.
+        </p>
+        <div class="side-by-side" id="side-by-side">
+          <div class="code-pane">
+            <header>COBOL source</header>
+            <pre id="cobol-source" class="code-pane-body">No sample loaded.</pre>
+          </div>
+          <div class="code-pane">
+            <header>Generated Java</header>
+            <pre id="generated-java" class="code-pane-body">No run yet.</pre>
+            <div class="unsupported" id="unsupported-features"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="build-test-title">
+        <h2 id="build-test-title">4. Build &amp; test</h2>
+        <p class="panel-help">
+          Outcome from build-test-runner-service. <code>match</code> means
+          the generated Java reproduced the Golden Master. Anything else is
+          either a known W0 coverage gap or an unknown regression — both are
+          shown distinctly.
+        </p>
+        <div id="build-test" class="build-test" data-status="idle">
+          No run yet.
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="evidence-title">
+        <h2 id="evidence-title">5. Evidence Pack v0</h2>
+        <p class="panel-help">
+          Reference to the Evidence Pack manifest assembled by
+          evidence-service. Missing artifacts are listed so a reviewer can
+          tell incomplete packs from complete ones at a glance.
+        </p>
+        <div id="evidence" class="evidence" data-status="idle">
+          No run yet.
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <small>
+        W0 demo surface · Issue #15 · BFF served from same origin · No customer data is accepted.
+      </small>
+    </footer>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,318 @@
+openapi: 3.1.0
+info:
+  title: c2c-bff
+  version: 0.1.0
+  description: >
+    W0 backend-for-frontend. Brokers c2c-ui calls to the W0 capability mesh
+    (orchestrator-service, evidence-service, build-test-runner-service,
+    target-java-generation-service, cobol-parser-service, semantic-ir-service,
+    agentic-harness-core). Returns a documented mock response set when
+    upstream services are not reachable so the demo runs on a fresh checkout.
+
+servers:
+  - url: http://localhost:8090
+    description: local
+
+paths:
+  /api/v0/health:
+    get:
+      summary: Service health probe
+      operationId: health
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v0/mode:
+    get:
+      summary: Report whether the BFF is in live or mock mode for each upstream
+      operationId: mode
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModeResponse"
+
+  /api/v0/samples:
+    get:
+      summary: List W0 sample COBOL programs available to the UI
+      operationId: listSamples
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Sample" }
+
+  /api/v0/samples/{programId}:
+    get:
+      summary: Fetch a sample COBOL program by id
+      operationId: getSample
+      parameters:
+        - in: path
+          name: programId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SampleDetail" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs:
+    post:
+      summary: Start a W0 migration run for a given sample
+      operationId: startRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunStartInput" }
+      responses:
+        "201":
+          description: started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunSummary" }
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}:
+    get:
+      summary: Get current state for a W0 run
+      operationId: getRun
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunSummary" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}/generated:
+    get:
+      summary: Return generated Java for side-by-side display
+      operationId: getGenerated
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GeneratedView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}/build-test:
+    get:
+      summary: Return build/test result for the run
+      operationId: getBuildTest
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuildTestView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}/evidence:
+    get:
+      summary: Return Evidence Pack manifest reference and basic stats
+      operationId: getEvidence
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvidenceView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status: { type: string, enum: [ok] }
+        service: { type: string }
+
+    ModeResponse:
+      type: object
+      required: [orchestrator, evidence]
+      properties:
+        orchestrator: { type: string, enum: [live, mock] }
+        evidence: { type: string, enum: [live, mock] }
+
+    Sample:
+      type: object
+      required: [programId, title, knownDivergenceAtW0]
+      properties:
+        programId: { type: string }
+        title: { type: string }
+        description: { type: string }
+        knownDivergenceAtW0: { type: boolean }
+
+    SampleDetail:
+      allOf:
+        - $ref: "#/components/schemas/Sample"
+        - type: object
+          required: [cobolSource, expectedOutput]
+          properties:
+            cobolSource: { type: string }
+            expectedOutput: { type: string }
+            cobolSourcePath: { type: string }
+
+    RunStartInput:
+      type: object
+      required: [programId]
+      properties:
+        programId: { type: string }
+        requester: { type: string }
+
+    RunSummary:
+      type: object
+      required: [runId, programId, status, mode, createdAt]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        status:
+          type: string
+          enum: [starting, updating, completed, failed]
+        mode: { type: string, enum: [live, mock] }
+        message: { type: string }
+        evidenceRefs:
+          type: array
+          items: { type: string }
+        policyDecision: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    GeneratedView:
+      type: object
+      required: [runId, programId, mode, status]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, mock] }
+        status:
+          type: string
+          enum: [generated, unsupported, skipped]
+        entryClass: { type: string }
+        entryFilePath: { type: string }
+        files:
+          type: object
+          additionalProperties: { type: string }
+        unsupportedFeatures:
+          type: array
+          items: { type: string }
+        openAssumptions:
+          type: array
+          items: { type: string }
+        note: { type: string }
+
+    BuildTestView:
+      type: object
+      required: [runId, programId, mode, status, classification]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, mock] }
+        status:
+          type: string
+          enum:
+            [
+              ok,
+              compile-failed,
+              run-failed,
+              output-divergence,
+              missing-golden-master,
+              skipped,
+            ]
+        classification:
+          type: string
+          enum:
+            [
+              match,
+              divergence-known-w0-coverage-gap,
+              divergence-unknown,
+              compile-error,
+              run-error,
+              skipped-no-execution,
+            ]
+        expectedOutput: { type: string }
+        actualOutput: { type: string }
+        outputRef: { type: string }
+        note: { type: string }
+
+    EvidenceView:
+      type: object
+      required: [runId, programId, mode, status]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, mock] }
+        status:
+          type: string
+          enum: [complete, incomplete]
+        packId: { type: string }
+        manifestUri: { type: string }
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        note: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
