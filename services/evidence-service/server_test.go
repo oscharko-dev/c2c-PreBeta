@@ -156,10 +156,17 @@ func TestExportDirectoryAndTar(t *testing.T) {
 		t.Fatalf("directory export: expected 200, got %d body=%s", res.StatusCode, string(body))
 	}
 	var dirResp struct {
-		Export ExportRecord `json:"export"`
+		Pack   EvidencePackManifest `json:"pack"`
+		Export ExportRecord         `json:"export"`
 	}
 	_ = json.NewDecoder(res.Body).Decode(&dirResp)
 	res.Body.Close()
+	if len(dirResp.Pack.Exports) != 1 {
+		t.Fatalf("expected 1 export record in response pack, got %d", len(dirResp.Pack.Exports))
+	}
+	if dirResp.Pack.Exports[0].SHA256 == "" {
+		t.Fatalf("expected non-empty export sha256")
+	}
 	dirPath := strings.TrimPrefix(dirResp.Export.URI, "file://")
 	if _, err := os.Stat(filepath.Join(dirPath, "manifest.json")); err != nil {
 		t.Fatalf("expected manifest.json on disk, got %v", err)
@@ -250,6 +257,46 @@ func TestValidateEndpointReportsMissing(t *testing.T) {
 	res.Body.Close()
 }
 
+func TestPatchPackNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	res := patchJSON(t, srv.URL+"/v0/packs/epk-missing-0001", PatchInput{Summary: ptr("missing")})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", res.StatusCode)
+	}
+}
+
+func TestEventsEndpointReturnsEmittedEvents(t *testing.T) {
+	srv, _ := newTestServer(t)
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-events",
+		Artifacts: completeArtifacts(t),
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	res, err := http.Get(srv.URL + "/v0/events")
+	if err != nil {
+		t.Fatalf("get events: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+	var events []HarnessEvent
+	if err := json.NewDecoder(res.Body).Decode(&events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatalf("expected at least one event")
+	}
+	if events[0].EventType != EventTypePackCreated {
+		t.Fatalf("unexpected event type: %s", events[0].EventType)
+	}
+}
+
 func TestJSONLEventSinkPersistsEvents(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "events.jsonl")
@@ -311,3 +358,5 @@ func patchJSON(t *testing.T, url string, payload any) *http.Response {
 	}
 	return res
 }
+
+func ptr[T any](v T) *T { return &v }

@@ -241,3 +241,6 @@ var/
 # Local generated supply-chain/build outputs
 artifacts/*.json
 **/dependency-reduced-pom.xml
+
+# TypeScript test transpilation output
+apps/c2c-ui/dist-test/
