@@ -260,6 +260,10 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	start := now
 	invocationID := newInvocationID(now)
 
+	// validateInvocation always returns a fully populated validatedInvocation
+	// value (record pre-seeded) even on error, so accessing validated.record
+	// on the err != nil path is safe.
+	//goland:noinspection GoDfaErrorMayBeNotNil
 	validated, err := s.validateInvocation(request, requestRef)
 	if err != nil {
 		record := validated.record

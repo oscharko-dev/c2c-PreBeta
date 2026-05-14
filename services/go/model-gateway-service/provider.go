@@ -109,7 +109,7 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 	if err != nil {
 		return ModelInvocationOutput{}, fmt.Errorf("call foundry endpoint failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ModelInvocationOutput{}, fmt.Errorf("foundry endpoint responded with %d", resp.StatusCode)
 	}

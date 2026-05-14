@@ -194,11 +194,12 @@ func (e *Exporter) exportTar(manifest *EvidencePackManifest, path string) (Expor
 	if err != nil {
 		return ExportRecord{}, fmt.Errorf("create archive file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	hash := sha256.New()
 	writer := io.MultiWriter(f, hash)
 	tw := tar.NewWriter(writer)
+	defer func() { _ = tw.Close() }()
 	header := &tar.Header{
 		Name:    manifestFileName,
 		Mode:    0o644,
