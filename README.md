@@ -1,4 +1,127 @@
-# c2c : AI-First COBOL to Code 
+# c2c : AI-First COBOL-to-Code
+
 Experience Learning Harness · Open Source · Open Weight · EU Sovereignty
 
-Think Big, Start Small!
+Think Big, Start Small.
+
+This repository is the W0 platform foundation for a polyglot service mesh that prepares and validates COBOL-to-code migrations.
+The initial walking skeleton is intentionally constrained, deterministic, and reproducible.
+
+## W0 Repository Architecture
+
+The W0 architecture is organized as a microservice repository with one service skeleton per supported runtime:
+
+- `services/java/w0-service` (Java 21 + Maven)
+- `services/go/w0-service` (Go 1.22 + Modules)
+- `services/python/w0-service` (Python 3.12 + stdlib tests)
+- `services/typescript/w0-service` (TypeScript + Node 20)
+
+W0 remains **Java-first for platform orchestration**, while every additional target language must follow the
+`target-generator contract` defined in this repository (scripts, folder layout, artifact naming, and CI checks).
+
+## Bootstrap (Local)
+
+A clean checkout can be prepared with:
+
+```bash
+./scripts/bootstrap.sh
+./scripts/validate-platform.sh
+```
+
+### Required tooling (optional per language when you touch that service)
+
+- Bash-compatible shell
+- Git 2.31+
+- Java 21 + Maven 3.9+
+- Go 1.22+
+- Python 3.12+
+- Node.js 20+
+- Docker (for container checks and local image builds)
+
+The bootstrap script verifies repository health and prints per-service command helpers.
+
+## Service commands
+
+```bash
+# Java
+./scripts/java-check.sh
+
+# Go
+./scripts/go-check.sh
+
+# Python
+./scripts/python-check.sh
+
+# TypeScript
+./scripts/typescript-check.sh
+```
+
+### Shared checks
+
+```bash
+# Security + dependency visibility baseline
+./scripts/license-sbom.sh
+
+# Full local verification (best effort)
+./scripts/ci-checks.sh
+```
+
+## CI and quality gates
+
+Pull request CI runs:
+
+- Repository hygiene and bootstrap validation
+- Per-language lint and unit-test gate (service touched in W0 layout)
+- Secret scan baseline (`patterns.yaml` + `secret` linter)
+- Dependency manifest generation
+- License + SBOM artifact generation
+
+The baseline is intentionally lightweight for W0 and tuned for predictability.
+
+## Artifact and versioning
+
+W0 artifacts are versioned by convention using SemVer + git revision:
+
+`<service>-<lang>-v<major>.<minor>.<patch>-<sha>-<yyyymmddThhmmssZ>`
+
+Examples:
+
+- `w0-service-java-v0.1.0-7f3c2a1-20260514T101010Z`
+- `w0-service-python-v0.1.0-7f3c2a1-20260514T101010Z`
+
+The canonical version source is `artifacts/build-metadata.json`, produced by the CI scripts.
+
+## Repo layout map
+
+```text
+.github/
+  workflows/
+    ci.yml                 # foundational pull checks
+    platform-baseline.yml  # language, supply-chain and artifact gates
+services/
+  go/w0-service/
+  java/w0-service/
+  python/w0-service/
+  typescript/w0-service/
+scripts/
+  bootstrap.sh
+  ci-checks.sh
+  go-check.sh
+  java-check.sh
+  license-sbom.sh
+  python-check.sh
+  typescript-check.sh
+  secret-scan.sh
+  build-metadata.sh
+docs/
+  corpus/
+  governance/
+  adr/
+```
+
+## W0 safety constraints
+
+- No customer source code in W0.
+- No externally sourced data is required to run W0 services.
+- Public examples and templates used here are only those explicitly approved for W0.
+- Every change must be traceable to an issue and PR.
