@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/experience-event-v0.json",
+  "title": "Experience Event v0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "service",
+    "runId",
+    "actor",
+    "capability",
+    "dataClass",
+    "redactionProfile",
+    "policyDecision",
+    "status",
+    "stateTransition",
+    "pattern",
+    "patternFingerprint",
+    "occurrences",
+    "confidence",
+    "observationOnly",
+    "policyVersion",
+    "createdAt",
+    "observedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "eventType": {
+      "type": "string",
+      "minLength": 1
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataClass": {
+      "type": "string",
+      "enum": ["model", "evidence", "rag", "graph", "parser", "generator", "build-test", "test", "model-gateway", "other"]
+    },
+    "redactionProfile": {
+      "type": "string",
+      "enum": ["harness-control-plane", "agent-managed", "none"]
+    },
+    "policyDecision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["observed", "ignored"]
+    },
+    "stateTransition": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputHash": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "outputHash": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "pattern": {
+      "type": "string",
+      "minLength": 1
+    },
+    "patternFingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "buildTestOutcome": {
+      "type": "string"
+    },
+    "occurrences": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "firstStepId": {
+      "type": "integer"
+    },
+    "lastStepId": {
+      "type": "integer"
+    },
+    "relatedRecords": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "observationOnly": {
+      "type": "boolean"
+    },
+    "policyVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true
+}

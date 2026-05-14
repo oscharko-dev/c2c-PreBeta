@@ -1,0 +1,18 @@
+schemaVersion: v0
+policyVersion: v0.1.0
+mode: observation
+observationOnly: true
+requireReviewerApproval: true
+blockPromptChanges: true
+blockModelChanges: true
+blockGeneratorChanges: true
+blockRuntimeChanges: true
+blockPolicyChanges: true
+detection:
+  minOccurrencesRepeatAction: 2
+  minOccurrencesRepeatedFailure: 2
+  minConfidence: 0.8
+  minConfidenceRepeatAction: 0.85
+  minConfidenceFailure: 0.9
+  includeBuildTestFailures: true
+
