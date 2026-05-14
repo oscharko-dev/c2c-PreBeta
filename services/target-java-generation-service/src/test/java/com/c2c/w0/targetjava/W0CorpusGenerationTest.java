@@ -40,6 +40,30 @@ class W0CorpusGenerationTest {
     }
 
     @Test
+    void generatedProjectBuildsWithMavenLifecycle() throws Exception {
+        Path repoRoot = findRepoRoot();
+        Path fixture = repoRoot.resolve("fixtures/semantic-ir/branch-account-guard.ir.json");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ir = JSON.readValue(Files.readString(fixture), Map.class);
+
+        Map<String, Object> response = service.generate(Map.of("runId", "run-corpus-lifecycle", "ir", ir));
+        assertEquals("ok", response.get("status"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> generated = (Map<String, Object>) response.get("generatedProject");
+        @SuppressWarnings("unchecked")
+        Map<String, String> files = (Map<String, String>) generated.get("files");
+
+        Path projectDir = Files.createTempDirectory("c2c-generated-project-");
+        try {
+            writeGeneratedProject(projectDir, files);
+            runMavenPackage(projectDir);
+        } finally {
+            deleteRecursively(projectDir);
+        }
+    }
+
+    @Test
     void runtimeImportIsPresentAndAssumptionRegistryUsable() throws Exception {
         Path repoRoot = findRepoRoot();
         Path fixture = repoRoot.resolve("fixtures/semantic-ir/branch-account-guard.ir.json");
@@ -115,6 +139,24 @@ class W0CorpusGenerationTest {
         } finally {
             deleteRecursively(classOut);
         }
+    }
+
+    private static void writeGeneratedProject(Path projectDir, Map<String, String> files) throws IOException {
+        for (Map.Entry<String, String> entry : files.entrySet()) {
+            Path filePath = projectDir.resolve(entry.getKey());
+            Files.createDirectories(filePath.getParent());
+            Files.writeString(filePath, entry.getValue());
+        }
+    }
+
+    private static void runMavenPackage(Path projectDir) throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("mvn", "-q", "-DskipTests", "package");
+        pb.directory(projectDir.toFile());
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        String output = new String(process.getInputStream().readAllBytes());
+        int exitCode = process.waitFor();
+        assertEquals(0, exitCode, "Generated project maven package failed:\n" + output);
     }
 
     private static void deleteRecursively(Path path) {
