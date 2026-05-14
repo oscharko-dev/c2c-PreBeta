@@ -38,7 +38,8 @@ jobs:
           use-caches: true
           post-pr-comment: true
           use-annotations: true
-          upload-result: false
+          upload-result: true
+          artifact-name: qodana-report-jvm
           push-fixes: 'none'
 
   qodana-python:
@@ -63,7 +64,8 @@ jobs:
           use-caches: true
           post-pr-comment: false
           use-annotations: true
-          upload-result: false
+          upload-result: true
+          artifact-name: qodana-report-python
           push-fixes: 'none'
 
   qodana-go:
@@ -88,7 +90,8 @@ jobs:
           use-caches: true
           post-pr-comment: false
           use-annotations: true
-          upload-result: false
+          upload-result: true
+          artifact-name: qodana-report-go
           push-fixes: 'none'
 
   qodana-js:
@@ -113,5 +116,6 @@ jobs:
           use-caches: true
           post-pr-comment: false
           use-annotations: true
-          upload-result: false
+          upload-result: true
+          artifact-name: qodana-report-js
           push-fixes: 'none'
