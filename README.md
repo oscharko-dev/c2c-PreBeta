@@ -41,6 +41,45 @@ A clean checkout can be prepared with:
 
 The bootstrap script verifies repository health and prints per-service command helpers.
 
+### Local dev sweet-spot setup (recommended)
+
+Use this setup to keep development fast while retaining reproducible behavior:
+
+- Go 1.26+
+- Java 21 + Maven 3.9+
+- Rust (via `rustup`, usually latest stable)
+- Docker for container/runtime validation
+
+```bash
+# Install/refresh toolchain (macOS/Homebrew)
+brew install go maven openjdk@21 rustup-init
+
+# Configure Java 21 and Rust in this shell
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"
+export CPPFLAGS="-I/opt/homebrew/opt/openjdk@21/include"
+source "$HOME/.cargo/env"
+
+# Repository bootstrap + checks
+./scripts/bootstrap.sh
+./scripts/go-check.sh
+./scripts/java-check.sh
+./scripts/python-check.sh
+./scripts/typescript-check.sh
+./scripts/license-sbom.sh
+```
+
+Minimal validation (run on every new machine/session):
+
+```bash
+go version
+mvn -v
+java -version
+cargo --version
+docker --version
+./scripts/bootstrap.sh
+```
+
 ## Service commands
 
 ```bash
@@ -64,7 +103,13 @@ The bootstrap script verifies repository health and prints per-service command h
 ./scripts/license-sbom.sh
 
 # Full local verification (best effort)
-./scripts/ci-checks.sh
+make ci-checks
+```
+
+Alternatively:
+
+```bash
+make dev-check
 ```
 
 ## CI and quality gates
