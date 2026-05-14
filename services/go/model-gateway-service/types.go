@@ -150,6 +150,7 @@ type EventEnvelopeV0 struct {
 	EventType        string                 `json:"eventType"`
 	Service          string                 `json:"service"`
 	RunID            string                 `json:"runId"`
+	StepID           int64                  `json:"stepId"`
 	Actor            string                 `json:"actor"`
 	Capability       string                 `json:"capability"`
 	DataClass        string                 `json:"dataClass"`
@@ -178,6 +179,9 @@ func (e EventEnvelopeV0) Validate() error {
 	}
 	if strings.TrimSpace(e.RunID) == "" {
 		return SchemaValidationError{Path: "runId", Reason: "required"}
+	}
+	if e.StepID <= 0 {
+		return SchemaValidationError{Path: "stepId", Reason: "required and must be > 0"}
 	}
 	if e.CreatedAt.IsZero() {
 		return SchemaValidationError{Path: "createdAt", Reason: "required"}

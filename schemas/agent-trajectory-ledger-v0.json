@@ -52,6 +52,8 @@
           "eventType",
           "stateTransition",
           "status",
+          "inputRef",
+          "outputRef",
           "createdAt"
         ],
         "properties": {
@@ -87,6 +89,19 @@
             "type": "string",
             "minLength": 1
           },
+          "errorClass": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inputRef": { "$ref": "#/$defs/dataReference" },
+          "outputRef": { "$ref": "#/$defs/dataReference" },
+          "relatedRecords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -96,5 +111,19 @@
       }
     }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "$defs": {
+    "dataReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
 }

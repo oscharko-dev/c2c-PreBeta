@@ -223,6 +223,10 @@ type AgentTrajectoryEntry struct {
 	EventType       string    `json:"eventType"`
 	StateTransition string    `json:"stateTransition"`
 	Status          string    `json:"status"`
+	ErrorClass      string    `json:"errorClass,omitempty"`
+	InputRef        EventReference `json:"inputRef"`
+	OutputRef       EventReference `json:"outputRef"`
+	RelatedRecords  []string  `json:"relatedRecords,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
@@ -271,6 +275,12 @@ func (l AgentTrajectoryLedgerV0) Validate() error {
 		if _, ok := allowedDataClasses[step.DataClass]; !ok {
 			return SchemaValidationError{Path: "steps.dataClass", Reason: fmt.Sprintf("step[%d] has unsupported dataClass", i)}
 		}
+		if err := step.InputRef.Validate(); err != nil {
+			return err
+		}
+		if err := step.OutputRef.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -315,6 +325,10 @@ func BuildAgentTrajectoryLedger(runID string, events []EventEnvelopeV0) (AgentTr
 			EventType:       event.EventType,
 			StateTransition: event.StateTransition,
 			Status:          event.Status,
+			ErrorClass:      event.ErrorClass,
+			InputRef:        event.InputRef,
+			OutputRef:       event.OutputRef,
+			RelatedRecords:  event.RelatedRecords,
 			CreatedAt:       event.CreatedAt,
 		})
 		if event.EventType == "run.completed" || event.EventType == "run.failed" {
