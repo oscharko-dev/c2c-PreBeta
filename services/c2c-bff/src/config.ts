@@ -10,6 +10,7 @@ export interface BffConfig {
   evidenceUrl: string;
   upstreamTimeoutMs: number;
   transformSourceMaxBytes: number;
+  diagnosticMode: boolean;
 }
 
 const SERVICE_NAME = 'c2c-bff';
@@ -33,6 +34,12 @@ function parseTimeoutMs(raw: string | undefined, fallback: number): number {
     throw new Error(`invalid timeout ${JSON.stringify(raw)}`);
   }
   return value;
+}
+
+function parseBoolFlag(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
 function parseSizeBytes(raw: string | undefined, fallback: number): number {
@@ -78,5 +85,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, packageRoot: st
     evidenceUrl: env.C2C_EVIDENCE_URL?.trim() ?? '',
     upstreamTimeoutMs: parseTimeoutMs(env.C2C_UPSTREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS),
     transformSourceMaxBytes: parseSizeBytes(env.C2C_TRANSFORM_SOURCE_MAX_BYTES, DEFAULT_TRANSFORM_SOURCE_MAX_BYTES),
+    diagnosticMode: parseBoolFlag(env.C2C_DIAGNOSTIC_MODE),
   };
 }

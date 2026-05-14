@@ -3,8 +3,15 @@ info:
   title: orchestrator-service
   version: 0.1.0
   description: >
-    W0 orchestrator service that drives COBOL-to-Java workflow execution over
-    Harness capabilities.
+    W0 orchestrator service that drives COBOL-to-Java workflow execution as a
+    Harness consumer. The orchestrator is the only product workflow executor
+    for UI-started transformation runs and never bypasses the Harness
+    capability gateway. The workflow lifecycle emits Harness events
+    `orchestrator.workflow.accepted`, `orchestrator.workflow.completed`, and
+    `orchestrator.workflow.failed`. Run state transitions to `failed` when a
+    required capability is unavailable or a step (parser, IR, generator,
+    build/test, evidence) returns a non-success outcome, surfacing a
+    diagnostic message in the Harness run state.
 servers:
   - url: http://localhost:8084
     description: local
@@ -97,6 +104,12 @@ components:
           type: string
         status:
           type: string
+          description: >
+            Lifecycle status managed by orchestrator-service and persisted in
+            the Harness run record. `failed` is set when a required capability
+            cannot be resolved or any workflow step (parser, IR, generator,
+            build/test, evidence) fails; the `message` field carries the
+            diagnostic.
           enum: [starting, updating, completed, failed]
         evidenceRefs:
           type: array
@@ -106,6 +119,9 @@ components:
           type: string
         message:
           type: string
+          description: >
+            Human-readable status/diagnostic. For failed runs, includes the
+            failing step or missing capability id.
         updatedBy:
           type: string
         createdAt:

@@ -8,7 +8,15 @@ import { AddressInfo } from 'node:net';
 import { createApp } from './server';
 import { createRunStore } from './run-store';
 import type { SampleDetail, SampleRegistry, SampleSummary } from './samples';
-import type { EvidenceClient, OrchestratorClient, UpstreamResponse } from './upstream';
+import {
+  createEvidenceClient,
+  createOrchestratorClient,
+  type EvidenceClient,
+  type HttpClient,
+  type HttpRequestOptions,
+  type OrchestratorClient,
+  type UpstreamResponse,
+} from './upstream';
 import type { BffConfig } from './config';
 
 const FIXED_SAMPLE: SampleDetail = {
@@ -168,6 +176,7 @@ const baseConfig: BffConfig = {
   evidenceUrl: '',
   upstreamTimeoutMs: 1_000,
   transformSourceMaxBytes: 1_000_000,
+  diagnosticMode: false,
 };
 
 interface RunningServer {
@@ -294,11 +303,36 @@ test('samples list and detail return registry contents', async () => {
   }
 });
 
-test('starting a run in mock mode returns a completed run with mock evidence', async () => {
+test('starting a run rejects with 503 when orchestrator is missing and diagnostic mode is off', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const handler = createApp({
     config: baseConfig,
+    samples,
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const blocked = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(blocked.status, 503);
+    assert.match((blocked.body as { error: string }).error, /orchestrator URL/i);
+    assert.match((blocked.body as { error: string }).error, /C2C_DIAGNOSTIC_MODE/);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('starting a run in diagnostic mock mode returns a completed run with mock evidence', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const handler = createApp({
+    config: { ...baseConfig, diagnosticMode: true },
     samples,
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
@@ -680,6 +714,76 @@ test('transform rejects oversize source text before calling the orchestrator', a
     assert.equal(rejected.status, 413);
     assert.equal(calls.startTransformRun.length, 0);
     assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('product transform calls only orchestrator URL, never capability endpoints', async () => {
+  const observed: Array<{ url: string; method: string }> = [];
+  const recordingHttp: HttpClient = {
+    async request(targetUrl: string, options: HttpRequestOptions): Promise<UpstreamResponse> {
+      observed.push({ url: targetUrl, method: options.method ?? 'GET' });
+      return {
+        status: 201,
+        body: {
+          run: {
+            runId: 'orch-isolation-1',
+            workflowId: 'w0-migration-v0',
+            status: 'updating',
+            policyDecision: 'allow',
+            message: 'orchestrator accepted',
+            evidenceRefs: [],
+          },
+          status: 'started',
+          message: 'orchestrator run started',
+        },
+      };
+    },
+  };
+
+  const orchestratorUrl = 'http://orchestrator.test';
+  const evidenceUrl = 'http://evidence.test';
+  const orchestrator = createOrchestratorClient(orchestratorUrl, recordingHttp, 1_000);
+  const evidence = createEvidenceClient(evidenceUrl, recordingHttp, 1_000);
+
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl, evidenceUrl },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator,
+    evidence,
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const transformed = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. ISO01.\n' },
+    });
+    assert.equal(transformed.status, 201);
+
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(started.status, 201);
+
+    assert.ok(observed.length >= 2, `expected upstream calls, observed=${observed.length}`);
+    for (const call of observed) {
+      assert.ok(
+        call.url.startsWith(orchestratorUrl) || call.url.startsWith(evidenceUrl),
+        `BFF must only call orchestrator or evidence URLs in product mode, observed ${call.method} ${call.url}`,
+      );
+    }
+    const capabilityHints = ['/v0/parse', '/v0/ir', '/v0/generate', '/v0/run-verification', '/v0/invoke'];
+    for (const call of observed) {
+      for (const hint of capabilityHints) {
+        assert.ok(
+          !call.url.endsWith(hint),
+          `BFF must not call capability endpoint ${hint} directly; observed ${call.url}`,
+        );
+      }
+    }
   } finally {
     await server.close();
   }
