@@ -20,6 +20,15 @@ exclude:
   # recognise the synthesised method and flags every dataclass class.
   - name: PyClassHasNoInitInspection
 
+  # The qodana-python linter flags valid `Optional[Mapping[str, X]] = None`
+  # PEP 484 annotations as "Invalid type argument" because it does not
+  # resolve the project's Python 3.12 interpreter (pyproject.toml present
+  # but not honoured by the linter image). Suppress narrowly to the
+  # orchestrator-service package where these annotations live.
+  - name: PyTypeHintsInspection
+    paths:
+      - services/orchestrator-service
+
   # Custom internal control-plane headers (X-Harness-Actor, X-Harness-Role)
   # are project convention; the inspector only validates RFC-registered
   # header names.
@@ -29,7 +38,20 @@ exclude:
   # defer chains. Production code paths still fail the inspection.
   - name: GoUnhandledErrorResult
     paths:
-      - "**/*_test.go"
+      - services/agentic-harness-core/main_test.go
+      - services/agentic-harness-core/events_schema_test.go
+      - services/evidence-service/server_test.go
+      - services/evidence-service/concurrency_test.go
+      - services/evidence-service/hardening_test.go
+      - services/evidence-service/sample_test.go
+
+  # validateInvocation always returns a fully populated value struct
+  # (record pre-seeded) even on error, so accessing validated.record on
+  # the err != nil path is safe. The //goland:noinspection comment in
+  # source is not honoured by the qodana-go linter image.
+  - name: GoDfaErrorMayBeNotNil
+    paths:
+      - services/go/model-gateway-service/server.go
 
   # Qodana's qodana-jvm linter does not honour //noinspection comments for
   # this rule. The single remaining ScheduledExecutorService allocation in
@@ -38,4 +60,4 @@ exclude:
   # semantics. Scope the exclusion narrowly.
   - name: AutoCloseableResource
     paths:
-      - "services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/GeneratedProgramRunner.java"
+      - services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/GeneratedProgramRunner.java
