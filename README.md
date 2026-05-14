@@ -171,6 +171,8 @@ docs/
 
 ## W0 safety constraints
 
+See CONTRIBUTING.md for issue, branch, PR, and ADR workflow entrypoints.
+
 - No customer source code in W0.
 - No externally sourced data is required to run W0 services.
 - Public examples and templates used here are only those explicitly approved for W0.
