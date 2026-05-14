@@ -8,6 +8,6 @@ class ServiceAppTest {
     @Test
     void computeNetMatchesExpected() {
         double net = ServiceApp.computeNet(125.75, 8, 0.1887);
-        assertEquals(816.31, net, 0.001);
+        assertEquals(816.17, net, 0.001);
     }
 }
