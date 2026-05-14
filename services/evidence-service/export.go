@@ -75,6 +75,12 @@ func (e *Exporter) resolveDestination(packID, format, requested string) (string,
 	if err != nil {
 		return "", fmt.Errorf("resolve export base directory: %w", err)
 	}
+	// Normalize the base through EvalSymlinks so the containment check
+	// compares against the canonical on-disk path (matters on macOS where
+	// /tmp -> /private/tmp).
+	if resolved, err := filepath.EvalSymlinks(absBase); err == nil {
+		absBase = resolved
+	}
 
 	var candidate string
 	if strings.TrimSpace(requested) == "" {
@@ -96,10 +102,61 @@ func (e *Exporter) resolveDestination(packID, format, requested string) (string,
 	if err != nil {
 		return "", fmt.Errorf("resolve export destination: %w", err)
 	}
-	if !strings.HasPrefix(absCandidate+string(os.PathSeparator), absBase+string(os.PathSeparator)) && absCandidate != absBase {
+	// Resolve symlinks on the longest ancestor of the candidate that exists
+	// today; this catches a pre-existing symlink under the export root that
+	// would otherwise be used to escape it on write.
+	resolvedAncestor, err := resolveExistingAncestor(absCandidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve export destination ancestors: %w", err)
+	}
+	if err := assertWithinBase(absBase, resolvedAncestor); err != nil {
 		return "", fieldError("destination", "destination must stay inside the configured export root")
 	}
-	return absCandidate, nil
+	return resolvedAncestor, nil
+}
+
+func assertWithinBase(absBase, absCandidate string) error {
+	sep := string(os.PathSeparator)
+	if absCandidate == absBase {
+		return nil
+	}
+	if strings.HasPrefix(absCandidate+sep, absBase+sep) {
+		return nil
+	}
+	return fieldError("destination", "destination must stay inside the configured export root")
+}
+
+// resolveExistingAncestor walks up the path until it finds an existing
+// directory, runs EvalSymlinks on it, and re-attaches the not-yet-existing
+// suffix. This lets the containment check see through symlinks that already
+// exist on disk without failing when the final target hasn't been created
+// yet (which is the normal case for fresh exports).
+func resolveExistingAncestor(absCandidate string) (string, error) {
+	current := absCandidate
+	suffixParts := make([]string, 0, 4)
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", err
+			}
+			for i := len(suffixParts) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffixParts[i])
+			}
+			_ = info
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return absCandidate, nil
+		}
+		suffixParts = append(suffixParts, filepath.Base(current))
+		current = parent
+	}
 }
 
 func (e *Exporter) exportDirectory(manifest *EvidencePackManifest, dir string) (ExportRecord, error) {
