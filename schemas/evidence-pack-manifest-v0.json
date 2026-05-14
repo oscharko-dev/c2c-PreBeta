@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/evidence-pack-manifest-v0.json",
+  "title": "Evidence Pack Manifest v0",
+  "description": "Reproducible, auditable artifact bundle produced by evidence-service for one W0 COBOL-to-Java migration run. References every input, transformation, generation, runtime, model invocation, and verification step by content hash so the bundle can be re-assembled or re-verified later without exposing raw secrets or payloads.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "capability",
+    "service",
+    "packId",
+    "runId",
+    "status",
+    "wave",
+    "createdAt",
+    "artifacts",
+    "validation"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "capability": {
+      "type": "string",
+      "const": "evidence.pack"
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "packId": {
+      "type": "string",
+      "pattern": "^epk-[A-Za-z0-9._-]+$"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string"
+    },
+    "wave": {
+      "type": "string",
+      "const": "w0"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["complete", "incomplete", "invalid"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "createdBy": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "sourceCobol",
+        "semanticIr",
+        "generatedJava",
+        "buildTestResults",
+        "harnessEvents",
+        "modelInvocations"
+      ],
+      "properties": {
+        "sourceCobol": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/dataReference" }
+        },
+        "corpusMetadata": { "$ref": "#/$defs/dataReference" },
+        "semanticIr": { "$ref": "#/$defs/dataReference" },
+        "transformationPasses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/transformationPass" }
+        },
+        "generatedJava": { "$ref": "#/$defs/dataReference" },
+        "runtimeVersion": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "ref": { "$ref": "#/$defs/dataReference" }
+          },
+          "additionalProperties": true
+        },
+        "modelInvocations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/modelInvocationRef" }
+        },
+        "buildTestResults": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dataReference" }
+        },
+        "sbom": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dataReference" }
+        },
+        "licenseReports": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dataReference" }
+        },
+        "harnessEvents": { "$ref": "#/$defs/dataReference" },
+        "trajectoryLedger": { "$ref": "#/$defs/dataReference" },
+        "experienceEvents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dataReference" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "openAssumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "unsupportedFeatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["feature"],
+        "properties": {
+          "feature": { "type": "string", "minLength": 1 },
+          "context": { "type": "string" },
+          "sourceRef": { "$ref": "#/$defs/dataReference" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["requiredArtifacts", "missingArtifacts", "ok"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "requiredArtifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "missingArtifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "messages": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "exports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["format", "uri", "createdAt"],
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": ["directory", "tar"]
+          },
+          "uri": { "type": "string", "minLength": 1 },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$"
+          },
+          "byteSize": { "type": "integer", "minimum": 0 },
+          "createdAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "dataReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "transformationPass": {
+      "type": "object",
+      "required": ["name", "outputRef"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "order": { "type": "integer", "minimum": 0 },
+        "inputRef": { "$ref": "#/$defs/dataReference" },
+        "outputRef": { "$ref": "#/$defs/dataReference" },
+        "policyDecision": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "modelInvocationRef": {
+      "type": "object",
+      "required": ["invocationId", "modelId", "ledgerRef"],
+      "properties": {
+        "invocationId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string" },
+        "promptTemplateVersion": { "type": "string" },
+        "status": { "type": "string" },
+        "ledgerRef": { "$ref": "#/$defs/dataReference" }
+      },
+      "additionalProperties": false
+    }
+  }
+}
