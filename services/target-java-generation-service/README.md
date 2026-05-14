@@ -48,6 +48,20 @@ The `outputRef` returned by the service is a SHA-256 of the canonical
 serialization of the generated files map — identical IR input yields identical
 `outputRef`.
 
+## W0 translation coverage
+
+The Java generator emits executable code for the checked-in W0 corpus subset:
+
+- working-storage fields with initial `VALUE` clauses,
+- basic `OCCURS` arrays with one-based COBOL subscripts,
+- `MOVE`, `DISPLAY`, `COMPUTE`, `ADD`, `SUBTRACT`, `MULTIPLY`, and `DIVIDE`,
+- `IF`/`ELSE` relational branches,
+- `EVALUATE`/`WHEN` including `WHEN OTHER`,
+- `PERFORM UNTIL` and `PERFORM VARYING ... UNTIL` blocks.
+
+Unsupported IR nodes still produce explicit diagnostics and assumption records
+instead of placeholders or silent fallback code.
+
 ## Harness events
 
 When `HARNESS_EVENT_ENDPOINT` is set, the service POSTs envelope-conformant

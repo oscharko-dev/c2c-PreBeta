@@ -80,6 +80,30 @@ public final class CobolField {
         this.numericValue = rescaled;
     }
 
+    /** Move a numeric literal into this field using the field's declared scale. */
+    public void moveNumericLiteral(String literal) {
+        Objects.requireNonNull(literal, "literal");
+        if (!picture.numeric()) {
+            throw new IllegalStateException(
+                    "Cannot move numeric literal into non-numeric field '" + name + "'");
+        }
+        String normalized = literal.trim();
+        boolean signedLiteral = normalized.startsWith("-");
+        if (normalized.startsWith("+")) {
+            normalized = normalized.substring(1);
+        }
+        int literalScale = 0;
+        int dot = normalized.indexOf('.');
+        if (dot >= 0) {
+            literalScale = normalized.length() - dot - 1;
+        }
+        setNumericValue(CobolDecimal.of(normalized, literalScale, signedLiteral || picture.signed()));
+    }
+
+    public int intValueExact() {
+        return numericValue().value().intValueExact();
+    }
+
     /** Move from another field, applying COBOL conversion when categories match. */
     public void moveFrom(CobolField source) {
         Objects.requireNonNull(source, "source");
@@ -132,8 +156,8 @@ public final class CobolField {
             padded = "0".repeat(width - unscaled.length()) + unscaled;
         }
         StringBuilder out = new StringBuilder();
-        if (picture.signed()) {
-            out.append(numericValue.value().signum() < 0 ? '-' : '+');
+        if (picture.signed() && numericValue.value().signum() < 0) {
+            out.append('-');
         }
         if (picture.scale() > 0) {
             int dot = padded.length() - picture.scale();

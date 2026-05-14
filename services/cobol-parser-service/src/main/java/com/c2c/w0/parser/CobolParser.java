@@ -15,7 +15,8 @@ public final class CobolParser {
     private static final Pattern PROGRAM_ID = Pattern.compile("^PROGRAM-ID\\.?\\s+([A-Z][A-Z0-9-]*)\\.?$");
     private static final Pattern DATA_DECLARATION = Pattern.compile("^(\\d{2})\\s+([A-Z][A-Z0-9-]*)\\s*(.*)$");
     private static final Pattern OCCURS = Pattern.compile("\\bOCCURS\\s+(\\d+)\\s+TIMES\\b");
-    private static final Pattern VALUE = Pattern.compile("\\bVALUE\\s+(.+?)(?:\\.|$)");
+    private static final Pattern VALUE = Pattern.compile(
+            "\\bVALUE\\s+(\"[^\"]*\"|[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)|SPACE|SPACES|ZERO|ZEROS|ZEROES)\\b");
     private static final Pattern PICTURE = Pattern.compile("\\b(?:PIC|PICTURE)\\s+([A-Z0-9()V+-]+)");
 
     private enum Division {
@@ -220,18 +221,22 @@ public final class CobolParser {
         } else if (statementText.startsWith("IF ")) {
             kind = "IF";
             opens = true;
-            operands.put("condition", statementText.substring(3).trim());
+            String condition = statementText.substring(3).trim();
+            operands.put("condition", condition);
+            operands.put("conditionTokens", splitArguments(condition));
         } else if (statementText.startsWith("EVALUATE ")) {
             kind = "EVALUATE";
             opens = true;
             operands.put("selector", statementText.substring(9).trim());
         } else if (statementText.startsWith("WHEN ")) {
             kind = "WHEN";
-            operands.put("value", statementText.substring(5).trim());
+            String value = statementText.substring(5).trim();
+            operands.put("value", value);
+            operands.put("valueTokens", splitArguments(value));
         } else if (statementText.startsWith("PERFORM ")) {
             kind = "PERFORM";
             opens = statementText.contains(" UNTIL ") || statementText.contains(" VARYING ");
-            operands.put("tokens", List.of(statementText.split("\\s+")));
+            parsePerform(statementText, operands);
         } else if (statementText.startsWith("MOVE ")) {
             kind = "MOVE";
             parseMove(statementText, operands);
@@ -241,8 +246,10 @@ public final class CobolParser {
         } else if (statementText.startsWith("COMPUTE ")) {
             kind = "COMPUTE";
             parseAssignment(statementText.substring(8), operands);
+            operands.computeIfPresent("expression", (k, v) -> String.valueOf(v).trim());
+            operands.put("expressionTokens", splitArguments(String.valueOf(operands.getOrDefault("expression", ""))));
         } else if (List.of("ADD", "SUBTRACT", "MULTIPLY", "DIVIDE").contains(kind)) {
-            operands.put("tokens", List.of(statementText.split("\\s+")));
+            parseArithmetic(statementText, operands);
         } else if (statementText.startsWith("CALL ")) {
             kind = "CALL";
             operands.put("target", statementText.substring(5).trim());
@@ -280,6 +287,93 @@ public final class CobolParser {
         operands.put("targets", splitArguments(body.substring(to + 4)));
     }
 
+    private static void parsePerform(String statementText, Map<String, Object> operands) {
+        List<String> tokens = splitArguments(statementText);
+        operands.put("tokens", tokens);
+        if (tokens.size() >= 3 && "UNTIL".equals(tokens.get(1))) {
+            String until = String.join(" ", tokens.subList(2, tokens.size()));
+            operands.put("mode", "until");
+            operands.put("until", until);
+            operands.put("conditionTokens", splitArguments(until));
+            return;
+        }
+        if (tokens.size() >= 8 && "VARYING".equals(tokens.get(1))) {
+            int from = tokens.indexOf("FROM");
+            int by = tokens.indexOf("BY");
+            int until = tokens.indexOf("UNTIL");
+            if (from == 3 && by > from && until > by) {
+                String untilText = String.join(" ", tokens.subList(until + 1, tokens.size()));
+                operands.put("mode", "varying-until");
+                operands.put("varying", tokens.get(2));
+                operands.put("from", tokens.get(from + 1));
+                operands.put("by", tokens.get(by + 1));
+                operands.put("until", untilText);
+                operands.put("conditionTokens", splitArguments(untilText));
+            }
+        }
+    }
+
+    private static void parseArithmetic(String statementText, Map<String, Object> operands) {
+        List<String> tokens = splitArguments(statementText);
+        operands.put("tokens", tokens);
+        if (tokens.isEmpty()) {
+            return;
+        }
+        String op = tokens.get(0);
+        if ("ADD".equals(op)) {
+            int to = tokens.indexOf("TO");
+            if (to > 1 && to + 1 < tokens.size()) {
+                operands.put("sources", tokens.subList(1, to));
+                operands.put("targets", tokens.subList(to + 1, tokens.size()));
+                if (to == 2) {
+                    operands.put("source", tokens.get(1));
+                }
+                if (tokens.size() == to + 2) {
+                    operands.put("target", tokens.get(to + 1));
+                }
+            }
+            return;
+        }
+        if ("SUBTRACT".equals(op)) {
+            int from = tokens.indexOf("FROM");
+            if (from > 1 && from + 1 < tokens.size()) {
+                operands.put("sources", tokens.subList(1, from));
+                operands.put("targets", tokens.subList(from + 1, tokens.size()));
+            }
+            return;
+        }
+        if ("MULTIPLY".equals(op)) {
+            int by = tokens.indexOf("BY");
+            int giving = tokens.indexOf("GIVING");
+            if (by == 2 && by + 1 < tokens.size()) {
+                operands.put("source", tokens.get(1));
+                operands.put("by", tokens.get(by + 1));
+                if (giving > by && giving + 1 < tokens.size()) {
+                    operands.put("target", tokens.get(giving + 1));
+                } else {
+                    operands.put("target", tokens.get(by + 1));
+                }
+            }
+            return;
+        }
+        if ("DIVIDE".equals(op)) {
+            int into = tokens.indexOf("INTO");
+            int by = tokens.indexOf("BY");
+            int giving = tokens.indexOf("GIVING");
+            if (into == 2 && into + 1 < tokens.size()) {
+                operands.put("divisor", tokens.get(1));
+                operands.put("dividend", tokens.get(into + 1));
+                operands.put("target", giving > into && giving + 1 < tokens.size() ? tokens.get(giving + 1) : tokens.get(into + 1));
+            } else if (by == 2 && by + 1 < tokens.size()) {
+                operands.put("dividend", tokens.get(1));
+                operands.put("divisor", tokens.get(by + 1));
+                if (giving > by && giving + 1 < tokens.size()) {
+                    operands.put("target", tokens.get(giving + 1));
+                }
+            }
+        }
+    }
+
     private static void parseAssignment(String body, Map<String, Object> operands) {
         int equals = body.indexOf('=');
         if (equals < 0) {
@@ -291,10 +385,66 @@ public final class CobolParser {
     }
 
     private static List<String> splitArguments(String value) {
+        List<String> rawTokens = rawTokens(value);
         List<String> result = new ArrayList<>();
-        Matcher matcher = Pattern.compile("\"[^\"]*\"|\\S+").matcher(value);
-        while (matcher.find()) {
-            result.add(matcher.group());
+        for (int i = 0; i < rawTokens.size(); i++) {
+            String token = rawTokens.get(i);
+            if (i + 1 < rawTokens.size()
+                    && token.matches("[A-Z][A-Z0-9-]*")
+                    && rawTokens.get(i + 1).startsWith("(")
+                    && rawTokens.get(i + 1).endsWith(")")) {
+                result.add(token + " " + rawTokens.get(++i));
+            } else {
+                result.add(token);
+            }
+        }
+        return result;
+    }
+
+    private static List<String> rawTokens(String value) {
+        List<String> result = new ArrayList<>();
+        if (value == null || value.isBlank()) {
+            return result;
+        }
+        int i = 0;
+        while (i < value.length()) {
+            while (i < value.length() && Character.isWhitespace(value.charAt(i))) {
+                i++;
+            }
+            if (i >= value.length()) {
+                break;
+            }
+            char ch = value.charAt(i);
+            if (ch == '"') {
+                int start = i++;
+                while (i < value.length() && value.charAt(i) != '"') {
+                    i++;
+                }
+                if (i < value.length()) {
+                    i++;
+                }
+                result.add(value.substring(start, i));
+                continue;
+            }
+            if (ch == '(') {
+                int start = i++;
+                int depth = 1;
+                while (i < value.length() && depth > 0) {
+                    char next = value.charAt(i++);
+                    if (next == '(') {
+                        depth++;
+                    } else if (next == ')') {
+                        depth--;
+                    }
+                }
+                result.add(value.substring(start, i));
+                continue;
+            }
+            int start = i;
+            while (i < value.length() && !Character.isWhitespace(value.charAt(i)) && value.charAt(i) != '(') {
+                i++;
+            }
+            result.add(value.substring(start, i));
         }
         return result;
     }

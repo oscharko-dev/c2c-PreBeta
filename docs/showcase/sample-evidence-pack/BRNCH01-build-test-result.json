@@ -7,47 +7,46 @@
     "sourceCount": 1
   },
   "capability": "build-test.run",
-  "classification": "divergence-known-w0-coverage-gap",
+  "classification": "match",
   "comparison": {
-    "actualLength": 48,
-    "actualSha256": "fb65fcc642a174d7a407c5a65d8c4e94ad76e5f31937c1bf7c5071ce36f21e9c",
-    "diff": "first divergence at character 15; actualLength=47 expectedLength=33",
+    "actualLength": 34,
+    "actualSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec",
     "expectedLength": 34,
     "expectedSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec",
-    "matched": false,
+    "matched": true,
     "normalisation": "trim+crlf-to-lf"
   },
   "diagnostics": [],
   "execution": {
-    "durationMs": 1,
+    "durationMs": 3,
     "exitCode": 0,
     "ok": true,
     "ran": true,
     "stderr": "",
-    "stdout": "APPROVED-COUNT=0\nREJECTED-COUNT=0\nREJECTED-WINS\n",
-    "stdoutSha256": "fb65fcc642a174d7a407c5a65d8c4e94ad76e5f31937c1bf7c5071ce36f21e9c"
+    "stdout": "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+    "stdoutSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec"
   },
   "goldenMaster": {
     "classification": "synthetic",
     "expected": "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
     "expectedSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec",
-    "knownDivergenceAtW0": true,
+    "knownDivergenceAtW0": false,
     "source": "corpus/synthetic/fixtures/branch-account-guard-output.txt"
   },
   "outputRef": {
-    "byteSize": 1536,
+    "byteSize": 1342,
     "kind": "build-test-result",
     "mimeType": "application/json",
-    "sha256": "59be7e2e69a17dbd01fbe0fdc162589892cd1b0af43154fc26ed16c1226366fb",
-    "uri": "urn:build-test-runner-service/build-test-result/59be7e2e69a17dbd01fbe0fdc162589892cd1b0af43154fc26ed16c1226366fb"
+    "sha256": "9b0a8c0c025feea05a6636471b245f6a2fe8c5c979c987d7d64103c4cab5e6a3",
+    "uri": "urn:build-test-runner-service/build-test-result/9b0a8c0c025feea05a6636471b245f6a2fe8c5c979c987d7d64103c4cab5e6a3"
   },
   "programId": "BRNCH01",
   "runId": "run-1",
   "schemaVersion": "v0",
   "service": "build-test-runner-service",
   "sourceRef": {},
-  "status": "output-divergence",
-  "summary": "Generated stdout diverges from Golden Master; classified as a documented W0 generator coverage gap.",
+  "status": "ok",
+  "summary": "Generated stdout matched Golden Master.",
   "tests": {
     "failed": 0,
     "note": "W0 generator does not emit JUnit tests yet; the runner only exercises compile + main() execution against a Golden Master.",

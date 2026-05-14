@@ -103,19 +103,41 @@ public final class SemanticIrService {
 
     private static List<Map<String, Object>> fieldLayouts(Map<String, Object> program) {
         List<Map<String, Object>> layouts = new ArrayList<>();
+        List<Map<String, Object>> activeOccursGroups = new ArrayList<>();
         for (Map<String, Object> item : mapList(program.get("dataItems"))) {
+            int level = intValue(item.get("level"), 0);
+            activeOccursGroups.removeIf(group -> intValue(group.get("level"), 0) >= level);
+
             Map<String, Object> layout = new LinkedHashMap<>();
             layout.put("id", item.get("id"));
             layout.put("name", item.get("name"));
-            layout.put("level", item.get("level"));
+            layout.put("level", level);
             layout.put("picture", item.get("picture"));
             layout.put("byteSize", item.get("byteSize"));
-            layout.put("occurs", item.get("occurs"));
+            Object ownOccurs = item.get("occurs");
+            Object inheritedOccurs = activeOccursGroups.isEmpty()
+                    ? null
+                    : activeOccursGroups.get(activeOccursGroups.size() - 1).get("occurs");
+            Object effectiveOccurs = ownOccurs == null ? inheritedOccurs : ownOccurs;
+            layout.put("occurs", effectiveOccurs);
+            if (ownOccurs == null && inheritedOccurs != null) {
+                Map<String, Object> parent = activeOccursGroups.get(activeOccursGroups.size() - 1);
+                layout.put("occursParent", parent.get("name"));
+                layout.put("occursParentLevel", parent.get("level"));
+            }
             layout.put("numeric", item.get("numeric"));
             layout.put("signed", item.get("signed"));
             layout.put("scale", item.get("scale"));
+            layout.put("value", item.get("value"));
             layout.put("sourceLine", item.get("line"));
             layouts.add(layout);
+            if (ownOccurs != null && item.get("picture") == null) {
+                Map<String, Object> group = new LinkedHashMap<>();
+                group.put("name", item.get("name"));
+                group.put("level", level);
+                group.put("occurs", ownOccurs);
+                activeOccursGroups.add(group);
+            }
         }
         return layouts;
     }
@@ -125,13 +147,166 @@ public final class SemanticIrService {
         for (Map<String, Object> statement : mapList(program.get("statements"))) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", statement.get("id"));
-            item.put("operation", text(statement.get("kind"), "UNKNOWN").toLowerCase(Locale.ROOT));
+            String operation = text(statement.get("kind"), "UNKNOWN").toLowerCase(Locale.ROOT);
+            item.put("operation", operation);
             item.put("sourceLine", statement.get("line"));
-            item.put("operands", objectMap(statement.get("operands")));
+            item.put("operands", enrichOperands(operation, objectMap(statement.get("operands"))));
             item.put("raw", statement.get("raw"));
             normalized.add(item);
         }
         return normalized;
+    }
+
+    private static Map<String, Object> enrichOperands(String operation, Map<String, Object> operands) {
+        Map<String, Object> enriched = new LinkedHashMap<>(operands);
+        switch (operation) {
+            case "compute" -> {
+                String expression = text(enriched.get("expression"), "");
+                enriched.put("expressionTokens", tokenList(expression));
+            }
+            case "if" -> {
+                String condition = text(enriched.get("condition"), "");
+                enriched.put("conditionModel", conditionModel(condition));
+            }
+            case "perform" -> {
+                enriched.put("performModel", performModel(enriched));
+                String until = text(enriched.get("until"), "");
+                if (!until.isBlank()) {
+                    enriched.put("conditionModel", conditionModel(until));
+                }
+            }
+            case "evaluate" -> {
+                String selector = text(enriched.get("selector"), "");
+                enriched.put("selectorTokens", tokenList(selector));
+            }
+            case "when" -> {
+                String value = text(enriched.get("value"), "");
+                enriched.put("valueTokens", tokenList(value));
+            }
+            case "add", "subtract", "multiply", "divide" -> enriched.put("arithmeticModel", arithmeticModel(operation, enriched));
+            default -> {
+                // No enrichment required for MOVE/DISPLAY/STOP/PARAGRAPH.
+            }
+        }
+        return enriched;
+    }
+
+    private static Map<String, Object> conditionModel(String condition) {
+        Map<String, Object> model = new LinkedHashMap<>();
+        model.put("raw", condition);
+        model.put("tokens", tokenList(condition));
+        for (String operator : List.of(">=", "<=", "<>", ">", "<", "=")) {
+            int idx = indexOfOperator(condition, operator);
+            if (idx >= 0) {
+                model.put("left", condition.substring(0, idx).trim());
+                model.put("operator", operator);
+                model.put("right", condition.substring(idx + operator.length()).trim());
+                return model;
+            }
+        }
+        return model;
+    }
+
+    private static Map<String, Object> performModel(Map<String, Object> operands) {
+        Map<String, Object> model = new LinkedHashMap<>();
+        model.put("mode", text(operands.get("mode"), ""));
+        for (String key : List.of("varying", "from", "by", "until")) {
+            if (operands.containsKey(key)) {
+                model.put(key, operands.get(key));
+            }
+        }
+        return model;
+    }
+
+    private static Map<String, Object> arithmeticModel(String operation, Map<String, Object> operands) {
+        Map<String, Object> model = new LinkedHashMap<>();
+        model.put("operation", operation);
+        for (String key : List.of("source", "sources", "target", "targets", "by", "dividend", "divisor")) {
+            if (operands.containsKey(key)) {
+                model.put(key, operands.get(key));
+            }
+        }
+        return model;
+    }
+
+    private static int indexOfOperator(String condition, String operator) {
+        boolean quoted = false;
+        int depth = 0;
+        for (int i = 0; i <= condition.length() - operator.length(); i++) {
+            char ch = condition.charAt(i);
+            if (ch == '"') {
+                quoted = !quoted;
+            } else if (!quoted && ch == '(') {
+                depth++;
+            } else if (!quoted && ch == ')' && depth > 0) {
+                depth--;
+            }
+            if (!quoted && depth == 0 && condition.startsWith(operator, i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static List<String> tokenList(String value) {
+        List<String> rawTokens = new ArrayList<>();
+        if (value == null || value.isBlank()) {
+            return rawTokens;
+        }
+        int i = 0;
+        while (i < value.length()) {
+            while (i < value.length() && Character.isWhitespace(value.charAt(i))) {
+                i++;
+            }
+            if (i >= value.length()) {
+                break;
+            }
+            char ch = value.charAt(i);
+            if (ch == '"') {
+                int start = i++;
+                while (i < value.length() && value.charAt(i) != '"') {
+                    i++;
+                }
+                if (i < value.length()) {
+                    i++;
+                }
+                rawTokens.add(value.substring(start, i));
+                continue;
+            }
+            if (ch == '(') {
+                int start = i++;
+                int depth = 1;
+                while (i < value.length() && depth > 0) {
+                    char next = value.charAt(i++);
+                    if (next == '(') {
+                        depth++;
+                    } else if (next == ')') {
+                        depth--;
+                    }
+                }
+                rawTokens.add(value.substring(start, i));
+                continue;
+            }
+            int start = i;
+            while (i < value.length() && !Character.isWhitespace(value.charAt(i)) && value.charAt(i) != '(') {
+                i++;
+            }
+            rawTokens.add(value.substring(start, i));
+        }
+
+        List<String> combined = new ArrayList<>();
+        for (int j = 0; j < rawTokens.size(); j++) {
+            String token = rawTokens.get(j);
+            if (j + 1 < rawTokens.size()
+                    && token.matches("[A-Z][A-Z0-9-]*")
+                    && rawTokens.get(j + 1).startsWith("(")
+                    && rawTokens.get(j + 1).endsWith(")")) {
+                combined.add(token + " " + rawTokens.get(++j));
+            } else {
+                combined.add(token);
+            }
+        }
+        return combined;
     }
 
     private static Map<String, Object> traceability(Map<String, Object> program) {
@@ -240,6 +415,20 @@ public final class SemanticIrService {
         }
         String text = String.valueOf(value).trim();
         return text.isBlank() ? fallback : text;
+    }
+
+    private static int intValue(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     private static String stable(String value) {

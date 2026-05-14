@@ -20,12 +20,11 @@ flow, and records the open assumptions a reviewer should expect.
    produces a deterministic fixture (mock) and the UI shows the run
    `runId`, `status`, and policy decision.
 4. Side-by-side: the UI shows the COBOL source and the generated Java
-   for the run. Unsupported W0 features and open assumptions are listed
+   for the run. Any unsupported features and open assumptions are listed
    under the generated panel — they are not hidden.
 5. Build & test: the UI shows expected vs actual stdout, with the
-   classification from `build-test-runner-service`
-   (`divergence-known-w0-coverage-gap` is the expected W0 result for the
-   three checked-in samples).
+   classification from `build-test-runner-service`; the checked-in W0 samples
+   are expected to report `classification: "match"`.
 6. Evidence Pack v0: the UI shows the manifest reference and the list
    of missing artifacts.
 

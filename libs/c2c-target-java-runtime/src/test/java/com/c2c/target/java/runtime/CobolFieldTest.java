@@ -83,6 +83,20 @@ class CobolFieldTest {
     }
 
     @Test
+    void positiveSignedDecimalDisplaysWithoutPlusSign() {
+        CobolField f = new CobolField("WS-AMT", "ir-13", PictureSpec.parse("S9(3)V99"));
+        f.moveNumericLiteral("12.30");
+        assertEquals("012.30", f.displayValue());
+    }
+
+    @Test
+    void moveNumericLiteralUsesDeclaredScale() {
+        CobolField f = new CobolField("WS-AMT", "ir-14", PictureSpec.parse("S9(3)V9"));
+        f.moveNumericLiteral("12.34");
+        assertEquals("012.3", f.displayValue());
+    }
+
+    @Test
     void irNodeIdIsPreserved() {
         CobolField f = new CobolField("WS-AMT", "stmt-007", PictureSpec.parse("9(3)"));
         assertEquals("stmt-007", f.irNodeId());

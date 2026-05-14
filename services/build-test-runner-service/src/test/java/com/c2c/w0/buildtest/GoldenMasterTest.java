@@ -39,8 +39,8 @@ class GoldenMasterTest {
         assertTrue(resolved.isPresent());
         assertEquals(Files.readString(expected), resolved.get().expected());
         assertEquals("synthetic", resolved.get().classification());
-        assertTrue(resolved.get().knownDivergenceAtW0(),
-                "BRNCH01 W0 entry must declare knownDivergenceAtW0=true");
+        assertEquals(false, resolved.get().knownDivergenceAtW0(),
+                "BRNCH01 now matches the W0 generated Java output");
     }
 
     @Test

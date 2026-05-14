@@ -14,7 +14,7 @@ const FIXED_SAMPLE: SampleDetail = {
   programId: 'BRNCH01',
   title: 'Branch approval guard',
   description: 'fixture sample',
-  knownDivergenceAtW0: true,
+  knownDivergenceAtW0: false,
   cobolSource: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. BRNCH01.\n',
   cobolSourcePath: 'corpus/synthetic/programs/branch-account-guard.cbl',
   expectedOutput: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n',
@@ -23,7 +23,7 @@ const FIXED_SAMPLE: SampleDetail = {
 const FIXED_SAMPLE_2: SampleDetail = {
   ...FIXED_SAMPLE,
   programId: 'BATCH01',
-  knownDivergenceAtW0: true,
+  knownDivergenceAtW0: false,
 };
 
 function fakeSamples(items: SampleDetail[]): SampleRegistry {
@@ -279,15 +279,15 @@ test('starting a run in mock mode returns a completed run with mock evidence', a
       unsupportedFeatures: string[];
     };
     assert.equal(genBody.mode, 'mock');
-    assert.equal(genBody.status, 'unsupported');
+    assert.equal(genBody.status, 'generated');
     assert.ok(Object.keys(genBody.files).length > 0);
-    assert.ok(genBody.unsupportedFeatures.length > 0);
+    assert.equal(genBody.unsupportedFeatures.length, 0);
 
     const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/build-test`);
     assert.equal(buildTest.status, 200);
     const btBody = buildTest.body as { status: string; classification: string; expectedOutput: string };
-    assert.equal(btBody.status, 'output-divergence');
-    assert.equal(btBody.classification, 'divergence-known-w0-coverage-gap');
+    assert.equal(btBody.status, 'ok');
+    assert.equal(btBody.classification, 'match');
     assert.match(btBody.expectedOutput, /APPROVED-COUNT/);
 
     const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/evidence`);

@@ -43,10 +43,10 @@ build-out, not a refactor:
   Rust runtime means adding `libs/c2c-target-rust-runtime/` and an
   accompanying generator that emits Rust projects depending on it. No change
   to existing Java code is required.
-- The **runtime surface** required by the contract (decimal, field, condition
-  helpers, assumption registry) is the same in every language. Each runtime
-  picks idiomatic types, but the conceptual surface is fixed so the IR
-  doesn't need a target-specific dialect.
+- The **runtime surface** required by the contract (decimal, field, OCCURS
+  arrays, condition helpers, assumption registry) is the same in every
+  language. Each runtime picks idiomatic types, but the conceptual surface is
+  fixed so the IR doesn't need a target-specific dialect.
 
 ## What we are deliberately not building in W0
 

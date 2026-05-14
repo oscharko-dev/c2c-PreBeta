@@ -19,7 +19,6 @@ classify the verification outcome of a generated Java project.
 
 Every W0 entry is **synthetic** (hand-curated expected output) rather than a
 **true** Golden Master (output captured from a COBOL runtime such as
-`cobcrun`). Because the W0 generator does not yet translate `PERFORM`,
-`EVALUATE`, `IF`, `COMPUTE`, or `ADD`, the runner is expected to emit a
-`divergence-known-w0-coverage-gap` classification for these programs. Future
-waves will add real GnuCOBOL re-execution and pin its stdout by SHA-256.
+`cobcrun`). The Java generator now matches these fixtures for the selected W0
+`PERFORM`, `EVALUATE`, `IF`, arithmetic, `DISPLAY`, and `OCCURS` subset.
+Future waves will add real GnuCOBOL re-execution and pin its stdout by SHA-256.

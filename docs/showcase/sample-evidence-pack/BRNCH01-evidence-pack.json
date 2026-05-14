@@ -8,7 +8,7 @@
   "wave": "w0",
   "status": "complete",
   "summary": "W0 demo run for BRNCH01",
-  "createdAt": "2026-05-14T10:46:16.269689Z",
+  "createdAt": "2026-05-14T11:18:16.739495Z",
   "createdBy": "w0-demo",
   "artifacts": {
     "sourceCobol": [
@@ -22,15 +22,15 @@
     ],
     "semanticIr": {
       "uri": "urn:c2c/semantic-ir/BRNCH01/run-1",
-      "sha256": "36997eef5b3ccbf1892e55fb5ff12acfd2541e3e437625b36c0ef7a837d3871a",
-      "byteSize": 21712,
+      "sha256": "c4a080240ca48e0a1ae45ed1bbc19511e1967b151663863201f2ca706be2f59f",
+      "byteSize": 23689,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },
     "generatedJava": {
       "uri": "urn:c2c/generated-java/BRNCH01/run-1",
-      "sha256": "05fa7cff968c0884e5aedd1fc4f10f058a2125c62e4b0c32277683cb9db4e602",
-      "byteSize": 17255,
+      "sha256": "fc231bf080c72a9cc3c8dab5fbf07ea76ecfae77a9f3261c2e2043c497f5fb47",
+      "byteSize": 12372,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },
@@ -55,31 +55,31 @@
     "buildTestResults": [
       {
         "uri": "urn:c2c/build-test/BRNCH01/run-1",
-        "sha256": "5364cbdf95f96f254237aa04e8f7259384d25a7a03039936ce7b4f55b39468d8",
-        "byteSize": 2172,
+        "sha256": "ee901b50be6204607b80a5a42e072d073bd0a7c28ae89911a51e66670def7eb1",
+        "byteSize": 1971,
         "mimeType": "application/json",
         "kind": "evidence-input"
       }
     ],
     "harnessEvents": {
       "uri": "urn:c2c/harness-events/run-1",
-      "sha256": "dd042fd475f91be2b7a9afcb8f56314c87d28cb45ceacebf8c2859570fe4dfac",
-      "byteSize": 11179,
+      "sha256": "c3f645ef3a35131f578d9265c3415cfbf2d7a90a569f8fc0373a1c69188bdb25",
+      "byteSize": 9906,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },
     "trajectoryLedger": {
       "uri": "urn:c2c/trajectory-ledger/run-1",
-      "sha256": "ebe434af212f6fbe20877c80f04ca298f1be477412e9f2cf0c859aa9c786f205",
-      "byteSize": 5377,
+      "sha256": "0ab4c15ea3e969de03d1f11c77c8bca93b1b50783e81b6e830dd87c6da15c74c",
+      "byteSize": 4526,
       "mimeType": "application/json",
       "kind": "evidence-input"
     }
   },
   "openAssumptions": [
     {
-      "id": "w0-coverage-gap",
-      "description": "W0 generator does not yet translate PERFORM/EVALUATE/IF/ADD/COMPUTE; divergence is expected and documented per program."
+      "id": "synthetic-golden-master",
+      "description": "W0 generated Java matches the synthetic Golden Master fixtures; true cobcrun-produced fixtures remain a Wave 1 follow-up."
     }
   ],
   "validation": {
@@ -98,9 +98,9 @@
     {
       "format": "directory",
       "uri": "urn:c2c/evidence-export/epk-run-1-0001",
-      "sha256": "02e9ac7e9a115bce4858745ada1fe9d33455d19a9f4ca6b65db8c43f989475a8",
-      "byteSize": 2917,
-      "createdAt": "2026-05-14T10:46:16.300631Z"
+      "sha256": "48ea61bdb2c69bb32b0e59583988fd9fffef84cfe3b918269b45fb2cfcfb2a5d",
+      "byteSize": 2926,
+      "createdAt": "2026-05-14T11:18:16.773477Z"
     }
   ]
 }

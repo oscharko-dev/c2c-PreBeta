@@ -523,7 +523,7 @@ run_program() {
         runtimeVersion:{id:"c2c-target-java-runtime:v0"}
       },
       openAssumptions:[
-        {id:"w0-coverage-gap", description:"W0 generator does not yet translate PERFORM/EVALUATE/IF/ADD/COMPUTE; divergence is expected and documented per program."}
+        {id:"synthetic-golden-master", description:"W0 generated Java matches the synthetic Golden Master fixtures; true cobcrun-produced fixtures remain a Wave 1 follow-up."}
       ]}' \
     >"$createBody"
 
@@ -769,7 +769,7 @@ write_scorecard() {
     echo "- Programs exercised: $total"
     echo "- Generated Java compiled cleanly: $compileOkCount / $total"
     echo "- Generated Java executed: $ranCount / $total"
-    echo "- Golden Master byte-equal matches: $goldenMatchCount / $total (W0 expects divergence-known-w0-coverage-gap)"
+    echo "- Golden Master byte-equal matches: $goldenMatchCount / $total"
     echo "- Build/test classification == \"match\": $matchCount / $total"
     echo "- Evidence Packs validating with no missing required artifacts: $validationOkCount / $total"
     echo "- Harness Event Envelope ledger entries captured: $harnessTotal"
@@ -777,10 +777,8 @@ write_scorecard() {
     echo
     echo "## Known limitations (W0)"
     echo
-    echo "- The W0 generator does not yet translate PERFORM/EVALUATE/IF/ADD/COMPUTE;"
-    echo "  golden-master divergence is **expected and documented** per program in"
-    echo "  \`fixtures/golden-master/index.json\`. The acceptance bar is"
-    echo "  \`classification == match\` OR \`classification == divergence-known-w0-coverage-gap\`."
+    echo "- The W0 Java generator now translates the selected W0 PERFORM/EVALUATE/IF/ADD/COMPUTE/OCCURS subset"
+    echo "  and the acceptance bar is \`classification == match\` for every program."
     echo "- W0 fixtures are synthetic. True \`cobcrun\` golden masters are a Wave 1 follow-up."
     echo "- Model-gateway-service is not exercised end-to-end in W0; the manifest"
     echo "  records an explicit \`status: \"skipped\"\` model invocation entry for honesty."
