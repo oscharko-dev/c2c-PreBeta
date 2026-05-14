@@ -132,8 +132,9 @@ final class CobolRuntimeExecutor {
             Files.writeString(source, sourceText, StandardCharsets.UTF_8);
             Path modulePath = workingRoot.resolve(moduleFileName(moduleName));
 
-            CommandResult compile = runCommand(List.of(
-                    cobcCommand, "-m", "-o", modulePath.toString(), source.toString()),
+            List<String> compileArgs = oracleCompileCommand(cobcCommand, sourceText,
+                    modulePath, source);
+            CommandResult compile = runCommand(compileArgs,
                     workingRoot, Map.of(), effectiveTimeoutMs);
             if (compile.exitCode() != 0) {
                 return OracleRun.compileFailed(moduleName, compile,
@@ -151,6 +152,51 @@ final class CobolRuntimeExecutor {
         } finally {
             GeneratedProjectMaterializer.deleteRecursively(workingRoot);
         }
+    }
+
+    /**
+     * Build the {@code cobc} command line for compiling a UI-supplied oracle.
+     * <p>
+     * UI-pasted COBOL is rarely strictly column-positioned, and GnuCOBOL's
+     * default format heuristics differ between 3.1.x and 3.2.x. Heuristically
+     * detect whether the source looks fixed-format (lines indented to column
+     * 7 with code starting in area A) and explicitly pass
+     * {@code -fsource-format=fixed} or {@code -fsource-format=free}, so the
+     * compiler never has to guess.
+     */
+    static List<String> oracleCompileCommand(String cobcCommand, String sourceText,
+                                             Path modulePath, Path source) {
+        String formatFlag = looksLikeFixedFormatCobol(sourceText) ? "--fixed" : "--free";
+        return List.of(cobcCommand, "-m", formatFlag,
+                "-o", modulePath.toString(), source.toString());
+    }
+
+    static boolean looksLikeFixedFormatCobol(String sourceText) {
+        if (sourceText == null) {
+            return false;
+        }
+        for (String line : sourceText.split("\n", -1)) {
+            String trimmed = line.stripTrailing();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            int leading = countLeadingSpaces(trimmed);
+            if (leading >= 6 && trimmed.length() > leading) {
+                // Looks like the first six (or seven) columns are reserved
+                // for the sequence/indicator area: classic fixed format.
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    private static int countLeadingSpaces(String line) {
+        int i = 0;
+        while (i < line.length() && line.charAt(i) == ' ') {
+            i++;
+        }
+        return i;
     }
 
     private static String resolveModuleName(String requestedProgramId, String sourceText) {

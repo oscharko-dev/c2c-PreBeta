@@ -25,27 +25,40 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class CobolOracleTest {
 
+    // Free-format COBOL (no fixed-column leading whitespace) so cobc handles
+    // it the same way across GnuCOBOL 3.1.x and 3.2.x — see Issue #92 CI
+    // failure on cobc 3.1.2 which rejected the fixed-format header at
+    // column 7. The runtime detects free vs fixed and passes
+    // -fsource-format= accordingly.
     private static final String COBOL_PRINT_PASS = String.join("\n",
-            "       IDENTIFICATION DIVISION.",
-            "       PROGRAM-ID. PASSPRG.",
-            "       PROCEDURE DIVISION.",
-            "           DISPLAY \"PASS\".",
-            "           STOP RUN.",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. PASSPRG.",
+            "PROCEDURE DIVISION.",
+            "    DISPLAY \"PASS\".",
+            "    STOP RUN.",
             "");
 
     private static final String COBOL_PRINT_HELLO = String.join("\n",
-            "       IDENTIFICATION DIVISION.",
-            "       PROGRAM-ID. HELLOPRG.",
-            "       PROCEDURE DIVISION.",
-            "           DISPLAY \"HELLO\".",
-            "           STOP RUN.",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. HELLOPRG.",
+            "PROCEDURE DIVISION.",
+            "    DISPLAY \"HELLO\".",
+            "    STOP RUN.",
             "");
 
     private static final String COBOL_BROKEN = String.join("\n",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. BROKENPR.",
+            "PROCEDURE DIVISION.",
+            "    MOVE \"x\" TO UNDECLARED-VARIABLE-XYZ.",
+            "    STOP RUN.",
+            "");
+
+    private static final String COBOL_FIXED_FORMAT_PASS = String.join("\n",
             "       IDENTIFICATION DIVISION.",
-            "       PROGRAM-ID. BROKENPR.",
+            "       PROGRAM-ID. FIXEDPRG.",
             "       PROCEDURE DIVISION.",
-            "           MOVE \"x\" TO UNDECLARED-VARIABLE-XYZ.",
+            "           DISPLAY \"PASS\".",
             "           STOP RUN.",
             "");
 
@@ -273,6 +286,42 @@ class CobolOracleTest {
         assertEquals("oracle-invalid-request", response.get("classification"));
         Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
         assertEquals(false, oracle.get("attempted"));
+    }
+
+    @Test
+    void oracleAlsoAcceptsFixedFormatSource() {
+        assumeTrue(CobolRuntimeExecutor.isAvailable(),
+                "GnuCOBOL cobc/cobcrun must be installed for fixed-format oracle");
+        Map<String, Object> generatedProject = trivialProject(
+                "sample.OracleFixed",
+                "package sample; public class OracleFixed { "
+                        + "public static void main(String[] a) { System.out.println(\"PASS\"); } }");
+        Map<String, Object> request = Map.of(
+                "runId", "run-oracle-fixed",
+                "programId", "FIXEDPRG",
+                "generatedProject", generatedProject,
+                "oracle", Map.of(
+                        "mode", "cobol-runtime",
+                        "sourceText", COBOL_FIXED_FORMAT_PASS,
+                        "timeoutMs", 5000));
+
+        Map<String, Object> response = service.runVerification(request);
+
+        assertEquals("ok", response.get("status"),
+                () -> "fixed-format oracle should still match; response=" + response);
+        assertEquals("match", response.get("classification"));
+    }
+
+    @Test
+    void formatHeuristicIdentifiesFreeAndFixedSources() {
+        assertTrue(CobolRuntimeExecutor.looksLikeFixedFormatCobol(COBOL_FIXED_FORMAT_PASS),
+                "7-leading-space header must be detected as fixed format");
+        assertFalse(CobolRuntimeExecutor.looksLikeFixedFormatCobol(COBOL_PRINT_PASS),
+                "column-1 header must be detected as free format");
+        assertFalse(CobolRuntimeExecutor.looksLikeFixedFormatCobol(""),
+                "empty source is not fixed format");
+        assertFalse(CobolRuntimeExecutor.looksLikeFixedFormatCobol(null),
+                "null source is not fixed format");
     }
 
     @Test
