@@ -33,11 +33,16 @@ export interface TransformResponse {
   orchestratorRunId: string;
   status: RunStatus;
   programId: string;
-  productMode: RunMode;
+  productMode: ProductMode;
   links: Record<string, string>;
 }
 
-export type RunMode = 'live' | 'mock';
+// `diagnostic-fixture` is an opt-in developer mode behind
+// C2C_ENABLE_DIAGNOSTIC_FIXTURES. The UI must never label its output as a
+// product result. `productMode` is the contained signal: it is `'live'` only
+// when the response represents a real orchestrated product outcome.
+export type RunMode = 'live' | 'diagnostic-fixture';
+export type ProductMode = 'live' | 'unavailable';
 export type RunStatus = 'starting' | 'updating' | 'completed' | 'failed';
 
 export interface RunSummary {
@@ -45,7 +50,7 @@ export interface RunSummary {
   programId: string;
   status: RunStatus;
   mode: RunMode;
-  productMode: RunMode;
+  productMode: ProductMode;
   message: string;
   policyDecision: string;
   evidenceRefs: string[];
@@ -72,6 +77,7 @@ export interface GeneratedView {
   runId: string;
   programId: string;
   mode: RunMode;
+  productMode?: ProductMode;
   status: GeneratedStatus;
   entryClass: string;
   entryFilePath: string;
@@ -108,6 +114,7 @@ export interface BuildTestView {
   runId: string;
   programId: string;
   mode: RunMode;
+  productMode?: ProductMode;
   status: BuildTestStatus;
   classification: BuildTestClassification;
   expectedOutput: string;
@@ -127,6 +134,7 @@ export interface EvidenceView {
   runId: string;
   programId: string;
   mode: RunMode;
+  productMode?: ProductMode;
   status: EvidenceStatus;
   packId: string;
   manifestUri: string;

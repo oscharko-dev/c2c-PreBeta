@@ -1,6 +1,10 @@
-import type { SampleDetail } from './samples';
+// Diagnostic fixtures for developer-only runs. This module is quarantined
+// inside `diagnostic-fixtures/` and may only be imported by code paths that
+// have already verified `C2C_ENABLE_DIAGNOSTIC_FIXTURES`. Product-mode code
+// must never reach this file.
+import type { SampleDetail } from '../samples';
 
-export interface MockRunOutcome {
+export interface DiagnosticFixtureOutcome {
   generated: {
     status: 'generated' | 'unsupported' | 'skipped';
     entryClass: string;
@@ -53,8 +57,7 @@ function classNameFor(programId: string): string {
 function generatedJavaStub(programId: string, className: string): string {
   return [
     `// Synthetic W0 generated-Java stub for programId=${programId}.`,
-    '// In live mode this content comes from target-java-generation-service.',
-    '// The checked-in W0 fixtures now match the Java generator subset.',
+    '// Diagnostic fixture only; the product path produces this content from target-java-generation-service.',
     'package c2c.w0.generated;',
     '',
     `public final class ${className} {`,
@@ -81,13 +84,13 @@ function unsupportedFeaturesFor(programId: string): string[] {
   }
 }
 
-export function mockOutcomeFor(sample: SampleDetail, runId: string): MockRunOutcome {
+export function diagnosticFixtureOutcomeFor(sample: SampleDetail, runId: string): DiagnosticFixtureOutcome {
   const className = classNameFor(sample.programId);
   const entryFilePath = `src/main/java/c2c/w0/generated/${className}.java`;
   const unsupported = unsupportedFeaturesFor(sample.programId);
   const knownDivergence = sample.knownDivergenceAtW0;
 
-  const generated: MockRunOutcome['generated'] = {
+  const generated: DiagnosticFixtureOutcome['generated'] = {
     status: knownDivergence ? 'unsupported' : 'generated',
     entryClass: `c2c.w0.generated.${className}`,
     entryFilePath,
@@ -100,27 +103,27 @@ export function mockOutcomeFor(sample: SampleDetail, runId: string): MockRunOutc
       'No file or database access is wired in W0.',
     ],
     note: knownDivergence
-      ? 'W0 generator coverage does not yet include the constructs used by this program. The generated-Java view is a labelled stub.'
-      : 'W0 generator emitted a deterministic Java skeleton for this program.',
+      ? 'Diagnostic fixture: W0 generator coverage does not include the constructs used by this program. The generated-Java view is a labelled stub.'
+      : 'Diagnostic fixture: deterministic Java skeleton for developer inspection only; not a product result.',
   };
 
-  const buildTest: MockRunOutcome['buildTest'] = {
+  const buildTest: DiagnosticFixtureOutcome['buildTest'] = {
     status: knownDivergence ? 'output-divergence' : 'ok',
     classification: knownDivergence ? 'divergence-known-w0-coverage-gap' : 'match',
     actualOutput: `W0-STUB ${sample.programId}\n`,
-    outputRef: `sha256:mock/${sample.programId.toLowerCase()}`,
+    outputRef: `sha256:diagnostic-fixture/${sample.programId.toLowerCase()}`,
     note: knownDivergence
-      ? 'Build/test divergence is explicitly declared by the fixture registry.'
-      : 'Build/test matched the Golden Master fixture.',
+      ? 'Diagnostic fixture: divergence is declared by the fixture registry; not a product build/test result.'
+      : 'Diagnostic fixture: matches the Golden Master fixture; not a product build/test result.',
   };
 
-  const evidence: MockRunOutcome['evidence'] = {
+  const evidence: DiagnosticFixtureOutcome['evidence'] = {
     status: 'incomplete',
     packId: `epk-${runId}-1`,
-    manifestUri: `urn:c2c-bff/mock-evidence-pack/${runId}`,
-    exportUri: `urn:c2c-bff/mock-evidence-export/${runId}`,
+    manifestUri: `urn:c2c-bff/diagnostic-fixture-evidence-pack/${runId}`,
+    exportUri: `urn:c2c-bff/diagnostic-fixture-evidence-export/${runId}`,
     missingArtifacts: ['sourceCobol', 'semanticIr', 'harnessEvents', 'modelInvocations'],
-    note: 'Mock Evidence Pack manifest reference. Live exports come from evidence-service /v0/packs.',
+    note: 'Diagnostic fixture Evidence Pack reference; not a product Evidence Pack. Product exports come from evidence-service /v0/packs.',
   };
 
   return { generated, buildTest, evidence };

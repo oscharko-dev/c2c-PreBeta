@@ -1,13 +1,17 @@
 openapi: 3.1.0
 info:
   title: c2c-bff
-  version: 0.1.0
+  version: 0.2.0
   description: >
     W0 backend-for-frontend. Brokers c2c-ui calls to the W0 capability mesh
     (orchestrator-service, evidence-service, build-test-runner-service,
     target-java-generation-service, cobol-parser-service, semantic-ir-service,
-    agentic-harness-core). Returns a documented mock response set when
-    upstream services are not reachable so the reference run is available on a fresh checkout.
+    agentic-harness-core). Default product mode is fail-closed: when
+    `C2C_ORCHESTRATOR_URL` is not configured, `POST /api/v0/runs` and
+    `POST /api/v0/transform` return `503`. Diagnostic fixtures are
+    opt-in via `C2C_ENABLE_DIAGNOSTIC_FIXTURES=true` and are labelled
+    with `mode: "diagnostic-fixture"` and `productMode: "unavailable"`
+    so the UI never displays them as a product result.
 
 servers:
   - url: http://localhost:8090
@@ -28,7 +32,12 @@ paths:
 
   /api/v0/mode:
     get:
-      summary: Report whether the BFF is in live or mock mode for each upstream
+      summary: Report upstream reachability (orchestrator and evidence-service)
+      description: >
+        Returns whether each configured upstream is reachable. `mock` here
+        means "no upstream URL is configured"; it is distinct from the
+        per-run `mode` and `productMode` fields, which describe an
+        individual run.
       operationId: mode
       responses:
         "200":
@@ -323,7 +332,8 @@ components:
         status:
           type: string
           enum: [starting, updating, completed, failed]
-        mode: { type: string, enum: [live, mock] }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
         message: { type: string }
         evidenceRefs:
           type: array
@@ -353,8 +363,8 @@ components:
         status:
           type: string
           enum: [starting, updating, completed, failed]
-        mode: { type: string, enum: [live, mock] }
-        productMode: { type: string, enum: [live] }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
         message: { type: string }
         evidenceRefs:
           type: array
@@ -371,7 +381,8 @@ components:
       properties:
         runId: { type: string }
         programId: { type: string }
-        mode: { type: string, enum: [live, mock] }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
         status:
           type: string
           enum: [generated, unsupported, skipped, incomplete]
@@ -403,7 +414,8 @@ components:
       properties:
         runId: { type: string }
         programId: { type: string }
-        mode: { type: string, enum: [live, mock] }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
         status:
           type: string
           enum:
@@ -441,7 +453,8 @@ components:
       properties:
         runId: { type: string }
         programId: { type: string }
-        mode: { type: string, enum: [live, mock] }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
         status:
           type: string
           enum: [complete, incomplete]
@@ -479,7 +492,8 @@ components:
       properties:
         runId: { type: string }
         programId: { type: string }
-        mode: { type: string, enum: [live, mock] }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
         orchestratorRunId: { type: string }
         artifacts:
           type: array
@@ -500,7 +514,8 @@ components:
       properties:
         runId: { type: string }
         programId: { type: string }
-        mode: { type: string, enum: [live, mock] }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
         events:
           type: array
           items:
