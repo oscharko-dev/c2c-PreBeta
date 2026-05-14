@@ -1,0 +1,12 @@
+mode: "foundry-development"
+allowedModelIds:
+  - "foundry-gpt4-turbo"
+foundry:
+  endpoint: "https://contoso-foundry.openai.azure.com/openai/deployments"
+  apiKeyRef: "keyring/foundry/API_KEY"
+  timeoutMs: 30000
+customerInternalMock:
+  baseURL: "https://customer-internal.local/v1/model"
+  apiKeyRef: "keyring/customer-internal/API_KEY"
+  timeoutMs: 5000
+  requireStructuredOutput: true
