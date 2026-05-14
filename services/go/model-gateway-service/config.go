@@ -164,6 +164,9 @@ func (c FoundryDevelopmentAllowlist) Validate() error {
 	default:
 		return fmt.Errorf("unsupported endpoint mode: %s", c.Mode)
 	}
+	if c.Mode == ModelProviderFoundryDevelopment && len(c.AllowedModelIDs) == 0 {
+		return errors.New("allowedModelIds must contain at least one model in foundry-development mode")
+	}
 	return nil
 }
 
