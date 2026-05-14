@@ -1,0 +1,129 @@
+version: 0.1.0
+created_at: 2026-05-14
+owner: c2c-prebeta
+curation_phase: W0
+status: draft
+items:
+  - id: W0-SYN-001
+    name: "W0-CTRL-DECIMAL-PAYROLL"
+    source_type: synthetic
+    source_url: "corpus/synthetic/programs/ctrl-decimal-payroll.cbl"
+    source_release_or_commit: "initial-corpus-seed"
+    content_hash_sha256: "c61683c95fc180d8a74a0a5fe8dc2460f7b4b029b49942d0f55ba234b3c562fe"
+    license:
+      type: "Project-owned synthetic fixture"
+      status: approved
+      identifier: "INTERNAL-W0-CORPUS-FIXTURE"
+      restrictions: "No external redistribution obligations; generated code only."
+    runtime:
+      class: local-gnucobol-like
+      entrypoint: "corpus/synthetic/programs/ctrl-decimal-payroll.cbl"
+      execution_notes: "Compile with COBOL compiler available in W0 harness. No external file I/O required."
+      expected_output_artifact: "corpus/synthetic/fixtures/ctrl-decimal-payroll-output.txt"
+      invocation: "one-shot console program"
+    semantics:
+      included_features:
+        - MOVE
+        - COMPUTE
+        - IF
+        - PERFORM UNTIL
+        - DISPLAY
+      excluded_features:
+        - FILE SECTION
+        - CALL (external)
+        - CICS
+        - SQL
+    w0_suitability:
+      level: S1
+      rationale: "Includes control flow plus decimal arithmetic and structured output for deterministic golden master."
+      demo_candidate: true
+    golden_master:
+      strategy: "line-compare output snapshot"
+      tolerances: "strict"
+      notes: "One deterministic output stream with stable numeric formatting."
+
+  - id: W0-SYN-002
+    name: "W0-BRANCH-ALLOCATION-CHECK"
+    source_type: synthetic
+    source_url: "corpus/synthetic/programs/branch-account-guard.cbl"
+    source_release_or_commit: "initial-corpus-seed"
+    content_hash_sha256: "57ebe7c0a67f7261a21ec53cf047374e9a673b6f1214cd88a3ee3f12a134c08f"
+    license:
+      type: "Project-owned synthetic fixture"
+      status: approved
+      identifier: "INTERNAL-W0-CORPUS-FIXTURE"
+      restrictions: "No external redistribution obligations; generated code only."
+    runtime:
+      class: local-gnucobol-like
+      entrypoint: "corpus/synthetic/programs/branch-account-guard.cbl"
+      execution_notes: "Uses nested IF branches with table-style counters in working-storage only."
+      expected_output_artifact: "corpus/synthetic/fixtures/branch-account-guard-output.txt"
+      invocation: "one-shot console program"
+    semantics:
+      included_features:
+        - MOVE
+        - ADD
+        - IF
+        - EVALUATE
+        - DISPLAY
+      excluded_features:
+        - FILE SECTION
+        - REPORT WRITER
+        - SQL
+    w0_suitability:
+      level: S1
+      rationale: "Complex branching without external dependencies validates control-flow breadth for W0."
+      demo_candidate: false
+    golden_master:
+      strategy: "line-compare output snapshot"
+      tolerances: "strict"
+      notes: "Output should remain stable across compiler minor version updates if formatting rules stay constant."
+
+  - id: W0-SYN-003
+    name: "W0-BATCH-AGGREGATE-DECIMAL"
+    source_type: synthetic
+    source_url: "corpus/synthetic/programs/decimal-batch-aggregator.cbl"
+    source_release_or_commit: "initial-corpus-seed"
+    content_hash_sha256: "0120d6c79d0e2c78014106fab7e10de8936b01471e87de94c9337bfdf9fe5a08"
+    license:
+      type: "Project-owned synthetic fixture"
+      status: approved
+      identifier: "INTERNAL-W0-CORPUS-FIXTURE"
+      restrictions: "No external redistribution obligations; generated code only."
+    runtime:
+      class: local-gnucobol-like
+      entrypoint: "corpus/synthetic/programs/decimal-batch-aggregator.cbl"
+      execution_notes: "Deterministic loop-based rollup; no file dependencies."
+      expected_output_artifact: "corpus/synthetic/fixtures/decimal-batch-aggregator-output.txt"
+      invocation: "one-shot console program"
+    semantics:
+      included_features:
+        - MOVE
+        - PERFORM
+        - MULTIPLY
+        - ADD
+        - DISPLAY
+      excluded_features:
+        - GO TO
+        - DYNAMIC MEMORY
+        - SQL
+    w0_suitability:
+      level: S1
+      rationale: "Covers multi-row aggregate style behavior and arithmetic correctness under fixed decimals."
+      demo_candidate: false
+    golden_master:
+      strategy: "line-compare output snapshot"
+      tolerances: "strict"
+      notes: "No timing or random components."
+
+future_candidates:
+  - id: W0-OUT-01
+    name: "ACAS public sample"
+    source_type: public-reference
+    status: deferred
+    notes: "Large public application; classify as post-W0 due to file I/O and integration complexity."
+  - id: W0-OUT-02
+    name: "CardDemo public sample"
+    source_type: public-reference
+    status: deferred
+    notes: "UI and transaction wiring patterns not supported in W0."
