@@ -88,18 +88,18 @@ func TestStepCounterConcurrent(t *testing.T) {
 	close(results)
 
 	seen := make(map[int64]struct{}, workers*perWorker)
-	var max int64
+	var maxSeen int64
 	for r := range results {
 		if _, dup := seen[r]; dup {
 			t.Fatalf("duplicate step id %d under contention", r)
 		}
 		seen[r] = struct{}{}
-		if r > max {
-			max = r
+		if r > maxSeen {
+			maxSeen = r
 		}
 	}
-	if want := int64(workers * perWorker); max != want {
-		t.Fatalf("expected max step %d, got %d", want, max)
+	if want := int64(workers * perWorker); maxSeen != want {
+		t.Fatalf("expected max step %d, got %d", want, maxSeen)
 	}
 }
 

@@ -1,6 +1,6 @@
 #-------------------------------------------------------------------------------#
-#               Qodana analysis is configured by qodana.yaml file               #
-#             https://www.jetbrains.com/help/qodana/qodana-yaml.html            #
+#               Qodana analysis configuration                                   #
+#               https://www.jetbrains.com/help/qodana/qodana-yaml.html          #
 #-------------------------------------------------------------------------------#
 #################################################################################
 #              WARNING: Do not store sensitive information in this file,        #

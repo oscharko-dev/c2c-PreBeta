@@ -69,13 +69,9 @@ var allowedRedactionProfiles = map[string]struct{}{
 }
 
 const (
-	statusStarting     = "starting"
-	statusCompleted    = "completed"
-	statusFailed       = "failed"
-	statusInvoked      = "invoked"
-	statusAccepted     = "accepted"
-	statusRejected     = "rejected"
-	statusValidationOk = "validation_ok"
+	statusCompleted = "completed"
+	statusFailed    = "failed"
+	statusRejected  = "rejected"
 )
 
 const (
@@ -84,21 +80,12 @@ const (
 )
 
 const (
-	eventTypeModelInvocationAccepted = "model.invocation.accepted"
-	eventTypeModelInvocationFailed   = "model.invocation.failed"
-	eventTypeModelInvocationDone     = "model.invocation.completed"
+	eventTypeModelInvocationFailed = "model.invocation.failed"
+	eventTypeModelInvocationDone   = "model.invocation.completed"
 )
 
 const (
 	actorModelGateway = "model-gateway"
-)
-
-const (
-	headerContentType = "content-type"
-)
-
-const (
-	defaultRequestTimeoutMs = 30000
 )
 
 type SchemaValidationError struct {
@@ -322,13 +309,6 @@ type ModelGatewayHealthResponse struct {
 	Providers   []string          `json:"providers"`
 	ActiveModel int               `json:"activeModels"`
 	Configured  map[string]string `json:"configured"`
-}
-
-type ModelInvocationOutputEnvelope struct {
-	InvocationID string         `json:"invocationId"`
-	Status       string         `json:"status"`
-	Output       map[string]any `json:"output"`
-	LatencyMs    int64          `json:"latencyMs"`
 }
 
 func ComputeSHA256Ref(payload any) (DataReference, error) {

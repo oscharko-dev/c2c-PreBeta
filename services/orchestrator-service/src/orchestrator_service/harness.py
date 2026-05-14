@@ -2,31 +2,26 @@
 
 from __future__ import annotations
 
-import json
 import urllib.parse
 from dataclasses import dataclass
-from hashlib import sha256
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from .client import JSONHTTPClient
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass
 class HarnessFailure(Exception):
     status: int
     details: str
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class DataReference:
     uri: str
     sha256: str
     byte_size: int
-
-
-    def build_reference(uri: str, payload: Any) -> DataReference:
-        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-        return DataReference(uri=uri, sha256=sha256(raw).hexdigest(), byte_size=len(raw))
 
 
 class HarnessGateway:
@@ -81,7 +76,7 @@ class HarnessGateway:
         *,
         updated_by: str = "orchestrator",
         message: str = "",
-        evidence_refs: Optional[list[str]] = None,
+        evidence_refs: Optional[List[str]] = None,
         policy_decision: str = "policy allow",
     ) -> Dict[str, Any]:
         if not run_id:

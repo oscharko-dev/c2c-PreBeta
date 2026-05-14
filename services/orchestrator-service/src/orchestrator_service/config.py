@@ -102,6 +102,7 @@ DEFAULT_W0_CAPABILITIES = [
 ]
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class OrchestratorConfig:
     listen_addr: str

@@ -55,8 +55,13 @@ final class GeneratedProjectMaterializer {
             }
             try (var stream = Files.walk(path)) {
                 stream.sorted(java.util.Comparator.reverseOrder())
-                        .map(Path::toFile)
-                        .forEach(java.io.File::delete);
+                        .forEach(p -> {
+                            try {
+                                Files.deleteIfExists(p);
+                            } catch (IOException ignored) {
+                                // best effort
+                            }
+                        });
             }
         } catch (IOException ignored) {
             // best effort

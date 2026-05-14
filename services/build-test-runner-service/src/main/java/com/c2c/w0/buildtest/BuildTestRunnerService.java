@@ -80,38 +80,36 @@ public final class BuildTestRunnerService {
         String entryClass = string(generatedProject.get("entryClass"), null);
         String entryFilePath = string(generatedProject.get("entryFilePath"), null);
 
-        Path workingRoot = null;
-        Path classOut = null;
+        GeneratedProjectMaterializer.MaterializedProject materialised;
         try {
-            GeneratedProjectMaterializer.MaterializedProject materialised;
-            try {
-                materialised = GeneratedProjectMaterializer.materialise(files);
-            } catch (IllegalArgumentException e) {
-                applyClassification(response, ResultClassifier.compileFailure());
-                diagnostics.add(diagnostic("error", "materialise-failed", e.getMessage()));
-                response.put("build", failedBuild(diagnostics));
-                response.put("execution", emptyExecution());
-                response.put("tests", emptyTests());
-                response.put("goldenMaster", Map.of());
-                response.put("comparison", Map.of());
-                response.put("diagnostics", diagnostics);
-                response.put("outputRef", reference(response));
-                return response;
-            } catch (IOException e) {
-                applyClassification(response, ResultClassifier.compileFailure());
-                diagnostics.add(diagnostic("error", "materialise-io",
-                        "Failed to write generated project to a temp directory: " + e.getMessage()));
-                response.put("build", failedBuild(diagnostics));
-                response.put("execution", emptyExecution());
-                response.put("tests", emptyTests());
-                response.put("goldenMaster", Map.of());
-                response.put("comparison", Map.of());
-                response.put("diagnostics", diagnostics);
-                response.put("outputRef", reference(response));
-                return response;
-            }
-            workingRoot = materialised.root();
-            classOut = workingRoot.resolve("target/classes");
+            materialised = GeneratedProjectMaterializer.materialise(files);
+        } catch (IllegalArgumentException e) {
+            applyClassification(response, ResultClassifier.compileFailure());
+            diagnostics.add(diagnostic("error", "materialise-failed", e.getMessage()));
+            response.put("build", failedBuild(diagnostics));
+            response.put("execution", emptyExecution());
+            response.put("tests", emptyTests());
+            response.put("goldenMaster", Map.of());
+            response.put("comparison", Map.of());
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        } catch (IOException e) {
+            applyClassification(response, ResultClassifier.compileFailure());
+            diagnostics.add(diagnostic("error", "materialise-io",
+                    "Failed to write generated project to a temp directory: " + e.getMessage()));
+            response.put("build", failedBuild(diagnostics));
+            response.put("execution", emptyExecution());
+            response.put("tests", emptyTests());
+            response.put("goldenMaster", Map.of());
+            response.put("comparison", Map.of());
+            response.put("diagnostics", diagnostics);
+            response.put("outputRef", reference(response));
+            return response;
+        }
+
+        try (materialised) {
+            Path classOut = materialised.root().resolve("target/classes");
 
             // -- Compile -----------------------------------------------------
             JavaInMemoryCompiler.CompileResult compile =
@@ -121,8 +119,7 @@ public final class BuildTestRunnerService {
             buildSection.put("sourceCount", compile.sourceCount());
             buildSection.put("fileCount", files.size());
             buildSection.put("diagnostics", compile.diagnostics());
-            buildSection.put("classOutputDir", classOut.getFileName() == null
-                    ? "target/classes" : "target/classes");
+            buildSection.put("classOutputDir", "target/classes");
             response.put("build", buildSection);
             diagnostics.addAll(compile.diagnostics());
 
@@ -226,7 +223,7 @@ public final class BuildTestRunnerService {
                         "matched", false,
                         "skipped", true,
                         "reason", "missing-golden-master"));
-            } else if (run != null && run.ok()) {
+            } else if (run.ok()) {
                 Map<String, Object> comparison = compareToGoldenMaster(run.stdout(), golden.get().expected());
                 response.put("comparison", comparison);
                 if (Boolean.TRUE.equals(comparison.get("matched"))) {
@@ -243,8 +240,6 @@ public final class BuildTestRunnerService {
             response.put("diagnostics", diagnostics);
             response.put("outputRef", reference(response));
             return response;
-        } finally {
-            GeneratedProjectMaterializer.deleteRecursively(workingRoot);
         }
     }
 

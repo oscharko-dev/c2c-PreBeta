@@ -8,6 +8,7 @@ import time
 import unittest
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 from urllib.parse import urlparse
 
 from orchestrator_service.config import OrchestratorConfig
@@ -90,6 +91,7 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         return
 
+    # noinspection PyPep8Naming
     def do_GET(self) -> None:
         parts = self._path_parts()
         if len(parts) == 2 and parts[0] == "v0" and parts[1] == "runs":
@@ -127,6 +129,7 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
             return
         self._write_json(404, {"error": "not found"})
 
+    # noinspection PyPep8Naming
     def do_POST(self) -> None:
         parts = self._path_parts()
         if parts == ["v0", "runs"]:
@@ -286,6 +289,7 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
             return
         self._write_json(404, {"error": "not found"})
 
+    # noinspection PyPep8Naming
     def do_PATCH(self) -> None:
         parts = self._path_parts()
         if len(parts) == 3 and parts[0] == "v0" and parts[1] == "runs":
@@ -322,7 +326,8 @@ def _start_server(handler_cls) -> tuple[HTTPServer, int, threading.Thread]:
 
 
 class OrchestratorIntegrationTests(unittest.TestCase):
-    def _create_orchestrator(self, host: str, mock_port: int):
+    @staticmethod
+    def _create_orchestrator(host: str, mock_port: int):
         config = OrchestratorConfig(
             listen_addr=f"{host}:0",
             harness_base_url=f"http://{host}:{mock_port}",
@@ -349,6 +354,8 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
     def test_run_is_executed_and_status_becomes_completed(self):
         mock_server, mock_port, mock_thread = _start_server(MockHarnessHandler)
+        orchestrator_server: Optional[HTTPServer] = None
+        run_state: dict = {}
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -431,14 +438,13 @@ class OrchestratorIntegrationTests(unittest.TestCase):
         finally:
             mock_server.shutdown()
             mock_server.server_close()
-            try:
+            if orchestrator_server is not None:
                 orchestrator_server.shutdown()
                 orchestrator_server.server_close()
-            except UnboundLocalError:
-                pass
 
     def test_startup_tolerates_existing_capability_registrations(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: Optional[HTTPServer] = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -482,14 +488,13 @@ class OrchestratorIntegrationTests(unittest.TestCase):
         finally:
             mock_server.shutdown()
             mock_server.server_close()
-            try:
+            if orchestrator_server is not None:
                 orchestrator_server.shutdown()
                 orchestrator_server.server_close()
-            except UnboundLocalError:
-                pass
 
     def test_run_status_is_visible_while_workflow_is_in_flight(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: Optional[HTTPServer] = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -532,14 +537,13 @@ class OrchestratorIntegrationTests(unittest.TestCase):
         finally:
             mock_server.shutdown()
             mock_server.server_close()
-            try:
+            if orchestrator_server is not None:
                 orchestrator_server.shutdown()
                 orchestrator_server.server_close()
-            except UnboundLocalError:
-                pass
 
     def test_status_endpoints_return_503_when_harness_is_unavailable(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: Optional[HTTPServer] = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -566,11 +570,9 @@ class OrchestratorIntegrationTests(unittest.TestCase):
         finally:
             mock_server.shutdown()
             mock_server.server_close()
-            try:
+            if orchestrator_server is not None:
                 orchestrator_server.shutdown()
                 orchestrator_server.server_close()
-            except UnboundLocalError:
-                pass
 
 
 if __name__ == "__main__":

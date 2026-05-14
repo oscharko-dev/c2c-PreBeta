@@ -63,14 +63,10 @@ func (e *Exporter) Export(manifest *EvidencePackManifest, req ExportRequest) (Ex
 		return ExportRecord{}, err
 	}
 
-	switch format {
-	case ExportFormatDirectory:
+	if format == ExportFormatDirectory {
 		return e.exportDirectory(manifest, target)
-	case ExportFormatTar:
-		return e.exportTar(manifest, target)
-	default:
-		return ExportRecord{}, fieldError("format", "unsupported format")
 	}
+	return e.exportTar(manifest, target)
 }
 
 func (e *Exporter) resolveDestination(packID, format, requested string) (string, error) {
@@ -198,11 +194,12 @@ func (e *Exporter) exportTar(manifest *EvidencePackManifest, path string) (Expor
 	if err != nil {
 		return ExportRecord{}, fmt.Errorf("create archive file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	hash := sha256.New()
 	writer := io.MultiWriter(f, hash)
 	tw := tar.NewWriter(writer)
+	defer func() { _ = tw.Close() }()
 	header := &tar.Header{
 		Name:    manifestFileName,
 		Mode:    0o644,

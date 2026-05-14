@@ -45,6 +45,7 @@ DEFAULT_PROMPT_TEMPLATE_VERSION = "v1"
 DEFAULT_MODEL_TIMEOUT_MS = 15000
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class W0RunContext:
     run_id: str
@@ -54,6 +55,7 @@ class W0RunContext:
     model_prompt: Optional[str] = None
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class WorkflowStepResult:
     capability_id: str
@@ -405,6 +407,7 @@ class W0WorkflowRunner:
         except Exception as exc:
             raise OrchestratorError(f"trajectory ledger unavailable: {exc}") from exc
 
+    # noinspection PyTypeHints
     def _build_evidence_payload(
         self,
         *,
@@ -447,6 +450,7 @@ class W0WorkflowRunner:
             "summary": self._build_summary(context, parse_output, ir_output, generator_output, build_test_output),
         }
 
+    # noinspection PyTypeHints
     def _build_model_invocation_ref(self, context: W0RunContext, model_output: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         configured_model_id = _text(getattr(self.config, "model_gateway_model_id", None)) or DEFAULT_MODEL_ID
         if model_output is None:
@@ -498,7 +502,8 @@ class W0WorkflowRunner:
             "ledgerRef": _as_reference_payload(ledger_ref),
         }
 
-    def _resolve_program_id(self, *payloads: Mapping[str, Any]) -> str:
+    @staticmethod
+    def _resolve_program_id(*payloads: Mapping[str, Any]) -> str:
         for payload in payloads:
             program_id = _text(_first_non_empty_mapping(payload).get("programId"))
             if program_id:
@@ -651,6 +656,8 @@ class W0WorkflowRunner:
                 )
                 raise StepExecutionError(f"step {step_name} failed: {exc}") from exc
 
+        raise StepExecutionError(f"step {step_name} retry loop exited without resolution")
+
     @staticmethod
     def _event_input_payload(data_class: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
         event_payload = dict(payload)
@@ -661,7 +668,8 @@ class W0WorkflowRunner:
             event_payload["promptRedacted"] = True
         return event_payload
 
-    def _coerce_step_output_ref(self, output_payload: Mapping[str, Any], step_name: str, run_id: str) -> DataReference:
+    @staticmethod
+    def _coerce_step_output_ref(output_payload: Mapping[str, Any], step_name: str, run_id: str) -> DataReference:
         output_ref_raw = _first_non_empty_mapping(output_payload.get("outputRef"))
         if output_ref_raw:
             return DataReference(
@@ -763,7 +771,7 @@ class W0WorkflowRunner:
         with self._step_lock:
             current = self._step_id_by_run.get(run_id, 0) + 1
             self._step_id_by_run[run_id] = current
-            return current
+        return current
 
     @staticmethod
     def _build_summary(

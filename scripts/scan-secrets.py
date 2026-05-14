@@ -113,7 +113,7 @@ def scan_staged() -> list[tuple[str, int, str, str]]:
 
         for i, line in enumerate(content.splitlines(), start=1):
             for pattern, kind in SECRET_PATTERNS:
-                for match in pattern.finditer(line):
+                for _ in pattern.finditer(line):
                     findings.append((file_path, i, kind, _mask_line(line)))
     return findings
 

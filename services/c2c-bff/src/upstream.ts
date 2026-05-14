@@ -58,7 +58,7 @@ export function createNodeHttpClient(): HttpClient {
             res.on('data', (chunk: Buffer) => chunks.push(chunk));
             res.on('end', () => {
               const raw = Buffer.concat(chunks).toString('utf-8');
-              let body: unknown = raw;
+              let body: unknown;
               if (raw.length > 0) {
                 try {
                   body = JSON.parse(raw);

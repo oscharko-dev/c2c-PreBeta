@@ -65,10 +65,7 @@ public final class TargetJavaGenerationService {
         JavaProjectGenerator.GenerationResult result = JavaProjectGenerator.generate(ir);
         diagnostics.addAll(result.diagnostics());
 
-        Map<String, Object> filesPayload = new LinkedHashMap<>();
-        for (Map.Entry<String, String> entry : result.files().entrySet()) {
-            filesPayload.put(entry.getKey(), entry.getValue());
-        }
+        Map<String, Object> filesPayload = new LinkedHashMap<>(result.files());
         generated.put("entryClass", result.entryClass());
         generated.put("entryFilePath", result.entryFilePath());
         generated.put("fileCount", result.files().size());

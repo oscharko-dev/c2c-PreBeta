@@ -7,7 +7,7 @@ import logging
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .client import JSONHTTPClient
 from .config import OrchestratorConfig, load_config
@@ -64,7 +64,7 @@ class OrchestratorService:
             server_version = "orchestrator-service/0.1"
             error_content_type = "application/json"
 
-            def _route_parts(self) -> list[str]:
+            def _route_parts(self) -> List[str]:
                 path = urllib.parse.urlparse(self.path).path
                 return [segment for segment in path.split("/") if segment]
 
@@ -83,6 +83,7 @@ class OrchestratorService:
                 raw = self.rfile.read(content_length)
                 return json.loads(raw.decode("utf-8"))
 
+            # noinspection PyPep8Naming
             def do_GET(self) -> None:
                 try:
                     parts = self._route_parts()
@@ -118,12 +119,14 @@ class OrchestratorService:
                     service.logger.error("GET handling failed", exc_info=exc)
                     self._write_json(500, {"error": "internal server error"})
 
+            # noinspection PyPep8Naming
             def do_POST(self) -> None:
                 try:
                     parts = self._route_parts()
                     if len(parts) == 2 and parts[0] == "v0" and parts[1] == "runs":
                         payload = self._read_json()
-                        service._start_run(self, payload)
+                        status_code, response_body = service._start_run(payload)
+                        self._write_json(status_code, response_body)
                         return
                     self._write_json(404, {"error": "not found"})
                 except json.JSONDecodeError:
@@ -134,6 +137,7 @@ class OrchestratorService:
                     service.logger.error("POST handling failed", exc_info=exc)
                     self._write_json(500, {"error": "internal server error"})
 
+            # noinspection PyPep8Naming
             def do_PATCH(self) -> None:
                 self._write_json(405, {"error": "method not allowed"})
 
@@ -142,7 +146,7 @@ class OrchestratorService:
 
         return RequestHandler
 
-    def _run_state(self, run_id: str) -> Optional[dict[str, Any]]:
+    def _run_state(self, run_id: str) -> Optional[Dict[str, Any]]:
         try:
             return self.runner.gateway.get_run(run_id)
         except Exception as exc:
@@ -150,7 +154,7 @@ class OrchestratorService:
                 return None
             raise UpstreamServiceError("harness run status unavailable") from exc
 
-    def _runs_list(self) -> list[dict[str, Any]]:
+    def _runs_list(self) -> List[Dict[str, Any]]:
         try:
             list_response = self.runner.gateway.http.get_json(f"{self.runner.gateway.base_url}/v0/runs")
             if isinstance(list_response.payload, list):
@@ -159,7 +163,7 @@ class OrchestratorService:
             raise UpstreamServiceError("harness run list unavailable") from exc
         return []
 
-    def _start_run(self, request_handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None:
+    def _start_run(self, payload: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
         input_ref = payload.get("inputRef")
         if not isinstance(input_ref, dict):
             raise ValueError("inputRef is required and must be an object")
@@ -203,16 +207,13 @@ class OrchestratorService:
         )
         thread.start()
 
-        request_handler._write_json(
-            201,
-            {
-                "run": run,
-                "status": "started",
-                "message": "orchestrator run started",
-            },
-        )
+        return 201, {
+            "run": run,
+            "status": "started",
+            "message": "orchestrator run started",
+        }
 
-    def _execute_run(self, context: W0RunContext, input_ref: dict[str, Any]) -> None:
+    def _execute_run(self, context: W0RunContext, input_ref: Dict[str, Any]) -> None:
         try:
             self.runner.run(context=context, input_ref=input_ref)
         except Exception as exc:  # pragma: no cover - asynchronous runtime error path
@@ -231,7 +232,7 @@ def create_http_server(
     return server
 
 
-def create_configured_server(config: OrchestratorConfig) -> tuple[HTTPServer, W0WorkflowRunner]:
+def create_configured_server(config: OrchestratorConfig) -> Tuple[HTTPServer, W0WorkflowRunner]:
     harness_headers = {}
     if config.harness_token:
         harness_headers = {
@@ -247,7 +248,7 @@ def create_configured_server(config: OrchestratorConfig) -> tuple[HTTPServer, W0
     return create_http_server(config=config, runner=runner, host=host, port=port), runner
 
 
-def _split_listen_address(listen_addr: str) -> tuple[str, int]:
+def _split_listen_address(listen_addr: str) -> Tuple[str, int]:
     if ":" not in listen_addr:
         raise ValueError("listen address must include host and port")
     host, port_text = listen_addr.rsplit(":", 1)

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 type InMemoryHarnessEventStore struct {
@@ -382,12 +381,4 @@ func ensureDir(path string) error {
 		}
 	}
 	return nil
-}
-
-func nowTimestampKey() time.Time {
-	return time.Now().UTC()
-}
-
-func _nowTimestampUnused() time.Time {
-	return nowTimestampKey()
 }
