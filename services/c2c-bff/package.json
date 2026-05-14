@@ -1,0 +1,16 @@
+{
+  "name": "c2c-bff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "W0 backend-for-frontend that brokers UI calls to the c2c capability services and serves the c2c-ui static bundle.",
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "test": "npm run build && node --test dist/server.test.js dist/samples.test.js dist/upstream.test.js",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^20.14.11"
+  }
+}

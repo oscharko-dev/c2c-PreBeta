@@ -15,6 +15,8 @@ services = {
     "go": root / "services" / "go" / "w0-service",
     "python": root / "services" / "python" / "w0-service",
     "typescript": root / "services" / "typescript" / "w0-service",
+    "typescript-bff": root / "services" / "c2c-bff",
+    "typescript-ui": root / "apps" / "c2c-ui",
     "java": root / "services" / "java" / "w0-service",
     "java-cobol-parser": root / "services" / "cobol-parser-service",
     "java-semantic-ir": root / "services" / "semantic-ir-service",
@@ -62,17 +64,20 @@ go_sum = go_service / "go.sum"
 if go_sum.exists():
     licenses["go"] = f"module checksums captured in {go_sum.relative_to(root)}"
 
-# Node dependencies from npm lockfile
-ts_service = services["typescript"]
-pkg_lock = ts_service / "package-lock.json"
-if pkg_lock.exists():
-    with open(pkg_lock, "r", encoding="utf-8") as fh:
-        lock = json.load(fh)
-    packages = lock.get("packages", {})
-    dependencies["typescript"] = {
-        "packages": sorted([name for name in packages.keys() if name and name.startswith("node_modules/")])
-    }
-    licenses["typescript"] = f"dependency lock captured in {pkg_lock.relative_to(root)}"
+# Node dependencies from npm lockfile (covers all TypeScript packages).
+for ts_key in ("typescript", "typescript-bff", "typescript-ui"):
+    ts_service = services.get(ts_key)
+    if ts_service is None:
+        continue
+    pkg_lock = ts_service / "package-lock.json"
+    if pkg_lock.exists():
+        with open(pkg_lock, "r", encoding="utf-8") as fh:
+            lock = json.load(fh)
+        packages = lock.get("packages", {})
+        dependencies[ts_key] = {
+            "packages": sorted([name for name in packages.keys() if name and name.startswith("node_modules/")])
+        }
+        licenses[ts_key] = f"dependency lock captured in {pkg_lock.relative_to(root)}"
 
 # Python dependencies (requirements baseline)
 py_service = services["python"]
