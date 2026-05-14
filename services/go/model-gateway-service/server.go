@@ -146,10 +146,10 @@ func (s *ModelGatewayService) healthHandler(w http.ResponseWriter, r *http.Reque
 		providers = append(providers, name)
 	}
 	writeJSON(w, http.StatusOK, ModelGatewayHealthResponse{
-		Status:     "ok",
-		Service:    eventServiceName,
-		Schema:     gatewayEventSchemaVersion,
-		Providers:  providers,
+		Status:      "ok",
+		Service:     eventServiceName,
+		Schema:      gatewayEventSchemaVersion,
+		Providers:   providers,
 		ActiveModel: len(s.activeModels()),
 		Configured:  map[string]string{"mode": s.allowlist.Mode},
 	})
@@ -235,8 +235,8 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		record.ErrorMessage = err.Error()
 		outputRef, outputRefErr := ComputeSHA256Ref(map[string]any{
 			"invocationId": invocationID,
-			"error":       err.Error(),
-			"status":      statusRejected,
+			"error":        err.Error(),
+			"status":       statusRejected,
 		})
 		if outputRefErr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to compute validation output hash"})
@@ -249,7 +249,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": appendErr.Error()})
 			return
 		}
-		_ = s.emitEvent(EventEnvelopeV0{
+		s.emitEvent(EventEnvelopeV0{
 			EventID:          fmt.Sprintf("mgv-%s", invocationID),
 			EventType:        eventTypeModelInvocationFailed,
 			SchemaVersion:    gatewayEventSchemaVersion,
@@ -335,7 +335,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		eventType = eventTypeModelInvocationFailed
 		eventTransition = "invoke.failed"
 	}
-	_ = s.emitEvent(EventEnvelopeV0{
+	s.emitEvent(EventEnvelopeV0{
 		EventID:          fmt.Sprintf("mgv-%s", invocationID),
 		EventType:        eventType,
 		SchemaVersion:    gatewayEventSchemaVersion,
@@ -371,11 +371,11 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusOK, ModelInvocationResponse{
 		InvocationID: invocationID,
-		RunID:       request.RunID,
-		ModelID:     request.ModelID,
-		Status:      outputStatus,
-		LatencyMs:   latencyMs,
-		Output:      outputData,
+		RunID:        request.RunID,
+		ModelID:      request.ModelID,
+		Status:       outputStatus,
+		LatencyMs:    latencyMs,
+		Output:       outputData,
 	})
 }
 
