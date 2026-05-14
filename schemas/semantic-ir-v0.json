@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/semantic-ir-v0.json",
+  "title": "Semantic IR v0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "irId",
+    "programId",
+    "sourceHash",
+    "sourceKind",
+    "symbols",
+    "fieldLayouts",
+    "statements",
+    "controlFlow",
+    "assumptions",
+    "traceability"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "irId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "programId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceKind": {
+      "type": "string",
+      "enum": ["cobol"]
+    },
+    "symbols": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["id", "kind", "line"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["data-item", "paragraph"] },
+          "level": { "type": "integer", "minimum": 1 },
+          "line": { "type": "integer", "minimum": 0 },
+          "numeric": { "type": "boolean" },
+          "scale": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "fieldLayouts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "level", "byteSize", "sourceLine"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "level": { "type": "integer", "minimum": 1 },
+          "picture": { "type": ["string", "null"] },
+          "byteSize": { "type": "integer", "minimum": 0 },
+          "occurs": { "type": ["integer", "null"], "minimum": 1 },
+          "numeric": { "type": "boolean" },
+          "signed": { "type": "boolean" },
+          "scale": { "type": "integer", "minimum": 0 },
+          "sourceLine": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "statements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "operation", "sourceLine", "operands", "raw"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "operation": { "type": "string", "minLength": 1 },
+          "sourceLine": { "type": "integer", "minimum": 0 },
+          "operands": { "type": "object" },
+          "raw": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "controlFlow": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "from", "to", "label"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "traceability": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["line", "raw"],
+        "properties": {
+          "line": { "type": "integer", "minimum": 0 },
+          "raw": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

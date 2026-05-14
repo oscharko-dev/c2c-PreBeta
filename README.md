@@ -12,6 +12,8 @@ The initial walking skeleton is intentionally constrained, deterministic, and re
 The W0 architecture is organized as a microservice repository with one service skeleton per supported runtime:
 
 - `services/java/w0-service` (Java 21 + Maven)
+- `services/cobol-parser-service` (Java 21 + Maven, W0 COBOL S0/S1 parser)
+- `services/semantic-ir-service` (Java 21 + Maven, Semantic IR v0 normalizer)
 - `services/go/w0-service` (Go 1.22 + Modules)
 - `services/agentic-harness-core` (Go control-plane for registries and run-state)
 - `services/python/w0-service` (Python 3.12 + stdlib tests)
@@ -147,6 +149,8 @@ The canonical version source is `artifacts/build-metadata.json`, produced by the
 services/
   go/w0-service/
   java/w0-service/
+  cobol-parser-service/
+  semantic-ir-service/
   python/w0-service/
   typescript/w0-service/
 scripts/

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "v0",
+  "irId": "ir-ctrldec01-sample",
+  "programId": "CTRLDEC01",
+  "sourceHash": "sample",
+  "sourceKind": "cobol",
+  "symbols": {
+    "WS-GROSS-SALARY": {
+      "id": "d-ws-gross-salary-8",
+      "kind": "data-item",
+      "level": 1,
+      "line": 8,
+      "numeric": true,
+      "scale": 2
+    }
+  },
+  "fieldLayouts": [
+    {
+      "id": "d-ws-gross-salary-8",
+      "name": "WS-GROSS-SALARY",
+      "level": 1,
+      "picture": "S9(7)V99",
+      "byteSize": 9,
+      "occurs": null,
+      "numeric": true,
+      "signed": true,
+      "scale": 2,
+      "sourceLine": 8
+    }
+  ],
+  "statements": [
+    {
+      "id": "s-compute-12-1",
+      "operation": "compute",
+      "sourceLine": 12,
+      "operands": {
+        "target": "WS-GROSS-SALARY",
+        "expression": "WS-BASE-SALARY * WS-EMPLOYEE-COUNT"
+      },
+      "raw": "COMPUTE WS-GROSS-SALARY = WS-BASE-SALARY * WS-EMPLOYEE-COUNT"
+    }
+  ],
+  "controlFlow": [],
+  "assumptions": [
+    "W0 assumes display-compatible fixed-point decimal semantics for PIC S9/V fields."
+  ],
+  "traceability": {
+    "s-compute-12-1": {
+      "line": 12,
+      "raw": "COMPUTE WS-GROSS-SALARY = WS-BASE-SALARY * WS-EMPLOYEE-COUNT"
+    }
+  }
+}

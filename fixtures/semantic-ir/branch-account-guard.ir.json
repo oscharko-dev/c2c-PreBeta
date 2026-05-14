@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "v0",
+  "irId": "ir-brnch01-sample",
+  "programId": "BRNCH01",
+  "sourceHash": "sample",
+  "sourceKind": "cobol",
+  "symbols": {
+    "WS-ACCOUNT": {
+      "id": "d-ws-account-8",
+      "kind": "data-item",
+      "level": 10,
+      "line": 8,
+      "numeric": false,
+      "scale": 0
+    },
+    "WS-AMOUNT": {
+      "id": "d-ws-amount-10",
+      "kind": "data-item",
+      "level": 15,
+      "line": 10,
+      "numeric": true,
+      "scale": 2
+    }
+  },
+  "fieldLayouts": [
+    {
+      "id": "d-ws-account-8",
+      "name": "WS-ACCOUNT",
+      "level": 10,
+      "picture": null,
+      "byteSize": 0,
+      "occurs": 4,
+      "numeric": false,
+      "signed": false,
+      "scale": 0,
+      "sourceLine": 8
+    },
+    {
+      "id": "d-ws-amount-10",
+      "name": "WS-AMOUNT",
+      "level": 15,
+      "picture": "S9(5)V99",
+      "byteSize": 7,
+      "occurs": null,
+      "numeric": true,
+      "signed": true,
+      "scale": 2,
+      "sourceLine": 10
+    }
+  ],
+  "statements": [
+    {
+      "id": "s-perform-22-1",
+      "operation": "perform",
+      "sourceLine": 22,
+      "operands": {
+        "tokens": ["PERFORM", "VARYING", "WS-INDEX", "FROM", "1", "BY", "1", "UNTIL", "WS-INDEX", ">", "4"]
+      },
+      "raw": "PERFORM VARYING WS-INDEX FROM 1 BY 1 UNTIL WS-INDEX > 4"
+    },
+    {
+      "id": "s-evaluate-23-1",
+      "operation": "evaluate",
+      "sourceLine": 23,
+      "operands": {
+        "selector": "WS-STATUS (WS-INDEX)"
+      },
+      "raw": "EVALUATE WS-STATUS (WS-INDEX)"
+    }
+  ],
+  "controlFlow": [
+    {
+      "id": "e-s-perform-22-1-s-evaluate-23-1-next",
+      "from": "s-perform-22-1",
+      "to": "s-evaluate-23-1",
+      "label": "next"
+    }
+  ],
+  "assumptions": [
+    "W0 control-flow edges are structural and intentionally conservative."
+  ],
+  "traceability": {
+    "s-perform-22-1": {
+      "line": 22,
+      "raw": "PERFORM VARYING WS-INDEX FROM 1 BY 1 UNTIL WS-INDEX > 4"
+    },
+    "s-evaluate-23-1": {
+      "line": 23,
+      "raw": "EVALUATE WS-STATUS (WS-INDEX)"
+    }
+  }
+}
