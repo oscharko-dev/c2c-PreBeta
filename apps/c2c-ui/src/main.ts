@@ -2,31 +2,46 @@ import { BffError, createBffApi, type BffApi } from './api.js';
 import {
   buildTestSummary,
   evidenceSummary,
+  formatPostStartMetadata,
+  formatSourceMetadata,
   generatedSummary,
-  modeBadgeFromResponse,
+  limitationsSummary,
   pickEntryFile,
-  runStatusLine,
+  pipelineLine,
+  productReadiness,
+  runStatusChip,
+  sourceMetadata,
+  startButtonState,
 } from './view-model.js';
 import type {
   BuildTestView,
   EvidenceView,
   GeneratedView,
+  ModeResponse,
   RunSummary,
-  SampleDetail,
   SampleSummary,
   TransformRequest,
+  TransformResponse,
 } from './types.js';
 
 interface UiState {
+  mode?: ModeResponse;
+  modeError?: string;
   samples: SampleSummary[];
-  selectedSample?: SampleDetail;
+  samplesError?: string;
+  selectedGeneratedFile?: string;
   run?: RunSummary;
+  runError?: string;
   generated?: GeneratedView;
   buildTest?: BuildTestView;
   evidence?: EvidenceView;
   generatedError?: string;
   buildTestError?: string;
   evidenceError?: string;
+  busy: boolean;
+  lastError?: string;
+  lastTransform?: TransformResponse;
+  lastSourceHashHex?: string;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -43,187 +58,224 @@ function clearChildren(node: HTMLElement): void {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
-function renderModeBadge(state: ReturnType<typeof modeBadgeFromResponse>): void {
-  const node = el<HTMLDivElement>('mode-badge');
-  node.dataset['mode'] = state.mode;
-  setText(node, state.text);
+function setHidden(node: HTMLElement, hidden: boolean): void {
+  if (hidden) {
+    node.setAttribute('hidden', '');
+  } else {
+    node.removeAttribute('hidden');
+  }
 }
 
-function renderSamples(state: UiState, onSelect: (programId: string) => void): void {
-  const container = el<HTMLDivElement>('sample-picker');
-  clearChildren(container);
-  if (state.samples.length === 0) {
-    setText(container, 'No samples available.');
-    return;
+function renderProductMode(state: UiState): void {
+  const chip = el<HTMLDivElement>('product-mode-status');
+  const valueNode = chip.querySelector<HTMLElement>('.status-chip-value');
+  const readiness = productReadiness(state.mode, state.modeError);
+  chip.dataset['tone'] = readiness.tone;
+  if (valueNode) setText(valueNode, readiness.label);
+}
+
+function renderRunStatusChip(state: UiState): void {
+  const chip = el<HTMLDivElement>('run-status-chip');
+  const valueNode = chip.querySelector<HTMLElement>('.status-chip-value');
+  const summary = runStatusChip(state.run);
+  chip.dataset['state'] = summary.state;
+  if (valueNode) setText(valueNode, summary.label);
+}
+
+function renderStartButton(state: UiState): void {
+  const editor = el<HTMLTextAreaElement>('cobol-editor');
+  const button = el<HTMLButtonElement>('start-run');
+  const help = el<HTMLParagraphElement>('start-help');
+  const readiness = productReadiness(state.mode, state.modeError);
+  const buttonState = startButtonState({
+    sourceText: editor.value,
+    productReady: readiness.ready,
+    productLabel: readiness.label,
+    busy: state.busy,
+    ...(state.lastError ? { lastError: state.lastError } : {}),
+  });
+  button.disabled = !buttonState.enabled;
+  button.dataset['busy'] = buttonState.busy ? 'true' : 'false';
+  setText(button, buttonState.label);
+  setText(help, buttonState.help);
+  help.dataset['tone'] = buttonState.helpTone;
+  button.setAttribute('aria-busy', buttonState.busy ? 'true' : 'false');
+}
+
+function renderSourceMetadata(state: UiState): void {
+  const editor = el<HTMLTextAreaElement>('cobol-editor');
+  const meta = el<HTMLSpanElement>('source-meta');
+  const post = el<HTMLSpanElement>('source-post-start');
+  const text = editor.value;
+  setText(meta, formatSourceMetadata(sourceMetadata(text)));
+  if (state.lastTransform) {
+    setText(post, formatPostStartMetadata(state.lastTransform, state.lastSourceHashHex));
+    setHidden(post, false);
+  } else {
+    setText(post, '');
+    setHidden(post, true);
+  }
+}
+
+function renderReferenceLoader(state: UiState): void {
+  const select = el<HTMLSelectElement>('reference-loader');
+  const previous = select.value;
+  clearChildren(select);
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = state.samples.length === 0
+    ? state.samplesError
+      ? `failed to load: ${state.samplesError}`
+      : 'No reference programs available'
+    : 'Load reference program…';
+  select.appendChild(placeholder);
+  if (state.samplesError) {
+    placeholder.disabled = true;
   }
   for (const sample of state.samples) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'sample-card';
-    button.setAttribute('role', 'option');
-    button.setAttribute('aria-selected', String(state.selectedSample?.programId === sample.programId));
-    button.dataset['programId'] = sample.programId;
-
-    const pid = document.createElement('div');
-    pid.className = 'program-id';
-    pid.textContent = sample.programId;
-    button.appendChild(pid);
-
-    const title = document.createElement('div');
-    title.className = 'title';
-    title.textContent = sample.title;
-    button.appendChild(title);
-
-    const desc = document.createElement('div');
-    desc.className = 'description';
-    desc.textContent = sample.description;
-    button.appendChild(desc);
-
-    if (sample.knownDivergenceAtW0) {
-      const tag = document.createElement('div');
-      tag.className = 'known-divergence';
-      tag.textContent = 'known W0 divergence';
-      button.appendChild(tag);
-    }
-
-    button.addEventListener('click', () => onSelect(sample.programId));
-    container.appendChild(button);
+    const option = document.createElement('option');
+    option.value = sample.programId;
+    const tag = sample.knownDivergenceAtW0 ? ' (known W0 divergence)' : '';
+    option.textContent = `${sample.programId} · ${sample.title}${tag}`;
+    select.appendChild(option);
+  }
+  if (previous && state.samples.some((s) => s.programId === previous)) {
+    select.value = previous;
+  } else {
+    select.value = '';
   }
 }
 
-function renderCobolPane(state: UiState): void {
-  const pane = el<HTMLPreElement>('cobol-source');
-  if (!state.selectedSample) {
-    setText(pane, 'No sample loaded.');
-    return;
-  }
-  setText(pane, state.selectedSample.cobolSource);
-}
-
-function renderRunStatus(state: UiState): void {
-  const node = el<HTMLDivElement>('run-status');
-  const line = runStatusLine(state.run);
+function renderPipeline(state: UiState): void {
+  const node = el<HTMLDivElement>('pipeline-status');
+  const line = pipelineLine(state.run);
   node.dataset['state'] = line.state;
   clearChildren(node);
-  const primary = document.createElement('div');
-  primary.textContent = line.primary;
-  node.appendChild(primary);
-  if (line.secondary) {
-    const secondary = document.createElement('div');
-    secondary.style.color = 'var(--text-dim)';
-    secondary.style.marginTop = '4px';
-    secondary.textContent = line.secondary;
-    node.appendChild(secondary);
+  if (state.runError) {
+    const diag = document.createElement('div');
+    diag.className = 'diagnostic';
+    diag.textContent = `Failed to refresh run: ${state.runError}`;
+    node.appendChild(diag);
+    return;
+  }
+  const headline = document.createElement('div');
+  headline.textContent = line.headline;
+  node.appendChild(headline);
+  if (line.detail) {
+    const detail = document.createElement('div');
+    detail.style.color = 'var(--text-muted)';
+    detail.style.marginTop = '4px';
+    detail.textContent = line.detail;
+    node.appendChild(detail);
+  }
+  if (line.diagnostic) {
+    const diag = document.createElement('div');
+    diag.className = 'diagnostic';
+    diag.textContent = line.diagnostic;
+    node.appendChild(diag);
   }
 }
 
 function renderGenerated(state: UiState): void {
-  const pane = el<HTMLPreElement>('generated-java');
-  const unsupportedBlock = el<HTMLDivElement>('unsupported-features');
-  const summary = generatedSummary(state.generated);
-  if (!state.generated) {
-    setText(pane, state.generatedError ? `Failed to load generated output: ${state.generatedError}` : summary.headline);
-    unsupportedBlock.className = 'unsupported empty';
-    clearChildren(unsupportedBlock);
-    return;
-  }
-  const entry = pickEntryFile(state.generated);
-  const body = entry ? `// ${entry.path}\n\n${entry.content}` : `// ${summary.headline}\n\n${summary.note}`;
-  setText(pane, body);
+  const viewer = el<HTMLPreElement>('generated-output');
+  const noteNode = el<HTMLSpanElement>('generated-note');
+  const entryNode = el<HTMLSpanElement>('generated-entry');
+  const fileLabel = el<HTMLLabelElement>('generated-file-picker').parentElement as HTMLLabelElement;
+  const filePicker = el<HTMLSelectElement>('generated-file-picker');
 
-  if (state.generated.unsupportedFeatures.length === 0 && state.generated.openAssumptions.length === 0) {
-    unsupportedBlock.className = 'unsupported empty';
-    clearChildren(unsupportedBlock);
+  const summary = generatedSummary(state.generated, state.run, state.generatedError);
+  viewer.dataset['state'] = summary.viewerState;
+  setText(entryNode, summary.headline);
+  setText(noteNode, summary.note);
+
+  if (summary.viewerState !== 'shown' || !state.generated) {
+    setText(viewer, summary.paneText);
+    setHidden(fileLabel, true);
+    clearChildren(filePicker);
     return;
   }
-  unsupportedBlock.className = 'unsupported';
-  clearChildren(unsupportedBlock);
-  if (state.generated.unsupportedFeatures.length > 0) {
-    const label = document.createElement('div');
-    label.textContent = 'Unsupported W0 features:';
-    unsupportedBlock.appendChild(label);
-    const list = document.createElement('ul');
-    for (const feature of state.generated.unsupportedFeatures) {
-      const li = document.createElement('li');
-      li.textContent = feature;
-      list.appendChild(li);
-    }
-    unsupportedBlock.appendChild(list);
+
+  // Real product output is available — render file picker and content.
+  const filePaths = Object.keys(state.generated.files);
+  const pick = pickEntryFile(state.generated, state.selectedGeneratedFile);
+  if (!pick) {
+    viewer.dataset['state'] = 'empty';
+    setText(viewer, 'No generator files emitted for this run.');
+    setHidden(fileLabel, true);
+    clearChildren(filePicker);
+    return;
   }
-  if (state.generated.openAssumptions.length > 0) {
-    const label = document.createElement('div');
-    label.style.marginTop = '6px';
-    label.textContent = 'Open assumptions:';
-    unsupportedBlock.appendChild(label);
-    const list = document.createElement('ul');
-    for (const note of state.generated.openAssumptions) {
-      const li = document.createElement('li');
-      li.textContent = note;
-      list.appendChild(li);
+  setText(viewer, `// ${pick.path}\n\n${pick.content}`);
+  if (filePaths.length > 1) {
+    setHidden(fileLabel, false);
+    const currentValue = filePicker.value;
+    clearChildren(filePicker);
+    for (const file of filePaths) {
+      const option = document.createElement('option');
+      option.value = file;
+      option.textContent = file;
+      filePicker.appendChild(option);
     }
-    unsupportedBlock.appendChild(list);
+    filePicker.value = pick.path;
+    if (currentValue && filePaths.includes(currentValue)) {
+      filePicker.value = currentValue;
+    }
+  } else {
+    setHidden(fileLabel, true);
+    clearChildren(filePicker);
   }
 }
 
 function renderBuildTest(state: UiState): void {
   const node = el<HTMLDivElement>('build-test');
-  const summary = buildTestSummary(state.buildTest);
+  const summary = buildTestSummary(state.buildTest, state.run, state.buildTestError);
   node.dataset['status'] = summary.status;
   clearChildren(node);
-
-  if (!state.buildTest) {
-    setText(node, state.buildTestError ? `Failed to load build/test output: ${state.buildTestError}` : summary.headline);
-    return;
-  }
-
   const headlineRow = document.createElement('div');
-  headlineRow.className = 'row';
   headlineRow.textContent = summary.headline;
   node.appendChild(headlineRow);
-
-  const classRow = document.createElement('div');
-  classRow.className = 'row';
-  const classLabel = document.createElement('span');
-  classLabel.className = 'label';
-  classLabel.textContent = 'classification:';
-  classRow.appendChild(classLabel);
-  classRow.appendChild(document.createTextNode(summary.classification));
-  node.appendChild(classRow);
-
   if (summary.note) {
     const noteRow = document.createElement('div');
-    noteRow.className = 'row';
-    noteRow.style.color = 'var(--text-dim)';
+    noteRow.style.color = 'var(--text-muted)';
+    noteRow.style.marginTop = '4px';
     noteRow.textContent = summary.note;
     node.appendChild(noteRow);
   }
+  if (summary.isProductResult && state.buildTest) {
+    const compare = document.createElement('div');
+    compare.className = 'compare';
+    const expectedWrap = document.createElement('div');
+    const expectedLabel = document.createElement('div');
+    expectedLabel.className = 'compare-label';
+    expectedLabel.textContent = 'expected (oracle)';
+    const expected = document.createElement('pre');
+    expected.textContent = state.buildTest.expectedOutput || '(none)';
+    expectedWrap.appendChild(expectedLabel);
+    expectedWrap.appendChild(expected);
 
-  const compare = document.createElement('div');
-  compare.className = 'compare';
-  const expected = document.createElement('pre');
-  expected.textContent = `// expected (Golden Master)\n${state.buildTest.expectedOutput || '(none)'}`;
-  const actual = document.createElement('pre');
-  actual.textContent = `// actual\n${state.buildTest.actualOutput || '(none)'}`;
-  compare.appendChild(expected);
-  compare.appendChild(actual);
-  node.appendChild(compare);
+    const actualWrap = document.createElement('div');
+    const actualLabel = document.createElement('div');
+    actualLabel.className = 'compare-label';
+    actualLabel.textContent = 'actual (generated Java)';
+    const actual = document.createElement('pre');
+    actual.textContent = state.buildTest.actualOutput || '(none)';
+    actualWrap.appendChild(actualLabel);
+    actualWrap.appendChild(actual);
+
+    compare.appendChild(expectedWrap);
+    compare.appendChild(actualWrap);
+    node.appendChild(compare);
+  }
 }
 
 function renderEvidence(state: UiState): void {
   const node = el<HTMLDivElement>('evidence');
-  const summary = evidenceSummary(state.evidence);
+  const summary = evidenceSummary(state.evidence, state.run, state.evidenceError);
   node.dataset['status'] = summary.status;
   clearChildren(node);
-
-  if (!state.evidence) {
-    setText(node, state.evidenceError ? `Failed to load evidence output: ${state.evidenceError}` : summary.headline);
-    return;
-  }
-
   const headline = document.createElement('div');
   headline.textContent = summary.headline;
   node.appendChild(headline);
-
   if (summary.manifestUri) {
     const ref = document.createElement('div');
     const label = document.createElement('span');
@@ -233,21 +285,22 @@ function renderEvidence(state: UiState): void {
     ref.appendChild(document.createTextNode(' ' + summary.manifestUri));
     node.appendChild(ref);
   }
-  if (state.evidence.exportUri) {
-    const exportRef = document.createElement('div');
+  if (summary.exportUri) {
+    const ref = document.createElement('div');
     const label = document.createElement('span');
     label.className = 'label';
     label.textContent = 'export:';
-    exportRef.appendChild(label);
-    exportRef.appendChild(document.createTextNode(' ' + state.evidence.exportUri));
-    node.appendChild(exportRef);
+    ref.appendChild(label);
+    ref.appendChild(document.createTextNode(' ' + summary.exportUri));
+    node.appendChild(ref);
   }
-
   if (summary.missing.length > 0) {
     const missing = document.createElement('div');
-    missing.className = 'missing';
+    missing.style.marginTop = '6px';
+    missing.style.color = 'var(--warn)';
     missing.textContent = 'Missing artifacts:';
     const list = document.createElement('ul');
+    list.className = 'bare';
     for (const entry of summary.missing) {
       const li = document.createElement('li');
       li.textContent = entry;
@@ -256,47 +309,86 @@ function renderEvidence(state: UiState): void {
     missing.appendChild(list);
     node.appendChild(missing);
   }
-
   if (summary.note) {
     const noteRow = document.createElement('div');
-    noteRow.style.color = 'var(--text-dim)';
-    noteRow.style.marginTop = '6px';
+    noteRow.style.color = 'var(--text-muted)';
+    noteRow.style.marginTop = '4px';
     noteRow.textContent = summary.note;
     node.appendChild(noteRow);
   }
 }
 
-function setStartButtonEnabled(enabled: boolean, helpText: string): void {
-  const button = el<HTMLButtonElement>('start-run');
-  const help = el<HTMLSpanElement>('start-help');
-  button.disabled = !enabled;
-  setText(help, helpText);
+function renderLimitations(state: UiState): void {
+  const node = el<HTMLDivElement>('limitations');
+  const summary = limitationsSummary(state.generated, state.run);
+  node.dataset['state'] = summary.state;
+  clearChildren(node);
+  const headline = document.createElement('div');
+  headline.textContent = summary.headline;
+  node.appendChild(headline);
+  if (summary.unsupportedFeatures.length > 0) {
+    const label = document.createElement('div');
+    label.style.marginTop = '6px';
+    label.textContent = 'Unsupported features:';
+    node.appendChild(label);
+    const list = document.createElement('ul');
+    list.className = 'bare';
+    for (const feature of summary.unsupportedFeatures) {
+      const li = document.createElement('li');
+      li.textContent = feature;
+      list.appendChild(li);
+    }
+    node.appendChild(list);
+  }
+  if (summary.openAssumptions.length > 0) {
+    const label = document.createElement('div');
+    label.style.marginTop = '6px';
+    label.textContent = 'Open assumptions:';
+    node.appendChild(label);
+    const list = document.createElement('ul');
+    list.className = 'bare';
+    for (const note of summary.openAssumptions) {
+      const li = document.createElement('li');
+      li.textContent = note;
+      list.appendChild(li);
+    }
+    node.appendChild(list);
+  }
+}
+
+function renderAll(state: UiState): void {
+  renderProductMode(state);
+  renderRunStatusChip(state);
+  renderStartButton(state);
+  renderSourceMetadata(state);
+  renderPipeline(state);
+  renderGenerated(state);
+  renderBuildTest(state);
+  renderEvidence(state);
+  renderLimitations(state);
 }
 
 async function refreshRunDetails(api: BffApi, state: UiState, runId: string): Promise<void> {
   const [generated, buildTest, evidence] = await Promise.all([
-    api.getGenerated(runId).catch((err) => {
-      state.generatedError = err instanceof Error ? err.message : 'unknown error';
-      return undefined;
-    }),
-    api.getBuildTest(runId).catch((err) => {
-      state.buildTestError = err instanceof Error ? err.message : 'unknown error';
-      return undefined;
-    }),
-    api.getEvidence(runId).catch((err) => {
-      state.evidenceError = err instanceof Error ? err.message : 'unknown error';
-      return undefined;
-    }),
+    api.getGenerated(runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
+      value: undefined as GeneratedView | undefined,
+      error: err instanceof Error ? err.message : 'unknown error',
+    })),
+    api.getBuildTest(runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
+      value: undefined as BuildTestView | undefined,
+      error: err instanceof Error ? err.message : 'unknown error',
+    })),
+    api.getEvidence(runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
+      value: undefined as EvidenceView | undefined,
+      error: err instanceof Error ? err.message : 'unknown error',
+    })),
   ]);
-  if (generated) state.generatedError = undefined;
-  if (buildTest) state.buildTestError = undefined;
-  if (evidence) state.evidenceError = undefined;
-  state.generated = generated;
-  state.buildTest = buildTest;
-  state.evidence = evidence;
-  renderGenerated(state);
-  renderBuildTest(state);
-  renderEvidence(state);
+  state.generated = generated.value;
+  state.generatedError = generated.error;
+  state.buildTest = buildTest.value;
+  state.buildTestError = buildTest.error;
+  state.evidence = evidence.value;
+  state.evidenceError = evidence.error;
 }
 
 async function pollRunUntilTerminal(
@@ -305,95 +397,149 @@ async function pollRunUntilTerminal(
   runId: string,
   options: { maxAttempts?: number; intervalMs?: number } = {},
 ): Promise<void> {
-  const max = options.maxAttempts ?? 10;
-  const interval = options.intervalMs ?? 800;
+  const max = options.maxAttempts ?? 30;
+  const interval = options.intervalMs ?? 1000;
   for (let attempt = 0; attempt < max; attempt += 1) {
-    const run = await api.getRun(runId).catch(() => undefined);
-    if (run) {
+    try {
+      const run = await api.getRun(runId);
       state.run = run;
-      renderRunStatus(state);
+      state.runError = undefined;
+      renderRunStatusChip(state);
+      renderPipeline(state);
       if (run.status === 'completed' || run.status === 'failed') return;
+    } catch (err) {
+      state.runError = err instanceof Error ? err.message : 'unknown error';
+      renderPipeline(state);
     }
-    await new Promise((resolve) => setTimeout(resolve, interval));
+    await new Promise<void>((resolve) => setTimeout(resolve, interval));
   }
 }
 
+async function computeSha256Hex(text: string): Promise<string | undefined> {
+  try {
+    if (typeof globalThis.crypto?.subtle?.digest === 'function' && typeof TextEncoder !== 'undefined') {
+      const encoded = new TextEncoder().encode(text);
+      const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded);
+      return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof BffError) return `BFF error (${err.status}): ${err.message}`;
+  if (err instanceof Error) return err.message;
+  return 'unknown error';
+}
+
 async function bootstrap(api: BffApi): Promise<void> {
-  const state: UiState = { samples: [] };
+  const state: UiState = { samples: [], busy: false };
+  const editor = el<HTMLTextAreaElement>('cobol-editor');
+  const referenceLoader = el<HTMLSelectElement>('reference-loader');
+  const startButton = el<HTMLButtonElement>('start-run');
+  const filePicker = el<HTMLSelectElement>('generated-file-picker');
 
   try {
-    const mode = await api.getMode();
-    renderModeBadge(modeBadgeFromResponse(mode.orchestrator, mode.evidence));
+    state.mode = await api.getMode();
   } catch (err) {
-    renderModeBadge({ mode: 'error', text: err instanceof Error ? err.message : 'mode check failed' });
+    state.modeError = errorMessage(err);
   }
 
   try {
     state.samples = await api.listSamples();
   } catch (err) {
     state.samples = [];
-    const picker = el<HTMLDivElement>('sample-picker');
-    clearChildren(picker);
-    const failure = document.createElement('div');
-    failure.className = 'error-message';
-    failure.textContent = `Failed to load samples: ${err instanceof Error ? err.message : 'unknown error'}`;
-    picker.appendChild(failure);
+    state.samplesError = errorMessage(err);
   }
 
-  const onSelect = async (programId: string): Promise<void> => {
+  renderReferenceLoader(state);
+  renderAll(state);
+
+  editor.addEventListener('input', () => {
+    state.lastError = undefined;
+    renderStartButton(state);
+    renderSourceMetadata(state);
+  });
+
+  referenceLoader.addEventListener('change', async () => {
+    const programId = referenceLoader.value;
+    if (!programId) return;
     try {
-      const detail = await api.getSample(programId);
-      state.selectedSample = detail;
-      state.run = undefined;
-      state.generated = undefined;
-      state.buildTest = undefined;
-      state.evidence = undefined;
-      state.generatedError = undefined;
-      state.buildTestError = undefined;
-      state.evidenceError = undefined;
-      renderSamples(state, onSelect);
-      renderCobolPane(state);
-      renderRunStatus(state);
+      const sample = await api.getSample(programId);
+      editor.value = sample.cobolSource;
+      state.lastTransform = undefined;
+      state.lastSourceHashHex = undefined;
+      state.lastError = undefined;
+      renderSourceMetadata(state);
+      renderStartButton(state);
+      editor.focus();
+    } catch (err) {
+      state.lastError = errorMessage(err);
+      renderStartButton(state);
+    }
+  });
+
+  filePicker.addEventListener('change', () => {
+    state.selectedGeneratedFile = filePicker.value || undefined;
+    renderGenerated(state);
+  });
+
+  startButton.addEventListener('click', async () => {
+    const sourceText = editor.value;
+    if (sourceText.trim().length === 0) return;
+    const readiness = productReadiness(state.mode, state.modeError);
+    if (!readiness.ready) return;
+
+    state.busy = true;
+    state.lastError = undefined;
+    state.run = undefined;
+    state.runError = undefined;
+    state.generated = undefined;
+    state.generatedError = undefined;
+    state.buildTest = undefined;
+    state.buildTestError = undefined;
+    state.evidence = undefined;
+    state.evidenceError = undefined;
+    state.selectedGeneratedFile = undefined;
+    state.lastTransform = undefined;
+    state.lastSourceHashHex = undefined;
+    renderAll(state);
+
+    try {
+      const sourceHashHex = await computeSha256Hex(sourceText);
+      state.lastSourceHashHex = sourceHashHex;
+      const request: TransformRequest = { sourceText };
+      const detected = sourceMetadata(sourceText).programId;
+      if (detected) request.programId = detected;
+      const transform = await api.transform(request);
+      state.lastTransform = transform;
+      renderSourceMetadata(state);
+      try {
+        state.run = await api.getRun(transform.runId);
+      } catch (err) {
+        state.runError = errorMessage(err);
+      }
+      renderRunStatusChip(state);
+      renderPipeline(state);
+      await refreshRunDetails(api, state, transform.runId);
       renderGenerated(state);
       renderBuildTest(state);
       renderEvidence(state);
-      setStartButtonEnabled(true, `Ready to transform ${programId}.`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'failed to load sample';
-      setStartButtonEnabled(false, message);
-    }
-  };
-
-  renderSamples(state, onSelect);
-  renderCobolPane(state);
-  renderRunStatus(state);
-  renderGenerated(state);
-  renderBuildTest(state);
-  renderEvidence(state);
-
-  el<HTMLButtonElement>('start-run').addEventListener('click', async () => {
-    if (!state.selectedSample) return;
-    const programId = state.selectedSample.programId;
-    const request: TransformRequest = {
-      sourceText: state.selectedSample.cobolSource,
-      programId,
-      sourceName: state.selectedSample.cobolSourcePath,
-    };
-    setStartButtonEnabled(false, 'Starting transform…');
-    try {
-      const transform = await api.transform(request);
-      state.run = await api.getRun(transform.runId).catch(() => undefined);
-      renderRunStatus(state);
-      await refreshRunDetails(api, state, transform.runId);
-      if (transform.status !== 'completed' && transform.status !== 'failed') {
+      renderLimitations(state);
+      if (state.run && state.run.status !== 'completed' && state.run.status !== 'failed') {
+        await pollRunUntilTerminal(api, state, transform.runId);
+        await refreshRunDetails(api, state, transform.runId);
+      } else if (!state.run && transform.status !== 'completed' && transform.status !== 'failed') {
         await pollRunUntilTerminal(api, state, transform.runId);
         await refreshRunDetails(api, state, transform.runId);
       }
-      setStartButtonEnabled(true, `Last run: ${state.run?.status ?? 'unknown'}`);
     } catch (err) {
-      const message =
-        err instanceof BffError ? `BFF error (${err.status}): ${err.message}` : err instanceof Error ? err.message : 'unknown error';
-      setStartButtonEnabled(true, message);
+      state.lastError = errorMessage(err);
+    } finally {
+      state.busy = false;
+      renderAll(state);
     }
   });
 }
@@ -402,9 +548,10 @@ const api = createBffApi();
 bootstrap(api).catch((err: unknown) => {
   // eslint-disable-next-line no-console
   console.error('[c2c-ui] bootstrap failed', err);
-  const badge = document.getElementById('mode-badge');
-  if (badge) {
-    badge.dataset['mode'] = 'error';
-    badge.textContent = err instanceof Error ? `error · ${err.message}` : 'error · bootstrap failed';
+  const productChip = document.getElementById('product-mode-status');
+  if (productChip) {
+    productChip.dataset['tone'] = 'error';
+    const value = productChip.querySelector<HTMLElement>('.status-chip-value');
+    if (value) value.textContent = err instanceof Error ? err.message : 'bootstrap failed';
   }
 });
