@@ -22,9 +22,12 @@ class MockHarnessState:
         self.events: list[dict] = []
         self.run_sequence = 0
         self.capability_invocations: list[tuple[str, dict]] = []
+        self.capability_registrations: list[dict] = []
         self.pause_parse_seconds = 0.0
         self.fail_run_reads = False
         self.fail_run_list = False
+        self.fail_capability_registration = False
+        self.ledgers: dict[str, dict] = {}
 
         self.capabilities = {
             "cobol.parse": {
@@ -95,6 +98,16 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                 return
             self._write_json(200, list(self.state.runs.values()))
             return
+        if len(parts) == 4 and parts[0] == "v0" and parts[1] == "runs" and parts[3] == "ledger":
+            if self.state.fail_run_reads:
+                self._write_json(503, {"error": "harness unavailable"})
+                return
+            run_id = parts[2]
+            if run_id not in self.state.runs:
+                self._write_json(404, {"error": "run not found"})
+                return
+            self._write_json(200, self.state.ledgers.get(run_id, {"runId": run_id, "events": []}))
+            return
         if len(parts) == 3 and parts[0] == "v0" and parts[1] == "runs":
             if self.state.fail_run_reads:
                 self._write_json(503, {"error": "harness unavailable"})
@@ -129,12 +142,33 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                 "policyDecision": "policy allow",
             }
             self.state.runs[run_id] = run
+            self.state.ledgers[run_id] = {"runId": run_id, "events": []}
             self._write_json(201, run)
             return
         if parts == ["v0", "events"]:
             event = self._read_json()
             self.state.events.append(event)
             self._write_json(201, {"eventId": f"evt-{len(self.state.events)}"})
+            return
+        if parts == ["v0", "capabilities"]:
+            payload = self._read_json()
+            if self.state.fail_capability_registration:
+                self._write_json(500, {"error": "capability registration backend unavailable"})
+                return
+            capability = payload.get("capability", {})
+            capability_id = str(capability.get("id", "")).strip()
+            if not capability_id:
+                self._write_json(400, {"error": "capability id is required"})
+                return
+            if capability_id in self.state.runs:
+                # keep shape close to harness behavior for duplicate registration
+                self._write_json(400, {"error": f"capability {capability_id} already registered"})
+                return
+            if capability_id in (entry.get("id") for entry in self.state.capability_registrations):
+                self._write_json(400, {"error": f"capability {capability_id} already registered"})
+                return
+            self.state.capability_registrations.append(capability)
+            self._write_json(201, capability)
             return
         if parts[:1] == ["caps"]:
             capability = parts[1] if len(parts) > 1 else ""
@@ -143,15 +177,91 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
             if capability == "parse":
                 if self.state.pause_parse_seconds > 0:
                     time.sleep(self.state.pause_parse_seconds)
-                self._write_json(200, {"irRef": {"uri": "urn:test/ir"}})
+                self._write_json(
+                    200,
+                    {
+                        "schemaVersion": "v0",
+                        "status": "ok",
+                        "runId": payload.get("runId", "run-unknown"),
+                        "workflowId": payload.get("workflowId", "w0-migration-v0"),
+                        "program": {
+                            "programId": "DEMO01",
+                            "sourceHash": "a" * 64,
+                        },
+                        "sourceRef": {
+                            "uri": "urn:source/main.cob",
+                            "sha256": "a" * 64,
+                            "byteSize": 12,
+                        },
+                        "outputRef": {"uri": "urn:parse-output"},
+                    },
+                )
             elif capability == "ir":
-                self._write_json(200, {"irRef": {"uri": "urn:test/normalized-ir"}})
+                self._write_json(
+                    200,
+                    {
+                        "schemaVersion": "v0",
+                        "status": "ok",
+                        "runId": payload.get("runId", "run-unknown"),
+                        "workflowId": payload.get("workflowId", "w0-migration-v0"),
+                        "sourceRef": {
+                            "uri": "urn:source/main.cob",
+                            "sha256": "a" * 64,
+                            "byteSize": 12,
+                        },
+                        "ir": {
+                            "schemaVersion": "v0",
+                            "programId": "DEMO01",
+                            "irId": "ir-DEMO01",
+                        },
+                        "outputRef": {"uri": "urn:ir-output"},
+                    },
+                )
             elif capability == "generator":
-                self._write_json(200, {"javaRef": {"uri": "urn:test/compiled.java"}})
+                self._write_json(
+                    200,
+                    {
+                        "schemaVersion": "v0",
+                        "status": "ok",
+                        "runId": payload.get("runId", "run-unknown"),
+                        "workflowId": payload.get("workflowId", "w0-migration-v0"),
+                        "sourceRef": {
+                            "uri": "urn:source/main.cob",
+                            "sha256": "a" * 64,
+                            "byteSize": 12,
+                        },
+                        "generatedProject": {
+                            "entryClass": "DEMO01",
+                            "entryFilePath": "src/DEMO01.java",
+                            "fileCount": 1,
+                            "files": {"src/DEMO01.java": "class DEMO01 {}"},
+                        },
+                        "outputRef": {"uri": "urn:generated-java"},
+                    },
+                )
             elif capability == "build-test":
-                self._write_json(200, {"status": "ok", "buildOutcome": "compile"})
+                self._write_json(
+                    200,
+                    {
+                        "schemaVersion": "v0",
+                        "status": "ok",
+                        "runId": payload.get("runId", "run-unknown"),
+                        "workflowId": payload.get("workflowId", "w0-migration-v0"),
+                        "programId": "DEMO01",
+                        "outputRef": {"uri": "urn:build-output"},
+                    },
+                )
             elif capability == "evidence":
-                self._write_json(200, {"evidenceRef": {"uri": "urn:test/evidence"}})
+                self._write_json(
+                    200,
+                    {
+                        "schemaVersion": "v0",
+                        "runId": payload.get("runId", "run-unknown"),
+                        "workflowId": payload.get("workflowId", "w0-migration-v0"),
+                        "status": "complete",
+                        "outputRef": {"uri": "urn:evidence"},
+                    },
+                )
             elif capability == "model-gateway":
                 self._write_json(200, {"status": "ok", "advice": "Use standard profile."})
             else:
@@ -173,6 +283,15 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                     run[key] = list(value)
                 else:
                     run[key] = value
+            if "status" in payload:
+                if run_id in self.state.ledgers:
+                    self.state.ledgers[run_id]["events"].append(
+                        {
+                            "runId": run_id,
+                            "status": payload["status"],
+                            "evidenceRefs": run.get("evidenceRefs", []),
+                        }
+                    )
             self._write_json(200, run)
             return
         self._write_json(404, {"error": "not found"})
@@ -200,6 +319,14 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             build_test_capability_id="java.build-test",
             evidence_capability_id="evidence.writer",
             model_gateway_capability_id="model-gateway",
+            w0_capabilities=(
+                {"id": "cobol.parse", "name": "COBOL Parser", "owner": "parser-service", "dataClass": "parser", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/parse"},
+                {"id": "cobol.ir", "name": "Semantic IR", "owner": "ir-service", "dataClass": "generator", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/ir"},
+                {"id": "java.generator", "name": "Target Java Generator", "owner": "generator-service", "dataClass": "generator", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/generator"},
+                {"id": "java.build-test", "name": "Build Test", "owner": "build-service", "dataClass": "build-test", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/build-test"},
+                {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "dataClass": "evidence", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/evidence"},
+                {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway", "dataClass": "model-gateway", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/model-gateway"},
+            ),
         )
         return create_configured_server(config)
 
@@ -217,7 +344,10 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
             payload = {
                 "requester": "integration",
-                "inputRef": {"uri": "urn:integration/main.cob"},
+                "inputRef": {
+                    "uri": "urn:integration/main.cob",
+                    "source": "IDENTIFICATION DIVISION.",
+                },
             }
             status_response = None
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
@@ -256,8 +386,63 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 sorted(capability for capability, _ in state.capability_invocations),
                 ["build-test", "evidence", "generator", "ir", "parse"],
             )
+            self.assertEqual(
+                sorted(entry.get("id") for entry in state.capability_registrations),
+                ["cobol.ir", "cobol.parse", "evidence.writer", "java.build-test", "java.generator", "model-gateway"],
+            )
             self.assertGreaterEqual(len(state.events), 5)
             self.assertGreater(len(run_state.get("evidenceRefs", [])), 0)
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            try:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+            except UnboundLocalError:
+                pass
+
+    def test_startup_tolerates_existing_capability_registrations(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.capability_registrations.extend(
+                [
+                    {
+                        "id": "cobol.parse",
+                        "name": "COBOL Parser",
+                        "owner": "parser-service",
+                        "endpoint": f"http://{host}:{mock_port}/caps/parse",
+                    },
+                    {
+                        "id": "java.generator",
+                        "name": "Target Java Generator",
+                        "owner": "generator-service",
+                        "endpoint": f"http://{host}:{mock_port}/caps/generator",
+                    },
+                ]
+            )
+            MockHarnessHandler.state = state
+
+            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "GET",
+                    "/health",
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                health = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+            self.assertEqual(health["status"], "ok")
+            self.assertEqual(health["service"], "orchestrator-service")
+            self.assertEqual(len(state.capability_registrations), 6)
         finally:
             mock_server.shutdown()
             mock_server.server_close()
@@ -282,7 +467,15 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 connection.request(
                     "POST",
                     "/v0/runs",
-                    body=json.dumps({"requester": "integration", "inputRef": {"uri": "urn:integration/main.cob"}}),
+                    body=json.dumps(
+                        {
+                            "requester": "integration",
+                            "inputRef": {
+                                "uri": "urn:integration/main.cob",
+                                "source": "IDENTIFICATION DIVISION.",
+                            },
+                        }
+                    ),
                     headers={"Content-Type": "application/json"},
                 )
                 response = connection.getresponse()

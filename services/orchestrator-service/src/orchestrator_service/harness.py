@@ -6,7 +6,7 @@ import json
 import urllib.parse
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from .client import JSONHTTPClient
 
@@ -50,6 +50,28 @@ class HarnessGateway:
             raise HarnessFailure(resp.status, str(resp.payload))
         if not isinstance(resp.payload, dict) or "runId" not in resp.payload:
             raise ValueError("invalid run create response")
+        return resp.payload
+
+    def register_capability(self, capability: Mapping[str, Any]) -> Dict[str, Any]:
+        payload = {
+            "callerRole": "orchestrator",
+            "capability": dict(capability),
+        }
+        resp = self.http.post_json(f"{self.base_url}/v0/capabilities", payload, headers=self.harness_headers)
+        if resp.status not in (200, 201):
+            raise HarnessFailure(resp.status, str(resp.payload))
+        if not isinstance(resp.payload, dict):
+            raise ValueError("invalid capability registration response")
+        return resp.payload
+
+    def get_trajectory_ledger(self, run_id: str) -> Dict[str, Any]:
+        if not run_id:
+            raise ValueError("run_id is required")
+        resp = self.http.get_json(f"{self.base_url}/v0/runs/{urllib.parse.quote(run_id)}/ledger", headers=self.harness_headers)
+        if resp.status != 200:
+            raise HarnessFailure(resp.status, str(resp.payload))
+        if not isinstance(resp.payload, dict):
+            raise ValueError("invalid trajectory ledger response")
         return resp.payload
 
     def update_run(

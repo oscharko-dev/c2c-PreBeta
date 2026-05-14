@@ -23,6 +23,8 @@ class FakeGateway:
         self.updated_runs = []
         self.posted_events = []
         self.parse_attempts = 0
+        self.registered_capabilities = []
+        self.trajectory_ledger = {}
 
     def create_run(self, workflow_id: str, requester: str = "orchestrator", evidence_refs=None):
         self.created_run = {
@@ -42,6 +44,11 @@ class FakeGateway:
         self.calls.append(("get_capability", capability_id))
         return dict(self.capabilities[capability_id])
 
+    def register_capability(self, capability):
+        self.calls.append(("register_capability", str(capability.get("id", ""))))
+        self.registered_capabilities.append(dict(capability))
+        return dict(capability)
+
     def invoke_capability(self, capability, payload):
         capability_id = capability["id"]
         self.calls.append(("invoke", capability_id, dict(payload)))
@@ -56,6 +63,10 @@ class FakeGateway:
     def post_event(self, event):
         self.posted_events.append(event)
         return {"eventId": "evt-1"}
+
+    def get_trajectory_ledger(self, run_id: str):
+        self.calls.append(("get_trajectory_ledger", run_id))
+        return dict(self.trajectory_ledger.get(run_id, {"runId": run_id, "events": []}))
 
 
 class W0WorkflowRunnerTests(unittest.TestCase):
@@ -73,6 +84,14 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             build_test_capability_id="java.build-test",
             evidence_capability_id="evidence.writer",
             model_gateway_capability_id="model-gateway",
+            w0_capabilities=(
+                {"id": "cobol.parse", "name": "COBOL Parser", "owner": "parser-service", "endpoint": "http://parser"},
+                {"id": "cobol.ir", "name": "Semantic IR", "owner": "ir-service", "endpoint": "http://ir"},
+                {"id": "java.generator", "name": "Java Generator", "owner": "generator-service", "endpoint": "http://generator"},
+                {"id": "java.build-test", "name": "Build Test", "owner": "build-service", "endpoint": "http://build-test"},
+                {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "endpoint": "http://evidence"},
+                {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway", "endpoint": "http://model"},
+            ),
         )
 
     def _base_capabilities(self):
@@ -87,11 +106,75 @@ class W0WorkflowRunnerTests(unittest.TestCase):
 
     def _base_responses(self):
         return {
-            "cobol.parse": {"irRef": {"uri": "urn:ir"}},
-            "cobol.ir": {"irRef": {"uri": "urn:ir/normalized"}},
-            "java.generator": {"javaRef": {"uri": "urn:java/source"}},
-            "java.build-test": {"status": "ok", "buildOutcome": "compile"},
-            "evidence.writer": {"evidenceRef": {"uri": "urn:evidence"}},
+            "cobol.parse": {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": "run-1",
+                "workflowId": "w0-migration-v0",
+                "program": {
+                    "programId": "DEMO01",
+                    "sourceHash": "a" * 64,
+                    "sourceKind": "cobol",
+                },
+                "sourceRef": {
+                    "uri": "urn:source/main.cob",
+                    "sha256": "a" * 64,
+                    "byteSize": 12,
+                },
+                "outputRef": {"uri": "urn:orchestrator/run-1/parse"},
+            },
+            "cobol.ir": {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": "run-1",
+                "workflowId": "w0-migration-v0",
+                "sourceRef": {
+                    "uri": "urn:source/main.cob",
+                    "sha256": "a" * 64,
+                    "byteSize": 12,
+                },
+                "ir": {
+                    "schemaVersion": "v0",
+                    "programId": "DEMO01",
+                    "irId": "ir-DEMO01",
+                },
+                "outputRef": {"uri": "urn:orchestrator/run-1/ir"},
+            },
+            "java.generator": {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": "run-1",
+                "workflowId": "w0-migration-v0",
+                "sourceRef": {
+                    "uri": "urn:source/main.cob",
+                    "sha256": "a" * 64,
+                    "byteSize": 12,
+                },
+                "generatedProject": {
+                    "entryClass": "DEMO01",
+                    "entryFilePath": "src/DEMO01.java",
+                    "fileCount": 1,
+                    "files": {"src/DEMO01.java": "class DEMO01 {}"},
+                },
+                "traceability": {},
+                "outputRef": {"uri": "urn:orchestrator/run-1/generator"},
+            },
+            "java.build-test": {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": "run-1",
+                "workflowId": "w0-migration-v0",
+                "programId": "DEMO01",
+                "outputRef": {"uri": "urn:orchestrator/run-1/build"},
+            },
+            "evidence.writer": {
+                "schemaVersion": "v0",
+                "runId": "run-1",
+                "workflowId": "w0-migration-v0",
+                "status": "complete",
+                "packId": "pack-run-1",
+                "outputRef": {"uri": "urn:orchestrator/run-1/evidence"},
+            },
             "model-gateway": {"status": "ok", "advice": "Use standard profile."},
         }
 
@@ -106,7 +189,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             model_prompt=None,
         )
 
-        result = runner.run(context=context, input_ref={"uri": "urn:source/main.cob"})
+        result = runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
 
         self.assertEqual(result["status"], "completed")
         invoked = [entry[1] for entry in gateway.calls if entry[0] == "invoke"]
@@ -134,7 +217,10 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             model_prompt="Optimize with ISO-8859-1 checks.",
         )
 
-        result = runner.run(context=context, input_ref={"uri": "urn:source/main.cob"})
+        result = runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
         invoked = [entry[1] for entry in gateway.calls if entry[0] == "invoke"]
 
         self.assertEqual(result["status"], "completed")
@@ -154,7 +240,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             evidence_refs=[],
         )
 
-        runner.run(context=context, input_ref={"uri": "urn:source/main.cob"})
+        runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
 
         parse_invocations = [
             call for call in gateway.calls
@@ -179,7 +265,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         with self.assertRaises(StepExecutionError):
             runner.run(
                 context=context,
-                input_ref={"uri": "urn:source/main.cob", "sha256": "a" * 64, "byteSize": 12},
+                input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION.", "sha256": "a" * 64, "byteSize": 12},
             )
 
         self.assertEqual(gateway.updated_runs[-1][1], "failed")
