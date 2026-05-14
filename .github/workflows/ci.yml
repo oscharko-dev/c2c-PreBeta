@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for merge-conflict markers
+        run: |
+          if git grep -n -I -E '^(<<<<<<< |=======|>>>>>>>)' -- . ':!.git'; then
+            echo "Merge-conflict markers were found in tracked files."
+            exit 1
+          fi
+
+      - name: Validate shell scripts
+        run: |
+          sh_files=$(git ls-files | grep -E '\\.(sh|bash)$' || true)
+          if [ -n "$sh_files" ]; then
+            while IFS= read -r file; do
+              bash -n "$file"
+            done <<< "$sh_files"
+          else
+            echo "No shell scripts to validate"
+          fi
+
+      - name: Validate Python syntax
+        run: |
+          if [ -n "$(find . -name '*.py' -print -quit)" ]; then
+            python3 -m compileall -q .
+          else
+            echo "No Python files to validate"
+          fi
