@@ -277,8 +277,14 @@ func (l ModelInvocationLedgerV0) Validate() error {
 	if strings.TrimSpace(l.ModelID) == "" {
 		return SchemaValidationError{Path: "modelId", Reason: "required"}
 	}
+	if strings.TrimSpace(l.Provider) == "" {
+		return SchemaValidationError{Path: "provider", Reason: "required"}
+	}
 	if strings.TrimSpace(l.DataClass) == "" {
 		return SchemaValidationError{Path: "dataClass", Reason: "required"}
+	}
+	if strings.TrimSpace(l.PromptTemplate) == "" {
+		return SchemaValidationError{Path: "promptTemplateVersion", Reason: "required"}
 	}
 	if l.CreatedAt.IsZero() {
 		return SchemaValidationError{Path: "createdAt", Reason: "required"}
@@ -294,6 +300,11 @@ func (l ModelInvocationLedgerV0) Validate() error {
 	}
 	if l.Status == "" {
 		return SchemaValidationError{Path: "status", Reason: "required"}
+	}
+	switch l.Status {
+	case statusCompleted, statusFailed, statusRejected:
+	default:
+		return SchemaValidationError{Path: "status", Reason: "must be completed, failed, or rejected"}
 	}
 	if strings.TrimSpace(l.PolicyDecision) == "" {
 		return SchemaValidationError{Path: "policyDecision", Reason: "required"}

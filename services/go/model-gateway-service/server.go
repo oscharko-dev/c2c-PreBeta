@@ -116,13 +116,14 @@ func NewModelGatewayServiceFromFiles(
 	if eventSink == nil {
 		return nil, fmt.Errorf("event sink is required")
 	}
-	return NewModelGatewayService(registry, allowlist, ledger, eventSink, time.Now().UTC)
+	return NewModelGatewayService(registry, allowlist, ledger, eventSink, func() time.Time { return time.Now().UTC() })
 }
 
 func (s *ModelGatewayService) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v0/health", s.healthHandler)
 	mux.HandleFunc("/v0/models", s.modelsHandler)
+	mux.HandleFunc("/v0/models/", s.modelsHandler)
 	mux.HandleFunc("/v0/invoke", s.invokeHandler)
 	return mux
 }
@@ -296,9 +297,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		errorClass = "provider"
 		errorMessage = invokeErr.Error()
 	} else {
-		if output.Status != "" {
-			outputStatus = output.Status
-		}
+		outputStatus = normalizeInvocationStatus(output.Status)
 		if output.Data != nil {
 			outputData = output.Data
 		}
@@ -381,6 +380,15 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+func normalizeInvocationStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case statusCompleted, statusFailed, statusRejected:
+		return status
+	default:
+		return statusCompleted
+	}
+}
+
 func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest, requestRef DataReference) (validatedInvocation, error) {
 	result := validatedInvocation{
 		request: request,
@@ -395,7 +403,7 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 	}
 
 	if strings.TrimSpace(result.request.RunID) == "" {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "missing_run_id",
 			Message: "runId is required",
 		}
@@ -404,95 +412,95 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 		result.request.Actor = actorModelGateway
 	}
 	if strings.TrimSpace(result.request.ModelID) == "" {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "missing_model_id",
 			Message: "modelId is required",
 		}
 	}
 	if strings.TrimSpace(result.request.DataClass) == "" {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "missing_data_class",
 			Message: "dataClass is required",
 		}
 	}
 	if strings.TrimSpace(result.request.PromptTemplateVersion) == "" {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "missing_prompt_template",
 			Message: "promptTemplateVersion is required",
 		}
 	}
 	if result.request.TimeoutMs <= 0 {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "invalid_timeout",
 			Message: "timeoutMs must be greater than zero",
 		}
 	}
 	model, ok := s.registry.Get(result.request.ModelID)
 	if !ok {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "unknown_model",
 			Message: "unknown modelId",
 		}
 	}
 	if !model.IsActive(s.now()) {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "inactive_model",
 			Message: "model is not active",
 		}
 	}
 	if model.Provider != s.allowlist.Mode {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "disallowed_model_endpoint",
 			Message: "model endpoint mode is not allowed for this gateway",
 		}
 	}
 	if !s.allowlist.IsModelAllowed(model.ID) {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "forbidden_model",
 			Message: "modelId is not in allowlist",
 		}
 	}
 	if _, ok := allowedDataClasses[result.request.DataClass]; !ok {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "unsupported_data_class",
 			Message: "unsupported data class",
 		}
 	}
 	if !model.IsDataClassAllowed(result.request.DataClass) {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "forbidden_data_class",
 			Message: "data class is not allowed for model",
 		}
 	}
 	if !model.SupportsTemplate(result.request.PromptTemplateVersion) {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "unsupported_prompt_template",
 			Message: "unsupported promptTemplateVersion",
 		}
 	}
 	if result.request.StructuredOutput {
 		if !model.SupportsStructuredOutput {
-			return validatedInvocation{}, ModelGatewayValidationError{
+			return result, ModelGatewayValidationError{
 				Code:    "unsupported_structured_output",
 				Message: "model does not support structured output",
 			}
 		}
 		if len(result.request.StructuredOutputSchema) == 0 {
-			return validatedInvocation{}, ModelGatewayValidationError{
+			return result, ModelGatewayValidationError{
 				Code:    "missing_structured_output_schema",
 				Message: "structuredOutputSchema is required when structuredOutput=true",
 			}
 		}
 	}
 	if model.DefaultTimeoutMs > 0 && result.request.TimeoutMs > model.DefaultTimeoutMs {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "timeout_exceeded_model_default",
 			Message: "timeoutMs exceeds model default timeout",
 		}
 	}
 	maxTimeout := s.providerTimeouts[model.Provider]
 	if maxTimeout > 0 && result.request.TimeoutMs > maxTimeout {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "timeout_exceeded_provider",
 			Message: "timeoutMs exceeds provider timeout",
 		}
@@ -500,7 +508,7 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 
 	provider, ok := s.providers[model.Provider]
 	if !ok {
-		return validatedInvocation{}, ModelGatewayValidationError{
+		return result, ModelGatewayValidationError{
 			Code:    "provider_not_ready",
 			Message: "provider is not configured",
 		}

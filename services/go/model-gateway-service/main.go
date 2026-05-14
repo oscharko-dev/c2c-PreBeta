@@ -47,7 +47,7 @@ func main() {
 	}
 	compositeSink := NewCompositeEventSink(sinks...)
 
-	service, err := NewModelGatewayService(registry, allowed, ledger, compositeSink, time.Now().UTC)
+	service, err := NewModelGatewayService(registry, allowed, ledger, compositeSink, func() time.Time { return time.Now().UTC() })
 	if err != nil {
 		log.Fatalf("initialize service failed: %v", err)
 	}
