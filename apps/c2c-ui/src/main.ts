@@ -14,6 +14,7 @@ import type {
   RunSummary,
   SampleDetail,
   SampleSummary,
+  TransformRequest,
 } from './types.js';
 
 interface UiState {
@@ -356,7 +357,7 @@ async function bootstrap(api: BffApi): Promise<void> {
       renderGenerated(state);
       renderBuildTest(state);
       renderEvidence(state);
-      setStartButtonEnabled(true, `Ready to run ${programId}.`);
+      setStartButtonEnabled(true, `Ready to transform ${programId}.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'failed to load sample';
       setStartButtonEnabled(false, message);
@@ -373,15 +374,20 @@ async function bootstrap(api: BffApi): Promise<void> {
   el<HTMLButtonElement>('start-run').addEventListener('click', async () => {
     if (!state.selectedSample) return;
     const programId = state.selectedSample.programId;
-    setStartButtonEnabled(false, 'Starting run…');
+    const request: TransformRequest = {
+      sourceText: state.selectedSample.cobolSource,
+      programId,
+      sourceName: state.selectedSample.cobolSourcePath,
+    };
+    setStartButtonEnabled(false, 'Starting transform…');
     try {
-      const run = await api.startRun(programId);
-      state.run = run;
+      const transform = await api.transform(request);
+      state.run = await api.getRun(transform.runId).catch(() => undefined);
       renderRunStatus(state);
-      await refreshRunDetails(api, state, run.runId);
-      if (run.status !== 'completed' && run.status !== 'failed') {
-        await pollRunUntilTerminal(api, state, run.runId);
-        await refreshRunDetails(api, state, run.runId);
+      await refreshRunDetails(api, state, transform.runId);
+      if (transform.status !== 'completed' && transform.status !== 'failed') {
+        await pollRunUntilTerminal(api, state, transform.runId);
+        await refreshRunDetails(api, state, transform.runId);
       }
       setStartButtonEnabled(true, `Last run: ${state.run?.status ?? 'unknown'}`);
     } catch (err) {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
+import { createHash } from 'node:crypto';
 import * as net from 'node:net';
 import { AddressInfo } from 'node:net';
 
@@ -43,8 +44,31 @@ function stubSamples(items: SampleDetail[]): SampleRegistry {
   };
 }
 
-function stubOrchestrator(): { client: OrchestratorClient; calls: { startRun: number; getRun: number } } {
-  const calls = { startRun: 0, getRun: 0 };
+function stubOrchestrator(): {
+  client: OrchestratorClient;
+  calls: {
+    startRun: number;
+    getRun: number;
+    startTransformRun: Array<{
+      programId: string;
+      sourceText: string;
+      requester?: string;
+      sourceName?: string;
+      options?: unknown;
+    }>;
+  };
+} {
+  const calls = {
+    startRun: 0,
+    getRun: 0,
+    startTransformRun: [] as Array<{
+      programId: string;
+      sourceText: string;
+      requester?: string;
+      sourceName?: string;
+      options?: unknown;
+    }>,
+  };
   const client: OrchestratorClient = {
     enabled: true,
     async startRun() {
@@ -80,6 +104,24 @@ function stubOrchestrator(): { client: OrchestratorClient; calls: { startRun: nu
         },
       };
     },
+    async startTransformRun(input) {
+      calls.startTransformRun.push({ ...input });
+      return {
+        status: 201,
+        body: {
+          run: {
+            runId: 'live-transform-1',
+            workflowId: 'w0-migration-v0',
+            status: 'updating',
+            policyDecision: 'allow',
+            message: 'orchestrator accepted transform',
+            evidenceRefs: ['urn:evidence/live-transform-1'],
+          },
+          status: 'started',
+          message: 'orchestrator transform started',
+        },
+      };
+    },
   };
   return { client, calls };
 }
@@ -88,6 +130,9 @@ function disabledOrchestrator(): OrchestratorClient {
   return {
     enabled: false,
     async startRun() {
+      return undefined;
+    },
+    async startTransformRun() {
       return undefined;
     },
     async getRun() {
@@ -122,6 +167,7 @@ const baseConfig: BffConfig = {
   orchestratorUrl: '',
   evidenceUrl: '',
   upstreamTimeoutMs: 1_000,
+  transformSourceMaxBytes: 1_000_000,
 };
 
 interface RunningServer {
@@ -336,6 +382,224 @@ test('starting a run in live mode proxies the orchestrator and syncs status on g
     assert.equal(genBody.mode, 'live');
     assert.equal(genBody.status, 'skipped');
     assert.match(genBody.note, /Live generated-Java retrieval/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform rejects blank source text and does not create a run', async () => {
+  const runStore = createRunStore();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText: '   ' },
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform fails clearly when orchestrator url is missing', async () => {
+  const runStore = createRunStore();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. TRANS01.\n' },
+    });
+    assert.equal(rejected.status, 503);
+    assert.match((rejected.body as { error: string }).error, /orchestrator URL/i);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform derives program id, calls orchestrator, and returns the full transform contract', async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const sourceText = '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n';
+    const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText, sourceName: 'hello.cbl', options: { explain: true } },
+    });
+    assert.equal(started.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    assert.deepEqual(calls.startTransformRun[0], {
+      programId: 'HELLO01',
+      sourceText,
+      requester: 'c2c-ui',
+      sourceName: 'hello.cbl',
+      options: { explain: true },
+    });
+    assert.equal(runStore.list().length, 1);
+
+    const body = started.body as {
+      runId: string;
+      orchestratorRunId: string;
+      programId: string;
+      mode: string;
+      status: string;
+      productMode: string;
+      links: Record<string, string>;
+    };
+    assert.equal(body.programId, 'HELLO01');
+    assert.equal(body.mode, 'live');
+    assert.equal(body.productMode, 'live');
+    assert.equal(body.orchestratorRunId, 'live-transform-1');
+    assert.equal(body.status, 'updating');
+    assert.deepEqual(body.links, {
+      self: `/api/v0/runs/${body.runId}`,
+      generated: `/api/v0/runs/${body.runId}/generated`,
+      buildTest: `/api/v0/runs/${body.runId}/build-test`,
+      evidence: `/api/v0/runs/${body.runId}/evidence`,
+      events: `/api/v0/runs/${body.runId}/events`,
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform uses a deterministic fallback program id when none is provided', async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const sourceText = '       IDENTIFICATION DIVISION.\n       DISPLAY "NO PROGRAM ID".\n';
+    const expectedProgramId = `SRC-${createHash('sha256').update(sourceText, 'utf8').digest('hex').slice(0, 12).toUpperCase()}`;
+    const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText },
+    });
+    assert.equal(started.status, 201);
+    assert.equal(calls.startTransformRun[0]?.programId, expectedProgramId);
+    assert.equal((started.body as { programId: string }).programId, expectedProgramId);
+    assert.equal(runStore.list().length, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform does not create a run when the orchestrator returns a non-2xx status', async () => {
+  const runStore = createRunStore();
+  const client: OrchestratorClient = {
+    enabled: true,
+    async startRun() {
+      return undefined;
+    },
+    async startTransformRun() {
+      return { status: 502, body: { error: 'upstream rejected' } };
+    },
+    async getRun() {
+      return undefined;
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: client,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL01.\n' },
+    });
+    assert.equal(rejected.status, 502);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform does not create a run when the orchestrator throws', async () => {
+  const runStore = createRunStore();
+  const client: OrchestratorClient = {
+    enabled: true,
+    async startRun() {
+      return undefined;
+    },
+    async startTransformRun() {
+      throw new Error('boom');
+    },
+    async getRun() {
+      return undefined;
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: client,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL02.\n' },
+    });
+    assert.equal(rejected.status, 502);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform rejects oversize source text before calling the orchestrator', async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream', transformSourceMaxBytes: 32 },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. BIG01.\n' },
+    });
+    assert.equal(rejected.status, 413);
+    assert.equal(calls.startTransformRun.length, 0);
+    assert.equal(runStore.list().length, 0);
   } finally {
     await server.close();
   }

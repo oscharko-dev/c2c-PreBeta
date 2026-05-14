@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
+import { createHash } from 'node:crypto';
 import { AddressInfo } from 'node:net';
 
 import {
@@ -81,11 +82,47 @@ test('orchestrator client posts the expected payload shape', async () => {
   );
 });
 
+test('transform orchestrator client includes source text metadata and default requester', async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({ run: { runId: 'live-transform-1', status: 'updating' }, status: 'started' });
+      res.writeHead(201, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      const sourceText = '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n';
+      const expectedSha256 = createHash('sha256').update(sourceText, 'utf8').digest('hex');
+      const response = await orch.startTransformRun({
+        programId: 'HELLO01',
+        sourceText,
+        sourceName: 'hello.cbl',
+        options: { explain: true },
+      });
+      assert.equal(response?.status, 201);
+      assert.equal(captured.length, 1);
+      const parsed = JSON.parse(captured[0]?.body ?? '{}');
+      assert.equal(parsed.requester, 'c2c-ui');
+      assert.equal(parsed.programId, 'HELLO01');
+      assert.equal(parsed.sourceName, 'hello.cbl');
+      assert.deepEqual(parsed.options, { explain: true });
+      assert.equal(parsed.inputRef.kind, 'source');
+      assert.equal(parsed.inputRef.uri, `urn:c2c/ui-source/${expectedSha256}`);
+      assert.equal(parsed.inputRef.sourceText, sourceText);
+      assert.equal(parsed.inputRef.mimeType, 'text/x-cobol');
+      assert.equal(parsed.inputRef.byteSize, Buffer.byteLength(sourceText, 'utf8'));
+      assert.equal(parsed.inputRef.sha256, expectedSha256);
+    },
+  );
+});
+
 test('orchestrator and evidence clients are disabled when no base url is configured', async () => {
   const client = createNodeHttpClient();
   const orch = createOrchestratorClient('', client, 1_000);
   assert.equal(orch.enabled, false);
   assert.equal(await orch.startRun({ programId: 'x', cobolSourcePath: 'y' }), undefined);
+  assert.equal(await orch.startTransformRun({ programId: 'x', sourceText: 'y' }), undefined);
   assert.equal(await orch.getRun('z'), undefined);
 
   const ev = createEvidenceClient('', client, 1_000);
