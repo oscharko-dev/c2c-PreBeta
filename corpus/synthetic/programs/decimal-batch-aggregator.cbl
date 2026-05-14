@@ -1,0 +1,23 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BATCH01.
+
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-TOTAL-LINE.
+          05 WS-ROW                PIC 99 VALUE 1.
+          05 WS-ROW-LIMIT          PIC 99 VALUE 6.
+          05 WS-ACCUMULATOR        PIC S9(8)V99 VALUE 0.
+          05 WS-UNIT-COST          PIC S9(4)V99 VALUE 7.25.
+          05 WS-UNITS              PIC 99 VALUE 5.
+          05 WS-LINE-TOTAL         PIC S9(8)V99 VALUE 0.
+
+       PROCEDURE DIVISION.
+           PERFORM UNTIL WS-ROW > WS-ROW-LIMIT
+              COMPUTE WS-LINE-TOTAL = WS-ROW * WS-UNITS * WS-UNIT-COST
+              ADD WS-LINE-TOTAL TO WS-ACCUMULATOR
+              DISPLAY "LINE=" WS-ROW "TOTAL=" WS-LINE-TOTAL
+              ADD 1 TO WS-ROW
+           END-PERFORM
+
+           DISPLAY "BATCH-TOTAL=" WS-ACCUMULATOR
+           STOP RUN.
