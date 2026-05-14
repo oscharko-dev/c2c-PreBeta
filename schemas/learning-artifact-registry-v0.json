@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/learning-artifact-registry-v0.json",
+  "title": "Learning Artifact Registry v0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "service",
+    "records"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "records": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "artifactId",
+          "runId",
+          "service",
+          "generatedAt",
+          "summary",
+          "experienceEventRefs"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "v0"
+          },
+          "artifactId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "service": {
+            "type": "string",
+            "minLength": 1
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "experienceEventRefs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
