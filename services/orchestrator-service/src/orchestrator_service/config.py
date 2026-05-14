@@ -1,7 +1,11 @@
 """Configuration helpers for the orchestrator service."""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+import json
 import os
+from dataclasses import dataclass
+from typing import Any, Iterable, Mapping
 
 
 DEFAULT_LISTEN_ADDR = "0.0.0.0:8084"
@@ -16,6 +20,73 @@ DEFAULT_GENERATOR_CAPABILITY = "target.java.generate"
 DEFAULT_BUILD_TEST_CAPABILITY = "build-test.run"
 DEFAULT_EVIDENCE_CAPABILITY = "evidence.writer"
 DEFAULT_MODEL_GATEWAY_CAPABILITY = "model-gateway"
+DEFAULT_CAPABILITY_POLICY_PROFILE = "harness-control-plane"
+DEFAULT_CAPABILITY_VERSION = "v0.1.0"
+
+DEFAULT_PARSER_SERVICE_HOST = "127.0.0.1"
+DEFAULT_PARSER_SERVICE_PORT = 8081
+DEFAULT_IR_SERVICE_HOST = "127.0.0.1"
+DEFAULT_IR_SERVICE_PORT = 8082
+DEFAULT_GENERATOR_SERVICE_HOST = "127.0.0.1"
+DEFAULT_GENERATOR_SERVICE_PORT = 8083
+DEFAULT_BUILD_TEST_SERVICE_HOST = "127.0.0.1"
+DEFAULT_BUILD_TEST_SERVICE_PORT = 8084
+DEFAULT_EVIDENCE_SERVICE_HOST = "127.0.0.1"
+DEFAULT_EVIDENCE_SERVICE_PORT = 8080
+
+
+DEFAULT_W0_CAPABILITIES = [
+    {
+        "id": DEFAULT_PARSE_CAPABILITY,
+        "name": "COBOL Parser",
+        "owner": "cobol-parser-service",
+        "endpoint": f"http://{DEFAULT_PARSER_SERVICE_HOST}:{DEFAULT_PARSER_SERVICE_PORT}/v0/parse",
+        "dataClass": "parser",
+        "policyProfile": DEFAULT_CAPABILITY_POLICY_PROFILE,
+        "version": DEFAULT_CAPABILITY_VERSION,
+        "description": "Parses COBOL source and returns a normalized program model.",
+    },
+    {
+        "id": DEFAULT_IR_CAPABILITY,
+        "name": "Semantic IR Generator",
+        "owner": "semantic-ir-service",
+        "endpoint": f"http://{DEFAULT_IR_SERVICE_HOST}:{DEFAULT_IR_SERVICE_PORT}/v0/ir",
+        "dataClass": "parser",
+        "policyProfile": DEFAULT_CAPABILITY_POLICY_PROFILE,
+        "version": DEFAULT_CAPABILITY_VERSION,
+        "description": "Builds Semantic IR from parser output.",
+    },
+    {
+        "id": DEFAULT_GENERATOR_CAPABILITY,
+        "name": "Target Java Generator",
+        "owner": "target-java-generation-service",
+        "endpoint": f"http://{DEFAULT_GENERATOR_SERVICE_HOST}:{DEFAULT_GENERATOR_SERVICE_PORT}/v0/generate",
+        "dataClass": "generator",
+        "policyProfile": DEFAULT_CAPABILITY_POLICY_PROFILE,
+        "version": DEFAULT_CAPABILITY_VERSION,
+        "description": "Generates Java projects from Semantic IR.",
+    },
+    {
+        "id": DEFAULT_BUILD_TEST_CAPABILITY,
+        "name": "Build/Test Runner",
+        "owner": "build-test-runner-service",
+        "endpoint": f"http://{DEFAULT_BUILD_TEST_SERVICE_HOST}:{DEFAULT_BUILD_TEST_SERVICE_PORT}/v0/run-verification",
+        "dataClass": "build-test",
+        "policyProfile": DEFAULT_CAPABILITY_POLICY_PROFILE,
+        "version": DEFAULT_CAPABILITY_VERSION,
+        "description": "Builds and executes generated Java projects.",
+    },
+    {
+        "id": DEFAULT_EVIDENCE_CAPABILITY,
+        "name": "Evidence Pack Writer",
+        "owner": "evidence-service",
+        "endpoint": f"http://{DEFAULT_EVIDENCE_SERVICE_HOST}:{DEFAULT_EVIDENCE_SERVICE_PORT}/v0/packs",
+        "dataClass": "evidence",
+        "policyProfile": DEFAULT_CAPABILITY_POLICY_PROFILE,
+        "version": DEFAULT_CAPABILITY_VERSION,
+        "description": "Writes Evidence Pack manifests for W0 migration runs.",
+    },
+]
 
 
 @dataclass(frozen=True)
@@ -32,6 +103,7 @@ class OrchestratorConfig:
     build_test_capability_id: str
     evidence_capability_id: str
     model_gateway_capability_id: str
+    w0_capabilities: tuple[dict[str, Any], ...]
     harness_token: str = ""
     service_name: str = "orchestrator-service"
 
@@ -86,6 +158,16 @@ def load_config() -> OrchestratorConfig:
     if not parse_capability_id or not ir_capability_id or not generator_capability_id or not build_test_capability_id or not evidence_capability_id:
         raise ValueError("capability ids are required")
 
+    w0_capabilities = _load_w0_capabilities(
+        (
+            parse_capability_id,
+            ir_capability_id,
+            generator_capability_id,
+            build_test_capability_id,
+            evidence_capability_id,
+        )
+    )
+
     return OrchestratorConfig(
         listen_addr=listen_addr,
         harness_base_url=harness_base_url,
@@ -99,5 +181,93 @@ def load_config() -> OrchestratorConfig:
         build_test_capability_id=build_test_capability_id,
         evidence_capability_id=evidence_capability_id,
         model_gateway_capability_id=model_gateway_capability_id,
+        w0_capabilities=w0_capabilities,
         harness_token=harness_token,
     )
+
+
+def _load_w0_capabilities(required_ids: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+    manifest = os.environ.get("ORCHESTRATOR_W0_CAPABILITIES")
+    if manifest:
+        return tuple(_parse_w0_capability_manifest(manifest))
+
+    return _default_w0_capabilities_from_env(required_ids)
+
+
+def _parse_w0_capability_manifest(raw: str) -> list[dict[str, Any]]:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("ORCHESTRATOR_W0_CAPABILITIES must be valid JSON") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("ORCHESTRATOR_W0_CAPABILITIES must be a JSON array")
+    manifest: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, Mapping):
+            raise ValueError("ORCHESTRATOR_W0_CAPABILITIES entries must be objects")
+        parsed_item = dict(item)
+        if not isinstance(parsed_item.get("id"), str) or not parsed_item["id"].strip():
+            raise ValueError("ORCHESTRATOR_W0_CAPABILITIES items require a non-empty id")
+        manifest.append(parsed_item)
+    if not manifest:
+        raise ValueError("ORCHESTRATOR_W0_CAPABILITIES must include at least one capability")
+    return manifest
+
+
+def _default_w0_capabilities_from_env(required_ids: Iterable[str]) -> tuple[dict[str, Any], ...]:
+    defaults = list(DEFAULT_W0_CAPABILITIES)
+    endpoint_map = {
+        DEFAULT_PARSE_CAPABILITY: os.environ.get(
+            "ORCHESTRATOR_PARSE_CAPABILITY_ENDPOINT",
+            DEFAULT_W0_CAPABILITIES[0]["endpoint"],
+        ).strip(),
+        DEFAULT_IR_CAPABILITY: os.environ.get(
+            "ORCHESTRATOR_IR_CAPABILITY_ENDPOINT",
+            DEFAULT_W0_CAPABILITIES[1]["endpoint"],
+        ).strip(),
+        DEFAULT_GENERATOR_CAPABILITY: os.environ.get(
+            "ORCHESTRATOR_GENERATOR_CAPABILITY_ENDPOINT",
+            DEFAULT_W0_CAPABILITIES[2]["endpoint"],
+        ).strip(),
+        DEFAULT_BUILD_TEST_CAPABILITY: os.environ.get(
+            "ORCHESTRATOR_BUILD_TEST_CAPABILITY_ENDPOINT",
+            DEFAULT_W0_CAPABILITIES[3]["endpoint"],
+        ).strip(),
+        DEFAULT_EVIDENCE_CAPABILITY: os.environ.get(
+            "ORCHESTRATOR_EVIDENCE_CAPABILITY_ENDPOINT",
+            DEFAULT_W0_CAPABILITIES[4]["endpoint"],
+        ).strip(),
+    }
+
+    required_ids = set(id_value.strip() for id_value in required_ids if id_value)
+    if not required_ids:
+        return tuple(defaults)
+
+    configured: list[dict[str, Any]] = []
+    for capability in defaults:
+        if capability["id"] not in required_ids:
+            continue
+        entry = dict(capability)
+        entry["endpoint"] = endpoint_map.get(capability["id"], entry["endpoint"])
+        entry["name"] = os.environ.get(
+            f"ORCHESTRATOR_{entry['id'].replace('.', '_').replace('-', '_').upper()}_NAME",
+            entry["name"],
+        )
+        entry["owner"] = os.environ.get(
+            f"ORCHESTRATOR_{entry['id'].replace('.', '_').replace('-', '_').upper()}_OWNER",
+            entry["owner"],
+        )
+        entry["policyProfile"] = os.environ.get(
+            f"ORCHESTRATOR_{entry['id'].replace('.', '_').replace('-', '_').upper()}_POLICY_PROFILE",
+            entry["policyProfile"],
+        )
+        entry["version"] = os.environ.get(
+            f"ORCHESTRATOR_{entry['id'].replace('.', '_').replace('-', '_').upper()}_VERSION",
+            entry["version"],
+        )
+        entry["description"] = os.environ.get(
+            f"ORCHESTRATOR_{entry['id'].replace('.', '_').replace('-', '_').upper()}_DESCRIPTION",
+            entry["description"],
+        )
+        configured.append(entry)
+    return tuple(configured)

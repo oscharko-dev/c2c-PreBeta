@@ -11,12 +11,41 @@ from typing import Any, Optional
 
 from .client import JSONHTTPClient
 from .config import OrchestratorConfig, load_config
-from .harness import HarnessGateway
+from .client import HttpClientError
+from .harness import HarnessFailure, HarnessGateway
 from .workflow import W0RunContext, W0WorkflowRunner
 
 
 class UpstreamServiceError(Exception):
     """Raised when Harness cannot be reached or returns an invalid upstream result."""
+
+
+def _register_capabilities_with_harness(
+    config: OrchestratorConfig,
+    gateway: HarnessGateway,
+) -> None:
+    """Register orchestrator-owned capabilities into the Harness catalog."""
+    for capability in config.w0_capabilities:
+        capability_id = str(capability.get("id", "")).strip()
+        if not capability_id:
+            continue
+        try:
+            gateway.register_capability(capability)
+        except HarnessFailure as exc:
+            lower_message = str(exc.details).lower()
+            if exc.status == 400 and "already registered" in lower_message:
+                continue
+            if exc.status == 409 and "already registered" in lower_message:
+                continue
+            raise
+        except HttpClientError as exc:
+            lower_message = str(exc).lower()
+            if "already registered" in lower_message or "already exists" in lower_message:
+                if "failed with 400" in lower_message:
+                    continue
+                if "failed with 409" in lower_message:
+                    continue
+            raise
 
 
 class OrchestratorService:
@@ -212,6 +241,7 @@ def create_configured_server(config: OrchestratorConfig) -> tuple[HTTPServer, W0
         }
     http_client = JSONHTTPClient(timeout_seconds=config.request_timeout_seconds)
     gateway = HarnessGateway(config.harness_base_url, http_client, harness_headers=harness_headers)
+    _register_capabilities_with_harness(config=config, gateway=gateway)
     runner = W0WorkflowRunner(config=config, gateway=gateway)
     host, port = _split_listen_address(config.listen_addr)
     return create_http_server(config=config, runner=runner, host=host, port=port), runner
