@@ -7,6 +7,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SemanticIrServiceTest {
@@ -37,6 +38,12 @@ class SemanticIrServiceTest {
                                         "line", 4
                                 )),
                                 "statements", List.of(Map.of(
+                                        "id", "s-paragraph-1",
+                                        "kind", "PARAGRAPH",
+                                        "line", 7,
+                                        "raw", "MAIN",
+                                        "operands", Map.of("name", "MAIN")
+                                ), Map.of(
                                         "id", "s-display-1",
                                         "kind", "DISPLAY",
                                         "line", 8,
@@ -57,6 +64,12 @@ class SemanticIrServiceTest {
         assertFalse(((Map<?, ?>) ir.get("symbols")).isEmpty());
         assertFalse(((List<?>) ir.get("fieldLayouts")).isEmpty());
         assertFalse(((List<?>) ir.get("statements")).isEmpty());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> symbols = (Map<String, Object>) ir.get("symbols");
+        assertNotNull(symbols.get("MAIN"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> traceability = (Map<String, Object>) ir.get("traceability");
+        assertNotNull(traceability.get("d-ws-total-1"));
     }
 
     @Test

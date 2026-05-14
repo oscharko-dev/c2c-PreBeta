@@ -55,4 +55,21 @@ class CobolParserTest {
         assertEquals("failed", result.status);
         assertTrue(result.diagnostics.stream().anyMatch(d -> "unsupported-feature".equals(d.code)));
     }
+
+    @Test
+    void malformedDataDeclarationFailsExplicitly() {
+        Model.ParseRequest request = new Model.ParseRequest();
+        request.source = """
+               IDENTIFICATION DIVISION.
+               PROGRAM-ID. BADDATA.
+               DATA DIVISION.
+               WORKING-STORAGE SECTION.
+               XX INVALID DECL.
+               PROCEDURE DIVISION.
+                   STOP RUN.
+               """;
+        Model.ParseResult result = parser.parse(request);
+        assertEquals("failed", result.status);
+        assertTrue(result.diagnostics.stream().anyMatch(d -> "unsupported-data-declaration".equals(d.code)));
+    }
 }
