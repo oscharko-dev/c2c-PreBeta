@@ -31,7 +31,7 @@
              END-EVALUATE
            END-PERFORM
 
-           IF WS-APPROVED > WS-REJECTED
+           IF WS-APPROVED >= WS-REJECTED
                DISPLAY "APPROVED-COUNT=" WS-APPROVED
                DISPLAY "REJECTED-COUNT=" WS-REJECTED
            ELSE

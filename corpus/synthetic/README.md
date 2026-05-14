@@ -7,4 +7,4 @@ This directory contains W0 synthetic COBOL programs and deterministic fixture ou
 - `fixtures/` contains expected deterministic outputs.
 - `generator/` contains generator requirements and conventions.
 
-The synthetic corpus is intentionally minimal and intentionally excludes any customer or external data.
+The synthetic corpus is intentionally minimal and excludes customer code and sensitive data categories, including PII, bank data, and insurance data.
