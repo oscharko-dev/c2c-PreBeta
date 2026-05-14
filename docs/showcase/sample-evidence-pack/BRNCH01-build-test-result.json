@@ -1,0 +1,60 @@
+{
+  "build": {
+    "classOutputDir": "target/classes",
+    "compileOk": true,
+    "diagnostics": [],
+    "fileCount": 4,
+    "sourceCount": 1
+  },
+  "capability": "build-test.run",
+  "classification": "divergence-known-w0-coverage-gap",
+  "comparison": {
+    "actualLength": 48,
+    "actualSha256": "fb65fcc642a174d7a407c5a65d8c4e94ad76e5f31937c1bf7c5071ce36f21e9c",
+    "diff": "first divergence at character 15; actualLength=47 expectedLength=33",
+    "expectedLength": 34,
+    "expectedSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec",
+    "matched": false,
+    "normalisation": "trim+crlf-to-lf"
+  },
+  "diagnostics": [],
+  "execution": {
+    "durationMs": 1,
+    "exitCode": 0,
+    "ok": true,
+    "ran": true,
+    "stderr": "",
+    "stdout": "APPROVED-COUNT=0\nREJECTED-COUNT=0\nREJECTED-WINS\n",
+    "stdoutSha256": "fb65fcc642a174d7a407c5a65d8c4e94ad76e5f31937c1bf7c5071ce36f21e9c"
+  },
+  "goldenMaster": {
+    "classification": "synthetic",
+    "expected": "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+    "expectedSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec",
+    "knownDivergenceAtW0": true,
+    "source": "corpus/synthetic/fixtures/branch-account-guard-output.txt"
+  },
+  "outputRef": {
+    "byteSize": 1536,
+    "kind": "build-test-result",
+    "mimeType": "application/json",
+    "sha256": "59be7e2e69a17dbd01fbe0fdc162589892cd1b0af43154fc26ed16c1226366fb",
+    "uri": "urn:build-test-runner-service/build-test-result/59be7e2e69a17dbd01fbe0fdc162589892cd1b0af43154fc26ed16c1226366fb"
+  },
+  "programId": "BRNCH01",
+  "runId": "run-1",
+  "schemaVersion": "v0",
+  "service": "build-test-runner-service",
+  "sourceRef": {},
+  "status": "output-divergence",
+  "summary": "Generated stdout diverges from Golden Master; classified as a documented W0 generator coverage gap.",
+  "tests": {
+    "failed": 0,
+    "note": "W0 generator does not emit JUnit tests yet; the runner only exercises compile + main() execution against a Golden Master.",
+    "passed": 0,
+    "ran": false,
+    "skipped": 0,
+    "totalTests": 0
+  },
+  "workflowId": "w0-migration-v0"
+}

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "v0",
+  "capability": "evidence.pack",
+  "service": "evidence-service",
+  "packId": "epk-run-2-0002",
+  "runId": "run-2",
+  "workflowId": "w0-migration-v0",
+  "wave": "w0",
+  "status": "complete",
+  "summary": "W0 demo run for CTRLDEC01",
+  "createdAt": "2026-05-14T09:07:54.177583Z",
+  "createdBy": "w0-demo",
+  "artifacts": {
+    "sourceCobol": [
+      {
+        "uri": "urn:c2c/cobol/CTRLDEC01",
+        "sha256": "c61683c95fc180d8a74a0a5fe8dc2460f7b4b029b49942d0f55ba234b3c562fe",
+        "byteSize": 939,
+        "mimeType": "text/x-cobol",
+        "kind": "evidence-input"
+      }
+    ],
+    "semanticIr": {
+      "uri": "urn:c2c/semantic-ir/CTRLDEC01/run-2",
+      "sha256": "37becd89b4873dcef0120df5431a3b9245b25f1eaf799ed6ee80e5b7f032a973",
+      "byteSize": 12859,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "generatedJava": {
+      "uri": "urn:c2c/generated-java/CTRLDEC01/run-2",
+      "sha256": "b95891392bd8dcda5c7ab320173121c613ce5bfe25df421f4c993726a01066fb",
+      "byteSize": 11039,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "runtimeVersion": {
+      "id": "c2c-target-java-runtime:v0"
+    },
+    "modelInvocations": [
+      {
+        "invocationId": "inv-run-2-noop",
+        "modelId": "none",
+        "provider": "observation-only",
+        "status": "skipped",
+        "ledgerRef": {
+          "uri": "urn:c2c/model-invocations/run-2",
+          "sha256": "86ef8c9184a8d2494b443992c3bf5640c03512af791555a552583ff6ee0e38ef",
+          "byteSize": 170,
+          "mimeType": "application/json",
+          "kind": "evidence-input"
+        }
+      }
+    ],
+    "buildTestResults": [
+      {
+        "uri": "urn:c2c/build-test/CTRLDEC01/run-2",
+        "sha256": "7e761ac044dfdad36436f99eb1f95d1147848663d361b617489cd5b27af8a41a",
+        "byteSize": 2217,
+        "mimeType": "application/json",
+        "kind": "evidence-input"
+      }
+    ],
+    "harnessEvents": {
+      "uri": "urn:c2c/harness-events/run-2",
+      "sha256": "9a9d6bc47eba7eab75b654b86195bd1e1961dd8c603767f0ce8af0f42756f4e3",
+      "byteSize": 13598,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "trajectoryLedger": {
+      "uri": "urn:c2c/trajectory-ledger/run-2",
+      "sha256": "b4b4ac3c2f2514faf883ab1bdc3371f6025c7d5cb67e633c4b8ed04bd5cd2d76",
+      "byteSize": 5872,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    }
+  },
+  "openAssumptions": [
+    {
+      "id": "w0-coverage-gap",
+      "description": "W0 generator does not yet translate PERFORM/EVALUATE/IF/ADD/COMPUTE; divergence is expected and documented per program."
+    }
+  ],
+  "validation": {
+    "ok": true,
+    "requiredArtifacts": [
+      "sourceCobol",
+      "semanticIr",
+      "generatedJava",
+      "buildTestResults",
+      "harnessEvents",
+      "modelInvocations"
+    ],
+    "missingArtifacts": []
+  },
+  "exports": [
+    {
+      "format": "directory",
+      "uri": "file:///Users/oscharko-dev/Projects/c2c-PreBeta/.claude/worktrees/interesting-yalow-f86560/var/w0-demo/exports/epk-run-2-0002",
+      "sha256": "8921fb796727fb670f00d54754822a3809c918f4ab3e519a5ecc7ff66163c817",
+      "byteSize": 2926,
+      "createdAt": "2026-05-14T09:07:54.208038Z"
+    }
+  ]
+}

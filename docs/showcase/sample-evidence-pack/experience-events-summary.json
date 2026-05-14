@@ -1,0 +1,173 @@
+[
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-1",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-1",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "test_failure",
+    "occurrences": 1,
+    "runId": "run-1",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-2",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-2",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "test_failure",
+    "occurrences": 1,
+    "runId": "run-2",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "test_failure",
+    "occurrences": 1,
+    "runId": "run-3",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-3",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-3",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "cobol-parser-service",
+    "capability": "cobol.parse",
+    "status": "observed",
+    "dataClass": "parser"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "semantic-ir-service",
+    "capability": "cobol.ir",
+    "status": "observed",
+    "dataClass": "parser"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 4,
+    "runId": "run-4",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "repeated_failure",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "test_failure",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "cobol-parser-service",
+    "capability": "cobol.parse",
+    "status": "observed",
+    "dataClass": "parser"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "semantic-ir-service",
+    "capability": "cobol.ir",
+    "status": "observed",
+    "dataClass": "parser"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 4,
+    "runId": "run-4",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  }
+]

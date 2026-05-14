@@ -1,0 +1,150 @@
+{
+  "schemaVersion": "v0",
+  "runId": "run-1",
+  "status": "output-divergence",
+  "workflowId": "w0-migration-v0",
+  "startedAt": "2026-05-14T09:07:53.262561Z",
+  "capturedAt": "2026-05-14T09:07:53Z",
+  "steps": [
+    {
+      "eventId": "hev-1778749673262561000-1",
+      "stepId": 1,
+      "actor": "w0-demo",
+      "capability": "agentic-harness-core",
+      "dataClass": "other",
+      "eventType": "run.started",
+      "stateTransition": "created",
+      "status": "starting",
+      "inputRef": {
+        "uri": "urn:harness/run/request",
+        "sha256": "168b1b51b2ecc08ad33421efdcc4b89a5c1988c1df0214e0c0abe27f7ed5f73c",
+        "byteSize": 95
+      },
+      "outputRef": {
+        "uri": "urn:harness/run/run-1/state",
+        "sha256": "066ebe55efacf11339b71ba1f215e348ec6c8bd7b5865fd7ce620618d9f02592",
+        "byteSize": 303
+      },
+      "createdAt": "2026-05-14T09:07:53.262561Z"
+    },
+    {
+      "eventId": "evt-cobol-parser-service-7a286768-169f-4cd2-b0d9-af4518f6bd3e",
+      "stepId": 2,
+      "actor": "cobol-parser-service",
+      "capability": "cobol.parse",
+      "dataClass": "parser",
+      "eventType": "cobol.parse.completed",
+      "stateTransition": "service.step",
+      "status": "ok",
+      "inputRef": {
+        "uri": "urn:cobol-source/6e2e850874bbf936a5e4f587ece3246297a3d23ed7c49fb157211be7639be364",
+        "sha256": "6e2e850874bbf936a5e4f587ece3246297a3d23ed7c49fb157211be7639be364",
+        "byteSize": 1325,
+        "mimeType": "text/x-cobol",
+        "kind": "source"
+      },
+      "outputRef": {
+        "uri": "urn:cobol-parser-service/parse-output/39252f10acff6e9b28bc43863f87852fb114a7ebdbb8f53cbb9233ad6eff39d1",
+        "sha256": "39252f10acff6e9b28bc43863f87852fb114a7ebdbb8f53cbb9233ad6eff39d1",
+        "byteSize": 14438,
+        "mimeType": "application/json",
+        "kind": "parse-output"
+      },
+      "createdAt": "2026-05-14T09:07:53.333345Z"
+    },
+    {
+      "eventId": "evt-semantic-ir-service-4ed8871b-7067-41c6-b6a6-9455cc5c6a43",
+      "stepId": 3,
+      "actor": "semantic-ir-service",
+      "capability": "cobol.ir",
+      "dataClass": "parser",
+      "eventType": "cobol.ir.completed",
+      "stateTransition": "service.step",
+      "status": "ok",
+      "inputRef": {
+        "uri": "urn:cobol-source/6e2e850874bbf936a5e4f587ece3246297a3d23ed7c49fb157211be7639be364",
+        "sha256": "6e2e850874bbf936a5e4f587ece3246297a3d23ed7c49fb157211be7639be364",
+        "byteSize": 1325,
+        "mimeType": "text/x-cobol",
+        "kind": "source"
+      },
+      "outputRef": {
+        "uri": "urn:semantic-ir-service/semantic-ir/9a7a065800a1792b393bb7c7092c00109aec91f577b592e565785ab14bfdd754",
+        "sha256": "9a7a065800a1792b393bb7c7092c00109aec91f577b592e565785ab14bfdd754",
+        "byteSize": 14194,
+        "mimeType": "application/json",
+        "kind": "semantic-ir"
+      },
+      "createdAt": "2026-05-14T09:07:53.381891Z"
+    },
+    {
+      "eventId": "evt-target-java-generation-service-3c7ede96-6dd2-4a0f-8777-8aebdd3f1c2c",
+      "stepId": 4,
+      "actor": "target-java-generation-service",
+      "capability": "target.java.generate",
+      "dataClass": "generator",
+      "eventType": "target.java.generate.completed",
+      "stateTransition": "service.step",
+      "status": "ok",
+      "inputRef": {
+        "uri": "urn:harness/target.java.generate.completed/run-1/input",
+        "sha256": "aecfc716dc81dab582665ab06a035312f5e8ad01e7c5aa0b98f91e5a9166a385",
+        "byteSize": 167
+      },
+      "outputRef": {
+        "uri": "urn:target-java-generation-service/target-java-project/9a6657829bdcf408b377b0df80ebe858af06a6138bf4380a663b347dbbd82fcd",
+        "sha256": "9a6657829bdcf408b377b0df80ebe858af06a6138bf4380a663b347dbbd82fcd",
+        "byteSize": 10844,
+        "mimeType": "application/json",
+        "kind": "target-java-project"
+      },
+      "createdAt": "2026-05-14T09:07:53.437452Z"
+    },
+    {
+      "eventId": "evt-target-java-generation-service-8ae1e8ce-0512-451b-a60d-82becf09877f",
+      "stepId": 5,
+      "actor": "target-java-generation-service",
+      "capability": "target.java.generate",
+      "dataClass": "generator",
+      "eventType": "target.java.generate.unsupported",
+      "stateTransition": "service.step",
+      "status": "ok",
+      "inputRef": {
+        "uri": "urn:harness/target.java.generate.unsupported/run-1/input",
+        "sha256": "aecfc716dc81dab582665ab06a035312f5e8ad01e7c5aa0b98f91e5a9166a385",
+        "byteSize": 167
+      },
+      "outputRef": {
+        "uri": "urn:target-java-generation-service/target-java-project/9a6657829bdcf408b377b0df80ebe858af06a6138bf4380a663b347dbbd82fcd",
+        "sha256": "9a6657829bdcf408b377b0df80ebe858af06a6138bf4380a663b347dbbd82fcd",
+        "byteSize": 10844,
+        "mimeType": "application/json",
+        "kind": "target-java-project"
+      },
+      "createdAt": "2026-05-14T09:07:53.532906Z"
+    },
+    {
+      "eventId": "evt-build-test-runner-service-ae75227c-2a47-48ad-8b33-1a5cf199d525",
+      "stepId": 6,
+      "actor": "build-test-runner-service",
+      "capability": "build-test.run",
+      "dataClass": "build-test",
+      "eventType": "build-test.output-divergence",
+      "stateTransition": "generated->output-divergence",
+      "status": "output-divergence",
+      "inputRef": {
+        "uri": "urn:harness/build-test.output-divergence/run-1/input",
+        "sha256": "3946f61c029d6f451f1d8563dc4e0395fecb8c2bf5acbd8e5be6f052f16a549a",
+        "byteSize": 285
+      },
+      "outputRef": {
+        "uri": "urn:build-test-runner-service/build-test-result/59be7e2e69a17dbd01fbe0fdc162589892cd1b0af43154fc26ed16c1226366fb",
+        "sha256": "59be7e2e69a17dbd01fbe0fdc162589892cd1b0af43154fc26ed16c1226366fb",
+        "byteSize": 1536,
+        "mimeType": "application/json",
+        "kind": "build-test-result"
+      },
+      "createdAt": "2026-05-14T09:07:53.659258Z"
+    }
+  ]
+}
