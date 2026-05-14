@@ -222,3 +222,7 @@ vendor/
 
 # Runtime data artifacts
 services/agentic-harness-core/data/*.jsonl
+
+# Local generated supply-chain/build outputs
+artifacts/*.json
+**/dependency-reduced-pom.xml
