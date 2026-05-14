@@ -1,2 +1,4 @@
-# I am coming soon... 
-c2j is an AI-first Enterprise Platform, for mainframe-to-Java modernization workflows and governance. It provides a local Migration Factory workbench (Next.js UI + Java control-plane API) for migration operations, validation, quality gates, evidence export, and knowledge workflows.
+# c2c : AI-First COBOL to Code 
+Experience Learning Harness · Open Source · Open Weight · EU Sovereignty
+
+Think Big, Start Small!
