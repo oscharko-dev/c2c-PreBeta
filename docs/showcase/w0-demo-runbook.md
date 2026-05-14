@@ -16,16 +16,16 @@ The demo drives one COBOL program through every W0 service in turn:
 COBOL source
     │
     ▼  HTTP POST /v0/parse
-cobol-parser-service              ──► harness POST /v0/events
+cobol-parser-service              ──► harness POST /v0/events (authenticated)
     │
     ▼  HTTP POST /v0/ir
-semantic-ir-service               ──► harness POST /v0/events
+semantic-ir-service               ──► harness POST /v0/events (authenticated)
     │
     ▼  HTTP POST /v0/generate
-target-java-generation-service    ──► harness POST /v0/events
+target-java-generation-service    ──► harness POST /v0/events (authenticated)
     │
     ▼  HTTP POST /v0/run-verification
-build-test-runner-service         ──► harness POST /v0/events
+build-test-runner-service         ──► harness POST /v0/events (authenticated)
                                   ──► experience POST /v0/events (failures only)
     │
     ▼  HTTP POST /v0/packs (+ PATCH, /validate, /export)
@@ -112,7 +112,11 @@ trap. On a warm Maven cache the full run takes ~15 s on a developer laptop.
 
 5. Health-check each service (`/v0/health` or `/health`) with up to 20 s of
    retries.
-6. For each of `BRNCH01`, `CTRLDEC01`, `BATCH01`:
+6. Register the W0 parser, IR, generator, build/test, and evidence
+   capabilities in the Harness catalog with an authenticated
+   `orchestrator` principal. Every subsequent service endpoint is resolved
+   from that catalog before invocation.
+7. For each of `BRNCH01`, `CTRLDEC01`, `BATCH01`:
    1. Register a run on the harness via `POST /v0/runs`. Capture the
       harness-assigned `runId` (e.g. `run-1`).
    2. POST the COBOL source to the parser. Save the response.
@@ -127,18 +131,18 @@ trap. On a warm Maven cache the full run takes ~15 s on a developer laptop.
       deterministically.
    9. Re-fetch the manifest for archiving.
    10. PATCH the harness run to `status: completed`.
-7. Run the controlled-repeat scenario: drive `BRNCH01` twice in a fresh
-   harness run so the experience analyzer sees identical
-   `(actor, capability, inputHash, outputHash)` pairs and emits a
-   `repeat_action` pattern. This satisfies the
-   "controlled test case for repeated-action" acceptance criterion.
-8. Snapshot the harness `/v0/events` ledger. Normalize statuses to the
+8. Run controlled Experience Learning scenarios: drive `BRNCH01` twice in a
+   fresh harness run so the analyzer emits `repeat_action` and
+   `unchanged_output`, then append explicit controlled `failed → completed`
+   and `accepted` Harness events so `retry` and `accepted_pattern` are also
+   evidenced.
+9. Snapshot the harness `/v0/events` ledger. Normalize statuses to the
    experience-learning pattern enum (`ok`, `failed`, `started`, …;
    `starting → started`, `output-divergence → failed`). POST to
    `experience-learning-service` `/v0/harness-events`. Auto-analyze runs on
    ingest and produces experience events.
-9. POST the per-program trajectory ledgers to `/v0/trajectory-ledgers`.
-10. Compute and emit `var/w0-demo/scorecard.md`.
+10. POST the per-program trajectory ledgers to `/v0/trajectory-ledgers`.
+11. Compute and emit `var/w0-demo/scorecard.md`.
 
 The script aborts immediately on any non-success HTTP status. Service logs
 live in `var/w0-demo/logs/` and survive script exit so a developer can read
@@ -160,22 +164,36 @@ for svc in agentic-harness-core evidence-service experience-learning-service; do
   (cd "services/$svc" && go build -o "/tmp/$svc" .)
 done
 
+export HARNESS_TOKEN="manual-local-control-plane-token"
+
 # 2. Start the harness + capability services (each in its own terminal,
 #    or all in one with & + jobs / tmux; pick the same ports the demo uses)
-HARNESS_EVENT_LOG_PATH=/tmp/harness.jsonl HARNESS_PORT=8190 /tmp/agentic-harness-core &
+HARNESS_CONTROL_PLANE_TOKEN="$HARNESS_TOKEN" HARNESS_EVENT_LOG_PATH=/tmp/harness.jsonl HARNESS_PORT=8190 /tmp/agentic-harness-core &
 EVIDENCE_PORT=8191 EVIDENCE_EXPORT_DIR=/tmp/evidence-exports /tmp/evidence-service &
 EXPERIENCE_LEARNING_LISTEN_ADDR=:8192 /tmp/experience-learning-service &
-HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 COBOL_PARSER_LISTEN_ADDR=8181 \
+HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" COBOL_PARSER_LISTEN_ADDR=8181 \
   java -jar services/cobol-parser-service/target/cobol-parser-service-*.jar &
-HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 SEMANTIC_IR_LISTEN_ADDR=8182 \
+HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" SEMANTIC_IR_LISTEN_ADDR=8182 \
   java -jar services/semantic-ir-service/target/semantic-ir-service-*.jar &
-HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 TARGET_JAVA_GENERATION_LISTEN_ADDR=8183 \
+HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" TARGET_JAVA_GENERATION_LISTEN_ADDR=8183 \
   java -jar services/target-java-generation-service/target/target-java-generation-service-*.jar &
-HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 BUILD_TEST_RUNNER_LISTEN_ADDR=8184 \
+HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" BUILD_TEST_RUNNER_LISTEN_ADDR=8184 \
   java -jar services/build-test-runner-service/target/build-test-runner-service-*.jar &
 
+AUTH=(-H "Authorization: Bearer $HARNESS_TOKEN" -H "X-Harness-Actor: manual-demo" -H "X-Harness-Role: orchestrator")
+register_capability() {
+  local id="$1" name="$2" owner="$3" endpoint="$4" dataClass="$5"
+  jq -n --arg id "$id" --arg name "$name" --arg owner "$owner" --arg endpoint "$endpoint" --arg dataClass "$dataClass" \
+    '{capability:{id:$id,name:$name,owner:$owner,endpoint:$endpoint,dataClass:$dataClass,policyProfile:"harness-control-plane",version:"v0.1.0"}}' \
+  | curl -fsS -X POST -H 'Content-Type: application/json' "${AUTH[@]}" -d @- http://127.0.0.1:8190/v0/capabilities
+}
+register_capability cobol.parse "COBOL Parser" cobol-parser-service http://127.0.0.1:8181/v0/parse parser
+register_capability cobol.ir "Semantic IR Generator" semantic-ir-service http://127.0.0.1:8182/v0/ir parser
+register_capability target.java.generate "Target Java Generator" target-java-generation-service http://127.0.0.1:8183/v0/generate generator
+register_capability build-test.run "Build/Test Runner" build-test-runner-service http://127.0.0.1:8184/v0/run-verification build-test
+
 # 3. Drive a single program. Replace BRNCH01 / the .cbl path to try another.
-RUN=$(curl -fsS -X POST -H 'Content-Type: application/json' \
+RUN=$(curl -fsS -X POST -H 'Content-Type: application/json' "${AUTH[@]}" \
   -d '{"workflowId":"w0-migration-v0","requester":"manual"}' \
   http://127.0.0.1:8190/v0/runs | jq -r .runId)
 
@@ -194,8 +212,8 @@ BTR=$(jq -n --argjson g "$GEN" --arg runId "$RUN" \
 
 echo "$BTR" | jq '{status, classification, compileOk:.build.compileOk, matched:.comparison.matched}'
 
-# 4. Read the trajectory ledger (client-side; see w0-followups.md for why)
-curl -fsS http://127.0.0.1:8190/v0/events | jq --arg r "$RUN" '[.[] | select(.runId == $r)]'
+# 4. Read the trajectory ledger from the Harness source of truth.
+curl -fsS http://127.0.0.1:8190/v0/runs/$RUN/ledger | jq '.steps | length'
 ```
 
 The end-to-end output should report `compileOk: true`, `matched: false`,

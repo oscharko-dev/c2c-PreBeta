@@ -6,9 +6,15 @@ The `agentic-harness-core` service is the Wave 0 control-plane for tool capabili
 
 ```bash
 cd services/agentic-harness-core
+export HARNESS_CONTROL_PLANE_TOKEN="local-dev-token"
 go test ./...
 go run .
 ```
+
+Mutating endpoints require the control-plane token via `Authorization: Bearer
+<token>` or `X-Harness-Token`, plus `X-Harness-Actor` and `X-Harness-Role`
+headers. `GET /v0/health`, `GET /v0/ready`, catalog reads, run reads, event
+reads, and ledger reads remain unauthenticated for W0 local inspection.
 
 ## Endpoints
 
@@ -32,9 +38,10 @@ go run .
 
 ## Design notes
 
-- Agents must not register or own direct integration capabilities for core infra services (model, evidence, rag, graph, parser, generator, test). Such attempts are denied by default policy.
+- Agents must not register or own direct integration capabilities for core infra services (model, evidence, rag, graph, parser, generator, build-test, test, model-gateway). Such attempts are denied by default policy.
 - Capability and MCP registries are maintained as in-memory stores in W0 for deterministic baseline behavior.
+- Capability and MCP registrations reject duplicate ids; callers must update configuration intentionally rather than overwrite existing records.
 - Run transitions are explicit and stateful for `starting`, `updating`, `completed`, and `failed`.
 - Event envelopes are persisted in JSONL (`data/harness-events-v0.jsonl` by default) and include stable `runId`/`stepId`.
-- Event envelopes are guaranteed for capability registration, MCP registration, run state changes, and external service ingestion via `POST /v0/events`.
+- Event envelopes are guaranteed for capability registration, MCP registration, run state changes, and authenticated external service ingestion via `POST /v0/events`.
 - Local sample ledger output is available as `docs/agentic-harness-core/harness-events-v0.jsonl`.

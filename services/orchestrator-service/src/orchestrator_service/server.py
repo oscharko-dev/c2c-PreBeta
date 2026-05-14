@@ -203,8 +203,15 @@ def create_http_server(
 
 
 def create_configured_server(config: OrchestratorConfig) -> tuple[HTTPServer, W0WorkflowRunner]:
+    harness_headers = {}
+    if config.harness_token:
+        harness_headers = {
+            "Authorization": f"Bearer {config.harness_token}",
+            "X-Harness-Actor": config.service_name,
+            "X-Harness-Role": "orchestrator",
+        }
     http_client = JSONHTTPClient(timeout_seconds=config.request_timeout_seconds)
-    gateway = HarnessGateway(config.harness_base_url, http_client)
+    gateway = HarnessGateway(config.harness_base_url, http_client, harness_headers=harness_headers)
     runner = W0WorkflowRunner(config=config, gateway=gateway)
     host, port = _split_listen_address(config.listen_addr)
     return create_http_server(config=config, runner=runner, host=host, port=port), runner

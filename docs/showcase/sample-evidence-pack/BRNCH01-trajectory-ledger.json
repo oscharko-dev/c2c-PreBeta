@@ -1,13 +1,14 @@
 {
   "schemaVersion": "v0",
   "runId": "run-1",
-  "status": "output-divergence",
+  "status": "starting",
   "workflowId": "w0-migration-v0",
-  "startedAt": "2026-05-14T09:07:53.262561Z",
-  "capturedAt": "2026-05-14T09:07:53Z",
+  "startedAt": "2026-05-14T10:46:15.610319Z",
+  "completedAt": "0001-01-01T00:00:00Z",
+  "capturedAt": "2026-05-14T10:46:16.238102Z",
   "steps": [
     {
-      "eventId": "hev-1778749673262561000-1",
+      "eventId": "hev-1778755575610318000-1",
       "stepId": 1,
       "actor": "w0-demo",
       "capability": "agentic-harness-core",
@@ -22,13 +23,13 @@
       },
       "outputRef": {
         "uri": "urn:harness/run/run-1/state",
-        "sha256": "066ebe55efacf11339b71ba1f215e348ec6c8bd7b5865fd7ce620618d9f02592",
-        "byteSize": 303
+        "sha256": "695f83b4dd16a4fb64fc83bf0d7b7b14bd0018e1c37ef3f91057fbeb39986c94",
+        "byteSize": 300
       },
-      "createdAt": "2026-05-14T09:07:53.262561Z"
+      "createdAt": "2026-05-14T10:46:15.610319Z"
     },
     {
-      "eventId": "evt-cobol-parser-service-7a286768-169f-4cd2-b0d9-af4518f6bd3e",
+      "eventId": "evt-cobol-parser-service-a2849e6b-e4e3-43cf-9a48-aa6073fbddda",
       "stepId": 2,
       "actor": "cobol-parser-service",
       "capability": "cobol.parse",
@@ -50,10 +51,10 @@
         "mimeType": "application/json",
         "kind": "parse-output"
       },
-      "createdAt": "2026-05-14T09:07:53.333345Z"
+      "createdAt": "2026-05-14T10:46:15.679454Z"
     },
     {
-      "eventId": "evt-semantic-ir-service-4ed8871b-7067-41c6-b6a6-9455cc5c6a43",
+      "eventId": "evt-semantic-ir-service-e4efea30-563f-420f-91bf-ba351804976f",
       "stepId": 3,
       "actor": "semantic-ir-service",
       "capability": "cobol.ir",
@@ -75,11 +76,32 @@
         "mimeType": "application/json",
         "kind": "semantic-ir"
       },
-      "createdAt": "2026-05-14T09:07:53.381891Z"
+      "createdAt": "2026-05-14T10:46:15.727927Z"
     },
     {
-      "eventId": "evt-target-java-generation-service-3c7ede96-6dd2-4a0f-8777-8aebdd3f1c2c",
+      "eventId": "evt-target-java-generation-service-fd456652-cce1-4ee1-b0a8-dfae730e81ea",
       "stepId": 4,
+      "actor": "target-java-generation-service",
+      "capability": "target.java.generate",
+      "dataClass": "generator",
+      "eventType": "target.java.generate.started",
+      "stateTransition": "service.step",
+      "status": "started",
+      "inputRef": {
+        "uri": "urn:harness/target.java.generate.started/run-1/input",
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "byteSize": 2
+      },
+      "outputRef": {
+        "uri": "urn:harness/target.java.generate.started/run-1/output",
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "byteSize": 2
+      },
+      "createdAt": "2026-05-14T10:46:15.767007Z"
+    },
+    {
+      "eventId": "evt-target-java-generation-service-cbda4329-f79a-458e-a851-9460809ba225",
+      "stepId": 5,
       "actor": "target-java-generation-service",
       "capability": "target.java.generate",
       "dataClass": "generator",
@@ -98,11 +120,11 @@
         "mimeType": "application/json",
         "kind": "target-java-project"
       },
-      "createdAt": "2026-05-14T09:07:53.437452Z"
+      "createdAt": "2026-05-14T10:46:15.874871Z"
     },
     {
-      "eventId": "evt-target-java-generation-service-8ae1e8ce-0512-451b-a60d-82becf09877f",
-      "stepId": 5,
+      "eventId": "evt-target-java-generation-service-3bcf551e-47b5-456c-9469-ad39f496e95d",
+      "stepId": 6,
       "actor": "target-java-generation-service",
       "capability": "target.java.generate",
       "dataClass": "generator",
@@ -121,11 +143,11 @@
         "mimeType": "application/json",
         "kind": "target-java-project"
       },
-      "createdAt": "2026-05-14T09:07:53.532906Z"
+      "createdAt": "2026-05-14T10:46:15.881116Z"
     },
     {
-      "eventId": "evt-build-test-runner-service-ae75227c-2a47-48ad-8b33-1a5cf199d525",
-      "stepId": 6,
+      "eventId": "evt-build-test-runner-service-c0af1c69-24a1-431e-8ef0-9cc91ef7c034",
+      "stepId": 7,
       "actor": "build-test-runner-service",
       "capability": "build-test.run",
       "dataClass": "build-test",
@@ -144,7 +166,7 @@
         "mimeType": "application/json",
         "kind": "build-test-result"
       },
-      "createdAt": "2026-05-14T09:07:53.659258Z"
+      "createdAt": "2026-05-14T10:46:16.095156Z"
     }
   ]
 }

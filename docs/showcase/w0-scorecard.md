@@ -11,10 +11,10 @@ go/no-go evidence the W0 release gate refers to.
 
 | Field | Value |
 |-------|-------|
-| Run tag | `20260514T090008Z` |
-| Started (UTC) | 2026-05-14T09:00:08Z |
-| Finished (UTC) | 2026-05-14T09:00:21Z |
-| Wall-clock duration | ~13 s end-to-end on a developer laptop, after the one-time Maven warm cache. |
+| Run tag | `20260514T104603Z` |
+| Started (UTC) | 2026-05-14T10:46:03Z |
+| Finished (UTC) | 2026-05-14T10:46:17Z |
+| Wall-clock duration | ~14 s end-to-end on a developer laptop, after the one-time Maven warm cache. |
 | Java | OpenJDK 21 (Homebrew) |
 | Go | go1.26.x |
 | Maven | 3.9.x |
@@ -43,21 +43,23 @@ Acceptance bar at W0: `classification ∈ {match, divergence-known-w0-coverage-g
 | Golden-Master byte-equal matches | 0 / 3 | _expected_ |
 | Evidence Packs `validation.ok == true` and `status == "complete"` | 3 / 3 | 3 |
 | Evidence Pack export round-trips | 3 / 3 | 3 |
-| Harness Event Envelope ledger entries captured | 32 | ≥ one per service step |
+| Harness Event Envelope ledger entries captured | 45 | ≥ one per service step |
 | Distinct harness `runId`s exercised | 4 (`run-1` … `run-3` + controlled `run-4`) | ≥ 3 + 1 controlled |
-| Experience Events emitted | 19 | ≥ 1 (AC: success/failure/retry/repeat) |
-| Distinct experience `patternFingerprint`s | 10 | ≥ 1 |
+| Experience Events emitted | 23 | ≥ 1 (AC: success/failure/retry/repeat) |
+| Distinct experience `patternFingerprint`s | 13 | ≥ 1 |
 
 ### Experience pattern breakdown
 
 | Pattern | Count | Source |
 |---------|-------|--------|
-| `repeat_action` | 7 | Driven by the controlled BRNCH01 ×2 scenario in `run-4`. |
-| `unchanged_output` | 7 | Same controlled scenario; deterministic generator → identical `outputRef`. |
-| `test_failure` | 4 | BTR `output-divergence` events bucketed across runs. |
+| `accepted_pattern` | 1 | Controlled accepted artifact event in `run-4`. |
+| `repeat_action` | 8 | Driven by the controlled BRNCH01 ×2 scenario in `run-4`. |
+| `retry` | 1 | Controlled failed→completed sequence in `run-4`. |
+| `unchanged_output` | 8 | Same controlled scenario; deterministic generator → identical `outputRef`. |
+| `test_failure` | 4 | BTR `output-divergence` events normalized to failure for analysis. |
 | `repeated_failure` | 1 | BTR divergence repeated twice in the controlled scenario. |
 
-This satisfies AC: _"Experience Events are produced for at least success, failure, retry, or repeated-action scenarios using controlled test cases."_ (success is represented by every `analysis.detected` observation; failure by `test_failure`/`repeated_failure`; repeat by `repeat_action`/`unchanged_output`.)
+This satisfies AC: _"Experience Events are produced for at least success, failure, retry, or repeated-action scenarios using controlled test cases."_ Success/accepted is represented by `accepted_pattern`, failure by `test_failure`/`repeated_failure`, retry by `retry`, and repeat by `repeat_action`/`unchanged_output`.
 
 ## Foundry / model-gateway invocation cost
 
@@ -66,7 +68,7 @@ W0 does **not** exercise `model-gateway-service` end-to-end. Each manifest carri
 ## Known divergences from happy-path acceptance
 
 - `Build/test classification == "match"` is **0 / 3** by design. The W0 generator does not yet translate `PERFORM`, `EVALUATE`, `IF`, `ADD`, or `COMPUTE`, so generated stdout cannot match the COBOL Golden Master at this wave. The runner's classifier flags every divergence as `divergence-known-w0-coverage-gap` after cross-referencing [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json) entries that pre-declare `knownDivergenceAtW0: true`. Wave 1 will extend coverage; documented in [`w0-followups.md`](w0-followups.md).
-- The harness `/v0/runs/{id}/ledger` endpoint and `experience-learning-service` `/v0/harness-events` endpoint both impose schema constraints that today's capability services do not yet meet without an orchestrator-side rewrite (unique `stepId`s; status enum). The demo applies a documented client-side normalization to satisfy them; the long-term fix is captured in [`w0-followups.md`](w0-followups.md).
+- `experience-learning-service` `/v0/harness-events` still imposes a narrower status enum than the raw Harness event stream (`starting`, `output-divergence`, etc.). The demo applies a documented client-side normalization before ingest; the long-term service-side fix is captured in [`w0-followups.md`](w0-followups.md).
 - W0 fixtures are synthetic. True `cobcrun` golden masters are deferred to Wave 1 once the host CI image carries `cobc`. Already declared in `fixtures/golden-master/index.json` (`classification: "synthetic"`).
 
 ## Where the artifacts live

@@ -6,6 +6,7 @@ info:
     Wave 0 control-plane for capability and run-state orchestration.
 servers:
   - url: /v0
+security: []
 paths:
   /health:
     get:
@@ -27,6 +28,8 @@ paths:
           description: Capability list
     post:
       summary: Register a capability
+      security:
+        - HarnessControlPlane: []
       requestBody:
         required: true
         content:
@@ -36,6 +39,8 @@ paths:
       responses:
         "201":
           description: Registered
+        "401":
+          description: Missing or invalid control-plane token
         "403":
           description: Policy blocked registration
   /capabilities/{id}:
@@ -53,6 +58,8 @@ paths:
   /capabilities/{id}/validate:
     post:
       summary: Validate capability by id
+      security:
+        - HarnessControlPlane: []
       parameters:
         - name: id
           in: path
@@ -70,6 +77,8 @@ paths:
           description: Run list
     post:
       summary: Start a migration run
+      security:
+        - HarnessControlPlane: []
       responses:
         "201":
           description: Run started
@@ -93,6 +102,8 @@ paths:
           description: Run state
     patch:
       summary: Update run state
+      security:
+        - HarnessControlPlane: []
       parameters:
         - name: runId
           in: path
@@ -116,6 +127,8 @@ paths:
           description: MCP server list
     post:
       summary: Register MCP server metadata
+      security:
+        - HarnessControlPlane: []
       requestBody:
         required: true
         content:
@@ -145,6 +158,8 @@ paths:
           description: Event list
     post:
       summary: Ingest an event envelope for an active run
+      security:
+        - HarnessControlPlane: []
       requestBody:
         required: true
         content:
@@ -156,6 +171,8 @@ paths:
           description: Event accepted
         "400":
           description: Invalid envelope
+        "403":
+          description: Authenticated actor is not authorized to produce this event
   /runs/{runId}/ledger:
     get:
       summary: Retrieve run trajectory ledger built from run events
@@ -175,6 +192,8 @@ paths:
   /policy/decide:
     post:
       summary: Explicitly evaluate a policy action
+      security:
+        - HarnessControlPlane: []
       requestBody:
         required: true
         content:
@@ -187,6 +206,14 @@ paths:
         "403":
           description: Policy block
 components:
+  securitySchemes:
+    HarnessControlPlane:
+      type: http
+      scheme: bearer
+      description: >
+        Shared W0 control-plane token from HARNESS_CONTROL_PLANE_TOKEN.
+        Mutating requests also identify the caller with X-Harness-Actor and
+        X-Harness-Role headers.
   schemas:
     RunCreateRequest:
       type: object

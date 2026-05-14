@@ -39,6 +39,7 @@ public final class ServiceApp {
     public static void main(String[] args) throws Exception {
         int port = readPort(System.getenv("BUILD_TEST_RUNNER_LISTEN_ADDR"));
         String harnessEndpoint = normaliseEndpoint(System.getenv("HARNESS_EVENT_ENDPOINT"));
+        String harnessEventToken = normaliseToken(System.getenv("HARNESS_EVENT_TOKEN"));
         String experienceEndpoint = normaliseEndpoint(System.getenv("EXPERIENCE_EVENT_ENDPOINT"));
         BuildTestRunnerService service = new BuildTestRunnerService();
 
@@ -53,7 +54,7 @@ public final class ServiceApp {
         });
 
         server.createContext("/v0/run-verification",
-                exchange -> handleRunVerification(exchange, service, harnessEndpoint, experienceEndpoint));
+                exchange -> handleRunVerification(exchange, service, harnessEndpoint, harnessEventToken, experienceEndpoint));
 
         server.start();
         System.out.printf("%s listening on %d%n", SERVICE_NAME, port);
@@ -63,6 +64,7 @@ public final class ServiceApp {
     private static void handleRunVerification(HttpExchange exchange,
                                               BuildTestRunnerService service,
                                               String harnessEndpoint,
+                                              String harnessEventToken,
                                               String experienceEndpoint) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendText(exchange, 405, "method not allowed");
@@ -74,7 +76,7 @@ public final class ServiceApp {
             Map<String, Object> response = service.runVerification(request);
             int status = httpStatus(response);
             sendJson(exchange, status, response);
-            emitEvents(harnessEndpoint, experienceEndpoint, response);
+            emitEvents(harnessEndpoint, harnessEventToken, experienceEndpoint, response);
         } catch (IllegalArgumentException e) {
             sendJson(exchange, 400, Map.of("status", "failed", "error", e.getMessage()));
         } catch (Exception e) {
@@ -99,12 +101,12 @@ public final class ServiceApp {
         return 200;
     }
 
-    static void emitEvents(String harnessEndpoint, String experienceEndpoint,
+    static void emitEvents(String harnessEndpoint, String harnessEventToken, String experienceEndpoint,
                            Map<String, Object> response) {
         try {
-            postIfPresent(harnessEndpoint, buildHarnessEvent(response));
+            postIfPresent(harnessEndpoint, harnessEventToken, buildHarnessEvent(response));
             for (Map<String, Object> experience : buildExperienceEvents(response)) {
-                postIfPresent(experienceEndpoint, experience);
+                postIfPresent(experienceEndpoint, null, experience);
             }
         } catch (Exception ignored) {
             // Event emission is best-effort for capability services.
@@ -204,12 +206,18 @@ public final class ServiceApp {
         return "build-test:" + classification + ":" + programId;
     }
 
-    private static void postIfPresent(String endpoint, Map<String, Object> event) throws Exception {
+    private static void postIfPresent(String endpoint, String eventToken, Map<String, Object> event) throws Exception {
         if (endpoint == null) {
             return;
         }
-        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
                 .header("Content-Type", "application/json")
+                .header("X-Harness-Actor", SERVICE_NAME)
+                .header("X-Harness-Role", "service");
+        if (eventToken != null) {
+            builder.header("Authorization", "Bearer " + eventToken);
+        }
+        HttpRequest request = builder
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(event)))
                 .build();
         HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding());
@@ -241,6 +249,13 @@ public final class ServiceApp {
             return endpoint;
         }
         return endpoint.endsWith("/") ? endpoint + "v0/events" : endpoint + "/v0/events";
+    }
+
+    private static String normaliseToken(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        return token.trim();
     }
 
     private static void sendText(HttpExchange exchange, int status, String body) throws IOException {

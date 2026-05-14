@@ -1,8 +1,8 @@
 # W0 Follow-Ups
 
-Concrete items discovered while assembling the W0 end-to-end demo
+Remaining concrete items discovered while assembling the W0 end-to-end demo
 ([issue #16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16)) that are
-**explicitly deferred** rather than fixed in this PR. Per the
+**explicitly deferred** beyond the Epic #1 closure PR. Per the
 [development workflow](../governance/development-workflow.md) governance rule,
 scope expansion is not silently merged — every item below is filed as a
 separate issue so it can be planned, owned, and verified independently.
@@ -11,28 +11,7 @@ Each entry includes the symptom seen during the W0 demo run, the contract /
 service involved, and a proposed fix shape. Wave 1 owners may take any item
 without waiting for the others.
 
-## F-W0-01 · Harness `/v0/runs/{id}/ledger` requires unique `stepId`s · [#50](https://github.com/oscharko-dev/c2c-PreBeta/issues/50)
-
-- **Symptom**: the demo's first run got `HTTP 404 — duplicate stepId` when
-  calling `GET http://harness/v0/runs/<runId>/ledger` because every W0 Java
-  capability service posts harness events with `stepId: 1` by default. The
-  trajectory ledger schema rejects duplicates.
-- **Service(s)**: `agentic-harness-core` (server-side ledger build),
-  `cobol-parser-service`, `semantic-ir-service`,
-  `target-java-generation-service`, `build-test-runner-service` (all emit
-  `stepId: 1`).
-- **Current workaround**: the demo builds a schema-conformant trajectory
-  ledger client-side from the harness event stream, renumbering steps in
-  arrival order.
-- **Proposed fix**: either (a) make the harness's
-  `emitEvent` re-assign `stepId` per run regardless of what the caller sent,
-  or (b) extend the orchestrator-service to rewrite events as they pass
-  through. (a) is preferred — it keeps capability services dumb.
-- **Owner**: harness / platform.
-- **Acceptance**: `curl /v0/runs/<id>/ledger` returns a valid
-  `AgentTrajectoryLedgerV0` for any run that has ≥ one event.
-
-## F-W0-02 · `experience-learning-service` `/v0/harness-events` status enum mismatch · [#51](https://github.com/oscharko-dev/c2c-PreBeta/issues/51)
+## F-W0-01 · `experience-learning-service` `/v0/harness-events` status enum mismatch · [#64](https://github.com/oscharko-dev/c2c-PreBeta/issues/64)
 
 - **Symptom**: harness events with `status` values produced by W0 services
   (`starting`, `output-divergence`) get `HTTP 400 — status: unsupported`
@@ -53,27 +32,31 @@ without waiting for the others.
   without normalisation is accepted whenever the harness itself accepted
   the same envelope.
 
-## F-W0-03 · Capability registration for parser/generator/build-test is forbidden by default policy · [#52](https://github.com/oscharko-dev/c2c-PreBeta/issues/52)
+## F-W0-02 · Orchestrator capability auto-bootstrap and payload alignment · [#65](https://github.com/oscharko-dev/c2c-PreBeta/issues/65)
 
-- **Symptom**: `agentic-harness-core` policy rejects `register_capability`
-  when `dataClass ∈ {parser, generator, build-test, ...}` for `actor == agent`.
-  As a result the W0 demo cannot drive services through the harness's
-  capability-invocation surface and instead calls each service over HTTP
-  directly. The orchestrator-service exists but is unusable end-to-end on
-  a fresh harness because it relies on those capability registrations.
+- **Symptom**: the W0 demo now registers parser, IR, generator, build/test,
+  and evidence capabilities in the Harness catalog and resolves endpoints
+  from that catalog before invocation. The remaining gap is that
+  `orchestrator-service` still does not auto-bootstrap those registrations on
+  a cold harness, and its current request payload shape is covered by mocks
+  rather than the real W0 service HTTP contracts.
 - **Service(s)**: `agentic-harness-core` (`policy.go` `DefaultPolicyEngine`),
   `orchestrator-service`.
-- **Proposed fix**: allow capability registration for the W0 core
-  infrastructure when the caller role is `orchestrator` or the
-  registration carries a documented W0 manifest signed by the platform team.
-  Keep the current denial for `agent`-role registrations.
+- **Current guardrail**: `agent`-role registrations for core infrastructure
+  remain denied. Authenticated `orchestrator` callers can register W0 core
+  capabilities, and duplicate ids are rejected instead of overwritten.
+- **Proposed fix**: teach `orchestrator-service.main` to bootstrap a
+  documented W0 capability manifest from environment/config, then update its
+  live payload adapters to match `cobol-parser-service`,
+  `semantic-ir-service`, `target-java-generation-service`,
+  `build-test-runner-service`, and `evidence-service`.
 - **Owner**: harness / platform.
 - **Acceptance**: `orchestrator-service.main` can register the parser, IR,
   generator, build/test, and evidence capabilities on a cold harness and
   then drive a run through `POST /v0/runs` without any manual capability
   insertion.
 
-## F-W0-04 · True `cobcrun` Golden Masters · [#53](https://github.com/oscharko-dev/c2c-PreBeta/issues/53)
+## F-W0-03 · True `cobcrun` Golden Masters · [#66](https://github.com/oscharko-dev/c2c-PreBeta/issues/66)
 
 - **Symptom**: every fixture in
   [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
@@ -91,7 +74,7 @@ without waiting for the others.
   reproducible `cobcrun` output committed under
   `corpus/synthetic/fixtures/`.
 
-## F-W0-05 · Model gateway invocation in W0 demo · [#54](https://github.com/oscharko-dev/c2c-PreBeta/issues/54)
+## F-W0-04 · Model gateway invocation in W0 demo · [#67](https://github.com/oscharko-dev/c2c-PreBeta/issues/67)
 
 - **Symptom**: `modelInvocations` in every Evidence Pack manifest carries an
   observation-only `status: "skipped"` entry. No model call ever exercises
@@ -109,7 +92,7 @@ without waiting for the others.
   `modelInvocations[].status == "completed"` and `ledgerRef.sha256` matches a
   ledger entry on the gateway.
 
-## F-W0-06 · Generator coverage beyond the W0 subset · [#55](https://github.com/oscharko-dev/c2c-PreBeta/issues/55)
+## F-W0-05 · Generator coverage beyond the W0 subset · [#68](https://github.com/oscharko-dev/c2c-PreBeta/issues/68)
 
 - **Symptom**: every W0 program ends with `divergence-known-w0-coverage-gap`
   because the generator does not yet translate `PERFORM`, `EVALUATE`, `IF`,
@@ -125,7 +108,7 @@ without waiting for the others.
 
 ## Filing on GitHub
 
-Each item should land as a separate `type: task`, `wave: w1`, area-scoped
+Each item is filed as a separate `type: task`, `wave: w1`, area-scoped
 issue, linked from this document. The W0 release gate's
 "What is *not* ready" section already enumerates the same gaps; please link
 the gate document and this file from every Wave 1 follow-up issue so the

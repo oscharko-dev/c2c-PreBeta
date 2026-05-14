@@ -36,6 +36,7 @@ public final class ServiceApp {
     public static void main(String[] args) throws Exception {
         int port = readPort(System.getenv("TARGET_JAVA_GENERATION_LISTEN_ADDR"));
         String eventEndpoint = normalizeEndpoint(System.getenv("HARNESS_EVENT_ENDPOINT"));
+        String eventToken = normalizeToken(System.getenv("HARNESS_EVENT_TOKEN"));
         TargetJavaGenerationService service = new TargetJavaGenerationService();
 
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
@@ -48,7 +49,7 @@ public final class ServiceApp {
             sendJson(exchange, 200, Map.of("status", "ok", "service", SERVICE_NAME));
         });
 
-        server.createContext("/v0/generate", exchange -> handleGenerate(exchange, service, eventEndpoint));
+        server.createContext("/v0/generate", exchange -> handleGenerate(exchange, service, eventEndpoint, eventToken));
 
         server.start();
         System.out.printf("%s listening on %d%n", SERVICE_NAME, port);
@@ -57,7 +58,8 @@ public final class ServiceApp {
 
     static void handleGenerate(HttpExchange exchange,
                                TargetJavaGenerationService service,
-                               String eventEndpoint) throws IOException {
+                               String eventEndpoint,
+                               String eventToken) throws IOException {
         String runId = "run-unknown";
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendText(exchange, 405, "method not allowed");
@@ -81,25 +83,25 @@ public final class ServiceApp {
             @SuppressWarnings("unchecked")
             Map<String, Object> request = JSON.readValue(body, Map.class);
             runId = String.valueOf(request.getOrDefault("runId", runId));
-            emitEvent(eventEndpoint, Map.of("runId", runId, "status", "started"));
+            emitEvent(eventEndpoint, eventToken, Map.of("runId", runId, "status", "started"));
             Map<String, Object> response = service.generate(request);
             int status = "ok".equals(response.get("status")) ? 200 : 422;
             sendJson(exchange, status, response);
-            emitEvent(eventEndpoint, response);
+            emitEvent(eventEndpoint, eventToken, response);
         } catch (IllegalArgumentException e) {
             Map<String, Object> failed = Map.of("status", "failed", "runId", runId, "error", e.getMessage());
             sendJson(exchange, 400, failed);
-            emitEvent(eventEndpoint, failed);
+            emitEvent(eventEndpoint, eventToken, failed);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             Map<String, Object> failed = Map.of("status", "failed", "runId", runId,
                     "error", "malformed JSON: " + (e.getOriginalMessage() == null ? "parse error" : e.getOriginalMessage()));
             sendJson(exchange, 400, failed);
-            emitEvent(eventEndpoint, failed);
+            emitEvent(eventEndpoint, eventToken, failed);
         } catch (Exception e) {
             Map<String, Object> failed = Map.of("status", "failed", "runId", runId,
                     "error", e.getMessage() == null ? "unknown" : e.getMessage());
             sendJson(exchange, 500, failed);
-            emitEvent(eventEndpoint, failed);
+            emitEvent(eventEndpoint, eventToken, failed);
         }
     }
 
@@ -123,7 +125,7 @@ public final class ServiceApp {
     static final class RequestTooLargeException extends IOException {
     }
 
-    static void emitEvent(String endpoint, Map<String, Object> response) {
+    static void emitEvent(String endpoint, String eventToken, Map<String, Object> response) {
         if (endpoint == null) {
             return;
         }
@@ -146,9 +148,9 @@ public final class ServiceApp {
                     }
                 }
             }
-            postEvent(endpoint, buildEvent(response, eventType));
+            postEvent(endpoint, eventToken, buildEvent(response, eventType));
             if (hasUnsupported) {
-                postEvent(endpoint, buildEvent(response, "target.java.generate.unsupported"));
+                postEvent(endpoint, eventToken, buildEvent(response, "target.java.generate.unsupported"));
             }
         } catch (Exception ignored) {
             // Harness eventing is best effort for capability services.
@@ -184,9 +186,15 @@ public final class ServiceApp {
         return event;
     }
 
-    private static void postEvent(String endpoint, Map<String, Object> event) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+    private static void postEvent(String endpoint, String eventToken, Map<String, Object> event) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
                 .header("Content-Type", "application/json")
+                .header("X-Harness-Actor", SERVICE_NAME)
+                .header("X-Harness-Role", "service");
+        if (eventToken != null) {
+            builder.header("Authorization", "Bearer " + eventToken);
+        }
+        HttpRequest request = builder
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(event)))
                 .build();
         HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding());
@@ -218,6 +226,13 @@ public final class ServiceApp {
             return endpoint;
         }
         return endpoint.endsWith("/") ? endpoint + "v0/events" : endpoint + "/v0/events";
+    }
+
+    private static String normalizeToken(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        return token.trim();
     }
 
     private static void sendText(HttpExchange exchange, int status, String body) throws IOException {

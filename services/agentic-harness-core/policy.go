@@ -23,13 +23,15 @@ func (d DefaultPolicyEngine) Decide(action string, actorRole string, subject map
 	}
 
 	forbidden := map[string]bool{
-		DataClassModel:     true,
-		DataClassEvidence:   true,
-		DataClassRAG:       true,
-		DataClassGraph:     true,
-		DataClassParser:    true,
-		DataClassGenerator: true,
-		DataClassTest:      true,
+		DataClassModel:        true,
+		DataClassEvidence:     true,
+		DataClassRAG:          true,
+		DataClassGraph:        true,
+		DataClassParser:       true,
+		DataClassGenerator:    true,
+		DataClassBuildTest:    true,
+		DataClassTest:         true,
+		DataClassModelGateway: true,
 	}
 
 	if actorRole == "agent" && action == ActionRegisterCapability {

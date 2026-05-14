@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -109,12 +108,86 @@ func TestBuildAgentTrajectoryLedger(t *testing.T) {
 	}
 }
 
+func TestBuildAgentTrajectoryLedgerRenumbersDuplicateEventStepIDs(t *testing.T) {
+	now := time.Now().UTC()
+	events := []EventEnvelopeV0{
+		{
+			SchemaVersion:    EventSchemaVersionV0,
+			EventID:          "evt-parse",
+			EventType:        "parser.executed",
+			Service:          "cobol-parser-service",
+			RunID:            "run-dup",
+			StepID:           1,
+			Actor:            "parser",
+			Capability:       "cobol.parse",
+			DataClass:        DataClassParser,
+			RedactionProfile: ProfileAgentManaged,
+			PolicyDecision:   "policy allow",
+			Status:           "ok",
+			StateTransition:  "parse->ready",
+			InputRef:         mustRef(t, "urn:input/parse"),
+			OutputRef:        mustRef(t, "urn:output/parse"),
+			CreatedAt:        now,
+		},
+		{
+			SchemaVersion:    EventSchemaVersionV0,
+			EventID:          "evt-ir",
+			EventType:        "semantic-ir.generated",
+			Service:          "semantic-ir-service",
+			RunID:            "run-dup",
+			StepID:           1,
+			Actor:            "semantic-ir",
+			Capability:       "semantic-ir.generate",
+			DataClass:        DataClassParser,
+			RedactionProfile: ProfileAgentManaged,
+			PolicyDecision:   "policy allow",
+			Status:           "ok",
+			StateTransition:  "parse->ir",
+			InputRef:         mustRef(t, "urn:input/ir"),
+			OutputRef:        mustRef(t, "urn:output/ir"),
+			CreatedAt:        now.Add(time.Second),
+		},
+		{
+			SchemaVersion:    EventSchemaVersionV0,
+			EventID:          "evt-generate",
+			EventType:        "target-java.generated",
+			Service:          "target-java-generation-service",
+			RunID:            "run-dup",
+			StepID:           1,
+			Actor:            "generator",
+			Capability:       "target.java.generate",
+			DataClass:        DataClassGenerator,
+			RedactionProfile: ProfileAgentManaged,
+			PolicyDecision:   "policy allow",
+			Status:           "ok",
+			StateTransition:  "ir->java",
+			InputRef:         mustRef(t, "urn:input/generate"),
+			OutputRef:        mustRef(t, "urn:output/generate"),
+			CreatedAt:        now.Add(2 * time.Second),
+		},
+	}
+
+	ledger, err := BuildAgentTrajectoryLedger("run-dup", events)
+	if err != nil {
+		t.Fatalf("expected ledger build to tolerate duplicate event step IDs, got %v", err)
+	}
+	if len(ledger.Steps) != 3 {
+		t.Fatalf("expected 3 steps, got %d", len(ledger.Steps))
+	}
+	for i, step := range ledger.Steps {
+		expected := int64(i + 1)
+		if step.StepID != expected {
+			t.Fatalf("expected ledger step %d to be renumbered to %d, got %d", i, expected, step.StepID)
+		}
+	}
+}
+
 func TestEventsIngestionAndLedgerRoute(t *testing.T) {
 	tmp := t.TempDir()
 	sink := filepath.Join(tmp, "events.jsonl")
 	t.Setenv("HARNESS_EVENT_LOG_PATH", sink)
 
-	service := NewHarnessService()
+	service := newTestHarnessService(t)
 	server := httptest.NewServer(service.Routes())
 	defer server.Close()
 
@@ -122,7 +195,7 @@ func TestEventsIngestionAndLedgerRoute(t *testing.T) {
 		WorkflowID: "w0-migration-run",
 		Requester:  "orchestrator",
 	}
-	res, err := http.Post(server.URL+"/v0/runs", "application/json", bytes.NewReader(mustJSON(create)))
+	res, err := authPostJSON(server.URL+"/v0/runs", mustJSON(create), "orchestrator-service", "orchestrator")
 	if err != nil {
 		t.Fatalf("create run failed: %v", err)
 	}
@@ -150,7 +223,7 @@ func TestEventsIngestionAndLedgerRoute(t *testing.T) {
 		EventType:        "model.invoke",
 		Service:          "w0-model-gateway",
 		RunID:            run.RunID,
-		Actor:            "model-gateway",
+		Actor:            "w0-model-gateway",
 		Capability:       "model-gateway",
 		DataClass:        DataClassModelGateway,
 		RedactionProfile: ProfileAgentManaged,
@@ -162,7 +235,7 @@ func TestEventsIngestionAndLedgerRoute(t *testing.T) {
 		Payload:          payload,
 	}
 	raw, _ := json.Marshal(envelope)
-	res, err = http.Post(server.URL+"/v0/events", "application/json", bytes.NewReader(raw))
+	res, err = authPostJSON(server.URL+"/v0/events", raw, "w0-model-gateway", "service")
 	if err != nil {
 		t.Fatalf("emit event failed: %v", err)
 	}
@@ -172,6 +245,60 @@ func TestEventsIngestionAndLedgerRoute(t *testing.T) {
 	}
 	if _, err := os.Stat(sink); err != nil {
 		t.Fatalf("expected persistent sink at %s, got %v", sink, err)
+	}
+}
+
+func TestEventsRejectActorMismatch(t *testing.T) {
+	service := newTestHarnessService(t)
+	server := httptest.NewServer(service.Routes())
+	defer server.Close()
+
+	res, err := authPostJSON(server.URL+"/v0/runs", mustJSON(RunCreateRequest{
+		WorkflowID: "w0-auth-run",
+		Requester:  "orchestrator",
+	}), "orchestrator-service", "orchestrator")
+	if err != nil {
+		t.Fatalf("create run failed: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected run create 201, got %d", res.StatusCode)
+	}
+
+	var run RunState
+	if err := json.NewDecoder(res.Body).Decode(&run); err != nil {
+		t.Fatalf("decode run failed: %v", err)
+	}
+
+	ref := EventReference{
+		URI:      "urn:test/input",
+		SHA256:   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		ByteSize: 0,
+	}
+	envelope := EventEnvelopeV0{
+		SchemaVersion:    EventSchemaVersionV0,
+		EventID:          "evt-forged-1",
+		EventType:        "parser.executed",
+		Service:          "cobol-parser-service",
+		RunID:            run.RunID,
+		Actor:            "cobol-parser-service",
+		Capability:       "cobol.parse",
+		DataClass:        DataClassParser,
+		RedactionProfile: ProfileAgentManaged,
+		PolicyDecision:   "policy allow",
+		Status:           "ok",
+		StateTransition:  "run->parse",
+		InputRef:         ref,
+		OutputRef:        ref,
+	}
+	raw, _ := json.Marshal(envelope)
+	res, err = authPostJSON(server.URL+"/v0/events", raw, "target-java-generation-service", "service")
+	if err != nil {
+		t.Fatalf("emit forged event failed: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected forged actor mismatch to return 403, got %d", res.StatusCode)
 	}
 }
 

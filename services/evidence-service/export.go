@@ -22,8 +22,8 @@ type ExportRequest struct {
 	Format string `json:"format"`
 	// Destination is optional. When omitted, the service writes into the
 	// directory named by EVIDENCE_EXPORT_DIR (or ./data/evidence-exports as a
-	// last-resort default). Callers may supply an absolute path or a path
-	// underneath the configured base directory.
+	// last-resort default). Callers may supply a relative path underneath the
+	// configured base directory.
 	Destination string `json:"destination,omitempty"`
 }
 
@@ -179,7 +179,7 @@ func (e *Exporter) exportDirectory(manifest *EvidencePackManifest, dir string) (
 	}
 	return ExportRecord{
 		Format:    ExportFormatDirectory,
-		URI:       "file://" + dir,
+		URI:       exportRecordURI(dir),
 		SHA256:    ComputeSHA256Hex(body),
 		ByteSize:  int64(len(body)),
 		CreatedAt: e.clock(),
@@ -225,11 +225,15 @@ func (e *Exporter) exportTar(manifest *EvidencePackManifest, path string) (Expor
 	}
 	return ExportRecord{
 		Format:    ExportFormatTar,
-		URI:       "file://" + path,
+		URI:       exportRecordURI(path),
 		SHA256:    hex.EncodeToString(hash.Sum(nil)),
 		ByteSize:  info.Size(),
 		CreatedAt: e.clock(),
 	}, nil
+}
+
+func exportRecordURI(path string) string {
+	return "urn:c2c/evidence-export/" + filepath.Base(path)
 }
 
 func marshalCanonical(manifest *EvidencePackManifest) ([]byte, error) {

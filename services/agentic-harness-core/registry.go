@@ -24,6 +24,9 @@ func (r *CapabilityRegistry) Register(cap Capability) error {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, exists := r.capabilities[cap.ID]; exists {
+		return RegistryValidationError{Reason: fmt.Sprintf("capability %s already registered", cap.ID)}
+	}
 	r.capabilities[cap.ID] = cap
 	return nil
 }
@@ -92,6 +95,9 @@ func (r *McpServerRegistry) Register(server McpServer) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, exists := r.servers[server.ID]; exists {
+		return RegistryValidationError{Reason: fmt.Sprintf("mcp server %s already registered", server.ID)}
+	}
 	r.servers[server.ID] = server
 	return nil
 }

@@ -167,7 +167,10 @@ func TestExportDirectoryAndTar(t *testing.T) {
 	if dirResp.Pack.Exports[0].SHA256 == "" {
 		t.Fatalf("expected non-empty export sha256")
 	}
-	dirPath := strings.TrimPrefix(dirResp.Export.URI, "file://")
+	if strings.HasPrefix(dirResp.Export.URI, "file://") {
+		t.Fatalf("export URI must not expose host-local file paths: %s", dirResp.Export.URI)
+	}
+	dirPath := filepath.Join(svc.exporter.baseDir, manifest.PackID)
 	if _, err := os.Stat(filepath.Join(dirPath, "manifest.json")); err != nil {
 		t.Fatalf("expected manifest.json on disk, got %v", err)
 	}
@@ -183,7 +186,10 @@ func TestExportDirectoryAndTar(t *testing.T) {
 	}
 	_ = json.NewDecoder(res.Body).Decode(&tarResp)
 	res.Body.Close()
-	tarPath := strings.TrimPrefix(tarResp.Export.URI, "file://")
+	if strings.HasPrefix(tarResp.Export.URI, "file://") {
+		t.Fatalf("tar export URI must not expose host-local file paths: %s", tarResp.Export.URI)
+	}
+	tarPath := filepath.Join(svc.exporter.baseDir, manifest.PackID+".tar")
 	f, err := os.Open(tarPath)
 	if err != nil {
 		t.Fatalf("open tar: %v", err)

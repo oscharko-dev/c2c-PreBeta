@@ -30,7 +30,7 @@ public final class ServiceApp {
         String eventEndpoint = System.getenv("HARNESS_EVENT_ENDPOINT");
 
         CobolParser parser = new CobolParser();
-        HarnessEventPublisher publisher = new HarnessEventPublisher(eventEndpoint);
+        HarnessEventPublisher publisher = new HarnessEventPublisher(eventEndpoint, System.getenv("HARNESS_EVENT_TOKEN"));
 
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
 
@@ -135,10 +135,12 @@ public final class ServiceApp {
 
     private static final class HarnessEventPublisher {
         private final String eventEndpoint;
+        private final String eventToken;
         private int sequence;
 
-        HarnessEventPublisher(String eventEndpoint) {
+        HarnessEventPublisher(String eventEndpoint, String eventToken) {
             this.eventEndpoint = normalizeEndpoint(eventEndpoint);
+            this.eventToken = normalizeToken(eventToken);
             this.sequence = 1;
         }
 
@@ -172,8 +174,14 @@ public final class ServiceApp {
                 event.put("payload", payload);
 
                 String eventText = JSON.writeValueAsString(event);
-                HttpRequest request = HttpRequest.newBuilder(URI.create(eventEndpoint))
+                HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(eventEndpoint))
                         .header("Content-Type", "application/json")
+                        .header("X-Harness-Actor", SERVICE_NAME)
+                        .header("X-Harness-Role", "service");
+                if (eventToken != null) {
+                    builder.header("Authorization", "Bearer " + eventToken);
+                }
+                HttpRequest request = builder
                         .POST(HttpRequest.BodyPublishers.ofString(eventText))
                         .build();
                 HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding());
@@ -207,6 +215,13 @@ public final class ServiceApp {
                 return endpoint + "/v0/events";
             }
             return endpoint + "v0/events";
+        }
+
+        private static String normalizeToken(String token) {
+            if (token == null || token.isBlank()) {
+                return null;
+            }
+            return token.trim();
         }
     }
 }
