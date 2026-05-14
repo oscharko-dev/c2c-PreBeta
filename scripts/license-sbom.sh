@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +25,10 @@ manifest = {
     "schema_version": "w0-sbom-1",
     "artifacts": [],
 }
+
+dependencies: dict[str, dict[str, object]] = {}
+licenses: dict[str, str] = {}
+
 
 for language, service_dir in services.items():
     files = []
@@ -48,3 +53,78 @@ with open(out_file, "w", encoding="utf-8") as fh:
     json.dump(manifest, fh, indent=2, sort_keys=True)
 
 print(f"Wrote {out_file}")
+
+# Go dependencies and checksums from go.mod/go.sum
+go_service = services["go"]
+go_modules = subprocess.check_output(["go", "list", "-m", "all"], cwd=go_service, text=True)
+dependencies["go"] = {"modules": [line.strip() for line in go_modules.splitlines() if line.strip()]}
+go_sum = go_service / "go.sum"
+if go_sum.exists():
+    licenses["go"] = f"module checksums captured in {go_sum.relative_to(root)}"
+
+# Node dependencies from npm lockfile
+ts_service = services["typescript"]
+pkg_lock = ts_service / "package-lock.json"
+if pkg_lock.exists():
+    with open(pkg_lock, "r", encoding="utf-8") as fh:
+        lock = json.load(fh)
+    packages = lock.get("packages", {})
+    dependencies["typescript"] = {
+        "packages": sorted([name for name in packages.keys() if name and name.startswith("node_modules/")])
+    }
+    licenses["typescript"] = f"dependency lock captured in {pkg_lock.relative_to(root)}"
+
+# Python dependencies (requirements baseline)
+py_service = services["python"]
+req_file = py_service / "requirements.txt"
+if req_file.exists():
+    requirements = [line.strip() for line in req_file.read_text(encoding="utf-8").splitlines() if line.strip() and not line.strip().startswith("#")]
+    dependencies["python"] = {"requirements": requirements}
+    licenses["python"] = f"dependency baseline captured in {req_file.relative_to(root)}"
+
+# Java dependencies (Maven dependency tree)
+java_services = [services["java"], services["java-cobol-parser"], services["java-semantic-ir"]]
+java_deps: dict[str, list[str]] = {}
+for svc in java_services:
+    output = subprocess.check_output(
+        ["mvn", "-q", "-DforceStdout", "dependency:list", "-DincludeScope=runtime"],
+        cwd=svc,
+        text=True,
+        stderr=subprocess.STDOUT,
+    )
+    coords = []
+    for line in output.splitlines():
+        line = line.strip()
+        if ":" in line and not line.startswith("["):
+            coords.append(line)
+    java_deps[svc.name] = sorted(set(coords))
+dependencies["java"] = java_deps
+licenses["java"] = "runtime dependency coordinates captured from Maven dependency:list"
+
+dep_file = out_dir / "dependency-manifest.json"
+with open(dep_file, "w", encoding="utf-8") as fh:
+    json.dump(
+        {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "schema_version": "w0-dependency-manifest-1",
+            "dependencies": dependencies,
+        },
+        fh,
+        indent=2,
+        sort_keys=True,
+    )
+print(f"Wrote {dep_file}")
+
+license_file = out_dir / "license-visibility.json"
+with open(license_file, "w", encoding="utf-8") as fh:
+    json.dump(
+        {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "schema_version": "w0-license-visibility-1",
+            "evidence": licenses,
+        },
+        fh,
+        indent=2,
+        sort_keys=True,
+    )
+print(f"Wrote {license_file}")

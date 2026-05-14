@@ -108,15 +108,20 @@ jobs:
       - name: Run secret scan
         run: ./scripts/secret-scan.sh
 
-      - name: Generate platform SBOM
+      - name: Generate platform security and supply-chain artifacts
         run: |
           ./scripts/license-sbom.sh
           mkdir -p artifacts
           cp artifacts/platform-sbom.json artifacts/platform-sbom-${{ github.sha }}.json
+          cp artifacts/dependency-manifest.json artifacts/dependency-manifest-${{ github.sha }}.json
+          cp artifacts/license-visibility.json artifacts/license-visibility-${{ github.sha }}.json
 
-      - name: Upload SBOM artifact
+      - name: Upload baseline artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: platform-sbom-${{ github.sha }}
-          path: artifacts/platform-sbom-${{ github.sha }}.json
+          name: platform-baseline-${{ github.sha }}
+          path: |
+            artifacts/platform-sbom-${{ github.sha }}.json
+            artifacts/dependency-manifest-${{ github.sha }}.json
+            artifacts/license-visibility-${{ github.sha }}.json
           if-no-files-found: error
