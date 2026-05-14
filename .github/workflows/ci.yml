@@ -54,3 +54,16 @@ jobs:
           else
             echo "No Python files to validate"
           fi
+
+      - name: Set up JDK 21
+        if: hashFiles('libs/c2c-target-java-runtime/pom.xml') != ''
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build c2c-target-java-runtime independently
+        if: hashFiles('libs/c2c-target-java-runtime/pom.xml') != ''
+        working-directory: libs/c2c-target-java-runtime
+        run: mvn -B -ntp verify

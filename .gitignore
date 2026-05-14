@@ -183,6 +183,16 @@ obj/
 target/
 
 # -------------------------------
+# Re-include source paths that legitimately contain a 'target' segment
+# (e.g. Java packages com.c2c.target.* shipped under libs/) so the
+# language-build rules above do not swallow real source.
+# -------------------------------
+!libs/**/src/main/java/**/target/
+!libs/**/src/main/java/**/target/**
+!libs/**/src/test/java/**/target/
+!libs/**/src/test/java/**/target/**
+
+# -------------------------------
 # Swift / Xcode / iOS
 # -------------------------------
 DerivedData/

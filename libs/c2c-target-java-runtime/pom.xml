@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.c2c</groupId>
+  <artifactId>c2c-target-java-runtime</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>c2c-target-java-runtime</name>
+  <description>
+    W0 Java target runtime providing COBOL-compatible primitives (decimal, field,
+    condition/status, open-assumption registry) consumed by code generated through
+    the c2c target-generator-contract-v0.
+  </description>
+
+  <properties>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.1</version>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <C2c-Runtime-Name>c2c-target-java-runtime</C2c-Runtime-Name>
+              <C2c-Runtime-Version>0.1.0</C2c-Runtime-Version>
+              <C2c-Contract-Version>target-generator-contract-v0</C2c-Contract-Version>
+              <C2c-Ir-Version>semantic-ir-v0</C2c-Ir-Version>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
