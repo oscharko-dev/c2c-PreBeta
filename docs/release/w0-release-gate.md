@@ -7,7 +7,7 @@ purely on a verbal claim or a screenshot.
 
 > Issue: [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) ·
 > Parent epic: [#1](https://github.com/oscharko-dev/c2c-PreBeta/issues/1) ·
-> Companion: [W0 demo runbook](../showcase/w0-demo-runbook.md),
+> Companion: [W0 reference runbook](../showcase/w0-reference-runbook.md),
 > [W0 scorecard](../showcase/w0-scorecard.md),
 > [W0 follow-ups](../showcase/w0-followups.md).
 
@@ -17,7 +17,7 @@ purely on a verbal claim or a screenshot.
 |-------|-------|
 | Status | **GO for Wave 1 planning** as of the run tag below. |
 | Recorded run tag | `20260514T104603Z` |
-| Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [sample-evidence-pack/](../showcase/sample-evidence-pack/), CI on `dev` |
+| Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [reference-evidence-pack/](../showcase/reference-evidence-pack/), CI on `dev` |
 | Sign-off | Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) closing comment links to this document. |
 
 Wave 1 planning may proceed under the explicit constraints in
@@ -28,14 +28,14 @@ to remove or weaken any of the W0 acceptance bars below.
 
 ### 1. Repeatable end-to-end walking skeleton
 
-- [x] A fresh developer can run `./scripts/w0-demo.sh` from a clean checkout
+- [x] A fresh developer can run `./scripts/w0-reference-run.sh` from a clean checkout
       and reproduce the entire COBOL-to-Java workflow against the documented
       W0 corpus without standing up any external infrastructure. Wall-clock
       ~15 s after a warm Maven cache.
-      _Evidence_: [`scripts/w0-demo.sh`](../../scripts/w0-demo.sh) and
-      [w0-demo-runbook.md](../showcase/w0-demo-runbook.md).
+      _Evidence_: [`scripts/w0-reference-run.sh`](../../scripts/w0-reference-run.sh) and
+      [w0-reference-runbook.md](../showcase/w0-reference-runbook.md).
 - [x] The runbook documents every service, port, and environment variable.
-      _Evidence_: [w0-demo-runbook.md](../showcase/w0-demo-runbook.md).
+      _Evidence_: [w0-reference-runbook.md](../showcase/w0-reference-runbook.md).
 
 ### 2. Real COBOL-to-Java transformation through every W0 service
 
@@ -43,7 +43,7 @@ to remove or weaken any of the W0 acceptance bars below.
       project, a runtime execution result, and a hash-referenced
       Build/Test Result conforming to
       [`schemas/build-test-result-v0.json`](../../schemas/build-test-result-v0.json).
-      _Evidence_: [`docs/showcase/sample-evidence-pack/BRNCH01-build-test-result.json`](../showcase/sample-evidence-pack/BRNCH01-build-test-result.json).
+      _Evidence_: [`docs/showcase/reference-evidence-pack/BRNCH01-build-test-result.json`](../showcase/reference-evidence-pack/BRNCH01-build-test-result.json).
 - [x] Generated Java compiles cleanly for **3 / 3** W0 programs.
       _Evidence_: scorecard "Generated Java compiled cleanly" row.
 
@@ -61,7 +61,7 @@ to remove or weaken any of the W0 acceptance bars below.
 - [x] Every run produces an Evidence Pack manifest that satisfies
       [`schemas/evidence-pack-manifest-v0.json`](../../schemas/evidence-pack-manifest-v0.json),
       with `status == complete` and `validation.ok == true`.
-      _Evidence_: [`docs/showcase/sample-evidence-pack/BRNCH01-evidence-pack.json`](../showcase/sample-evidence-pack/BRNCH01-evidence-pack.json).
+      _Evidence_: [`docs/showcase/reference-evidence-pack/BRNCH01-evidence-pack.json`](../showcase/reference-evidence-pack/BRNCH01-evidence-pack.json).
 - [x] Each manifest references source COBOL, Semantic IR, generated Java,
       build/test result, Harness Events ledger, model invocations,
       and trajectory ledger by URI + sha256 — no raw secrets, prompts, or
@@ -76,20 +76,20 @@ to remove or weaken any of the W0 acceptance bars below.
 
 - [x] Every workflow step posts an envelope-conformant event to the harness
       `/v0/events` endpoint. The scorecard's "Harness Event Envelope ledger
-      entries captured" metric is non-zero (45 across 4 demo runs).
+      entries captured" metric is non-zero (45 across 4 reference-run executions).
       _Evidence_: scorecard "Aggregate metrics" table.
 - [x] Each Evidence Pack manifest carries a `harnessEvents` ref whose
       sha256 matches the harness snapshot taken at that point in the run.
-      _Evidence_: per-program manifests under [`sample-evidence-pack/`](../showcase/sample-evidence-pack/).
+      _Evidence_: per-program manifests under [`reference-evidence-pack/`](../showcase/reference-evidence-pack/).
 
 ### 6. Experience Events on controlled scenarios
 
-- [x] The demo runs a controlled "BRNCH01 ×2" scenario and the
+- [x] The reference run executes a controlled "BRNCH01 ×2" scenario and the
       experience-learning analyzer emits at least one event per
       `{success, failure, retry, repeated-action}` outcome class:
       `repeat_action`, `unchanged_output`, `test_failure`, `repeated_failure`
       patterns are all present in the captured run.
-      _Evidence_: [`sample-evidence-pack/experience-events-summary.json`](../showcase/sample-evidence-pack/experience-events-summary.json).
+      _Evidence_: [`reference-evidence-pack/experience-events-summary.json`](../showcase/reference-evidence-pack/experience-events-summary.json).
 
 ### 7. Honest about model-gateway scope
 
@@ -110,7 +110,7 @@ to remove or weaken any of the W0 acceptance bars below.
 ### 9. Governance hygiene
 
 - [x] No source for this issue lives outside an issue/PR. Branch:
-      `claude/issue-16-w0-demo-release-gate`. PR linked back to issue #16
+      `claude/issue-16-w0-reference-run-release-gate`. PR linked back to issue #16
       with `Resolves #16`.
 - [x] No TODOs or temporary workarounds were merged. Any deferred work is
       filed as an explicit follow-up under
@@ -138,11 +138,11 @@ to remove or weaken any of the W0 acceptance bars below.
   synthetic fixtures until a later fixture-hardening pass promotes them.
 - **Model gateway.** Zero model calls in W0. Wave 1 will exercise
   `model-gateway-service` end-to-end with a documented allowlist.
-- **Harness-driven orchestration semantics.** The W0 demo registers every
+- **Harness-driven orchestration semantics.** The W0 reference run registers every
   W0 capability in the Harness catalog and resolves service endpoints from
   that catalog before invocation. The remaining Wave 1 gap is moving this
   bootstrap and live payload adaptation into `orchestrator-service.main`
-  itself; the direct demo driver stays only as the deterministic release-gate
+  itself; the direct reference-run driver stays only as the deterministic release-gate
   harness.
 
 ## Scope
@@ -161,8 +161,8 @@ A reviewer can re-derive every "ready" item by running:
 
 ```bash
 ./scripts/bootstrap.sh
-./scripts/w0-demo.sh
-cat var/w0-demo/scorecard.md
+./scripts/w0-reference-run.sh
+cat var/w0-reference-run/scorecard.md
 ```
 
 and comparing the produced scorecard and per-program manifests against the

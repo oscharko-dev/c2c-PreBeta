@@ -351,7 +351,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               return;
             }
           } catch {
-            // fall through to mock so the demo stays usable when upstream is misconfigured
+            // fall through to mock so the reference run stays usable when upstream is misconfigured
           }
         }
 

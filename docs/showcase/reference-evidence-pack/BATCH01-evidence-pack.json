@@ -7,9 +7,9 @@
   "workflowId": "w0-migration-v0",
   "wave": "w0",
   "status": "complete",
-  "summary": "W0 demo run for BATCH01",
+  "summary": "W0 reference run for BATCH01",
   "createdAt": "2026-05-14T11:18:17.571819Z",
-  "createdBy": "w0-demo",
+  "createdBy": "w0-reference-run",
   "artifacts": {
     "sourceCobol": [
       {

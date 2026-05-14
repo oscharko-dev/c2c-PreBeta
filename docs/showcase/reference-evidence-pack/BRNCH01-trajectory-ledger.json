@@ -10,7 +10,7 @@
     {
       "eventId": "hev-1778757496085903000-1",
       "stepId": 1,
-      "actor": "w0-demo",
+      "actor": "w0-reference-run",
       "capability": "agentic-harness-core",
       "dataClass": "other",
       "eventType": "run.started",

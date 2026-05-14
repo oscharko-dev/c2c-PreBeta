@@ -5,13 +5,13 @@ and serves the c2c-ui static bundle on the same origin.
 
 ## Responsibility
 
-1. Expose a thin demo API under `/api/v0/*` for selecting samples, starting
+1. Expose a thin reference-run API under `/api/v0/*` for selecting samples, starting
    migration runs, fetching run status, side-by-side viewing, build/test
    results, and Evidence Pack references.
 2. Proxy live calls to `orchestrator-service` and `evidence-service` when
    `C2C_ORCHESTRATOR_URL` and `C2C_EVIDENCE_URL` are set.
 3. Fall back to a documented mock-mode response set when upstream services
-   are not configured or unreachable, so a fresh checkout can run the demo
+   are not configured or unreachable, so a fresh checkout can run the reference run
    without standing up the full mesh.
 4. Serve the c2c-ui build output under `/` (defaults to
    `../../apps/c2c-ui/dist`).
@@ -76,7 +76,7 @@ npm run start
 
 The W0 BFF intentionally does not retrieve generated Java or build-test
 output from live services; those views show a skipped marker in live
-mode and a documentation pointer instead of fake data. The downstream
+mode and a documentation pointer instead of synthetic fallback data. The downstream
 services (`target-java-generation-service`, `build-test-runner-service`)
 remain the canonical source while a richer aggregator is deferred to a
 later wave.

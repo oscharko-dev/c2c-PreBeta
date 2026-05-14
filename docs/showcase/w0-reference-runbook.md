@@ -1,4 +1,4 @@
-# W0 End-to-End Demo Runbook
+# W0 End-to-End Validation Runbook
 
 This runbook walks a developer through the c2c W0 walking skeleton from a
 clean checkout to a validated Evidence Pack, captured Harness Event ledger,
@@ -10,7 +10,7 @@ the [W0 release gate](../release/w0-release-gate.md) and the
 
 ## What you will see
 
-The demo drives one COBOL program through every W0 service in turn:
+The reference run drives one COBOL program through every W0 service in turn:
 
 ```text
 COBOL source
@@ -76,7 +76,7 @@ Run once per workstation. Versions matching the local-dev sweet spot in
 | Maven | 3.9+ | Builds the four Java capability services. |
 | Go | 1.22+ (tested with 1.26) | Builds the three Go services. |
 
-The demo script verifies each binary is on `$PATH` before doing anything else.
+The reference-run script verifies each binary is on `$PATH` before doing anything else.
 
 ## Reproducible run — single command
 
@@ -84,10 +84,10 @@ From a clean checkout:
 
 ```bash
 ./scripts/bootstrap.sh   # one-time repo health check
-./scripts/w0-demo.sh     # the runbook in script form
+./scripts/w0-reference-run.sh     # the runbook in script form
 ```
 
-`scripts/w0-demo.sh` is idempotent. It writes everything under `var/w0-demo/`
+`scripts/w0-reference-run.sh` is idempotent. It writes everything under `var/w0-reference-run/`
 (git-ignored) and tears down every background process it starts via an `EXIT`
 trap. On a warm Maven cache the full run takes ~15 s on a developer laptop.
 
@@ -98,19 +98,19 @@ trap. On a warm Maven cache the full run takes ~15 s on a developer laptop.
    `mvn -DskipTests package` on the four Java capability services so each
    one is materialized as a shaded fat jar.
 3. `go build` of `agentic-harness-core`, `evidence-service`, and
-   `experience-learning-service` into `var/w0-demo/bin/` so the launched
+   `experience-learning-service` into `var/w0-reference-run/bin/` so the launched
    process IS the listening process (cleaner than `go run`'s child binary).
 4. Start each service in the background. Ports (overridable via env var):
 
    | Service | Default port | Env var |
    |---------|--------------|---------|
-   | `agentic-harness-core` | `8190` | `W0_DEMO_HARNESS_PORT` |
-   | `evidence-service` | `8191` | `W0_DEMO_EVIDENCE_PORT` |
-   | `experience-learning-service` | `8192` | `W0_DEMO_EXPERIENCE_PORT` |
-   | `cobol-parser-service` | `8181` | `W0_DEMO_PARSER_PORT` |
-   | `semantic-ir-service` | `8182` | `W0_DEMO_IR_PORT` |
-   | `target-java-generation-service` | `8183` | `W0_DEMO_GENERATOR_PORT` |
-   | `build-test-runner-service` | `8184` | `W0_DEMO_BTR_PORT` |
+   | `agentic-harness-core` | `8190` | `W0_REFERENCE_RUN_HARNESS_PORT` |
+   | `evidence-service` | `8191` | `W0_REFERENCE_RUN_EVIDENCE_PORT` |
+   | `experience-learning-service` | `8192` | `W0_REFERENCE_RUN_EXPERIENCE_PORT` |
+   | `cobol-parser-service` | `8181` | `W0_REFERENCE_RUN_PARSER_PORT` |
+   | `semantic-ir-service` | `8182` | `W0_REFERENCE_RUN_IR_PORT` |
+   | `target-java-generation-service` | `8183` | `W0_REFERENCE_RUN_GENERATOR_PORT` |
+   | `build-test-runner-service` | `8184` | `W0_REFERENCE_RUN_BTR_PORT` |
 
 5. Health-check each service (`/v0/health` or `/health`) with up to 20 s of
    retries.
@@ -144,16 +144,16 @@ trap. On a warm Maven cache the full run takes ~15 s on a developer laptop.
    `output-divergence` internally before analysis. Auto-analyze runs on ingest
    and produces experience events.
 10. POST the per-program trajectory ledgers to `/v0/trajectory-ledgers`.
-11. Compute and emit `var/w0-demo/scorecard.md`.
+11. Compute and emit `var/w0-reference-run/scorecard.md`.
 
 The script aborts immediately on any non-success HTTP status. Service logs
-live in `var/w0-demo/logs/` and survive script exit so a developer can read
+live in `var/w0-reference-run/logs/` and survive script exit so a developer can read
 them after a failure.
 
 ## Manual walk-through (when you want to drive it by hand)
 
 The same workflow run end-to-end via `curl` from a developer shell — useful
-in demos or when a single step needs to be re-run after a fix.
+in validation sessions or when a single step needs to be re-run after a fix.
 
 ```bash
 # 1. Build everything (one-off; ~30 s warm)
@@ -169,7 +169,7 @@ done
 export HARNESS_TOKEN="manual-local-control-plane-token"
 
 # 2. Start the harness + capability services (each in its own terminal,
-#    or all in one with & + jobs / tmux; pick the same ports the demo uses)
+#    or all in one with & + jobs / tmux; pick the same ports the reference run uses)
 HARNESS_CONTROL_PLANE_TOKEN="$HARNESS_TOKEN" HARNESS_EVENT_LOG_PATH=/tmp/harness.jsonl HARNESS_PORT=8190 /tmp/agentic-harness-core &
 EVIDENCE_PORT=8191 EVIDENCE_EXPORT_DIR=/tmp/evidence-exports /tmp/evidence-service &
 EXPERIENCE_LEARNING_LISTEN_ADDR=:8192 /tmp/experience-learning-service &
@@ -182,7 +182,7 @@ HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 HARNESS_EVENT_TOKEN="$HARNESS_TOKEN
 HARNESS_EVENT_ENDPOINT=http://127.0.0.1:8190 HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" BUILD_TEST_RUNNER_LISTEN_ADDR=8184 \
   java -jar services/build-test-runner-service/target/build-test-runner-service-*.jar &
 
-AUTH=(-H "Authorization: Bearer $HARNESS_TOKEN" -H "X-Harness-Actor: manual-demo" -H "X-Harness-Role: orchestrator")
+AUTH=(-H "Authorization: Bearer $HARNESS_TOKEN" -H "X-Harness-Actor: manual-reference-run" -H "X-Harness-Role: orchestrator")
 register_capability() {
   local id="$1" name="$2" owner="$3" endpoint="$4" dataClass="$5"
   jq -n --arg id "$id" --arg name "$name" --arg owner "$owner" --arg endpoint "$endpoint" --arg dataClass "$dataClass" \
@@ -223,26 +223,26 @@ The end-to-end output should report `compileOk: true`, `matched: true`,
 
 ## Reading the captured artifacts
 
-After `scripts/w0-demo.sh` completes (or after the manual walk), look here:
+After `scripts/w0-reference-run.sh` completes (or after the manual walk), look here:
 
 | Path | Purpose |
 |------|---------|
-| `var/w0-demo/scorecard.md` | This run's scorecard. |
-| `var/w0-demo/artifacts/<programId>/16-evidence-manifest.json` | Canonical Evidence Pack manifest. Compare against `schemas/evidence-pack-manifest-v0.json`. |
-| `var/w0-demo/exports/<packId>/manifest.json` | Deterministic export of the same manifest. The export's sha256 is referenced from the manifest's `exports[]`. |
-| `var/w0-demo/artifacts/<programId>/11-trajectory-ledger.json` | Agent trajectory ledger for that run (`schemas/agent-trajectory-ledger-v0.json`). |
-| `var/w0-demo/events/harness-events.jsonl` | Raw harness ledger across all runs. |
-| `var/w0-demo/events/experience-events-snapshot.json` | Experience events emitted by analysis. |
-| `var/w0-demo/logs/<service>.log` | Per-service stdout/stderr. |
+| `var/w0-reference-run/scorecard.md` | This run's scorecard. |
+| `var/w0-reference-run/artifacts/<programId>/16-evidence-manifest.json` | Canonical Evidence Pack manifest. Compare against `schemas/evidence-pack-manifest-v0.json`. |
+| `var/w0-reference-run/exports/<packId>/manifest.json` | Deterministic export of the same manifest. The export's sha256 is referenced from the manifest's `exports[]`. |
+| `var/w0-reference-run/artifacts/<programId>/11-trajectory-ledger.json` | Agent trajectory ledger for that run (`schemas/agent-trajectory-ledger-v0.json`). |
+| `var/w0-reference-run/events/harness-events.jsonl` | Raw harness ledger across all runs. |
+| `var/w0-reference-run/events/experience-events-snapshot.json` | Experience events emitted by analysis. |
+| `var/w0-reference-run/logs/<service>.log` | Per-service stdout/stderr. |
 
 A frozen copy of the same artifacts is committed under
-[`sample-evidence-pack/`](sample-evidence-pack/) so reviewers can read the
-manifest without re-running the demo.
+[`reference-evidence-pack/`](reference-evidence-pack/) so reviewers can read the
+manifest without re-running the reference run.
 
 ## Cleanup
 
 The script's `EXIT` trap kills every PID it recorded under
-`var/w0-demo/pids/`. If a previous run was interrupted with `kill -9` or a
+`var/w0-reference-run/pids/`. If a previous run was interrupted with `kill -9` or a
 crash, leftover Go binaries may still be holding ports. Check with:
 
 ```bash
@@ -255,9 +255,9 @@ lsof -nP -i :8190 -i :8191 -i :8192 -i :8193 -i :8181 -i :8182 -i :8183 -i :8184
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| `address already in use` on `:8190` (or any demo port) | Previous run left a Go binary alive. | `lsof -nP -i :<port>` → `kill <pid>`. |
-| Maven test runs blow up the demo time | Tests were not skipped. | The demo uses `-DskipTests` on purpose — full tests run in CI. |
-| `model-gateway invocation failed` | Foundry development credentials, endpoint, deployment, or allowlist variables are missing or rejected. | Populate `.env` with the approved Foundry development values, or run with `W0_DEMO_MODEL_GATEWAY_ENABLED=false` to produce explicit skipped entries. |
-| `wait_http` times out | Java service hasn't finished starting / Maven warm cache cold. | Check `var/w0-demo/logs/<service>.log` for the actual error. |
+| `address already in use` on `:8190` (or any reference-run port) | Previous run left a Go binary alive. | `lsof -nP -i :<port>` → `kill <pid>`. |
+| Maven test runs blow up the reference run time | Tests were not skipped. | The reference run uses `-DskipTests` on purpose — full tests run in CI. |
+| `model-gateway invocation failed` | Foundry development credentials, endpoint, deployment, or allowlist variables are missing or rejected. | Populate `.env` with the approved Foundry development values, or run with `W0_REFERENCE_RUN_MODEL_GATEWAY_ENABLED=false` to produce explicit skipped entries. |
+| `wait_http` times out | Java service hasn't finished starting / Maven warm cache cold. | Check `var/w0-reference-run/logs/<service>.log` for the actual error. |
 | `experience-learning harness-event ingest failed (HTTP 400)` | A service emitted a malformed harness event or a status outside the Harness Event Envelope status contract. | Add the missing harness status to `experience-learning-service` validation and analysis mapping, then file a follow-up in [`w0-followups.md`](w0-followups.md) if the producer contract changed. |
 | `classification: "divergence-unknown"` reported | A program is not in `fixtures/golden-master/index.json`, or generated output no longer matches an undeclared fixture. This is a **release-gate fail**. | Register an intentionally divergent fixture with a rationale only if the divergence is expected; otherwise treat it as a generator bug. |

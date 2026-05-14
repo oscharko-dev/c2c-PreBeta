@@ -1,21 +1,21 @@
 # W0 Showcase
 
 Entry point for the c2c **Wave 0 walking skeleton** showcase. Everything
-here is reproducible from a clean checkout via `scripts/w0-demo.sh`.
+here is reproducible from a clean checkout via `scripts/w0-reference-run.sh`.
 
 ## Documents
 
 | Document | Purpose |
 |----------|---------|
-| [w0-demo-runbook.md](w0-demo-runbook.md) | How to reproduce the end-to-end W0 demo, both via the script and by hand. |
-| [w0-scorecard.md](w0-scorecard.md) | Captured metrics from a real demo run. The release gate refers to this. |
+| [w0-reference-runbook.md](w0-reference-runbook.md) | How to reproduce the end-to-end W0 reference run, both via the script and by hand. |
+| [w0-scorecard.md](w0-scorecard.md) | Captured metrics from a real reference run. The release gate refers to this. |
 | [w0-followups.md](w0-followups.md) | Work intentionally deferred to Wave 1. Each item is filed as its own GitHub issue. |
 | [../release/w0-release-gate.md](../release/w0-release-gate.md) | Go/no-go checklist with evidence pointers. |
 
-## Sample artifacts (frozen for review)
+## Reference artifacts (frozen for review)
 
-[`sample-evidence-pack/`](sample-evidence-pack/) contains a frozen snapshot
-of the artifacts that the most recent demo run produced. They are committed
+[`reference-evidence-pack/`](reference-evidence-pack/) contains a frozen snapshot
+of the artifacts that the most recent reference run produced. They are committed
 so reviewers can read the manifest, trajectory ledger, build/test result,
 and experience-event summary without standing up the services.
 
@@ -33,7 +33,7 @@ and experience-event summary without standing up the services.
 The W0 showcase is intentionally narrow:
 
 - Three synthetic COBOL programs, no customer source.
-- The demo can exercise `model-gateway-service` for a bounded Foundry
+- The reference run can exercise `model-gateway-service` for a bounded Foundry
   development invocation; disabled or over-limit runs still record explicit
   `status: "skipped"` model-invocation entries rather than hiding them.
 - Generated stdout matches the checked-in Golden Master fixtures for the

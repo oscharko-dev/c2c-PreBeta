@@ -4,4 +4,4 @@ This area is intentionally left as a placeholder until public samples can be leg
 
 The following public references are intentionally deferred until a dedicated post-W0 legal and runtime review:
 - ACAS
-- CardDemo
+- Card public sample

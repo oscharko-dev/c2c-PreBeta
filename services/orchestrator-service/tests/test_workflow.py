@@ -13,7 +13,7 @@ from orchestrator_service.workflow import (
 )
 
 
-class FakeGateway:
+class StubGateway:
     def __init__(self, capabilities, responses, *, fail_parse_attempts: int = 0):
         self.capabilities = capabilities
         self.responses = responses
@@ -113,7 +113,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 "runId": "run-1",
                 "workflowId": "w0-migration-v0",
                 "program": {
-                    "programId": "DEMO01",
+                    "programId": "CASE01",
                     "sourceHash": "a" * 64,
                     "sourceKind": "cobol",
                 },
@@ -136,8 +136,8 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 },
                 "ir": {
                     "schemaVersion": "v0",
-                    "programId": "DEMO01",
-                    "irId": "ir-DEMO01",
+                    "programId": "CASE01",
+                    "irId": "ir-CASE01",
                 },
                 "outputRef": {"uri": "urn:orchestrator/run-1/ir"},
             },
@@ -152,10 +152,10 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                     "byteSize": 12,
                 },
                 "generatedProject": {
-                    "entryClass": "DEMO01",
-                    "entryFilePath": "src/DEMO01.java",
+                    "entryClass": "CASE01",
+                    "entryFilePath": "src/CASE01.java",
                     "fileCount": 1,
-                    "files": {"src/DEMO01.java": "class DEMO01 {}"},
+                    "files": {"src/CASE01.java": "class CASE01 {}"},
                 },
                 "traceability": {},
                 "outputRef": {"uri": "urn:orchestrator/run-1/generator"},
@@ -165,7 +165,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 "status": "ok",
                 "runId": "run-1",
                 "workflowId": "w0-migration-v0",
-                "programId": "DEMO01",
+                "programId": "CASE01",
                 "outputRef": {"uri": "urn:orchestrator/run-1/build"},
             },
             "evidence.writer": {
@@ -193,7 +193,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         }
 
     def test_successful_run_without_model_prompt(self):
-        gateway = FakeGateway(self._base_capabilities(), self._base_responses())
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
         runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
         context = W0RunContext(
             run_id="run-1",
@@ -225,7 +225,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(model_invocation["provider"], "orchestrator")
 
     def test_skipped_model_invocation_uses_configured_model_id(self):
-        gateway = FakeGateway(self._base_capabilities(), self._base_responses())
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
         runner = W0WorkflowRunner(config=self._base_config(model_gateway_model_id="phi-4"), gateway=gateway)
         context = W0RunContext(
             run_id="run-1",
@@ -243,7 +243,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(model_invocation["modelId"], "phi-4")
 
     def test_successful_run_with_optional_model_prompt(self):
-        gateway = FakeGateway(self._base_capabilities(), self._base_responses())
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
         runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
         context = W0RunContext(
             run_id="run-1",
@@ -280,7 +280,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(model_invocation["ledgerRef"]["sha256"], "b" * 64)
 
     def test_retry_happy_path_on_temporary_parse_failure(self):
-        gateway = FakeGateway(
+        gateway = StubGateway(
             self._base_capabilities(),
             self._base_responses(),
             fail_parse_attempts=1,
@@ -302,7 +302,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(len(parse_invocations), 2)
 
     def test_run_fails_after_retries_are_exhausted(self):
-        gateway = FakeGateway(
+        gateway = StubGateway(
             self._base_capabilities(),
             self._base_responses(),
             fail_parse_attempts=4,

@@ -1,13 +1,13 @@
 # W0 Follow-Ups
 
-Concrete items discovered while assembling the W0 end-to-end demo
+Concrete items discovered while assembling the W0 end-to-end validation
 ([issue #16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16)) that are
 **explicitly deferred** beyond the Epic #1 closure PR. Per the
 [development workflow](../governance/development-workflow.md) governance rule,
 scope expansion is not silently merged — every item below is filed as a
 separate issue so it can be planned, owned, and verified independently.
 
-Each entry includes the symptom seen during the W0 demo run, the contract /
+Each entry includes the symptom seen during the W0 reference run, the contract /
 service involved, and the fix shape or current resolution. Wave 1 owners may
 take any open item without waiting for the others.
 
@@ -20,7 +20,7 @@ take any open item without waiting for the others.
   harness-event status validation), all W0 services emitting harness events.
 - **Resolution**: the service accepts raw Harness Event Envelope statuses
   and maps known statuses internally for analysis (`starting → started`,
-  `output-divergence` / `compile-failed` / `run-failed → failed`). The W0 demo
+  `output-divergence` / `compile-failed` / `run-failed → failed`). The W0 reference run
   posts the raw harness ledger directly.
 - **Fix shape**: keep the Harness Event Envelope status as raw producer data
   while keeping the *experience-event status enum* (`observed`, `ignored`)
@@ -33,7 +33,7 @@ take any open item without waiting for the others.
 
 ## F-W0-02 · Orchestrator capability auto-bootstrap and payload alignment · [#65](https://github.com/oscharko-dev/c2c-PreBeta/issues/65)
 
-- **Symptom**: the W0 demo now registers parser, IR, generator, build/test,
+- **Symptom**: the W0 reference run now registers parser, IR, generator, build/test,
   and evidence capabilities in the Harness catalog and resolves endpoints
   from that catalog before invocation. The remaining gap is that
   `orchestrator-service` still does not auto-bootstrap those registrations on
@@ -73,7 +73,7 @@ take any open item without waiting for the others.
   until their COBOL-runtime output is promoted in a later fixture-hardening
   pass.
 
-## F-W0-04 · Model gateway invocation in W0 demo · [#67](https://github.com/oscharko-dev/c2c-PreBeta/issues/67)
+## F-W0-04 · Model gateway invocation in W0 reference run · [#67](https://github.com/oscharko-dev/c2c-PreBeta/issues/67)
 
 - **Symptom**: `modelInvocations` in every Evidence Pack manifest carries an
   observation-only `status: "skipped"` entry. No model call ever exercises
@@ -85,9 +85,9 @@ take any open item without waiting for the others.
 - **Proposed fix**: stand up `services/model-gateway-service` (Java or Go)
   implementing the W0 gateway README contract, plumb it into
   `orchestrator-service`'s optional `model-guidance` step, and update the
-  demo to record real model-invocation ledger entries.
+  reference run to record real Model Invocation Ledger entries.
 - **Owner**: model gateway.
-- **Acceptance**: a demo run produces ≥ 1 manifest where
+- **Acceptance**: a reference run produces ≥ 1 manifest where
   `modelInvocations[].status == "completed"` and `ledgerRef.sha256` matches a
   ledger entry on the gateway.
 

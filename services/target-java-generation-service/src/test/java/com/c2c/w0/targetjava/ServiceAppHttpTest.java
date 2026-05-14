@@ -89,7 +89,7 @@ class ServiceAppHttpTest {
 
     @Test
     void happyPathReturns200WithGeneratedProject() throws Exception {
-        Map<String, Object> body = Map.of("runId", "run-http", "ir", smallIr("HTTPDEMO"));
+        Map<String, Object> body = Map.of("runId", "run-http", "ir", smallIr("HTTPCASE"));
         assertEquals(200, post("/v0/generate", JSON.writeValueAsString(body), "application/json"));
     }
 
@@ -110,7 +110,7 @@ class ServiceAppHttpTest {
                     ServiceApp.handleGenerate(exchange, new TargetJavaGenerationService(), eventEndpoint, null));
             local.start();
             try {
-                Map<String, Object> body = Map.of("runId", "run-events", "ir", smallIr("EVENTDEMO"));
+                Map<String, Object> body = Map.of("runId", "run-events", "ir", smallIr("EVENTCASE"));
                 int status = postToPort(local.getAddress().getPort(), "/v0/generate",
                         JSON.writeValueAsString(body), "application/json");
                 assertEquals(200, status);
