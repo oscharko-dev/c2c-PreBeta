@@ -63,10 +63,9 @@ export interface OutputRef {
 }
 
 export interface Diagnostic {
-  level?: string;
-  code?: string;
-  message?: string;
-  [key: string]: unknown;
+  level: string;
+  code: string;
+  message: string;
 }
 
 export interface GeneratedView {
@@ -113,7 +112,7 @@ export interface BuildTestView {
   classification: BuildTestClassification;
   expectedOutput: string;
   actualOutput: string;
-  outputRef: string | OutputRef | null;
+  outputRef: OutputRef | null;
   note: string;
   compileStatus?: CompileStatus;
   executionStatus?: ExecutionStatus;

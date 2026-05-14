@@ -6,6 +6,11 @@ import type {
   RunSummary,
   TransformResponse,
 } from './types.js';
+import {
+  PLACEHOLDER_JAVA_MARKERS as SHARED_PLACEHOLDER_MARKERS,
+  findPlaceholderInFiles,
+  type PlaceholderJavaMarker,
+} from './placeholder-markers.js';
 
 export interface ProductReadiness {
   ready: boolean;
@@ -243,20 +248,11 @@ export function pickEntryFile(generated: GeneratedView, preferredPath?: string):
   return { path, content };
 }
 
-export const PLACEHOLDER_JAVA_MARKERS: readonly string[] = [
-  'W0-STUB',
-  'Synthetic W0 generated-Java stub',
-  '// TODO: implement',
-  'PLACEHOLDER',
-];
+export const PLACEHOLDER_JAVA_MARKERS: readonly PlaceholderJavaMarker[] = SHARED_PLACEHOLDER_MARKERS;
 
-export function containsPlaceholderMarker(files: Record<string, string>): string | null {
-  for (const content of Object.values(files)) {
-    for (const marker of PLACEHOLDER_JAVA_MARKERS) {
-      if (content.includes(marker)) return marker;
-    }
-  }
-  return null;
+export function containsPlaceholderMarker(files: Record<string, string>): PlaceholderJavaMarker | null {
+  const hit = findPlaceholderInFiles(files);
+  return hit ? hit.marker : null;
 }
 
 export interface GeneratedSummary {
@@ -265,7 +261,7 @@ export interface GeneratedSummary {
   isProductOutput: boolean;
   viewerState: 'pending' | 'empty' | 'shown' | 'error';
   paneText: string;
-  placeholderMarker?: string;
+  placeholderMarker?: PlaceholderJavaMarker;
 }
 
 export function generatedSummary(

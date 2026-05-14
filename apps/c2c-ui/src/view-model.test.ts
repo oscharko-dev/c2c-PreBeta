@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildTestSummary,
+  containsPlaceholderMarker,
   evidenceSummary,
   formatPostStartMetadata,
   formatSourceMetadata,
@@ -11,6 +12,7 @@ import {
   modeBadgeFromResponse,
   pickEntryFile,
   pipelineLine,
+  PLACEHOLDER_JAVA_MARKERS,
   productReadiness,
   runStatusChip,
   runStatusLine,
@@ -70,7 +72,7 @@ function makeBuildTest(overrides: Partial<BuildTestView> = {}): BuildTestView {
     classification: 'match',
     expectedOutput: 'X',
     actualOutput: 'X',
-    outputRef: 'sha256:1',
+    outputRef: { uri: 'file:///run/build-test-result.json', sha256: '1'.repeat(64) },
     note: '',
     ...overrides,
   };
@@ -365,6 +367,30 @@ test('evidenceSummary exposes manifest, export and missing artifacts when live',
   assert.equal(summary.exportUri, 'urn:export');
   assert.deepEqual(summary.missing, ['sourceCobol']);
   assert.equal(summary.isProductResult, false);
+});
+
+test('containsPlaceholderMarker detects each documented marker and ignores clean code', () => {
+  assert.equal(containsPlaceholderMarker({}), null);
+  assert.equal(containsPlaceholderMarker({ 'A.java': 'class A {}' }), null);
+  for (const marker of PLACEHOLDER_JAVA_MARKERS) {
+    assert.equal(
+      containsPlaceholderMarker({ 'X.java': `prefix ${marker} suffix` }),
+      marker,
+      `failed to detect marker ${marker}`,
+    );
+  }
+});
+
+test('buildTestSummary renders all diagnostics without applying an arbitrary cap', () => {
+  const diagnostics = Array.from({ length: 25 }, (_, idx) => ({
+    level: 'info',
+    code: `code-${idx}`,
+    message: `message ${idx}`,
+  }));
+  const view = makeBuildTest({ diagnostics });
+  const summary = buildTestSummary(view, makeRun({ status: 'completed' }), undefined);
+  assert.equal(summary.diagnostics.length, 25);
+  assert.equal(summary.diagnostics[24]?.code, 'code-24');
 });
 
 test('generatedSummary refuses to display placeholder Java as a successful product run', () => {
