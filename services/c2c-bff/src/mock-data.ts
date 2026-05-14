@@ -33,6 +33,7 @@ export interface MockRunOutcome {
     status: 'complete' | 'incomplete';
     packId: string;
     manifestUri: string;
+    exportUri: string;
     missingArtifacts: string[];
     note: string;
   };
@@ -115,6 +116,7 @@ export function mockOutcomeFor(sample: SampleDetail, runId: string): MockRunOutc
     status: 'incomplete',
     packId: `epk-${runId}-1`,
     manifestUri: `urn:c2c-bff/mock-evidence-pack/${runId}`,
+    exportUri: `file://evidence/mock/${runId}/evidence-pack-v0.zip`,
     missingArtifacts: ['sourceCobol', 'semanticIr', 'harnessEvents', 'modelInvocations'],
     note: 'Mock Evidence Pack manifest reference. Live exports come from evidence-service /v0/packs.',
   };

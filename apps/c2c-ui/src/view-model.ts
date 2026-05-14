@@ -107,17 +107,19 @@ export function evidenceSummary(view: EvidenceView | undefined): {
   status: EvidenceView['status'] | 'idle';
   headline: string;
   manifestUri: string;
+  exportUri: string;
   missing: string[];
   note: string;
 } {
   if (!view) {
-    return { status: 'idle', headline: 'No run yet.', manifestUri: '', missing: [], note: '' };
+    return { status: 'idle', headline: 'No run yet.', manifestUri: '', exportUri: '', missing: [], note: '' };
   }
   const headline = `[${view.mode}] status=${view.status}${view.packId ? ` · packId=${view.packId}` : ''}`;
   return {
     status: view.status,
     headline,
     manifestUri: view.manifestUri,
+    exportUri: view.exportUri ?? '',
     missing: view.missingArtifacts,
     note: view.note,
   };
