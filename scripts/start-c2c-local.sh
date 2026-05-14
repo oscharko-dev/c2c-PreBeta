@@ -93,12 +93,66 @@ require node
 require npm
 require python3
 
-mkdir -p "$VAR_DIR"
-rm -rf "$VAR_DIR"
-mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR"
-
 launcher_pid_file="$PID_DIR/launcher.pid"
-printf '%s\n' "$$" >"$launcher_pid_file"
+
+pid_is_running() {
+  local pid="$1"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+canonicalize_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+print(os.path.normpath(os.path.realpath(sys.argv[1])))
+PY
+}
+
+assert_safe_var_dir() {
+  local resolved_var_dir
+  resolved_var_dir="$(canonicalize_path "$VAR_DIR")"
+  local resolved_root
+  resolved_root="$(canonicalize_path "$ROOT_DIR")"
+  if [[ "$resolved_var_dir" != "$resolved_root"/* ]]; then
+    fail "C2C_LOCAL_VAR_DIR must stay under $ROOT_DIR (got $VAR_DIR)"
+  fi
+  if [[ "$resolved_var_dir" == "$resolved_root" ]]; then
+    fail "C2C_LOCAL_VAR_DIR must not be the repository root"
+  fi
+}
+
+prepare_var_dir() {
+  assert_safe_var_dir
+
+  if [[ -f "$launcher_pid_file" ]]; then
+    local existing_pid
+    existing_pid="$(cat "$launcher_pid_file" 2>/dev/null || true)"
+    if pid_is_running "$existing_pid"; then
+      fail "c2c local stack is already running (launcher pid $existing_pid)"
+    fi
+  fi
+
+  mkdir -p "$VAR_DIR"
+  rm -rf \
+    "$LOG_DIR" \
+    "$PID_DIR" \
+    "$BIN_DIR" \
+    "$READY_MARKER" \
+    "$VAR_DIR/evidence-exports" \
+    "$VAR_DIR/harness-events.jsonl" \
+    "$VAR_DIR/evidence-events.jsonl" \
+    "$VAR_DIR/experience-harness-events.jsonl" \
+    "$VAR_DIR/agent-trajectory-ledger.jsonl" \
+    "$VAR_DIR/experience-events.jsonl" \
+    "$VAR_DIR/learning-artifact-registry.json" \
+    "$VAR_DIR/model-invocation-ledger-v0.jsonl" \
+    "$VAR_DIR/model-gateway-events-v0.jsonl"
+  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR"
+  printf '%s\n' "$$" >"$launcher_pid_file"
+}
+
+prepare_var_dir
 
 cleanup() {
   local exit_code=$?
@@ -200,7 +254,9 @@ build_go_binary() {
 shaded_jar() {
   local svc="$1"
   local jar
-  jar="$(find "$ROOT_DIR/services/$svc/target" -maxdepth 1 -type f -name "${svc}-*.jar" ! -name 'original-*' | sort | head -n1 || true)"
+  jar="$(find "$ROOT_DIR/services/$svc/target" -maxdepth 1 -type f -name "${svc}-*.jar" ! -name 'original-*' -print0 \
+    | xargs -0 ls -1t 2>/dev/null \
+    | head -n1 || true)"
   [[ -n "$jar" && -f "$jar" ]] || fail "could not locate shaded jar for $svc"
   printf '%s' "$jar"
 }
@@ -428,9 +484,11 @@ start_model_gateway() {
 
 start_java_services() {
   local jar
+  # The Java services accept a port, :port, or host:port; pass host:port
+  # explicitly so the launcher's listen-address convention is unambiguous.
   jar="$(shaded_jar cobol-parser-service)"
   start_bg parser "$LOG_DIR/parser.log" \
-    COBOL_PARSER_LISTEN_ADDR="$PARSER_PORT" \
+    COBOL_PARSER_LISTEN_ADDR="127.0.0.1:$PARSER_PORT" \
     HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
     HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     -- \
@@ -439,7 +497,7 @@ start_java_services() {
 
   jar="$(shaded_jar semantic-ir-service)"
   start_bg semantic-ir "$LOG_DIR/semantic-ir.log" \
-    SEMANTIC_IR_LISTEN_ADDR="$SEMANTIC_IR_PORT" \
+    SEMANTIC_IR_LISTEN_ADDR="127.0.0.1:$SEMANTIC_IR_PORT" \
     HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
     HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     -- \
@@ -448,7 +506,7 @@ start_java_services() {
 
   jar="$(shaded_jar target-java-generation-service)"
   start_bg target-java-generation "$LOG_DIR/target-java-generation.log" \
-    TARGET_JAVA_GENERATION_LISTEN_ADDR="$TARGET_JAVA_GENERATION_PORT" \
+    TARGET_JAVA_GENERATION_LISTEN_ADDR="127.0.0.1:$TARGET_JAVA_GENERATION_PORT" \
     HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
     HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     -- \
@@ -457,7 +515,7 @@ start_java_services() {
 
   jar="$(shaded_jar build-test-runner-service)"
   start_bg build-test-runner "$LOG_DIR/build-test-runner.log" \
-    BUILD_TEST_RUNNER_LISTEN_ADDR="$BUILD_TEST_RUNNER_PORT" \
+    BUILD_TEST_RUNNER_LISTEN_ADDR="127.0.0.1:$BUILD_TEST_RUNNER_PORT" \
     HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
     HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     EXPERIENCE_EVENT_ENDPOINT="$EXPERIENCE_URL" \

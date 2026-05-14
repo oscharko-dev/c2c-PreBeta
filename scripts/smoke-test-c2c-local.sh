@@ -24,10 +24,14 @@ fail() { printf '[c2c-local-smoke][error] %s\n' "$*" >&2; exit 1; }
 
 wait_for_file() {
   local file="$1"
-  local attempts="${2:-600}"
+  local launcher_pid="$2"
+  local attempts="${3:-600}"
   while (( attempts > 0 )); do
     if [[ -f "$file" ]]; then
       return 0
+    fi
+    if [[ -n "$launcher_pid" ]] && ! kill -0 "$launcher_pid" 2>/dev/null; then
+      return 2
     fi
     sleep 1
     attempts=$((attempts - 1))
@@ -66,8 +70,13 @@ log "starting launcher"
 "$ROOT_DIR/scripts/start-c2c-local.sh" --ci >"$launcher_log" 2>&1 &
 launcher_pid=$!
 
-if ! wait_for_file "$READY_MARKER" 1800; then
+wait_result=0
+wait_for_file "$READY_MARKER" "$launcher_pid" 1800 || wait_result=$?
+if (( wait_result != 0 )); then
   tail -n 120 "$launcher_log" >&2 || true
+  if [[ "$wait_result" == "2" ]]; then
+    fail "launcher exited before writing ready marker"
+  fi
   fail "ready marker did not appear: $READY_MARKER"
 fi
 
@@ -75,7 +84,7 @@ ready_url="$(tr -d '\r\n' <"$READY_MARKER")"
 [[ "$ready_url" == "$BFF_URL" ]] || fail "ready marker pointed at $ready_url, expected $BFF_URL"
 
 expected_line="c2c local application ready: $BFF_URL"
-ready_count="$(grep -Fxc "$expected_line" "$launcher_log" | tr -d '[:space:]')"
+ready_count="$( (grep -Fxc "$expected_line" "$launcher_log" || true) | tr -d '[:space:]')"
 [[ "$ready_count" == "1" ]] || fail "expected exactly one ready line in launcher output"
 
 if ! wait_http "$BFF_URL/api/v0/health"; then
