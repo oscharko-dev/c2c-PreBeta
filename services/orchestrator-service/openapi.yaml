@@ -1,0 +1,172 @@
+openapi: 3.1.0
+info:
+  title: orchestrator-service
+  version: 0.1.0
+  description: >
+    W0 orchestrator service that drives COBOL-to-Java workflow execution over
+    Harness capabilities.
+servers:
+  - url: http://localhost:8084
+    description: local
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v0/runs:
+    post:
+      summary: Start a W0 migration run
+      operationId: startRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunStartRequest"
+      responses:
+        "201":
+          description: Run accepted for orchestration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunStartResponse"
+    get:
+      summary: List harness runs
+      operationId: listRuns
+      responses:
+        "200":
+          description: Runs list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunState"
+  /v0/runs/{runId}:
+    get:
+      summary: Get orchestration run status
+      operationId: getRunStatus
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current run state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunState"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: orchestrator-service
+        workflowId:
+          type: string
+          example: w0-migration-v0
+    RunState:
+      type: object
+      required: [runId, workflowId, status]
+      properties:
+        runId:
+          type: string
+        workflowId:
+          type: string
+        status:
+          type: string
+          enum: [starting, updating, completed, failed]
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+        policyDecision:
+          type: string
+        message:
+          type: string
+        updatedBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        lastUpdatedAt:
+          type: string
+          format: date-time
+    RunStartRequest:
+      type: object
+      required: [inputRef]
+      properties:
+        requester:
+          type: string
+          description: Human/agent id that initiated the run
+          example: orchestrator
+        inputRef:
+          $ref: "#/components/schemas/DataReferenceLike"
+        modelPrompt:
+          type: string
+          description: Optional model assistance prompt routed through model-gateway capability
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    RunStartResponse:
+      type: object
+      required: [run, status, message]
+      properties:
+        run:
+          $ref: "#/components/schemas/RunState"
+        status:
+          type: string
+          example: started
+        message:
+          type: string
+          example: orchestrator run started
+    DataReferenceLike:
+      type: object
+      required: [uri]
+      properties:
+        uri:
+          type: string
+          description: Stable locator for an input artifact
+          example: urn:examples/cobol/main.cbl
+        sha256:
+          type: string
+          example: d2d2d2...
+        byteSize:
+          type: integer
+          example: 1024
+        byte_size:
+          type: integer
+          example: 1024
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
