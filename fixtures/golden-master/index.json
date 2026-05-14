@@ -1,37 +1,57 @@
 {
   "schemaVersion": "v0",
-  "description": "Golden Master registry consumed by build-test-runner-service. Each entry maps a COBOL programId to an expected stdout fixture and records whether the fixture was produced by a true COBOL runtime (e.g. GnuCOBOL cobcrun) or hand-curated as a synthetic expected output. Entries with classification true are recompiled with cobc and re-executed with cobcrun by the runner when output comparison is enabled.",
+  "description": "Reference-program registry. Drives two consumers: (1) build-test-runner-service, which uses programId + expectedOutputPath + classification + knownDivergenceAtW0 to reproduce/compare outputs, and (2) c2c-bff, which surfaces reference programs to the c2c-ui. Each entry carries an explicit reference-program support contract (Issue #94): supportedInProductMode gates whether the UI may run the program through the real product path; w0Subset, oracleMode, and knownLimitations describe what is proven. Entries with classification 'true' are recompiled with cobc and re-executed with cobcrun by the build-test runner when output comparison is enabled.",
   "entries": [
     {
       "programId": "BRNCH01",
+      "title": "Branch approval guard",
       "cobolSource": "corpus/synthetic/programs/branch-account-guard.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/branch-account-guard-output.txt",
       "classification": "true",
       "knownDivergenceAtW0": false,
+      "supportedInProductMode": true,
+      "w0Subset": ["MOVE", "PERFORM", "EVALUATE", "ADD", "DISPLAY"],
+      "oracleMode": "cobol-runtime",
+      "knownLimitations": [],
       "rationale": "Expected output was reproduced from corpus/synthetic/programs/branch-account-guard.cbl with GnuCOBOL cobc -m and cobcrun BRNCH01."
     },
     {
       "programId": "ARITH01",
+      "title": "Arithmetic adjustment ledger",
       "cobolSource": "corpus/synthetic/programs/arithmetic-adjustment-ledger.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/arithmetic-adjustment-ledger-output.txt",
       "classification": "synthetic",
       "knownDivergenceAtW0": false,
+      "supportedInProductMode": true,
+      "w0Subset": ["MOVE", "SUBTRACT", "MULTIPLY", "DIVIDE", "DISPLAY"],
+      "oracleMode": "synthetic-fixture",
+      "knownLimitations": [],
       "rationale": "Synthetic expected output now matches generated Java for the W0 MOVE/SUBTRACT/MULTIPLY/DIVIDE/DISPLAY subset."
     },
     {
       "programId": "CTRLDEC01",
+      "title": "Control decimal payroll",
       "cobolSource": "corpus/synthetic/programs/ctrl-decimal-payroll.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/ctrl-decimal-payroll-output.txt",
       "classification": "synthetic",
       "knownDivergenceAtW0": false,
+      "supportedInProductMode": true,
+      "w0Subset": ["COMPUTE", "IF", "DISPLAY"],
+      "oracleMode": "synthetic-fixture",
+      "knownLimitations": [],
       "rationale": "Synthetic expected output now matches generated Java for the W0 COMPUTE/IF/DISPLAY subset using fixed-point HALF_EVEN rescale semantics."
     },
     {
       "programId": "BATCH01",
+      "title": "Decimal batch aggregator",
       "cobolSource": "corpus/synthetic/programs/decimal-batch-aggregator.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/decimal-batch-aggregator-output.txt",
       "classification": "synthetic",
       "knownDivergenceAtW0": false,
+      "supportedInProductMode": true,
+      "w0Subset": ["PERFORM", "COMPUTE", "ADD", "DISPLAY"],
+      "oracleMode": "synthetic-fixture",
+      "knownLimitations": [],
       "rationale": "Synthetic expected output now matches generated Java for the W0 PERFORM/COMPUTE/ADD/DISPLAY subset."
     }
   ]

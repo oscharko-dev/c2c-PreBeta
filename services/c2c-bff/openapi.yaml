@@ -84,6 +84,12 @@ paths:
   /api/v0/transform:
     post:
       summary: Start a product-mode transform from COBOL source text
+      description: |
+        Single entry point for product-mode transforms. Reference programs
+        loaded via GET /api/v0/samples/{programId} are sent through this
+        endpoint just like pasted source. If the request resolves to a
+        registered reference program whose supportedInProductMode is false,
+        the BFF returns 400 and never dispatches to the orchestrator.
       operationId: startTransform
       requestBody:
         required: true
@@ -97,7 +103,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TransformResponse" }
         "400":
-          description: validation error
+          description: validation error or unsupported reference program
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -287,23 +293,59 @@ components:
         evidence: { type: string, enum: [live, mock] }
 
     Sample:
+      description: |
+        Reference program metadata exposed to the UI. The reference-program
+        contract (Issue #94) is explicit: only entries with
+        supportedInProductMode=true may be loaded and run through
+        POST /api/v0/transform. Unsupported entries appear in listings as
+        disabled so callers know they exist but cannot execute them.
       type: object
-      required: [programId, title, knownDivergenceAtW0]
+      required:
+        - programId
+        - title
+        - knownDivergenceAtW0
+        - supportedInProductMode
+        - w0Subset
+        - oracleMode
+        - knownLimitations
       properties:
         programId: { type: string }
         title: { type: string }
         description: { type: string }
         knownDivergenceAtW0: { type: boolean }
+        supportedInProductMode:
+          type: boolean
+          description: True iff this reference program can complete the real
+            product path (parse → Semantic IR → Java generation → build/test →
+            Evidence Pack) via POST /api/v0/transform.
+        w0Subset:
+          type: array
+          description: COBOL verbs/constructs this reference program exercises
+            within the W0 subset. Non-empty for supportedInProductMode=true.
+          items: { type: string }
+        oracleMode:
+          description: How equivalence is proven for this program. Null only
+            for unsupported entries.
+          oneOf:
+            - type: string
+              enum: [cobol-runtime, synthetic-fixture]
+            - type: "null"
+        knownLimitations:
+          type: array
+          description: Documented W0 limitations for this program (empty if
+            none known).
+          items: { type: string }
 
     SampleDetail:
       allOf:
         - $ref: "#/components/schemas/Sample"
         - type: object
-          required: [cobolSource, expectedOutput]
+          required: [cobolSource, expectedOutput, cobolSourcePath, expectedOutputPath]
           properties:
             cobolSource: { type: string }
             expectedOutput: { type: string }
             cobolSourcePath: { type: string }
+            expectedOutputPath: { type: string }
 
     RunStartInput:
       type: object
