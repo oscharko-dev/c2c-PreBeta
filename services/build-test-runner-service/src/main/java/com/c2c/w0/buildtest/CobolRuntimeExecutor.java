@@ -48,7 +48,7 @@ final class CobolRuntimeExecutor {
             Path source = resolveCorpusSource(repoRoot, golden.cobolSource());
             String moduleName = moduleName(golden.programId());
             workingRoot = Files.createTempDirectory("c2c-cobol-golden-master-");
-            Path modulePath = workingRoot.resolve(moduleName + ".so");
+            Path modulePath = workingRoot.resolve(moduleFileName(moduleName));
 
             CommandResult compile = runCommand(List.of(
                     cobcCommand, "-m", "-o", modulePath.toString(), source.toString()),
@@ -101,6 +101,21 @@ final class CobolRuntimeExecutor {
             throw new IllegalArgumentException("COBOL programId is not a safe module name: " + programId);
         }
         return candidate;
+    }
+
+    static String moduleFileName(String moduleName) {
+        return moduleFileName(moduleName, System.getProperty("os.name", ""));
+    }
+
+    static String moduleFileName(String moduleName, String osName) {
+        String normalized = osName == null ? "" : osName.toLowerCase();
+        if (normalized.contains("mac") || normalized.contains("darwin")) {
+            return moduleName + ".dylib";
+        }
+        if (normalized.contains("win")) {
+            return moduleName + ".dll";
+        }
+        return moduleName + ".so";
     }
 
     private static VersionResult versionOf(String executable) {

@@ -62,6 +62,13 @@ class GoldenMasterTest {
     }
 
     @Test
+    void cobcrunModuleFileNameMatchesHostConvention() {
+        assertEquals("BRNCH01.dylib", CobolRuntimeExecutor.moduleFileName("BRNCH01", "Mac OS X"));
+        assertEquals("BRNCH01.so", CobolRuntimeExecutor.moduleFileName("BRNCH01", "Linux"));
+        assertEquals("BRNCH01.dll", CobolRuntimeExecutor.moduleFileName("BRNCH01", "Windows 11"));
+    }
+
+    @Test
     void expectedRefPathResolvesInsideRepoRoot() throws Exception {
         Path root = repoRoot();
         String relativePath = "corpus/synthetic/fixtures/branch-account-guard-output.txt";
