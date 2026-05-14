@@ -81,6 +81,7 @@ var allowedEventStatuses = map[string]struct{}{
 }
 
 var allowedPatternStates = map[string]struct{}{
+	"starting":          {},
 	"completed":         {},
 	"failed":            {},
 	"aborted":           {},
@@ -93,6 +94,11 @@ var allowedPatternStates = map[string]struct{}{
 	"started":           {},
 	"invoked":           {},
 	"ok":                {},
+	"output-divergence": {},
+	"compile-failed":    {},
+	"run-failed":        {},
+	"missing-golden-master": {},
+	"skipped":           {},
 }
 
 var allowedPolicyModes = map[string]struct{}{
