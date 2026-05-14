@@ -40,6 +40,11 @@ class W0CorpusGenerationTest {
     }
 
     @Test
+    void generatedJavaCompilesForArithmeticAdjustmentLedger() throws Exception {
+        runFixture("fixtures/semantic-ir/arithmetic-adjustment-ledger.ir.json", "ARITH01");
+    }
+
+    @Test
     void generatedProjectBuildsWithMavenLifecycle() throws Exception {
         Path repoRoot = findRepoRoot();
         Path fixture = repoRoot.resolve("fixtures/semantic-ir/branch-account-guard.ir.json");

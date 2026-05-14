@@ -17,6 +17,7 @@ class CobolParserTest {
     void parsesSelectedW0CorpusPrograms() throws Exception {
         for (String fixture : new String[]{
                 "branch-account-guard.cbl",
+                "arithmetic-adjustment-ledger.cbl",
                 "ctrl-decimal-payroll.cbl",
                 "decimal-batch-aggregator.cbl",
         }) {

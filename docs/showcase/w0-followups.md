@@ -93,14 +93,18 @@ take any open item without waiting for the others.
 
 ## F-W0-05 · Generator coverage beyond the checked-in W0 subset · [#68](https://github.com/oscharko-dev/c2c-PreBeta/issues/68)
 
-- **Symptom**: the checked-in W0 programs now match their synthetic Golden
-  Masters, but broader COBOL forms remain outside the implemented subset.
+- **Status**: fixed for `ARITH01`; broader COBOL forms should continue as
+  separate Wave 1 fixture issues.
+- **Symptom**: the original checked-in W0 programs match their synthetic
+  Golden Masters, but broader COBOL forms remain outside the implemented
+  subset.
 - **Service(s)**: `target-java-generation-service`.
-- **Proposed fix**: Wave 1 sequence covering each construct, each with its
-  own issue, ADR, fixture, and Golden Master byte-equal target.
+- **Fix**: `ARITH01` adds a fixture-backed `MOVE` / `SUBTRACT` /
+  `MULTIPLY ... GIVING` / `DIVIDE ... GIVING` / computed `DISPLAY` path with
+  a byte-equal Golden Master target.
 - **Owner**: generator.
-- **Acceptance**: new corpus programs beyond `BRNCH01`, `CTRLDEC01`, and
-  `BATCH01` report `classification: "match"` from the build-test runner.
+- **Acceptance**: `ARITH01` reports `classification: "match"` from the
+  build-test runner.
 
 ## Filing on GitHub
 

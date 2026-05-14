@@ -1,0 +1,338 @@
+{
+  "schemaVersion" : "v0",
+  "irId" : "ir-arith01-e8f26f638d5bd6e7c1a01b2f88128bd0",
+  "programId" : "ARITH01",
+  "sourceHash" : "e8f26f638d5bd6e7c1a01b2f88128bd06252cda6cecaaf6ae8ce46fa1e9b135c",
+  "sourceKind" : "cobol",
+  "symbols" : {
+    "WS-BASE-AMOUNT" : {
+      "id" : "d-ws-base-amount-2b43b6ce9a5b",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 6,
+      "numeric" : true,
+      "scale" : 2
+    },
+    "WS-DISCOUNT" : {
+      "id" : "d-ws-discount-90f929dc6940",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 7,
+      "numeric" : true,
+      "scale" : 2
+    },
+    "WS-NET" : {
+      "id" : "d-ws-net-d64e81b7fc84",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 8,
+      "numeric" : true,
+      "scale" : 2
+    },
+    "WS-FACTOR" : {
+      "id" : "d-ws-factor-460ebfa09e00",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 9,
+      "numeric" : true,
+      "scale" : 0
+    },
+    "WS-GROSS" : {
+      "id" : "d-ws-gross-2362a9fb29b0",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 10,
+      "numeric" : true,
+      "scale" : 2
+    },
+    "WS-DIVISOR" : {
+      "id" : "d-ws-divisor-e4f5806b821e",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 11,
+      "numeric" : true,
+      "scale" : 0
+    },
+    "WS-SPLIT" : {
+      "id" : "d-ws-split-4e742a1b6c68",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 12,
+      "numeric" : true,
+      "scale" : 2
+    }
+  },
+  "fieldLayouts" : [ {
+    "id" : "d-ws-base-amount-2b43b6ce9a5b",
+    "name" : "WS-BASE-AMOUNT",
+    "level" : 1,
+    "picture" : "S9(5)V99",
+    "byteSize" : 7,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "120.00",
+    "sourceLine" : 6
+  }, {
+    "id" : "d-ws-discount-90f929dc6940",
+    "name" : "WS-DISCOUNT",
+    "level" : 1,
+    "picture" : "S9(5)V99",
+    "byteSize" : 7,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "20.00",
+    "sourceLine" : 7
+  }, {
+    "id" : "d-ws-net-d64e81b7fc84",
+    "name" : "WS-NET",
+    "level" : 1,
+    "picture" : "S9(5)V99",
+    "byteSize" : 7,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "0",
+    "sourceLine" : 8
+  }, {
+    "id" : "d-ws-factor-460ebfa09e00",
+    "name" : "WS-FACTOR",
+    "level" : 1,
+    "picture" : "9",
+    "byteSize" : 1,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : false,
+    "scale" : 0,
+    "value" : "3",
+    "sourceLine" : 9
+  }, {
+    "id" : "d-ws-gross-2362a9fb29b0",
+    "name" : "WS-GROSS",
+    "level" : 1,
+    "picture" : "S9(5)V99",
+    "byteSize" : 7,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "0",
+    "sourceLine" : 10
+  }, {
+    "id" : "d-ws-divisor-e4f5806b821e",
+    "name" : "WS-DIVISOR",
+    "level" : 1,
+    "picture" : "9",
+    "byteSize" : 1,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : false,
+    "scale" : 0,
+    "value" : "2",
+    "sourceLine" : 11
+  }, {
+    "id" : "d-ws-split-4e742a1b6c68",
+    "name" : "WS-SPLIT",
+    "level" : 1,
+    "picture" : "S9(5)V99",
+    "byteSize" : 7,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "0",
+    "sourceLine" : 12
+  } ],
+  "statements" : [ {
+    "id" : "s-move-097730b62965",
+    "operation" : "move",
+    "sourceLine" : 15,
+    "operands" : {
+      "source" : "WS-BASE-AMOUNT",
+      "targets" : [ "WS-NET" ]
+    },
+    "raw" : "MOVE WS-BASE-AMOUNT TO WS-NET"
+  }, {
+    "id" : "s-subtract-476c27f6cda1",
+    "operation" : "subtract",
+    "sourceLine" : 16,
+    "operands" : {
+      "tokens" : [ "SUBTRACT", "WS-DISCOUNT", "FROM", "WS-NET" ],
+      "sources" : [ "WS-DISCOUNT" ],
+      "targets" : [ "WS-NET" ],
+      "arithmeticModel" : {
+        "operation" : "subtract",
+        "sources" : [ "WS-DISCOUNT" ],
+        "targets" : [ "WS-NET" ]
+      }
+    },
+    "raw" : "SUBTRACT WS-DISCOUNT FROM WS-NET"
+  }, {
+    "id" : "s-multiply-3ca689ca9cac",
+    "operation" : "multiply",
+    "sourceLine" : 17,
+    "operands" : {
+      "tokens" : [ "MULTIPLY", "WS-NET", "BY", "WS-FACTOR", "GIVING", "WS-GROSS" ],
+      "source" : "WS-NET",
+      "by" : "WS-FACTOR",
+      "target" : "WS-GROSS",
+      "arithmeticModel" : {
+        "operation" : "multiply",
+        "source" : "WS-NET",
+        "by" : "WS-FACTOR",
+        "target" : "WS-GROSS"
+      }
+    },
+    "raw" : "MULTIPLY WS-NET BY WS-FACTOR GIVING WS-GROSS"
+  }, {
+    "id" : "s-divide-7fde9b8052ce",
+    "operation" : "divide",
+    "sourceLine" : 18,
+    "operands" : {
+      "tokens" : [ "DIVIDE", "WS-GROSS", "BY", "WS-DIVISOR", "GIVING", "WS-SPLIT" ],
+      "dividend" : "WS-GROSS",
+      "divisor" : "WS-DIVISOR",
+      "target" : "WS-SPLIT",
+      "arithmeticModel" : {
+        "operation" : "divide",
+        "dividend" : "WS-GROSS",
+        "divisor" : "WS-DIVISOR",
+        "target" : "WS-SPLIT"
+      }
+    },
+    "raw" : "DIVIDE WS-GROSS BY WS-DIVISOR GIVING WS-SPLIT"
+  }, {
+    "id" : "s-display-a94f05cb064d",
+    "operation" : "display",
+    "sourceLine" : 19,
+    "operands" : {
+      "items" : [ "\"NET=\"", "WS-NET" ]
+    },
+    "raw" : "DISPLAY \"NET=\" WS-NET"
+  }, {
+    "id" : "s-display-3942291813ee",
+    "operation" : "display",
+    "sourceLine" : 20,
+    "operands" : {
+      "items" : [ "\"GROSS=\"", "WS-GROSS" ]
+    },
+    "raw" : "DISPLAY \"GROSS=\" WS-GROSS"
+  }, {
+    "id" : "s-display-da31b67bc80d",
+    "operation" : "display",
+    "sourceLine" : 21,
+    "operands" : {
+      "items" : [ "\"SPLIT=\"", "WS-SPLIT" ]
+    },
+    "raw" : "DISPLAY \"SPLIT=\" WS-SPLIT"
+  }, {
+    "id" : "s-stop-69339491a2f3",
+    "operation" : "stop",
+    "sourceLine" : 22,
+    "operands" : { },
+    "raw" : "STOP RUN."
+  } ],
+  "controlFlow" : [ {
+    "id" : "e-s-move-097730b62965-s-subtract-476c27f6cda1-next",
+    "from" : "s-move-097730b62965",
+    "to" : "s-subtract-476c27f6cda1",
+    "label" : "next"
+  }, {
+    "id" : "e-s-subtract-476c27f6cda1-s-multiply-3ca689ca9cac-next",
+    "from" : "s-subtract-476c27f6cda1",
+    "to" : "s-multiply-3ca689ca9cac",
+    "label" : "next"
+  }, {
+    "id" : "e-s-multiply-3ca689ca9cac-s-divide-7fde9b8052ce-next",
+    "from" : "s-multiply-3ca689ca9cac",
+    "to" : "s-divide-7fde9b8052ce",
+    "label" : "next"
+  }, {
+    "id" : "e-s-divide-7fde9b8052ce-s-display-a94f05cb064d-next",
+    "from" : "s-divide-7fde9b8052ce",
+    "to" : "s-display-a94f05cb064d",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-a94f05cb064d-s-display-3942291813ee-next",
+    "from" : "s-display-a94f05cb064d",
+    "to" : "s-display-3942291813ee",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-3942291813ee-s-display-da31b67bc80d-next",
+    "from" : "s-display-3942291813ee",
+    "to" : "s-display-da31b67bc80d",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-da31b67bc80d-s-stop-69339491a2f3-next",
+    "from" : "s-display-da31b67bc80d",
+    "to" : "s-stop-69339491a2f3",
+    "label" : "next"
+  } ],
+  "assumptions" : [ "W0 assumes display-compatible fixed-point decimal semantics for PIC S9/V fields.", "W0 control-flow edges are structural and intentionally conservative." ],
+  "traceability" : {
+    "d-ws-base-amount-2b43b6ce9a5b" : {
+      "raw" : "WS-BASE-AMOUNT",
+      "line" : 6
+    },
+    "d-ws-discount-90f929dc6940" : {
+      "raw" : "WS-DISCOUNT",
+      "line" : 7
+    },
+    "d-ws-net-d64e81b7fc84" : {
+      "raw" : "WS-NET",
+      "line" : 8
+    },
+    "d-ws-factor-460ebfa09e00" : {
+      "raw" : "WS-FACTOR",
+      "line" : 9
+    },
+    "d-ws-gross-2362a9fb29b0" : {
+      "raw" : "WS-GROSS",
+      "line" : 10
+    },
+    "d-ws-divisor-e4f5806b821e" : {
+      "raw" : "WS-DIVISOR",
+      "line" : 11
+    },
+    "d-ws-split-4e742a1b6c68" : {
+      "raw" : "WS-SPLIT",
+      "line" : 12
+    },
+    "s-move-097730b62965" : {
+      "raw" : "MOVE WS-BASE-AMOUNT TO WS-NET",
+      "line" : 15
+    },
+    "s-subtract-476c27f6cda1" : {
+      "raw" : "SUBTRACT WS-DISCOUNT FROM WS-NET",
+      "line" : 16
+    },
+    "s-multiply-3ca689ca9cac" : {
+      "raw" : "MULTIPLY WS-NET BY WS-FACTOR GIVING WS-GROSS",
+      "line" : 17
+    },
+    "s-divide-7fde9b8052ce" : {
+      "raw" : "DIVIDE WS-GROSS BY WS-DIVISOR GIVING WS-SPLIT",
+      "line" : 18
+    },
+    "s-display-a94f05cb064d" : {
+      "raw" : "DISPLAY \"NET=\" WS-NET",
+      "line" : 19
+    },
+    "s-display-3942291813ee" : {
+      "raw" : "DISPLAY \"GROSS=\" WS-GROSS",
+      "line" : 20
+    },
+    "s-display-da31b67bc80d" : {
+      "raw" : "DISPLAY \"SPLIT=\" WS-SPLIT",
+      "line" : 21
+    },
+    "s-stop-69339491a2f3" : {
+      "raw" : "STOP RUN.",
+      "line" : 22
+    }
+  }
+}

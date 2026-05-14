@@ -95,9 +95,9 @@ class GoldenMasterTest {
     }
 
     @Test
-    void registryLookupCoversAllThreeW0Programs() {
+    void registryLookupCoversAllFourW0Programs() {
         Path root = repoRoot();
-        for (String programId : new String[]{"BRNCH01", "CTRLDEC01", "BATCH01"}) {
+        for (String programId : new String[]{"BRNCH01", "ARITH01", "CTRLDEC01", "BATCH01"}) {
             Optional<GoldenMaster.Resolved> resolved =
                     GoldenMaster.resolve(programId, Map.of(), root);
             assertTrue(resolved.isPresent(), "missing Golden Master for " + programId);
