@@ -12,6 +12,12 @@ assignees: ''
 ## Scope
 [Clearly define what is in scope. Remember: No implementation happens without an issue.]
 
+## Governance Checklist
+- [ ] Required: This is an implementation task, not work outside governance.
+- [ ] Required: Follow-up scope is explicitly listed in Out of Scope.
+- [ ] Required: Ownership is assigned (one owner before coding starts).
+- [ ] Required: Branch naming follows issue rule (`issue-<number>-<short-description>`).
+
 ## Deliverables
 - [ ] Deliverable 1
 - [ ] Deliverable 2
