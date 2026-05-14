@@ -397,40 +397,10 @@ run_program() {
     >"$modelLedger"
   modelRef="$(data_ref_json "$modelLedger" "urn:c2c/model-invocations/$runId")"
 
-  # Trajectory ledger for this run. The harness `/v0/runs/{id}/ledger`
-  # endpoint requires unique stepIds per run, but the W0 capability services
-  # currently all emit stepId=1 by default (orchestrator is expected to
-  # rewrite them in the harness-driven path). Tracked as a follow-up under
-  # docs/showcase/w0-followups.md. Until then, we build a schema-conformant
-  # ledger client-side, renumbering steps in arrival order so the manifest
-  # has a real ledger to reference.
+  # Trajectory ledger for this run from the harness source of truth.
   local trajectoryLedger="$outDir/11-trajectory-ledger.json"
-  jq --arg runId "$runId" \
-     --arg workflowId "$workflowId" \
-     --arg capturedAt "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '
-    ([ .[] | select(.runId == $runId) ]) as $events
-    | {schemaVersion:"v0",
-       runId:$runId,
-       status:(($events | last).status // "completed"),
-       workflowId:$workflowId,
-       startedAt:(($events | first).createdAt),
-       capturedAt:$capturedAt,
-       steps:([
-         range(0; ($events|length)) as $i
-         | $events[$i] as $e
-         | {eventId:$e.eventId,
-            stepId:($i + 1),
-            actor:$e.actor,
-            capability:$e.capability,
-            dataClass:$e.dataClass,
-            eventType:$e.eventType,
-            stateTransition:$e.stateTransition,
-            status:$e.status,
-            inputRef:$e.inputRef,
-            outputRef:$e.outputRef,
-            createdAt:$e.createdAt}
-       ])}' \
-     "$harnessSnapshot" >"$trajectoryLedger"
+  curl -fsS "$HARNESS_URL/v0/runs/$runId/ledger" >"$trajectoryLedger" \
+    || fail "$programId: failed to fetch harness trajectory ledger"
   trajRef="$(data_ref_json "$trajectoryLedger" "urn:c2c/trajectory-ledger/$runId")"
 
   local createBody="$outDir/12-evidence-create.json"
@@ -625,28 +595,8 @@ ingest_experience() {
   curl -fsS "$HARNESS_URL/v0/events" >"$snapshot" \
     || fail "failed to snapshot harness events"
 
-  # The experience-learning service's harness-event ingest enforces
-  # `status in {observed, ignored}` (an experience-pattern enum), but raw
-  # harness EventEnvelope statuses are e.g. "ok"/"output-divergence". This
-  # is a documented W0 contract gap (see docs/showcase/w0-followups.md). For
-  # the demo we re-stamp every harness event's status to "observed" so the
-  # analyzer can run end-to-end and produce real experience events from real
-  # harness inputs.
-  # The experience-learning service's harness-event ingest restricts status
-  # to a known pattern enum (ok, completed, failed, started, invoked, ...).
-  # The W0 capability services emit "starting" and "output-divergence"
-  # which are not in that enum. Map them to compatible values so the demo
-  # can flow end-to-end. Tracked in docs/showcase/w0-followups.md.
   local normalized="$EVENT_DIR/harness-events-observed.json"
-  jq '[
-    .[]
-    | .status |= (
-        if . == "starting" then "started"
-        elif . == "output-divergence" then "failed"
-        elif . == "compile-failed" or . == "run-failed" or . == "missing-golden-master" then "failed"
-        elif . == null or . == "" then "completed"
-        else . end)
-  ]' "$snapshot" >"$normalized"
+  cp "$snapshot" "$normalized"
   local ingestStatus
   ingestStatus="$(curl -sS -o "$EVENT_DIR/experience-harness-ingest-response.json" \
     -w "%{http_code}" \
