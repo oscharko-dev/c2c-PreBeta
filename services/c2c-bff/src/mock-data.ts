@@ -16,12 +16,15 @@ export interface MockRunOutcome {
       | 'compile-failed'
       | 'run-failed'
       | 'output-divergence'
+      | 'golden-master-reproduction-failed'
       | 'missing-golden-master'
       | 'skipped';
     classification:
       | 'match'
       | 'divergence-known-w0-coverage-gap'
       | 'divergence-unknown'
+      | 'true-golden-master-reproduction-error'
+      | 'true-golden-master-mismatch'
       | 'compile-error'
       | 'run-error'
       | 'skipped-no-execution';

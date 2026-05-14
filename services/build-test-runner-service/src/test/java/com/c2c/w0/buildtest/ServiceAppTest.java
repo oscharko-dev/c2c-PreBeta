@@ -14,7 +14,13 @@ class ServiceAppTest {
 
     @Test
     void httpStatusIsAlwaysTwoHundredForStructuredOutcomes() {
-        for (String status : new String[]{"ok", "compile-failed", "run-failed", "output-divergence"}) {
+        for (String status : new String[]{
+                "ok",
+                "compile-failed",
+                "run-failed",
+                "output-divergence",
+                "golden-master-reproduction-failed",
+        }) {
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("status", status);
             assertEquals(200, ServiceApp.httpStatus(response),

@@ -47,6 +47,7 @@ func TestStatusValidationSeparatesHarnessAndExperienceDomains(t *testing.T) {
 		"output-divergence",
 		"compile-failed",
 		"run-failed",
+		"golden-master-reproduction-failed",
 		"missing-golden-master",
 		"producer-custom-status",
 		"ok",

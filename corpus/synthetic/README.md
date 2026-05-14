@@ -17,8 +17,10 @@ and consumed by
 [`build-test-runner-service`](../../services/build-test-runner-service/) to
 classify the verification outcome of a generated Java project.
 
-Every W0 entry is **synthetic** (hand-curated expected output) rather than a
-**true** Golden Master (output captured from a COBOL runtime such as
-`cobcrun`). The Java generator now matches these fixtures for the selected W0
-`PERFORM`, `EVALUATE`, `IF`, arithmetic, `DISPLAY`, and `OCCURS` subset.
-Future waves will add real GnuCOBOL re-execution and pin its stdout by SHA-256.
+`BRNCH01` is a **true** Golden Master: its expected output is reproducible by
+compiling `programs/branch-account-guard.cbl` with GnuCOBOL `cobc -m` and
+executing the module with `cobcrun BRNCH01`. The remaining W0 entries are still
+**synthetic** (hand-curated expected output) until they are promoted through the
+same runtime reproduction path. The Java generator now matches all three
+fixtures for the selected W0 `PERFORM`, `EVALUATE`, `IF`, arithmetic,
+`DISPLAY`, and `OCCURS` subset.

@@ -133,9 +133,9 @@ to remove or weaken any of the W0 acceptance bars below.
 - **COBOL coverage beyond the selected W0 subset.** The generator now covers the
   checked-in W0 arithmetic/control-flow/OCCURS fixtures byte-for-byte, but it is
   still not a feature-complete COBOL translator.
-- **True `cobcrun` golden masters.** All W0 fixtures are documented as
-  `synthetic`. Hosting `cobc` in CI and re-running fixtures under it is a
-  Wave 1 task — see [`w0-followups.md`](../showcase/w0-followups.md).
+- **Full true `cobcrun` coverage.** BRNCH01 is now a true Golden Master
+  reproduced by GnuCOBOL `cobcrun`; CTRLDEC01 and BATCH01 remain documented
+  synthetic fixtures until a later fixture-hardening pass promotes them.
 - **Model gateway.** Zero model calls in W0. Wave 1 will exercise
   `model-gateway-service` end-to-end with a documented allowlist.
 - **Harness-driven orchestration semantics.** The W0 demo registers every
@@ -151,8 +151,9 @@ to remove or weaken any of the W0 acceptance bars below.
   Pack v0 + Harness ledger + Experience Learning analysis for three
   documented synthetic COBOL programs.
 - **Out of scope for W0**: Wave 1 feature implementation, customer pilot
-  onboarding, claims of production readiness, true `cobcrun` reproduction,
-  model-gateway exercise, multi-tenant authentication.
+  onboarding, claims of production readiness, complete true `cobcrun`
+  coverage for every fixture, model-gateway exercise, multi-tenant
+  authentication.
 
 ## Re-evidencing this gate
 

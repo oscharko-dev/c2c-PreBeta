@@ -39,7 +39,9 @@ The W0 corpus is the three synthetic COBOL programs under
 [`corpus/synthetic/programs/`](../../corpus/synthetic/programs/):
 `BRNCH01`, `CTRLDEC01`, `BATCH01`. All three are
 [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
-entries with `classification: "synthetic"` and `knownDivergenceAtW0: false`.
+entries with `knownDivergenceAtW0: false`; `BRNCH01` is
+`classification: "true"` and is reproduced through GnuCOBOL `cobcrun`, while
+`CTRLDEC01` and `BATCH01` remain `classification: "synthetic"`.
 
 ## Honest expectations for W0
 
@@ -53,8 +55,9 @@ corpus. The acceptance bar is therefore:
 - `classification == match` for every program.
 - Evidence Pack `status == complete` and `validation.ok == true` for every program.
 
-Anything else (especially `divergence-unknown`, `compile-failed`,
-`run-failed`, or `validation.ok == false`) is a release-gate fail.
+Anything else (especially `divergence-unknown`,
+`golden-master-reproduction-failed`, `compile-failed`, `run-failed`, or
+`validation.ok == false`) is a release-gate fail.
 
 Today's recorded outcome is in [w0-scorecard.md](w0-scorecard.md).
 

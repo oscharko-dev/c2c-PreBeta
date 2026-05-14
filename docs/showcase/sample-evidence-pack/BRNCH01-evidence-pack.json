@@ -55,8 +55,8 @@
     "buildTestResults": [
       {
         "uri": "urn:c2c/build-test/BRNCH01/run-1",
-        "sha256": "ee901b50be6204607b80a5a42e072d073bd0a7c28ae89911a51e66670def7eb1",
-        "byteSize": 1971,
+        "sha256": "a0bc4c017959aa356178f89264754f44c8ce6d4724a2fe38783583015d38d236",
+        "byteSize": 2727,
         "mimeType": "application/json",
         "kind": "evidence-input"
       }
@@ -70,16 +70,16 @@
     },
     "trajectoryLedger": {
       "uri": "urn:c2c/trajectory-ledger/run-1",
-      "sha256": "0ab4c15ea3e969de03d1f11c77c8bca93b1b50783e81b6e830dd87c6da15c74c",
-      "byteSize": 4526,
+      "sha256": "8ecae855679a6afe8ebb49edff14d27a792406af3f8cb8b267b65126c22c032c",
+      "byteSize": 5709,
       "mimeType": "application/json",
       "kind": "evidence-input"
     }
   },
   "openAssumptions": [
     {
-      "id": "synthetic-golden-master",
-      "description": "W0 generated Java matches the synthetic Golden Master fixtures; true cobcrun-produced fixtures remain a Wave 1 follow-up."
+      "id": "mixed-golden-master-provenance",
+      "description": "BRNCH01 is reproduced through GnuCOBOL cobcrun; CTRLDEC01 and BATCH01 remain synthetic Golden Master fixtures."
     }
   ],
   "validation": {

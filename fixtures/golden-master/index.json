@@ -1,14 +1,14 @@
 {
   "schemaVersion": "v0",
-  "description": "Golden Master registry consumed by build-test-runner-service. Each entry maps a COBOL programId to an expected stdout fixture and records whether the fixture was produced by a true COBOL runtime (e.g. GnuCOBOL cobcrun) or hand-curated as a synthetic expected output. W0 entries are all synthetic; true GnuCOBOL re-execution will be added in a follow-up wave once the host CI image carries cobc.",
+  "description": "Golden Master registry consumed by build-test-runner-service. Each entry maps a COBOL programId to an expected stdout fixture and records whether the fixture was produced by a true COBOL runtime (e.g. GnuCOBOL cobcrun) or hand-curated as a synthetic expected output. Entries with classification true are recompiled with cobc and re-executed with cobcrun by the runner when output comparison is enabled.",
   "entries": [
     {
       "programId": "BRNCH01",
       "cobolSource": "corpus/synthetic/programs/branch-account-guard.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/branch-account-guard-output.txt",
-      "classification": "synthetic",
+      "classification": "true",
       "knownDivergenceAtW0": false,
-      "rationale": "Synthetic expected output now matches generated Java for the W0 PERFORM/EVALUATE/IF/ADD/OCCURS subset."
+      "rationale": "Expected output was reproduced from corpus/synthetic/programs/branch-account-guard.cbl with GnuCOBOL cobc -m and cobcrun BRNCH01."
     },
     {
       "programId": "CTRLDEC01",

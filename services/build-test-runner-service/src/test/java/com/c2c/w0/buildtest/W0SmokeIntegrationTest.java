@@ -14,6 +14,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * End-to-end W0 smoke verification: for each of the three W0 corpus IR
@@ -22,7 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * with a registered Golden Master comparison.
  * <p>
  * Generation is expected to succeed, compile cleanly, execute, and match the
- * synthetic Golden Master fixtures for the W0 arithmetic/control-flow subset.
+ * Golden Master fixtures for the W0 arithmetic/control-flow subset. Fixtures
+ * classified as {@code true} must also reproduce through GnuCOBOL.
  */
 class W0SmokeIntegrationTest {
 
@@ -67,6 +69,10 @@ class W0SmokeIntegrationTest {
         Path repo = repoRoot();
         Path fixture = repo.resolve(relativePath);
         assertTrue(Files.exists(fixture), "fixture not found: " + fixture);
+        if ("true".equals(expectedGoldenClassification(programId))) {
+            assumeTrue(CobolRuntimeExecutor.isAvailable(),
+                    "GnuCOBOL cobc/cobcrun must be installed for true Golden Master verification");
+        }
 
         Map<String, Object> ir = JSON.readValue(Files.readString(fixture), Map.class);
         Map<String, Object> generation = generator.generate(Map.of(
@@ -89,10 +95,22 @@ class W0SmokeIntegrationTest {
 
         Map<?, ?> golden = (Map<?, ?>) result.get("goldenMaster");
         assertNotNull(golden, "goldenMaster section must be present for " + programId);
-        assertEquals("synthetic", golden.get("classification"),
-                "W0 fixtures are documented as synthetic for " + programId);
+        assertEquals(expectedGoldenClassification(programId), golden.get("classification"),
+                "unexpected Golden Master classification for " + programId);
         assertEquals(false, golden.get("knownDivergenceAtW0"),
                 "W0 entry should no longer declare a known generator divergence for " + programId);
+        if ("true".equals(golden.get("classification"))) {
+            Map<?, ?> cobolRuntime = (Map<?, ?>) golden.get("cobolRuntime");
+            assertNotNull(cobolRuntime, "true Golden Master must include cobcrun verification for " + programId);
+            assertEquals(true, cobolRuntime.get("available"),
+                    "GnuCOBOL must be available for true Golden Master verification");
+            assertEquals(true, cobolRuntime.get("compileOk"),
+                    "cobc must compile the true Golden Master for " + programId + ": " + cobolRuntime);
+            assertEquals(true, cobolRuntime.get("ran"),
+                    "cobcrun must execute the true Golden Master for " + programId + ": " + cobolRuntime);
+            assertEquals(true, cobolRuntime.get("matched"),
+                    "cobcrun stdout must match the checked-in fixture for " + programId + ": " + cobolRuntime);
+        }
 
         Object classification = result.get("classification");
         assertEquals("match", String.valueOf(classification),
@@ -106,6 +124,10 @@ class W0SmokeIntegrationTest {
         assertNotNull(execution.get("stdoutSha256"));
 
         return result;
+    }
+
+    private static String expectedGoldenClassification(String programId) {
+        return "BRNCH01".equals(programId) ? "true" : "synthetic";
     }
 
     private static Path repoRoot() {

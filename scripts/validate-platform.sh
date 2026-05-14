@@ -61,6 +61,7 @@ for f in \
   services/build-test-runner-service/pom.xml \
   services/build-test-runner-service/openapi.yaml \
   services/build-test-runner-service/Dockerfile \
+  services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/CobolRuntimeExecutor.java \
   services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/BuildTestRunnerService.java \
   services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/ServiceApp.java \
   services/build-test-runner-service/src/test/java/com/c2c/w0/buildtest/BuildTestRunnerServiceTest.java \

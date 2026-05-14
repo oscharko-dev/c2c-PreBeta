@@ -57,21 +57,21 @@ take any open item without waiting for the others.
 
 ## F-W0-03 · True `cobcrun` Golden Masters · [#66](https://github.com/oscharko-dev/c2c-PreBeta/issues/66)
 
-- **Symptom**: every fixture in
+- **Status**: fixed for the first W0 fixture. `BRNCH01` is now
+  `classification: "true"` in
   [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
-  is `classification: "synthetic"`. The runner has a code path that detects
-  `cobcrun` and re-executes the COBOL source, but the CI image does not
-  carry `cobc`, so the synthetic path is always taken.
+  and the runner recompiles it with `cobc -m` before executing
+  `cobcrun BRNCH01`.
 - **Service(s)**: `build-test-runner-service` (`GoldenMaster*`),
   `.github/workflows/`, repo CI image.
-- **Proposed fix**: add GnuCOBOL (`cobc`) to the CI base image, set
-  `classification: "true"` for at least one W0 fixture, and gate the W0 demo
-  on byte-equal stdout (which will fail until the generator extends past the
-  W0 subset).
+- **Implemented fix**: CI installs GnuCOBOL (`cobc`/`cobcrun`), true fixtures
+  are reproduced through `cobcrun`, and non-reproducible true fixtures fail as
+  `golden-master-reproduction-failed` instead of being treated as generated
+  Java divergences or documented synthetic W0 gaps.
 - **Owner**: platform / verification.
-- **Acceptance**: at least one fixture is `classification: "true"` with a
-  reproducible `cobcrun` output committed under
-  `corpus/synthetic/fixtures/`.
+- **Remaining scope**: `CTRLDEC01` and `BATCH01` remain labelled synthetic
+  until their COBOL-runtime output is promoted in a later fixture-hardening
+  pass.
 
 ## F-W0-04 · Model gateway invocation in W0 demo · [#67](https://github.com/oscharko-dev/c2c-PreBeta/issues/67)
 
