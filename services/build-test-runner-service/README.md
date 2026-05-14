@@ -31,6 +31,18 @@ worker hardening pass is a future-wave concern.
   optional Golden Master hint. Returns a `BuildTestResult` envelope conforming
   to [`schemas/build-test-result-v0.json`](../../schemas/build-test-result-v0.json).
 
+## Toolchain requirements
+
+The W0 registry contains at least one true Golden Master. Java verification
+therefore requires GnuCOBOL in addition to Maven/JDK:
+
+```bash
+cobc --version
+cobcrun --version
+```
+
+On Ubuntu 24.04 CI this is installed with `apt-get install -y gnucobol3`.
+
 ## Safety constraints
 
 - Only the JDK in-process compile and run paths are exercised. No shelling
@@ -40,10 +52,13 @@ worker hardening pass is a future-wave concern.
   hang the runner.
 - File materialisation rejects relative paths that escape the working root
   via `..` segments or absolute paths.
-- The optional Golden Master executor for true GnuCOBOL output is gated on a
-  detected `cobcrun` binary AND on the source path being inside the
-  repository corpus directory; in W0 it is not invoked, all checked-in
-  fixtures are documented as synthetic.
+- True Golden Master reproduction is allowed only for checked-in COBOL
+  sources under the repository `corpus/` directory. The runner compiles those
+  fixtures with `cobc -m`, executes them with `cobcrun`, and treats
+  non-reproducible true fixtures as
+  `golden-master-reproduction-failed`/`true-golden-master-reproduction-error`
+  rather than as a generated-Java divergence or documented W0 synthetic
+  coverage gap.
 
 ## Inputs
 
@@ -61,10 +76,11 @@ unless an inline Golden Master is provided.
 ## Outputs
 
 - `status`: one of `ok`, `compile-failed`, `run-failed`, `output-divergence`,
-  `missing-golden-master`, `skipped`.
+  `golden-master-reproduction-failed`, `missing-golden-master`, `skipped`.
 - `classification`: a coarse evidence classifier — `match`,
   `divergence-known-w0-coverage-gap`, `divergence-unknown`, `compile-error`,
-  `run-error`, or `skipped-no-execution`.
+  `run-error`, `true-golden-master-reproduction-error`,
+  `true-golden-master-mismatch`, or `skipped-no-execution`.
 - `outputRef`: a hash-stamped reference to the canonical result JSON.
 
 See [`docs/build-test-runner-service/README.md`](../../docs/build-test-runner-service/README.md)

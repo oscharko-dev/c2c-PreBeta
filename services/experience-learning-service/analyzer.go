@@ -634,7 +634,7 @@ func classifyBuildOutcome(event EventEnvelopeV0) string {
 	if status == "compile-failed" || outcome == "compile" || strings.Contains(eventType, "compile") {
 		return "compile"
 	}
-	if status == "run-failed" || status == "output-divergence" || outcome == "test" || strings.Contains(eventType, "test") || dataClass == dataClassTest {
+	if status == "run-failed" || status == "output-divergence" || status == "golden-master-reproduction-failed" || outcome == "test" || strings.Contains(eventType, "test") || dataClass == dataClassTest {
 		return "test"
 	}
 	if dataClass == dataClassBuildTest || strings.Contains(eventType, "build") {
@@ -663,7 +663,7 @@ func harnessStatusForAnalysis(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "starting":
 		return "started"
-	case "output-divergence", "compile-failed", "run-failed":
+	case "output-divergence", "compile-failed", "run-failed", "golden-master-reproduction-failed":
 		return "failed"
 	default:
 		return strings.ToLower(strings.TrimSpace(status))

@@ -42,6 +42,10 @@ The recommended invocation from the repository root, mirroring CI:
 (cd libs/c2c-target-java-runtime && mvn -q -DskipTests install)
 (cd services/target-java-generation-service && mvn -q -DskipTests install)
 
+# Required for entries with classification "true".
+cobc --version
+cobcrun --version
+
 # Build + test build-test-runner-service. This runs the W0 smoke
 # integration test that drives all three corpus programs end-to-end.
 (cd services/build-test-runner-service && mvn -q test)
@@ -86,15 +90,18 @@ The response conforms to
 [`schemas/build-test-result-v0.json`](../../schemas/build-test-result-v0.json).
 
 - `status` — `ok`, `compile-failed`, `run-failed`, `output-divergence`,
-  `missing-golden-master`, or `skipped`.
+  `golden-master-reproduction-failed`, `missing-golden-master`, or
+  `skipped`.
 - `classification` — `match`, `divergence-known-w0-coverage-gap`,
-  `divergence-unknown`, `compile-error`, `run-error`,
+  `divergence-unknown`, `true-golden-master-reproduction-error`,
+  `true-golden-master-mismatch`, `compile-error`, `run-error`,
   `skipped-no-execution`, or `missing-golden-master`.
 - `build` — javac diagnostics and source/file counts.
 - `execution` — captured stdout, stderr, duration, and `stdoutSha256`.
 - `goldenMaster` — the resolved fixture's expected text, classification
-  (`true` vs `synthetic`), source path, `expectedSha256`, and the
-  `knownDivergenceAtW0` flag.
+  (`true` vs `synthetic`), expected-output source path, COBOL source path,
+  `expectedSha256`, `knownDivergenceAtW0`, and, for true fixtures, the
+  `cobolRuntime` reproduction result.
 - `comparison` — `matched`, `actualSha256`, `expectedSha256`, plus a brief
   diff summary when divergent.
 - `outputRef` — canonical `urn:` URI + SHA-256 + byte size; this is the
@@ -117,10 +124,14 @@ program, each with:
   `divergence-unknown`.
 - `rationale` — human prose explaining the classification choice.
 
-All three W0 entries are `synthetic` and now `knownDivergenceAtW0=false`
-because generated Java matches the checked-in fixtures. Future waves will add
-true Golden Masters by re-executing the COBOL programs in a GnuCOBOL container
-and pinning the resulting stdout by hash.
+`BRNCH01` is the first W0 entry classified as `true`. The runner recompiles
+`corpus/synthetic/programs/branch-account-guard.cbl` with `cobc -m`, executes
+the resulting module with `cobcrun BRNCH01`, and requires byte-equal stdout
+against `corpus/synthetic/fixtures/branch-account-guard-output.txt` before it
+accepts the fixture as a valid oracle. The remaining W0 entries stay
+`synthetic` and `knownDivergenceAtW0=false` because generated Java matches the
+checked-in fixtures but their expected output has not yet been promoted to a
+COBOL-runtime-produced Golden Master.
 
 ## Safety constraints
 
@@ -135,10 +146,11 @@ and pinning the resulting stdout by hash.
   disk.
 - Golden Master path resolution rejects paths that escape the repository
   root.
-- Optional GnuCOBOL re-execution (future wave) is gated on a detected
-  `cobcrun` binary AND on the COBOL source path being inside the corpus
-  directory. W0 ships no such invocation; all checked-in expected outputs
-  are documented as synthetic.
+- GnuCOBOL re-execution is gated on detected `cobc`/`cobcrun` binaries and on
+  the COBOL source path being inside the corpus directory. A true fixture that
+  cannot be compiled, run, or matched is classified as
+  `golden-master-reproduction-failed`, separate from generated-Java output
+  divergences and documented synthetic W0 gaps.
 
 ## Relationship to other W0 services
 

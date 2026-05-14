@@ -523,7 +523,7 @@ run_program() {
         runtimeVersion:{id:"c2c-target-java-runtime:v0"}
       },
       openAssumptions:[
-        {id:"synthetic-golden-master", description:"W0 generated Java matches the synthetic Golden Master fixtures; true cobcrun-produced fixtures remain a Wave 1 follow-up."}
+        {id:"mixed-golden-master-provenance", description:"BRNCH01 is reproduced through GnuCOBOL cobcrun; CTRLDEC01 and BATCH01 remain synthetic Golden Master fixtures."}
       ]}' \
     >"$createBody"
 
@@ -770,7 +770,7 @@ write_scorecard() {
     echo
     echo "- The W0 Java generator now translates the selected W0 PERFORM/EVALUATE/IF/ADD/COMPUTE/OCCURS subset"
     echo "  and the acceptance bar is \`classification == match\` for every program."
-    echo "- W0 fixtures are synthetic. True \`cobcrun\` golden masters are a Wave 1 follow-up."
+    echo "- BRNCH01 is a true \`cobcrun\` Golden Master; CTRLDEC01 and BATCH01 remain synthetic fixtures."
     echo "- Model-gateway-service is not exercised end-to-end in W0; the manifest"
     echo "  records an explicit \`status: \"skipped\"\` model invocation entry for honesty."
     echo "- The Evidence Pack manifest references content by sha256 only; no raw"

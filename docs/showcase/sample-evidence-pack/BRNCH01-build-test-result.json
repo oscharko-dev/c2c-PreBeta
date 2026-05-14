@@ -27,18 +27,42 @@
     "stdoutSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec"
   },
   "goldenMaster": {
-    "classification": "synthetic",
+    "classification": "true",
+    "cobolRuntime": {
+      "attempted": true,
+      "available": true,
+      "cobcVersion": "cobc (GnuCOBOL) 3.1.2.0",
+      "cobcrunVersion": "cobcrun (GnuCOBOL) 3.1.2.0",
+      "cobolSource": "corpus/synthetic/programs/branch-account-guard.cbl",
+      "compileExitCode": 0,
+      "compileOk": true,
+      "compiler": "cobc",
+      "durationMs": 0,
+      "exitCode": 0,
+      "matched": true,
+      "moduleName": "BRNCH01",
+      "ok": true,
+      "programId": "BRNCH01",
+      "ran": true,
+      "reason": "",
+      "runtime": "cobcrun",
+      "stderr": "",
+      "stdout": "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+      "stdoutSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec"
+    },
+    "cobolSource": "corpus/synthetic/programs/branch-account-guard.cbl",
     "expected": "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
     "expectedSha256": "a3701fd0f135513db0bbc1eb429f1741782c1b3265c9502a9511e07ad03a33ec",
     "knownDivergenceAtW0": false,
+    "programId": "BRNCH01",
     "source": "corpus/synthetic/fixtures/branch-account-guard-output.txt"
   },
   "outputRef": {
-    "byteSize": 1342,
+    "byteSize": 1968,
     "kind": "build-test-result",
     "mimeType": "application/json",
-    "sha256": "9b0a8c0c025feea05a6636471b245f6a2fe8c5c979c987d7d64103c4cab5e6a3",
-    "uri": "urn:build-test-runner-service/build-test-result/9b0a8c0c025feea05a6636471b245f6a2fe8c5c979c987d7d64103c4cab5e6a3"
+    "sha256": "ea11ef30b557a0d78a6b196c94e08451d80943104a834d19d17bef6cf566ed46",
+    "uri": "urn:build-test-runner-service/build-test-result/ea11ef30b557a0d78a6b196c94e08451d80943104a834d19d17bef6cf566ed46"
   },
   "programId": "BRNCH01",
   "runId": "run-1",

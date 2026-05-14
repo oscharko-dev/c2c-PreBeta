@@ -91,9 +91,10 @@ export emits an `evidence.pack.exported` Harness Event keyed by the run id.
   rely on artifact sha256s and the harness JSONL ledger.
 - PDF/A audit reports and customer-specific compliance packs are explicitly
   out of scope for Issue #14.
-- Golden Master fixtures for the W0 corpus are synthetic until GnuCOBOL
-  fixtures land — packs surface this through `openAssumptions` entries
-  reported by `build-test-runner-service`.
+- The W0 corpus has mixed Golden Master provenance: BRNCH01 is reproduced
+  through GnuCOBOL `cobcrun`, while CTRLDEC01 and BATCH01 remain synthetic.
+  Packs surface this through `openAssumptions` entries reported by
+  `build-test-runner-service`.
 - The export base directory is local-filesystem; an object-store backed
   exporter is a future-wave concern.
 

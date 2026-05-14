@@ -94,10 +94,11 @@ public final class ServiceApp {
                 || ResultClassifier.STATUS_SKIPPED.equals(status)) {
             return 422;
         }
-        // compile-failed / run-failed / output-divergence are still 200 from
-        // an HTTP standpoint: the runner *successfully* produced a structured
-        // result, even though the verification outcome is negative. CI gates
-        // and Harness consumers must read the status field for the verdict.
+        // compile-failed / run-failed / output-divergence /
+        // golden-master-reproduction-failed are still 200 from an HTTP
+        // standpoint: the runner successfully produced a structured result,
+        // even though the verification outcome is negative. CI gates and
+        // Harness consumers must read the status field for the verdict.
         return 200;
     }
 

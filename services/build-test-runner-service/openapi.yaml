@@ -109,8 +109,10 @@ components:
               type: string
         classification:
           type: string
-          enum: [true, synthetic]
+          enum: ["true", "synthetic"]
         source:
+          type: string
+        cobolSource:
           type: string
     RunOptions:
       type: object
@@ -144,13 +146,15 @@ components:
           type: string
         status:
           type: string
-          enum: [ok, compile-failed, run-failed, output-divergence, missing-golden-master, skipped]
+          enum: [ok, compile-failed, run-failed, output-divergence, golden-master-reproduction-failed, missing-golden-master, skipped]
         classification:
           type: string
           enum:
             - match
             - divergence-known-w0-coverage-gap
             - divergence-unknown
+            - true-golden-master-reproduction-error
+            - true-golden-master-mismatch
             - compile-error
             - run-error
             - skipped-no-execution
@@ -163,6 +167,65 @@ components:
           type: object
         goldenMaster:
           type: object
+          properties:
+            programId:
+              type: string
+            expected:
+              type: string
+            expectedSha256:
+              type: string
+            classification:
+              type: string
+              enum: ["true", "synthetic"]
+            source:
+              type: string
+            cobolSource:
+              type: string
+            knownDivergenceAtW0:
+              type: boolean
+            cobolRuntime:
+              type: object
+              properties:
+                attempted:
+                  type: boolean
+                available:
+                  type: boolean
+                compileOk:
+                  type: boolean
+                ran:
+                  type: boolean
+                ok:
+                  type: boolean
+                matched:
+                  type: boolean
+                compileExitCode:
+                  type: integer
+                exitCode:
+                  type: integer
+                stdout:
+                  type: string
+                stderr:
+                  type: string
+                stdoutSha256:
+                  type: string
+                durationMs:
+                  type: integer
+                reason:
+                  type: string
+                programId:
+                  type: string
+                cobolSource:
+                  type: string
+                moduleName:
+                  type: string
+                compiler:
+                  type: string
+                runtime:
+                  type: string
+                cobcVersion:
+                  type: string
+                cobcrunVersion:
+                  type: string
         comparison:
           type: object
         outputRef:

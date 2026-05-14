@@ -180,7 +180,25 @@ public final class BuildTestRunnerService {
                     programId, mapOrEmpty(request.get("goldenMaster")), repoRoot);
 
             if (golden.isPresent()) {
-                response.put("goldenMaster", golden.get().toMap());
+                Map<String, Object> goldenMap = golden.get().toMap();
+                response.put("goldenMaster", goldenMap);
+                if (!skipExecution && compareOutput && golden.get().isTrueFixture()) {
+                    CobolRuntimeExecutor.Reproduction reproduction =
+                            CobolRuntimeExecutor.reproduce(golden.get(), repoRoot, timeoutMs);
+                    goldenMap.put("cobolRuntime", reproduction.toMap());
+                    if (!reproduction.ok()) {
+                        diagnostics.add(diagnostic("error", "true-golden-master-reproduction-failed",
+                                trueGoldenMasterFailureSummary(reproduction)));
+                        applyClassification(response, trueGoldenMasterClassification(reproduction));
+                        response.put("comparison", Map.of(
+                                "matched", false,
+                                "skipped", false,
+                                "reason", "true-golden-master-reproduction-failed"));
+                        response.put("diagnostics", diagnostics);
+                        response.put("outputRef", reference(response));
+                        return response;
+                    }
+                }
             } else {
                 response.put("goldenMaster", Map.of(
                         "resolved", false,
@@ -268,6 +286,33 @@ public final class BuildTestRunnerService {
         return "first divergence at character " + common
                 + "; actualLength=" + actual.length()
                 + " expectedLength=" + expected.length();
+    }
+
+    private static String trueGoldenMasterFailureSummary(CobolRuntimeExecutor.Reproduction reproduction) {
+        if (!reproduction.available()) {
+            return "GnuCOBOL cobc/cobcrun are not available for true Golden Master reproduction.";
+        }
+        if (!reproduction.compileOk()) {
+            return "cobc failed while compiling the true Golden Master source: " + reproduction.reason();
+        }
+        if (!reproduction.ran()) {
+            return "cobcrun did not execute the true Golden Master module: " + reproduction.reason();
+        }
+        if (!reproduction.matched()) {
+            return "cobcrun stdout differs from the checked-in true Golden Master expected output.";
+        }
+        return "true Golden Master reproduction failed.";
+    }
+
+    private static Map<String, Object> trueGoldenMasterClassification(
+            CobolRuntimeExecutor.Reproduction reproduction) {
+        String summary = trueGoldenMasterFailureSummary(reproduction);
+        if (reproduction.available() && reproduction.compileOk()
+                && reproduction.ran() && reproduction.exitCode() == 0
+                && !reproduction.matched()) {
+            return ResultClassifier.trueGoldenMasterMismatch(summary);
+        }
+        return ResultClassifier.trueGoldenMasterReproductionError(summary);
     }
 
     private void attachGoldenMaster(Map<String, Object> response, String programId,

@@ -78,8 +78,8 @@
   },
   "openAssumptions": [
     {
-      "id": "synthetic-golden-master",
-      "description": "W0 generated Java matches the synthetic Golden Master fixtures; true cobcrun-produced fixtures remain a Wave 1 follow-up."
+      "id": "mixed-golden-master-provenance",
+      "description": "BRNCH01 is reproduced through GnuCOBOL cobcrun; CTRLDEC01 and BATCH01 remain synthetic Golden Master fixtures."
     }
   ],
   "validation": {

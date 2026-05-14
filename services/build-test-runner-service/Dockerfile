@@ -16,6 +16,12 @@ RUN cd /workspace/services/build-test-runner-service && mvn -q -DskipTests packa
 # images.
 FROM eclipse-temurin:21-jdk
 WORKDIR /app
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gnucobol3 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/services/build-test-runner-service/target/build-test-runner-service-0.1.0.jar /app/app.jar
+COPY fixtures/golden-master /app/fixtures/golden-master
+COPY corpus/synthetic/programs /app/corpus/synthetic/programs
+COPY corpus/synthetic/fixtures /app/corpus/synthetic/fixtures
 EXPOSE 8084
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

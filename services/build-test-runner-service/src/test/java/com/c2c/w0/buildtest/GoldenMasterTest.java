@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class GoldenMasterTest {
 
@@ -38,9 +39,26 @@ class GoldenMasterTest {
                 GoldenMaster.resolve("BRNCH01", Map.of(), root);
         assertTrue(resolved.isPresent());
         assertEquals(Files.readString(expected), resolved.get().expected());
-        assertEquals("synthetic", resolved.get().classification());
+        assertEquals("true", resolved.get().classification());
+        assertEquals("corpus/synthetic/programs/branch-account-guard.cbl",
+                resolved.get().cobolSource());
         assertEquals(false, resolved.get().knownDivergenceAtW0(),
                 "BRNCH01 now matches the W0 generated Java output");
+    }
+
+    @Test
+    void trueRegistryFixtureReproducesThroughCobcrun() {
+        assumeTrue(CobolRuntimeExecutor.isAvailable(),
+                "GnuCOBOL cobc/cobcrun must be installed for true Golden Master verification");
+        GoldenMaster.Resolved resolved = GoldenMaster.resolve("BRNCH01", Map.of(), repoRoot())
+                .orElseThrow();
+        CobolRuntimeExecutor.Reproduction reproduction =
+                CobolRuntimeExecutor.reproduce(resolved, repoRoot(), 5000L);
+        assertTrue(reproduction.available(), () -> reproduction.toMap().toString());
+        assertTrue(reproduction.compileOk(), () -> reproduction.toMap().toString());
+        assertTrue(reproduction.ran(), () -> reproduction.toMap().toString());
+        assertTrue(reproduction.matched(), () -> reproduction.toMap().toString());
+        assertTrue(reproduction.ok(), () -> reproduction.toMap().toString());
     }
 
     @Test

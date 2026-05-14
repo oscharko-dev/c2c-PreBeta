@@ -167,12 +167,12 @@ class BuildTestRunnerServiceTest {
     @Test
     void registryDivergenceIsUnknownWhenFixtureDoesNotDeclareKnownGap() {
         Map<String, Object> generatedProject = trivialProject(
-                "sample.SilentBrnch",
-                "package sample; public class SilentBrnch { "
+                "sample.SilentCtrlDec",
+                "package sample; public class SilentCtrlDec { "
                         + "public static void main(String[] a) { } }");
         Map<String, Object> request = Map.of(
-                "runId", "run-brnch",
-                "programId", "BRNCH01",
+                "runId", "run-ctrldec",
+                "programId", "CTRLDEC01",
                 "generatedProject", generatedProject);
         Map<String, Object> response = service.runVerification(request);
         assertEquals("output-divergence", response.get("status"));
@@ -180,7 +180,64 @@ class BuildTestRunnerServiceTest {
         Map<?, ?> golden = (Map<?, ?>) response.get("goldenMaster");
         assertEquals("synthetic", golden.get("classification"));
         assertTrue(((String) golden.get("source"))
-                .endsWith("branch-account-guard-output.txt"));
+                .endsWith("ctrl-decimal-payroll-output.txt"));
+    }
+
+    @Test
+    void trueGoldenMasterMissingSourceIsReproductionError() {
+        Map<String, Object> generatedProject = trivialProject(
+                "sample.TrueFixture",
+                "package sample; public class TrueFixture { "
+                        + "public static void main(String[] a) { System.out.print(\"PASS\"); } }");
+        Map<String, Object> request = Map.of(
+                "runId", "run-true-missing-source",
+                "programId", "TRUEFAIL",
+                "generatedProject", generatedProject,
+                "goldenMaster", Map.of(
+                        "expected", "PASS",
+                        "classification", "true",
+                        "cobolSource", "corpus/synthetic/programs/does-not-exist.cbl"));
+        Map<String, Object> response = service.runVerification(request);
+        assertEquals("golden-master-reproduction-failed", response.get("status"));
+        assertEquals("true-golden-master-reproduction-error", response.get("classification"));
+        Map<?, ?> golden = (Map<?, ?>) response.get("goldenMaster");
+        assertEquals("true", golden.get("classification"));
+        Map<?, ?> cobolRuntime = (Map<?, ?>) golden.get("cobolRuntime");
+        assertNotNull(cobolRuntime);
+        assertEquals(true, cobolRuntime.get("attempted"));
+        assertEquals(false, cobolRuntime.get("ok"));
+    }
+
+    @Test
+    void trueGoldenMasterUnavailableToolchainIsReproductionError() {
+        String previousCobc = System.getProperty("c2c.cobc.path");
+        String previousCobcrun = System.getProperty("c2c.cobcrun.path");
+        System.setProperty("c2c.cobc.path", "__missing_cobc_for_test__");
+        System.setProperty("c2c.cobcrun.path", "__missing_cobcrun_for_test__");
+        try {
+            Map<String, Object> generatedProject = trivialProject(
+                    "sample.TrueFixtureUnavailable",
+                    "package sample; public class TrueFixtureUnavailable { "
+                            + "public static void main(String[] a) { System.out.print(\"PASS\"); } }");
+            Map<String, Object> request = Map.of(
+                    "runId", "run-true-unavailable",
+                    "programId", "TRUEUNAVAILABLE",
+                    "generatedProject", generatedProject,
+                    "goldenMaster", Map.of(
+                            "expected", "PASS",
+                            "classification", "true",
+                            "cobolSource", "corpus/synthetic/programs/branch-account-guard.cbl"));
+            Map<String, Object> response = service.runVerification(request);
+            assertEquals("golden-master-reproduction-failed", response.get("status"));
+            assertEquals("true-golden-master-reproduction-error", response.get("classification"));
+            Map<?, ?> golden = (Map<?, ?>) response.get("goldenMaster");
+            Map<?, ?> cobolRuntime = (Map<?, ?>) golden.get("cobolRuntime");
+            assertEquals(false, cobolRuntime.get("available"));
+            assertEquals(false, cobolRuntime.get("ok"));
+        } finally {
+            restoreProperty("c2c.cobc.path", previousCobc);
+            restoreProperty("c2c.cobcrun.path", previousCobcrun);
+        }
     }
 
     private static void assertHashRefValid(Map<String, Object> response) {
@@ -197,6 +254,14 @@ class BuildTestRunnerServiceTest {
                 "entryClass", entryClass,
                 "entryFilePath", relativePath,
                 "files", Map.of(relativePath, source));
+    }
+
+    private static void restoreProperty(String key, String previous) {
+        if (previous == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, previous);
+        }
     }
 
     private static Path repoRoot() {

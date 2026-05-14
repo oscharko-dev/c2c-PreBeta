@@ -35,7 +35,7 @@ The W0 showcase is intentionally narrow:
 - Three synthetic COBOL programs, no customer source.
 - No model-gateway calls. Each manifest records the absence with a
   `status: "skipped"` model-invocation entry rather than hiding it.
-- Generated stdout matches the checked-in synthetic Golden Master fixtures for
-  the selected W0 subset; the acceptance bar is `classification == match`.
-- Synthetic Golden Masters only. True `cobcrun` reproduction is a Wave 1
-  task (see [w0-followups.md](w0-followups.md) F-W0-04).
+- Generated stdout matches the checked-in Golden Master fixtures for the
+  selected W0 subset; the acceptance bar is `classification == match`.
+- BRNCH01 is reproduced through GnuCOBOL `cobcrun`; CTRLDEC01 and BATCH01
+  remain clearly labelled synthetic Golden Master fixtures.

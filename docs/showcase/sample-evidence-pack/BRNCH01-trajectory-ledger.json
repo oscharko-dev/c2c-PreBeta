@@ -137,9 +137,9 @@
         "byteSize": 197
       },
       "outputRef": {
-        "uri": "urn:build-test-runner-service/build-test-result/9b0a8c0c025feea05a6636471b245f6a2fe8c5c979c987d7d64103c4cab5e6a3",
-        "sha256": "9b0a8c0c025feea05a6636471b245f6a2fe8c5c979c987d7d64103c4cab5e6a3",
-        "byteSize": 1342,
+        "uri": "urn:build-test-runner-service/build-test-result/ea11ef30b557a0d78a6b196c94e08451d80943104a834d19d17bef6cf566ed46",
+        "sha256": "ea11ef30b557a0d78a6b196c94e08451d80943104a834d19d17bef6cf566ed46",
+        "byteSize": 1968,
         "mimeType": "application/json",
         "kind": "build-test-result"
       },

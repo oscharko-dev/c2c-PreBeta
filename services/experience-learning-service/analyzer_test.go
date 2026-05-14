@@ -423,13 +423,14 @@ func TestIngestHarnessEvents_AcceptsStartingAndPreservesRawStatus(t *testing.T) 
 
 func TestHarnessStatusForAnalysis(t *testing.T) {
 	cases := map[string]string{
-		"starting":            "started",
-		" output-divergence ": "failed",
-		"compile-failed":      "failed",
-		"run-failed":          "failed",
-		"updating":            "updating",
-		"COMPLETED":           "completed",
-		"ok":                  "ok",
+		"starting":                          "started",
+		" output-divergence ":               "failed",
+		"compile-failed":                    "failed",
+		"run-failed":                        "failed",
+		"golden-master-reproduction-failed": "failed",
+		"updating":                          "updating",
+		"COMPLETED":                         "completed",
+		"ok":                                "ok",
 	}
 
 	for input, expected := range cases {

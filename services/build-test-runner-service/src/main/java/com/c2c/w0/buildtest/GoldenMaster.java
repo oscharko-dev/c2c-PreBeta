@@ -43,19 +43,22 @@ final class GoldenMaster {
             if (inline instanceof String s && !s.isBlank()) {
                 String classification = string(hint.get("classification"), "synthetic");
                 String source = string(hint.get("source"), "inline-request");
+                String cobolSource = string(hint.get("cobolSource"), "");
                 boolean knownDivergence = booleanFlag(hint.get("knownDivergenceAtW0"), false);
-                return Optional.of(new Resolved(s, classification, source, knownDivergence));
+                return Optional.of(new Resolved(programId, s, classification, source, cobolSource, knownDivergence));
             }
             Object refObj = hint.get("expectedRef");
             if (refObj instanceof Map<?, ?> map) {
                 Object pathObj = map.get("path");
                 if (pathObj instanceof String pathStr && !pathStr.isBlank()) {
                     String classification = string(hint.get("classification"), "synthetic");
+                    String cobolSource = string(hint.get("cobolSource"), "");
                     boolean knownDivergence = booleanFlag(hint.get("knownDivergenceAtW0"), false);
                     Path resolved = resolveSafePath(repoRoot, pathStr);
                     String content = readSafe(resolved);
                     if (content != null) {
-                        return Optional.of(new Resolved(content, classification, pathStr, knownDivergence));
+                        return Optional.of(new Resolved(programId, content, classification, pathStr,
+                                cobolSource, knownDivergence));
                     }
                 }
             }
@@ -95,11 +98,13 @@ final class GoldenMaster {
                     continue;
                 }
                 String classification = string(raw.get("classification"), "synthetic");
+                String cobolSource = string(raw.get("cobolSource"), "");
                 boolean knownDivergence = booleanFlag(raw.get("knownDivergenceAtW0"), false);
                 Path target = resolveSafePath(repoRoot, relativePath);
                 String content = readSafe(target);
                 if (content != null) {
-                    return Optional.of(new Resolved(content, classification, relativePath, knownDivergence));
+                    return Optional.of(new Resolved(entryProgramId, content, classification, relativePath,
+                            cobolSource, knownDivergence));
                 }
             }
         } catch (IOException e) {
@@ -149,13 +154,22 @@ final class GoldenMaster {
         return fallback;
     }
 
-    record Resolved(String expected, String classification, String source, boolean knownDivergenceAtW0) {
+    record Resolved(String programId, String expected, String classification, String source,
+                    String cobolSource, boolean knownDivergenceAtW0) {
+        boolean isTrueFixture() {
+            return "true".equals(classification);
+        }
+
         Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
+            map.put("programId", programId);
             map.put("expected", expected);
             map.put("expectedSha256", HashUtil.sha256(expected == null ? "" : expected));
             map.put("classification", classification);
             map.put("source", source);
+            if (cobolSource != null && !cobolSource.isBlank()) {
+                map.put("cobolSource", cobolSource);
+            }
             map.put("knownDivergenceAtW0", knownDivergenceAtW0);
             return map;
         }

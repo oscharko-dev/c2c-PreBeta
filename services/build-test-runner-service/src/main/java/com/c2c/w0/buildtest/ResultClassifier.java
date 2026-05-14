@@ -24,12 +24,15 @@ final class ResultClassifier {
     static final String STATUS_COMPILE_FAILED = "compile-failed";
     static final String STATUS_RUN_FAILED = "run-failed";
     static final String STATUS_OUTPUT_DIVERGENCE = "output-divergence";
+    static final String STATUS_GOLDEN_MASTER_REPRODUCTION_FAILED = "golden-master-reproduction-failed";
     static final String STATUS_MISSING_GOLDEN_MASTER = "missing-golden-master";
     static final String STATUS_SKIPPED = "skipped";
 
     static final String CLASS_MATCH = "match";
     static final String CLASS_DIV_KNOWN = "divergence-known-w0-coverage-gap";
     static final String CLASS_DIV_UNKNOWN = "divergence-unknown";
+    static final String CLASS_TRUE_GM_REPRODUCTION_ERROR = "true-golden-master-reproduction-error";
+    static final String CLASS_TRUE_GM_MISMATCH = "true-golden-master-mismatch";
     static final String CLASS_COMPILE_ERROR = "compile-error";
     static final String CLASS_RUN_ERROR = "run-error";
     static final String CLASS_SKIPPED = "skipped-no-execution";
@@ -65,6 +68,16 @@ final class ResultClassifier {
     static Map<String, Object> divergence(boolean knownCoverageGap, String summary) {
         String classifier = knownCoverageGap ? CLASS_DIV_KNOWN : CLASS_DIV_UNKNOWN;
         return classification(STATUS_OUTPUT_DIVERGENCE, classifier, summary);
+    }
+
+    static Map<String, Object> trueGoldenMasterReproductionError(String summary) {
+        return classification(STATUS_GOLDEN_MASTER_REPRODUCTION_FAILED,
+                CLASS_TRUE_GM_REPRODUCTION_ERROR, summary);
+    }
+
+    static Map<String, Object> trueGoldenMasterMismatch(String summary) {
+        return classification(STATUS_GOLDEN_MASTER_REPRODUCTION_FAILED,
+                CLASS_TRUE_GM_MISMATCH, summary);
     }
 
     static Map<String, Object> classification(String status, String classifier, String summary) {

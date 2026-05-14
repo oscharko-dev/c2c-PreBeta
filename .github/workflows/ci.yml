@@ -13,7 +13,7 @@ on:
 jobs:
   ci:
     name: ci
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -62,6 +62,14 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+
+      - name: Install GnuCOBOL for true Golden Master verification
+        if: hashFiles('services/build-test-runner-service/pom.xml') != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnucobol3
+          cobc --version
+          cobcrun --version
 
       - name: Build c2c-target-java-runtime independently
         if: hashFiles('libs/c2c-target-java-runtime/pom.xml') != ''
