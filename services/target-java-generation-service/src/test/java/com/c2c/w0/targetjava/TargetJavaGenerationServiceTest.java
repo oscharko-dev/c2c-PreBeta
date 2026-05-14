@@ -73,6 +73,13 @@ class TargetJavaGenerationServiceTest {
     }
 
     @Test
+    void rejectsRawTextPayloadWithoutIr() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> service.generate(Map.of("runId", "run-x", "rawText", "DISPLAY 'HELLO'.")));
+        assertTrue(exception.getMessage().contains("ir document is required"));
+    }
+
+    @Test
     void failedStatusOnUnsupportedSchemaVersion() {
         Map<String, Object> ir = sampleIr();
         ir.put("schemaVersion", "v1");
