@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -12,12 +13,12 @@ import (
 )
 
 type fakeProvider struct {
-	t       *testing.T
-	output  map[string]any
-	err     error
-	status  string
-	calls   int
-	mu      sync.Mutex
+	t      *testing.T
+	output map[string]any
+	err    error
+	status string
+	calls  int
+	mu     sync.Mutex
 }
 
 func (f *fakeProvider) Name() string {
@@ -95,13 +96,48 @@ func newGatewayServiceForTest(now time.Time, provider ModelProvider, model Model
 		allowlist.AllowedModelIDs = []string{model.ID}
 	}
 	return &ModelGatewayService{
-		registry:         registry,
-		allowlist:        allowlist,
-		ledger:           ledger,
-		events:           events,
-		now:              func() time.Time { return now },
-		providers:        map[string]ModelProvider{provider.Name(): provider},
-		providerTimeouts: map[string]int64{provider.Name(): 30000},
+		registry:                    registry,
+		allowlist:                   allowlist,
+		ledger:                      ledger,
+		events:                      events,
+		now:                         func() time.Time { return now },
+		modelProvider:               ModelProviderFoundryDevelopment,
+		dataPolicy:                  "public_synthetic_only",
+		invocationLedgerEnabled:     true,
+		harnessEventEmissionEnabled: true,
+		defaultModelDeployment:      model.ID,
+		providers:                   map[string]ModelProvider{provider.Name(): provider},
+		providerTimeouts:            map[string]int64{provider.Name(): 30000},
+	}
+}
+
+func TestResolveGatewayConfigFromEnv_IssueVariables(t *testing.T) {
+	t.Setenv("C2C_MODEL_PROVIDER", "azure_foundry")
+	t.Setenv("C2C_MODEL_DEFAULT_DEPLOYMENT", "gpt-oss-120b")
+	t.Setenv("C2C_MODEL_FALLBACK_DEPLOYMENTS", "mistral-large-3,phi-4")
+	t.Setenv("C2C_MODEL_ALLOWED_DEPLOYMENTS", "gpt-oss-120b,mistral-large-3,phi-4")
+	t.Setenv("C2C_MODEL_DATA_POLICY", "public_synthetic_only")
+	t.Setenv("C2C_MODEL_INVOCATION_LEDGER_ENABLED", "true")
+	t.Setenv("C2C_HARNESS_EVENT_EMISSION_ENABLED", "true")
+	t.Setenv("AZURE_FOUNDRY_ENDPOINT", "https://workspacedevfoundry.example.com/openai/deployments")
+	t.Setenv("AZURE_FOUNDRY_API_KEY", "dummy-key")
+	t.Setenv("AZURE_FOUNDRY_API_VERSION", "2024-05-01-preview")
+
+	cfg, err := resolveGatewayConfigFromEnv()
+	if err != nil {
+		t.Fatalf("expected config to resolve: %v", err)
+	}
+	if cfg.modelProvider != ModelProviderFoundryDevelopment {
+		t.Fatalf("expected provider %s, got %s", ModelProviderFoundryDevelopment, cfg.modelProvider)
+	}
+	if cfg.defaultModelDeployment != "gpt-oss-120b" {
+		t.Fatalf("unexpected default deployment %s", cfg.defaultModelDeployment)
+	}
+	if len(cfg.fallbackModelDeployments) != 2 {
+		t.Fatalf("unexpected fallback count: %d", len(cfg.fallbackModelDeployments))
+	}
+	if !cfg.invocationLedgerEnabled || !cfg.harnessEventEmissionEnabled {
+		t.Fatalf("expected ledger and event emission to be enabled")
 	}
 }
 
@@ -123,8 +159,8 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 		LicenseStatus:             "approved",
 		ApprovalExpiry:            now.Add(24 * time.Hour).Format(time.RFC3339),
 		AllowedDataClasses:        []string{"model"},
-		SupportedTemplateVersions:  []string{"v1"},
-		SupportsStructuredOutput:   false,
+		SupportedTemplateVersions: []string{"v1"},
+		SupportsStructuredOutput:  false,
 	}, true)
 
 	payload := ModelInvocationRequest{
@@ -132,7 +168,7 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
 		DataClass:             "model",
-		PromptTemplateVersion:  "v1",
+		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
 		TimeoutMs:             1000,
 		Parameters:            map[string]any{"temperature": 0.2},
@@ -182,8 +218,8 @@ func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 		LicenseStatus:             "approved",
 		ApprovalExpiry:            now.Add(24 * time.Hour).Format(time.RFC3339),
 		AllowedDataClasses:        []string{"model"},
-		SupportedTemplateVersions:  []string{"v1"},
-		SupportsStructuredOutput:   false,
+		SupportedTemplateVersions: []string{"v1"},
+		SupportsStructuredOutput:  false,
 	}, false)
 
 	payload := ModelInvocationRequest{
@@ -191,7 +227,7 @@ func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
 		DataClass:             "model",
-		PromptTemplateVersion:  "v1",
+		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
 		TimeoutMs:             1000,
 		Parameters:            map[string]any{},
@@ -215,5 +251,64 @@ func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 	}
 	if provider.calls != 0 {
 		t.Fatalf("expected no provider call, got %d", provider.calls)
+	}
+}
+
+func TestModelGatewayService_HealthMetadataContainsRuntimePolicy(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	provider := &fakeProvider{}
+	service := newGatewayServiceForTest(now, provider, ModelMetadata{
+		ID:                        "foundry-gpt",
+		DeploymentName:            "foundry-dep",
+		ModelName:                 "gpt-4",
+		Version:                   "2026-01",
+		Provider:                  ModelProviderFoundryDevelopment,
+		LifecycleStatus:           "approved",
+		LicenseStatus:             "approved",
+		ApprovalExpiry:            now.Add(24 * time.Hour).Format(time.RFC3339),
+		AllowedDataClasses:        []string{"model"},
+		SupportedTemplateVersions: []string{"v1"},
+		SupportsStructuredOutput:  false,
+	}, true)
+
+	err := service.applyGatewayRuntimeConfig(gatewayConfig{
+		defaultModelDeployment:      "foundry-gpt",
+		fallbackModelDeployments:    []string{"foundry-gpt"},
+		allowedModelDeployments:     []string{"foundry-gpt"},
+		dataPolicy:                  "public_synthetic_only",
+		invocationLedgerEnabled:     true,
+		harnessEventEmissionEnabled: true,
+		modelProvider:               ModelProviderFoundryDevelopment,
+		azureFoundryAPIVersion:      "2024-05-01-preview",
+	})
+	if err != nil {
+		t.Fatalf("expected config applied: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v0/health", nil)
+	rr := httptest.NewRecorder()
+
+	service.healthHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected health 200, got %d", rr.Code)
+	}
+	var payload ModelGatewayHealthResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("expected valid json: %v", err)
+	}
+	if payload.Configured["defaultModelDeployment"] != "foundry-gpt" {
+		t.Fatalf("unexpected default deployment %s", payload.Configured["defaultModelDeployment"])
+	}
+	if payload.Configured["fallbackModelDeployments"] != "foundry-gpt" {
+		t.Fatalf("unexpected fallback deployments %s", payload.Configured["fallbackModelDeployments"])
+	}
+	if payload.Configured["allowedModelDeployments"] != "foundry-gpt" {
+		t.Fatalf("unexpected allowed deployments %s", payload.Configured["allowedModelDeployments"])
+	}
+	if payload.Configured["dataPolicy"] != "public_synthetic_only" {
+		t.Fatalf("unexpected data policy %s", payload.Configured["dataPolicy"])
+	}
+	if payload.Configured["invocationLedgerEnabled"] != strconv.FormatBool(true) {
+		t.Fatalf("ledger expected enabled, got %s", payload.Configured["invocationLedgerEnabled"])
 	}
 }

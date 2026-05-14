@@ -25,6 +25,11 @@ func TestNewFoundryAdapter_ConfigurationValidation(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "valid config with api-key",
+			cfg:     ProviderFoundryConfig{Endpoint: "https://foundry.example", ApiKey: "abc", TimeoutMs: 1000},
+			wantErr: false,
+		},
+		{
 			name:    "invalid timeout",
 			cfg:     ProviderFoundryConfig{Endpoint: "https://foundry.example", ApiKeyRef: "ref", TimeoutMs: 0},
 			wantErr: true,
@@ -92,9 +97,9 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 	}
 
 	output, err := adapter.Invoke(context.Background(), ModelInvocationRequest{
-		ModelID:               "m-1",
-		Prompt:                "hello",
-		TimeoutMs:             1000,
+		ModelID:                "m-1",
+		Prompt:                 "hello",
+		TimeoutMs:              1000,
 		PromptTemplateVersion:  "v1",
 		StructuredOutput:       true,
 		StructuredOutputSchema: map[string]any{"type": "object"},
@@ -102,10 +107,10 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 			"temperature": 0.2,
 		},
 	}, ModelMetadata{
-		ID:           "m-1",
+		ID:             "m-1",
 		DeploymentName: "deployment-1",
-		ModelName:     "foundry-gpt",
-		Version:       "1",
+		ModelName:      "foundry-gpt",
+		Version:        "1",
 	})
 
 	if err != nil {
@@ -119,6 +124,52 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 	}
 	if len(received) == 0 {
 		t.Fatalf("expected non-empty request body")
+	}
+}
+
+func TestFoundryAdapter_Invoke_UsesApiKeyWhenProvided(t *testing.T) {
+	var seen string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("api-key"); got != "direct-secret" {
+			t.Fatalf("expected api-key header, got %s", got)
+		}
+		if got := r.Header.Get("x-api-key-ref"); got != "" {
+			t.Fatalf("unexpected x-api-key-ref header: %s", got)
+		}
+		seen = r.Header.Get("api-key")
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	}))
+	defer server.Close()
+
+	adapter, err := NewFoundryAdapter(ProviderFoundryConfig{
+		Endpoint:  server.URL,
+		ApiKey:    "direct-secret",
+		ApiKeyRef: "should-be-ignored",
+		TimeoutMs: 2000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected adapter error: %v", err)
+	}
+
+	_, err = adapter.Invoke(context.Background(), ModelInvocationRequest{
+		ModelID:               "m-1",
+		Prompt:                "hello",
+		TimeoutMs:             1000,
+		PromptTemplateVersion: "v1",
+		StructuredOutput:      false,
+		Parameters:            map[string]any{},
+	}, ModelMetadata{
+		ID:             "m-1",
+		DeploymentName: "dep",
+		ModelName:      "foundry-gpt",
+		Version:        "1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected invoke error: %v", err)
+	}
+	if seen == "" {
+		t.Fatalf("expected api-key header to be sent")
 	}
 }
 
@@ -154,12 +205,12 @@ func TestCustomerInternalMockAdapter_Invoke(t *testing.T) {
 	}
 
 	output, err := adapter.Invoke(context.Background(), ModelInvocationRequest{
-		Prompt:                "hello",
+		Prompt:                 "hello",
 		StructuredOutput:       true,
 		StructuredOutputSchema: map[string]any{"type": "object"},
-		TimeoutMs:             1000,
+		TimeoutMs:              1000,
 	}, ModelMetadata{
-		ID:                   "cust-1",
+		ID:                       "cust-1",
 		SupportsStructuredOutput: true,
 	})
 
@@ -174,11 +225,11 @@ func TestCustomerInternalMockAdapter_Invoke(t *testing.T) {
 	}
 
 	_, err = adapter.Invoke(context.Background(), ModelInvocationRequest{
-		Prompt:         "hello",
+		Prompt:           "hello",
 		StructuredOutput: true,
-		TimeoutMs:      1000,
+		TimeoutMs:        1000,
 	}, ModelMetadata{
-		ID:                    "cust-1",
+		ID:                       "cust-1",
 		SupportsStructuredOutput: true,
 	})
 	if err == nil {

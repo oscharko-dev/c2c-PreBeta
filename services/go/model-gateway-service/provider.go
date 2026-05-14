@@ -24,6 +24,7 @@ type ModelProvider interface {
 type FoundryAdapter struct {
 	Endpoint  string
 	ApiKeyRef string
+	ApiKey    string
 	TimeoutMs int64
 	Client    *http.Client
 }
@@ -32,7 +33,9 @@ func NewFoundryAdapter(cfg ProviderFoundryConfig) (*FoundryAdapter, error) {
 	if strings.TrimSpace(cfg.Endpoint) == "" {
 		return nil, fmt.Errorf("foundry endpoint required")
 	}
-	if strings.TrimSpace(cfg.ApiKeyRef) == "" {
+	hasApiKeyRef := strings.TrimSpace(cfg.ApiKeyRef) != ""
+	hasApiKey := strings.TrimSpace(cfg.ApiKey) != ""
+	if !hasApiKeyRef && !hasApiKey {
 		return nil, fmt.Errorf("foundry api key reference required")
 	}
 	if cfg.TimeoutMs <= 0 {
@@ -45,6 +48,7 @@ func NewFoundryAdapter(cfg ProviderFoundryConfig) (*FoundryAdapter, error) {
 	return &FoundryAdapter{
 		Endpoint:  cfg.Endpoint,
 		ApiKeyRef: cfg.ApiKeyRef,
+		ApiKey:    cfg.ApiKey,
 		TimeoutMs: cfg.TimeoutMs,
 		Client:    &http.Client{},
 	}, nil
@@ -77,7 +81,11 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 		return ModelInvocationOutput{}, fmt.Errorf("build foundry request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("x-api-key-ref", f.ApiKeyRef)
+	if strings.TrimSpace(f.ApiKey) != "" {
+		req.Header.Set("api-key", f.ApiKey)
+	} else {
+		req.Header.Set("x-api-key-ref", f.ApiKeyRef)
+	}
 
 	resp, err := f.Client.Do(req)
 	if err != nil {

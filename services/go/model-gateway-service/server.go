@@ -17,21 +17,42 @@ import (
 var invocationCounter atomic.Uint64
 
 type ModelGatewayService struct {
-	registry         ModelRegistry
-	allowlist        FoundryDevelopmentAllowlist
-	ledger           ModelInvocationLedgerSink
-	events           EventSink
-	now              func() time.Time
-	providers        map[string]ModelProvider
-	providerTimeouts map[string]int64
+	registry                    ModelRegistry
+	allowlist                   FoundryDevelopmentAllowlist
+	ledger                      ModelInvocationLedgerSink
+	events                      EventSink
+	now                         func() time.Time
+	providers                   map[string]ModelProvider
+	providerTimeouts            map[string]int64
+	defaultModelDeployment      string
+	fallbackModelDeployments    []string
+	allowedModelDeployments     []string
+	dataPolicy                  string
+	invocationLedgerEnabled     bool
+	harnessEventEmissionEnabled bool
+	modelProvider               string
+	azureAPIVersion             string
 }
 
 type gatewayConfig struct {
-	registryPath    string
-	allowlistPath   string
-	ledgerPath      string
-	eventLogPath    string
-	harnessEventURL string
+	registryPath                 string
+	allowlistPath                string
+	ledgerPath                   string
+	eventLogPath                 string
+	harnessEventURL              string
+	modelProvider                string
+	defaultModelDeployment       string
+	fallbackModelDeployments     []string
+	allowedModelDeployments      []string
+	dataPolicy                   string
+	invocationLedgerEnabled      bool
+	harnessEventEmissionEnabled  bool
+	azureFoundryEndpoint         string
+	azureFoundryAPIKey           string
+	azureFoundryAPIKeyRef        string
+	azureFoundryAPIResource      string
+	azureFoundryAPIResourceGroup string
+	azureFoundryAPIVersion       string
 }
 
 type validatedInvocation struct {
@@ -90,6 +111,46 @@ func NewModelGatewayService(registry ModelRegistry, allowlist FoundryDevelopment
 		providers:        providers,
 		providerTimeouts: timeouts,
 	}, nil
+}
+
+func (s *ModelGatewayService) applyGatewayRuntimeConfig(cfg gatewayConfig) error {
+	if cfg.modelProvider != "" {
+		s.modelProvider = cfg.modelProvider
+	} else {
+		s.modelProvider = s.allowlist.Mode
+	}
+
+	s.invocationLedgerEnabled = cfg.invocationLedgerEnabled
+	s.harnessEventEmissionEnabled = cfg.harnessEventEmissionEnabled
+	s.azureAPIVersion = strings.TrimSpace(cfg.azureFoundryAPIVersion)
+
+	s.defaultModelDeployment = strings.TrimSpace(cfg.defaultModelDeployment)
+	s.fallbackModelDeployments = dedupeAndTrimNonEmptyStringSlice(cfg.fallbackModelDeployments)
+	s.allowedModelDeployments = dedupeAndTrimNonEmptyStringSlice(cfg.allowedModelDeployments)
+	if len(s.allowedModelDeployments) == 0 {
+		s.allowedModelDeployments = dedupeAndTrimNonEmptyStringSlice(s.allowlist.AllowedModelIDs)
+	}
+
+	if s.defaultModelDeployment == "" && len(s.allowedModelDeployments) > 0 {
+		s.defaultModelDeployment = s.allowedModelDeployments[0]
+	}
+
+	s.dataPolicy = strings.TrimSpace(cfg.dataPolicy)
+	if s.dataPolicy == "" {
+		s.dataPolicy = "public_synthetic_only"
+	}
+
+	if err := validateDeploymentPolicyActive(s.registry, s.now, s.allowedModelDeployments); err != nil {
+		return err
+	}
+	if s.defaultModelDeployment != "" && !stringInSlice(s.defaultModelDeployment, s.allowedModelDeployments) {
+		return fmt.Errorf("default model deployment %q is not in allowed deployments", s.defaultModelDeployment)
+	}
+	if err := validateDeploymentPolicyActive(s.registry, s.now, s.fallbackModelDeployments); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func NewModelGatewayServiceFromFiles(
@@ -152,7 +213,17 @@ func (s *ModelGatewayService) healthHandler(w http.ResponseWriter, r *http.Reque
 		Schema:      gatewayEventSchemaVersion,
 		Providers:   providers,
 		ActiveModel: len(s.activeModels()),
-		Configured:  map[string]string{"mode": s.allowlist.Mode},
+		Configured: map[string]string{
+			"mode":                        s.allowlist.Mode,
+			"modelProvider":               s.modelProvider,
+			"defaultModelDeployment":      s.defaultModelDeployment,
+			"fallbackModelDeployments":    strings.Join(s.fallbackModelDeployments, ","),
+			"allowedModelDeployments":     strings.Join(s.allowedModelDeployments, ","),
+			"dataPolicy":                  s.dataPolicy,
+			"invocationLedgerEnabled":     strconv.FormatBool(s.invocationLedgerEnabled),
+			"harnessEventEmissionEnabled": strconv.FormatBool(s.harnessEventEmissionEnabled),
+			"azureAPIVersion":             s.azureAPIVersion,
+		},
 	})
 }
 
@@ -246,7 +317,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		record.OutputRef = outputRef
 		record.LatencyMs = int64(time.Since(start) / time.Millisecond)
 		record.CreatedAt = now
-		if appendErr := s.ledger.Append(record); appendErr != nil {
+		if appendErr := s.appendLedgerRecord(record); appendErr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": appendErr.Error()})
 			return
 		}
@@ -324,7 +395,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	record.ErrorMessage = errorMessage
 	record.CreatedAt = now
 
-	if err := s.ledger.Append(record); err != nil {
+	if err := s.appendLedgerRecord(record); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -454,7 +525,7 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 			Message: "model endpoint mode is not allowed for this gateway",
 		}
 	}
-	if !s.allowlist.IsModelAllowed(model.ID) {
+	if !s.isModelDeploymentAllowed(model.ID) {
 		return result, ModelGatewayValidationError{
 			Code:    "forbidden_model",
 			Message: "modelId is not in allowlist",
@@ -533,7 +604,20 @@ func (s *ModelGatewayService) activeModels() []ModelMetadata {
 	return active
 }
 
+func (s *ModelGatewayService) appendLedgerRecord(record ModelInvocationLedgerV0) error {
+	if !s.invocationLedgerEnabled {
+		return nil
+	}
+	if s.ledger == nil {
+		return nil
+	}
+	return s.ledger.Append(record)
+}
+
 func (s *ModelGatewayService) emitEvent(event EventEnvelopeV0) {
+	if !s.harnessEventEmissionEnabled {
+		return
+	}
 	if s.events == nil {
 		return
 	}
@@ -544,6 +628,13 @@ func (s *ModelGatewayService) emitEvent(event EventEnvelopeV0) {
 	if err := s.events.Emit(event); err != nil {
 		log.Printf("event emission failed: %v", err)
 	}
+}
+
+func (s *ModelGatewayService) isModelDeploymentAllowed(modelID string) bool {
+	if len(s.allowedModelDeployments) == 0 {
+		return s.allowlist.IsModelAllowed(modelID)
+	}
+	return stringInSlice(modelID, s.allowedModelDeployments)
 }
 
 func statusForValidationErr(err error) int {
@@ -590,7 +681,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_, _ = w.Write(body)
 }
 
-func resolveGatewayConfigFromEnv() gatewayConfig {
+func resolveGatewayConfigFromEnv() (gatewayConfig, error) {
 	cfg := gatewayConfig{
 		registryPath:    os.Getenv("MODEL_GATEWAY_MODEL_REGISTRY_PATH"),
 		allowlistPath:   os.Getenv("MODEL_GATEWAY_ALLOWLIST_PATH"),
@@ -598,6 +689,50 @@ func resolveGatewayConfigFromEnv() gatewayConfig {
 		eventLogPath:    os.Getenv("MODEL_GATEWAY_EVENT_LOG_PATH"),
 		harnessEventURL: os.Getenv("HARNESS_EVENT_URL"),
 	}
+
+	cfg.modelProvider = firstNonEmptyEnv("C2C_MODEL_PROVIDER", "MODEL_GATEWAY_PROVIDER")
+	if cfg.modelProvider != "" {
+		providerMode, err := normalizeModelGatewayProvider(cfg.modelProvider)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.modelProvider = providerMode
+	}
+
+	cfg.defaultModelDeployment = firstNonEmptyEnv("C2C_MODEL_DEFAULT_DEPLOYMENT")
+	cfg.fallbackModelDeployments = parseCommaSeparatedIDs(firstNonEmptyEnv("C2C_MODEL_FALLBACK_DEPLOYMENTS"))
+	cfg.allowedModelDeployments = parseCommaSeparatedIDs(firstNonEmptyEnv("C2C_MODEL_ALLOWED_DEPLOYMENTS"))
+	cfg.dataPolicy = firstNonEmptyEnv("C2C_MODEL_DATA_POLICY")
+
+	invocationLedgerEnabled, hasInvocationLedgerFlag, err := parseBoolEnv("C2C_MODEL_INVOCATION_LEDGER_ENABLED", "MODEL_GATEWAY_INVOCATION_LEDGER_ENABLED")
+	if err != nil {
+		return cfg, err
+	}
+	if hasInvocationLedgerFlag {
+		cfg.invocationLedgerEnabled = invocationLedgerEnabled
+	}
+	harnessEventEmissionEnabled, hasHarnessEventEmissionFlag, err := parseBoolEnv("C2C_HARNESS_EVENT_EMISSION_ENABLED", "MODEL_GATEWAY_HARNESS_EVENT_EMISSION_ENABLED")
+	if err != nil {
+		return cfg, err
+	}
+	if hasHarnessEventEmissionFlag {
+		cfg.harnessEventEmissionEnabled = harnessEventEmissionEnabled
+	}
+
+	cfg.azureFoundryEndpoint = firstNonEmptyEnv("AZURE_FOUNDRY_ENDPOINT")
+	cfg.azureFoundryAPIKey = firstNonEmptyEnv("AZURE_FOUNDRY_API_KEY")
+	cfg.azureFoundryAPIKeyRef = firstNonEmptyEnv("AZURE_FOUNDRY_API_KEY_REF")
+	cfg.azureFoundryAPIResource = firstNonEmptyEnv("AZURE_FOUNDRY_API_RESOURCE")
+	cfg.azureFoundryAPIResourceGroup = firstNonEmptyEnv("AZURE_FOUNDRY_API_RESOURCE_GROUP")
+	cfg.azureFoundryAPIVersion = firstNonEmptyEnv("AZURE_FOUNDRY_API_VERSION")
+
+	if cfg.azureFoundryEndpoint == "" {
+		cfg.azureFoundryEndpoint = firstNonEmptyEnv("MODEL_GATEWAY_FOUNDRY_ENDPOINT")
+	}
+	if cfg.azureFoundryAPIKeyRef == "" {
+		cfg.azureFoundryAPIKeyRef = firstNonEmptyEnv("MODEL_GATEWAY_FOUNDRY_API_KEY_REF")
+	}
+
 	if cfg.registryPath == "" {
 		cfg.registryPath = defaultModelRegistryPath
 	}
@@ -610,5 +745,108 @@ func resolveGatewayConfigFromEnv() gatewayConfig {
 	if cfg.eventLogPath == "" {
 		cfg.eventLogPath = defaultEventLogPath
 	}
-	return cfg
+	if !hasInvocationLedgerFlag {
+		cfg.invocationLedgerEnabled = true
+	}
+	if !hasHarnessEventEmissionFlag {
+		cfg.harnessEventEmissionEnabled = true
+	}
+
+	return cfg, nil
+}
+
+func validateDeploymentPolicyActive(registry ModelRegistry, now func() time.Time, modelIDs []string) error {
+	for _, modelID := range modelIDs {
+		model, ok := registry.Get(modelID)
+		if !ok {
+			return fmt.Errorf("model deployment %q not found", modelID)
+		}
+		if !model.IsActive(now()) {
+			return fmt.Errorf("model deployment %q is not active", modelID)
+		}
+	}
+	return nil
+}
+
+func stringInSlice(value string, values []string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func parseCommaSeparatedIDs(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func dedupeAndTrimNonEmptyStringSlice(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeModelGatewayProvider(value string) (string, error) {
+	normalizedProvider := strings.ToLower(strings.TrimSpace(value))
+	normalizedProvider = strings.ReplaceAll(normalizedProvider, "-", "_")
+	switch normalizedProvider {
+	case "azure_foundry", "foundry_development", "foundry", "azurefoundry", "foundrydevelopment":
+		return ModelProviderFoundryDevelopment, nil
+	case "customer_internal_mock", "customerinternalmock", "customer_internal", "customer-internal", "customer", "mock":
+		return ModelProviderCustomerInternalMock, nil
+	default:
+		return "", fmt.Errorf("unsupported C2C_MODEL_PROVIDER value: %s", value)
+	}
+}
+
+func parseBoolEnv(keys ...string) (bool, bool, error) {
+	for _, key := range keys {
+		value, ok := os.LookupEnv(key)
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return false, false, fmt.Errorf("%s must be true or false", key)
+		}
+		return parsed, true, nil
+	}
+	return false, false, nil
 }
