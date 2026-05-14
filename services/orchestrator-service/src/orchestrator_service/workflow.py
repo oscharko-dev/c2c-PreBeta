@@ -33,7 +33,7 @@ STATE_TRANSITION_STEP_RETRY = "step.retry"
 STATE_TRANSITION_STEP_FAILED = "step.failed"
 POLICY_ALLOW = "policy allow"
 
-DATA_CLASS_CONTROL = "control"
+DATA_CLASS_CONTROL = "other"
 DATA_CLASS_PARSER = "parser"
 DATA_CLASS_GENERATOR = "generator"
 DATA_CLASS_BUILD_TEST = "build-test"
