@@ -1,19 +1,25 @@
 package main
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
 
 const (
-	eventTypeRunCompleted = "run.completed"
-	eventTypeRunFailed    = "run.failed"
-	eventTypeRunUpdated   = "run.updated"
-	eventTypeRunStarted   = "run.started"
+	defaultEventLogPath = "data/harness-events-v0.jsonl"
+
+	eventTypeCapabilityRegistered = "capability.registered"
+	eventTypeMCPRegistered       = "mcp-server.registered"
+	eventTypeRunCompleted        = "run.completed"
+	eventTypeRunFailed           = "run.failed"
+	eventTypeRunUpdated          = "run.updated"
+	eventTypeRunStarted          = "run.started"
 )
 
 type HarnessService struct {
@@ -22,6 +28,7 @@ type HarnessService struct {
 	mcpServers   *McpServerRegistry
 	policy       PolicyEngine
 	events       EventSink
+	stepTracker  *RunStepTracker
 }
 
 type PolicyRequest struct {
@@ -31,12 +38,26 @@ type PolicyRequest struct {
 }
 
 func NewHarnessService() *HarnessService {
+	var eventSink EventSink = NewInMemoryEventSink()
+
+	eventLogPath := strings.TrimSpace(os.Getenv("HARNESS_EVENT_LOG_PATH"))
+	if eventLogPath == "" {
+		eventLogPath = defaultEventLogPath
+	}
+	persistedSink, err := NewJSONLFileEventSink(eventLogPath)
+	if err == nil {
+		eventSink = persistedSink
+	} else {
+		log.Printf("event log initialization failed, falling back to memory sink: %v", err)
+	}
+
 	return &HarnessService{
 		capabilities: NewCapabilityRegistry(),
 		runStore:     NewRunStore(),
 		mcpServers:   NewMcpServerRegistry(),
 		policy:       DefaultPolicyEngine{},
-		events:       NewInMemoryEventSink(),
+		events:       eventSink,
+		stepTracker:  NewRunStepTracker(),
 	}
 }
 
@@ -75,7 +96,7 @@ func (h *HarnessService) healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
-		"service": "agentic-harness-core",
+		"service": ActorSystem,
 	})
 }
 
@@ -85,13 +106,13 @@ func (h *HarnessService) readyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":          "ready",
-		"capabilities":    len(h.capabilities.List()),
-		"runs":            len(h.runStore.List()),
-		"mcpServerCount":  len(h.mcpServers.List()),
-		"eventEnvelope":   "supported",
-		"policyGateways":  "enabled",
-		"lastUpdatedTime": time.Now().UTC(),
+		"status":         "ready",
+		"capabilities":   len(h.capabilities.List()),
+		"runs":           len(h.runStore.List()),
+		"mcpServerCount": len(h.mcpServers.List()),
+		"eventEnvelope":  EventSchemaVersionV0,
+		"policyGateway":  "enabled",
+		"lastUpdated":    time.Now().UTC(),
 	})
 }
 
@@ -114,7 +135,6 @@ func (h *HarnessService) capabilityCollectionHandler(w http.ResponseWriter, r *h
 			"dataClass": request.DataClass,
 		})
 		if err != nil {
-			log.Printf("policy evaluation failed: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "policy evaluation failed"})
 			return
 		}
@@ -127,14 +147,40 @@ func (h *HarnessService) capabilityCollectionHandler(w http.ResponseWriter, r *h
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := h.events.Emit(Event{
-			Type:   "capability.registered",
-			Source: "agentic-harness-core",
+
+		requestRef, err := NewEventReference("urn:harness/capability/request", request.Capability)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+		responseRef, err := NewEventReference("urn:harness/capability/response", map[string]any{
+			"id":      request.ID,
+			"status":  "registered",
+			"profile": request.PolicyProfile,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+
+		_, err = h.emitEvent(EventEnvelopeV0{
+			RunID:            systemRunID,
+			EventType:        eventTypeCapabilityRegistered,
+			Actor:            request.CallerRole,
+			Capability:       "agentic-harness-core",
+			DataClass:        request.DataClass,
+			RedactionProfile: request.PolicyProfileOrDefault(),
+			PolicyDecision:   decision.Reason,
+			Status:           "ok",
+			StateTransition:  "registry.registered",
+			InputRef:         requestRef,
+			OutputRef:        responseRef,
 			Payload: map[string]any{
 				"capabilityId": request.ID,
-				"decision":     decision,
 			},
-		}); err != nil {
+			RelatedRecords: []string{"urn:harness/capability/" + request.ID},
+		}, h.stepTracker)
+		if err != nil {
 			log.Printf("event emission failed: %v", err)
 		}
 		writeJSON(w, http.StatusCreated, request.Capability)
@@ -208,13 +254,38 @@ func (h *HarnessService) mcpServerCollectionHandler(w http.ResponseWriter, r *ht
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := h.events.Emit(Event{
-			Type:   "mcp-server.registered",
-			Source: "agentic-harness-core",
+		requestRef, err := NewEventReference("urn:harness/mcp/request", request)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+		responseRef, err := NewEventReference("urn:harness/mcp/response", map[string]any{
+			"id":      request.ID,
+			"name":    request.Name,
+			"status":  "registered",
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+		_, err = h.emitEvent(EventEnvelopeV0{
+			RunID:            systemRunID,
+			EventType:        eventTypeMCPRegistered,
+			Actor:            "orchestrator",
+			Capability:       "agentic-harness-core",
+			DataClass:        DataClassOther,
+			RedactionProfile: ProfileControlledByHarness,
+			PolicyDecision:   "allow",
+			Status:           "ok",
+			StateTransition:  "registry.registered",
+			InputRef:         requestRef,
+			OutputRef:        responseRef,
 			Payload: map[string]any{
-				"id": request.ID,
+				"serverId": request.ID,
 			},
-		}); err != nil {
+			RelatedRecords: []string{"urn:harness/mcp/" + request.ID},
+		}, h.stepTracker)
+		if err != nil {
 			log.Printf("event emission failed: %v", err)
 		}
 		writeJSON(w, http.StatusCreated, server)
@@ -275,13 +346,34 @@ func (h *HarnessService) runCollectionHandler(w http.ResponseWriter, r *http.Req
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := h.events.Emit(Event{
-			Type:   eventTypeRunStarted,
-			Source: "agentic-harness-core",
+		requestRef, err := NewEventReference("urn:harness/run/request", request)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+		outputRef, err := NewEventReference("urn:harness/run/"+run.RunID+"/state", run)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+		_, err = h.emitEvent(EventEnvelopeV0{
+			RunID:            run.RunID,
+			EventType:        eventTypeRunStarted,
+			Actor:            request.Requester,
+			Capability:       "agentic-harness-core",
+			DataClass:        DataClassOther,
+			RedactionProfile: ProfileControlledByHarness,
+			PolicyDecision:   decision.Reason,
+			Status:           StatusStarting,
+			StateTransition:  "created",
+			InputRef:         requestRef,
+			OutputRef:        outputRef,
 			Payload: map[string]any{
-				"runId": run.RunID,
+				"workflowId": request.WorkflowID,
+				"evidenceRefs": request.EvidenceRefs,
 			},
-		}); err != nil {
+		}, h.stepTracker)
+		if err != nil {
 			log.Printf("event emission failed: %v", err)
 		}
 		writeJSON(w, http.StatusCreated, run)
@@ -298,6 +390,30 @@ func (h *HarnessService) runItemHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	runID := segments[0]
+	if len(segments) == 2 && segments[1] == "ledger" {
+		run, found := h.runStore.Get(runID)
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+			return
+		}
+		allEvents, err := h.events.List()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		ledger, err := BuildAgentTrajectoryLedger(runID, allEvents)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		// Keep workflow id from source run state for easier replay.
+		if run.WorkflowID != "" {
+			ledger.WorkflowID = run.WorkflowID
+		}
+		ledger.Status = run.Status
+		writeJSON(w, http.StatusOK, ledger)
+		return
+	}
 	if len(segments) != 1 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "invalid run operation"})
 		return
@@ -339,7 +455,7 @@ func (h *HarnessService) runItemHandler(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": decision.Reason})
 			return
 		}
-		run, err := h.runStore.Update(runID, request, request.UpdatedBy, decision.Reason)
+		run, previousStatus, err := h.runStore.Update(runID, request, request.UpdatedBy, decision.Reason)
 		if err != nil {
 			if strings.Contains(err.Error(), "run is already terminal") || strings.Contains(err.Error(), "invalid run transition") {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -348,14 +464,36 @@ func (h *HarnessService) runItemHandler(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := h.events.Emit(Event{
-			Type:   h.runEventType(run.Status),
-			Source: "agentic-harness-core",
+		requestRef, err := NewEventReference("urn:harness/run/"+runID+"/request", request)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+		outputRef, err := NewEventReference("urn:harness/run/"+runID+"/state", run)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
+			return
+		}
+		eventType := h.runEventType(run.Status)
+		transition := fmt.Sprintf("%s->%s", previousStatus, run.Status)
+		_, err = h.emitEvent(EventEnvelopeV0{
+			RunID:            runID,
+			EventType:        eventType,
+			Actor:            request.UpdatedBy,
+			Capability:       "agentic-harness-core",
+			DataClass:        DataClassOther,
+			RedactionProfile: ProfileControlledByHarness,
+			PolicyDecision:   decision.Reason,
+			Status:           run.Status,
+			StateTransition:  transition,
+			InputRef:         requestRef,
+			OutputRef:        outputRef,
 			Payload: map[string]any{
 				"runId":  runID,
 				"status": run.Status,
 			},
-		}); err != nil {
+		}, h.stepTracker)
+		if err != nil {
 			log.Printf("event emission failed: %v", err)
 		}
 		writeJSON(w, http.StatusOK, run)
@@ -365,16 +503,95 @@ func (h *HarnessService) runItemHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *HarnessService) eventsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		items, err := h.events.List()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
+	case http.MethodPost:
+		var event EventEnvelopeV0
+		if err := decodeJSON(r, &event); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if event.SchemaVersion == "" {
+			event.SchemaVersion = EventSchemaVersionV0
+		}
+		if event.RunID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId is required"})
+			return
+		}
+		if event.Service == "" {
+			event.Service = ActorSystem
+		}
+		if event.CreatedAt.IsZero() {
+			event.CreatedAt = time.Now().UTC()
+		}
+		emitted, err := h.emitEvent(event, h.stepTracker)
+		if err != nil {
+			var schemaErr SchemaValidationError
+			if errors.As(err, &schemaErr) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, emitted)
+	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-		return
 	}
-	items, err := h.events.List()
+}
+
+func (h *HarnessService) emitEvent(event EventEnvelopeV0, tracker *RunStepTracker) (EventEnvelopeV0, error) {
+	if event.StepID == 0 {
+		event.StepID = tracker.Next(event.RunID)
+	}
+	event, err := h.enrichEventRefs(event)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return EventEnvelopeV0{}, err
 	}
-	writeJSON(w, http.StatusOK, items)
+	if err := event.Validate(); err != nil {
+		return EventEnvelopeV0{}, err
+	}
+	return h.events.Emit(event)
+}
+
+func (h *HarnessService) enrichEventRefs(event EventEnvelopeV0) (EventEnvelopeV0, error) {
+	payload := map[string]any{}
+	if event.Payload != nil {
+		payload = event.Payload
+	}
+	if event.InputRef.URI == "" {
+		inputRef, err := NewEventReference(fmt.Sprintf("urn:harness/%s/%s/input", event.EventType, event.RunID), payload)
+		if err != nil {
+			return EventEnvelopeV0{}, err
+		}
+		event.InputRef = inputRef
+	} else if event.InputRef.SHA256 == "" {
+		inputRef, err := NewEventReference(event.InputRef.URI, payload)
+		if err != nil {
+			return EventEnvelopeV0{}, err
+		}
+		event.InputRef = inputRef
+	}
+	if event.OutputRef.URI == "" {
+		outputRef, err := NewEventReference(fmt.Sprintf("urn:harness/%s/%s/output", event.EventType, event.RunID), payload)
+		if err != nil {
+			return EventEnvelopeV0{}, err
+		}
+		event.OutputRef = outputRef
+	} else if event.OutputRef.SHA256 == "" {
+		outputRef, err := NewEventReference(event.OutputRef.URI, payload)
+		if err != nil {
+			return EventEnvelopeV0{}, err
+		}
+		event.OutputRef = outputRef
+	}
+	return event, nil
 }
 
 func (h *HarnessService) runEventType(status string) string {
@@ -411,4 +628,11 @@ func (h *HarnessService) policyDecisionHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, decision)
+}
+
+func (c Capability) PolicyProfileOrDefault() string {
+	if c.PolicyProfile == "" {
+		return ProfileControlledByHarness
+	}
+	return c.PolicyProfile
 }

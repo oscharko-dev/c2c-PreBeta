@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/harness-event-envelope-v0.json",
+  "title": "Harness Event Envelope v0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "service",
+    "runId",
+    "stepId",
+    "actor",
+    "capability",
+    "dataClass",
+    "redactionProfile",
+    "policyDecision",
+    "status",
+    "stateTransition",
+    "createdAt",
+    "inputRef",
+    "outputRef"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "eventType": {
+      "type": "string",
+      "minLength": 1
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stepId": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataClass": {
+      "type": "string",
+      "enum": ["model", "evidence", "rag", "graph", "parser", "generator", "build-test", "test", "model-gateway", "other"]
+    },
+    "redactionProfile": {
+      "type": "string",
+      "enum": ["harness-control-plane", "agent-managed", "none"]
+    },
+    "policyDecision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stateTransition": {
+      "type": "string",
+      "minLength": 1
+    },
+    "errorClass": {
+      "type": "string",
+      "minLength": 1
+    },
+    "latencyMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "currency": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 3
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["amount"],
+      "additionalProperties": false
+    },
+    "inputRef": { "$ref": "#/$defs/dataReference" },
+    "outputRef": { "$ref": "#/$defs/dataReference" },
+    "payload": {
+      "type": "object"
+    },
+    "relatedRecords": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "dataReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -26,11 +26,15 @@ go run .
 - `GET /v0/runs/{runId}`
 - `PATCH /v0/runs/{runId}`
 - `GET /v0/events`
+- `POST /v0/events`
 - `POST /v0/policy/decide`
+- `GET /v0/runs/{runId}/ledger`
 
 ## Design notes
 
 - Agents must not register or own direct integration capabilities for core infra services (model, evidence, rag, graph, parser, generator, test). Such attempts are denied by default policy.
 - Capability and MCP registries are maintained as in-memory stores in W0 for deterministic baseline behavior.
 - Run transitions are explicit and stateful for `starting`, `updating`, `completed`, and `failed`.
-- Event envelope emission is guaranteed for capability registration, MCP registration, and run state changes.
+- Event envelopes are persisted in JSONL (`data/harness-events-v0.jsonl` by default) and include stable `runId`/`stepId`.
+- Event envelopes are guaranteed for capability registration, MCP registration, run state changes, and external service ingestion via `POST /v0/events`.
+- Local sample ledger output is available as `docs/agentic-harness-core/harness-events-v0.jsonl`.

@@ -143,6 +143,35 @@ paths:
       responses:
         "200":
           description: Event list
+    post:
+      summary: Ingest an event envelope for an active run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/harness-event-envelope-v0.json"
+      responses:
+        "201":
+          description: Event accepted
+        "400":
+          description: Invalid envelope
+  /runs/{runId}/ledger:
+    get:
+      summary: Retrieve run trajectory ledger built from run events
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Run trajectory ledger
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/agent-trajectory-ledger-v0.json"
   /policy/decide:
     post:
       summary: Explicitly evaluate a policy action
