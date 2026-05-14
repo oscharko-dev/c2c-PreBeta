@@ -1,8 +1,8 @@
 package main
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,11 +15,11 @@ const (
 	defaultEventLogPath = "data/harness-events-v0.jsonl"
 
 	eventTypeCapabilityRegistered = "capability.registered"
-	eventTypeMCPRegistered       = "mcp-server.registered"
-	eventTypeRunCompleted        = "run.completed"
-	eventTypeRunFailed           = "run.failed"
-	eventTypeRunUpdated          = "run.updated"
-	eventTypeRunStarted          = "run.started"
+	eventTypeMCPRegistered        = "mcp-server.registered"
+	eventTypeRunCompleted         = "run.completed"
+	eventTypeRunFailed            = "run.failed"
+	eventTypeRunUpdated           = "run.updated"
+	eventTypeRunStarted           = "run.started"
 )
 
 type HarnessService struct {
@@ -29,6 +29,7 @@ type HarnessService struct {
 	policy       PolicyEngine
 	events       EventSink
 	stepTracker  *RunStepTracker
+	auth         HarnessAuth
 }
 
 type PolicyRequest struct {
@@ -58,6 +59,7 @@ func NewHarnessService() *HarnessService {
 		policy:       DefaultPolicyEngine{},
 		events:       eventSink,
 		stepTracker:  NewRunStepTracker(),
+		auth:         NewHarnessAuthFromEnv(),
 	}
 }
 
@@ -87,6 +89,19 @@ func decodeJSON(r *http.Request, target any) error {
 		return fmt.Errorf("content-type must be application/json")
 	}
 	return json.NewDecoder(r.Body).Decode(target)
+}
+
+func (h *HarnessService) requirePrincipal(w http.ResponseWriter, r *http.Request) (Principal, bool) {
+	principal, err := h.auth.Require(r)
+	if err == nil {
+		return principal, true
+	}
+	status := http.StatusUnauthorized
+	if h.auth.token == "" {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]string{"error": err.Error()})
+	return Principal{}, false
 }
 
 func (h *HarnessService) healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -121,14 +136,16 @@ func (h *HarnessService) capabilityCollectionHandler(w http.ResponseWriter, r *h
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, h.capabilities.List())
 	case http.MethodPost:
+		principal, ok := h.requirePrincipal(w, r)
+		if !ok {
+			return
+		}
 		var request RegisterCapabilityRequest
 		if err := decodeJSON(r, &request); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
-		if request.CallerRole == "" {
-			request.CallerRole = "agent"
-		}
+		request.CallerRole = principal.Role
 
 		decision, err := h.policy.Decide(ActionRegisterCapability, request.CallerRole, map[string]string{
 			"id":        request.ID,
@@ -166,7 +183,7 @@ func (h *HarnessService) capabilityCollectionHandler(w http.ResponseWriter, r *h
 		_, err = h.emitEvent(EventEnvelopeV0{
 			RunID:            systemRunID,
 			EventType:        eventTypeCapabilityRegistered,
-			Actor:            request.CallerRole,
+			Actor:            principal.Actor,
 			Capability:       "agentic-harness-core",
 			DataClass:        request.DataClass,
 			RedactionProfile: request.PolicyProfileOrDefault(),
@@ -218,6 +235,9 @@ func (h *HarnessService) capabilityItemHandler(w http.ResponseWriter, r *http.Re
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "invalid capability operation"})
 			return
 		}
+		if _, ok := h.requirePrincipal(w, r); !ok {
+			return
+		}
 		capability, err := h.capabilities.Validate(capabilityID)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -237,27 +257,29 @@ func (h *HarnessService) mcpServerCollectionHandler(w http.ResponseWriter, r *ht
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, h.mcpServers.List())
 	case http.MethodPost:
+		principal, ok := h.requirePrincipal(w, r)
+		if !ok {
+			return
+		}
 		var request RegisterMcpServerRequest
 		if err := decodeJSON(r, &request); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
-			if request.CallerRole == "" {
-				request.CallerRole = "agent"
-			}
-			decision, err := h.policy.Decide(ActionRegisterCapability, request.CallerRole, map[string]string{
-				"id":        request.ID,
-				"dataClass": DataClassOther,
-			})
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "policy evaluation failed"})
-				return
-			}
-			if !decision.Allowed {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": decision.Reason})
-				return
-			}
-			server := McpServer{
+		request.CallerRole = principal.Role
+		decision, err := h.policy.Decide(ActionRegisterCapability, request.CallerRole, map[string]string{
+			"id":        request.ID,
+			"dataClass": DataClassOther,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "policy evaluation failed"})
+			return
+		}
+		if !decision.Allowed {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": decision.Reason})
+			return
+		}
+		server := McpServer{
 			ID:           request.ID,
 			Name:         request.Name,
 			Endpoint:     request.Endpoint,
@@ -275,9 +297,9 @@ func (h *HarnessService) mcpServerCollectionHandler(w http.ResponseWriter, r *ht
 			return
 		}
 		responseRef, err := NewEventReference("urn:harness/mcp/response", map[string]any{
-			"id":      request.ID,
-			"name":    request.Name,
-			"status":  "registered",
+			"id":     request.ID,
+			"name":   request.Name,
+			"status": "registered",
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create event payload hash"})
@@ -286,11 +308,11 @@ func (h *HarnessService) mcpServerCollectionHandler(w http.ResponseWriter, r *ht
 		_, err = h.emitEvent(EventEnvelopeV0{
 			RunID:            systemRunID,
 			EventType:        eventTypeMCPRegistered,
-			Actor:            "orchestrator",
+			Actor:            principal.Actor,
 			Capability:       "agentic-harness-core",
 			DataClass:        DataClassOther,
 			RedactionProfile: ProfileControlledByHarness,
-				PolicyDecision:   decision.Reason,
+			PolicyDecision:   decision.Reason,
 			Status:           "ok",
 			StateTransition:  "registry.registered",
 			InputRef:         requestRef,
@@ -337,15 +359,17 @@ func (h *HarnessService) runCollectionHandler(w http.ResponseWriter, r *http.Req
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, h.runStore.List())
 	case http.MethodPost:
+		principal, ok := h.requirePrincipal(w, r)
+		if !ok {
+			return
+		}
 		var request RunCreateRequest
 		if err := decodeJSON(r, &request); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
-		if request.Requester == "" {
-			request.Requester = "orchestrator"
-		}
-		decision, err := h.policy.Decide(ActionStartRun, request.Requester, map[string]string{
+		request.Requester = principal.Actor
+		decision, err := h.policy.Decide(ActionStartRun, principal.Role, map[string]string{
 			"workflowId": request.WorkflowID,
 		})
 		if err != nil {
@@ -356,7 +380,7 @@ func (h *HarnessService) runCollectionHandler(w http.ResponseWriter, r *http.Req
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": decision.Reason})
 			return
 		}
-		run, err := h.runStore.Create(request, request.Requester, decision.Reason)
+		run, err := h.runStore.Create(request, principal.Actor, decision.Reason)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -374,7 +398,7 @@ func (h *HarnessService) runCollectionHandler(w http.ResponseWriter, r *http.Req
 		_, err = h.emitEvent(EventEnvelopeV0{
 			RunID:            run.RunID,
 			EventType:        eventTypeRunStarted,
-			Actor:            request.Requester,
+			Actor:            principal.Actor,
 			Capability:       "agentic-harness-core",
 			DataClass:        DataClassOther,
 			RedactionProfile: ProfileControlledByHarness,
@@ -384,7 +408,7 @@ func (h *HarnessService) runCollectionHandler(w http.ResponseWriter, r *http.Req
 			InputRef:         requestRef,
 			OutputRef:        outputRef,
 			Payload: map[string]any{
-				"workflowId": request.WorkflowID,
+				"workflowId":   request.WorkflowID,
 				"evidenceRefs": request.EvidenceRefs,
 			},
 		}, h.stepTracker)
@@ -443,6 +467,10 @@ func (h *HarnessService) runItemHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		writeJSON(w, http.StatusOK, run)
 	case http.MethodPatch:
+		principal, ok := h.requirePrincipal(w, r)
+		if !ok {
+			return
+		}
 		var request RunUpdateRequest
 		if err := decodeJSON(r, &request); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
@@ -451,14 +479,12 @@ func (h *HarnessService) runItemHandler(w http.ResponseWriter, r *http.Request) 
 		if request.Status != "" {
 			request.Status = strings.ToLower(request.Status)
 		}
-		if request.UpdatedBy == "" {
-			request.UpdatedBy = "orchestrator"
-		}
+		request.UpdatedBy = principal.Actor
 		action := ActionUpdateRun
 		if request.Status == StatusCompleted {
 			action = ActionCompleteRun
 		}
-		decision, err := h.policy.Decide(action, request.UpdatedBy, map[string]string{
+		decision, err := h.policy.Decide(action, principal.Role, map[string]string{
 			"runId":  runID,
 			"status": request.Status,
 		})
@@ -527,6 +553,10 @@ func (h *HarnessService) eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, items)
 	case http.MethodPost:
+		principal, ok := h.requirePrincipal(w, r)
+		if !ok {
+			return
+		}
 		var event EventEnvelopeV0
 		if err := decodeJSON(r, &event); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
@@ -535,21 +565,28 @@ func (h *HarnessService) eventsHandler(w http.ResponseWriter, r *http.Request) {
 		if event.SchemaVersion == "" {
 			event.SchemaVersion = EventSchemaVersionV0
 		}
-			if event.RunID == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId is required"})
-				return
-			}
-			run, found := h.runStore.Get(event.RunID)
-			if !found {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId not found"})
-				return
-			}
-			if run.Status == StatusCompleted || run.Status == StatusFailed {
-				writeJSON(w, http.StatusConflict, map[string]string{"error": "run is already terminal"})
-				return
-			}
+		if event.RunID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId is required"})
+			return
+		}
+		run, found := h.runStore.Get(event.RunID)
+		if !found {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId not found"})
+			return
+		}
+		if run.Status == StatusCompleted || run.Status == StatusFailed {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "run is already terminal"})
+			return
+		}
+		if event.Actor == "" {
+			event.Actor = principal.Actor
+		}
 		if event.Service == "" {
-			event.Service = ActorSystem
+			event.Service = principal.Actor
+		}
+		if err := h.authorizeEventProducer(principal, event); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
 		}
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = time.Now().UTC()
@@ -630,6 +667,32 @@ func (h *HarnessService) enrichEventRefs(event EventEnvelopeV0) (EventEnvelopeV0
 	return event, nil
 }
 
+func (h *HarnessService) authorizeEventProducer(principal Principal, event EventEnvelopeV0) error {
+	if principal.Role == "orchestrator" {
+		if capability, found := h.capabilities.Get(event.Capability); found && capability.DataClass != event.DataClass {
+			return fmt.Errorf("event dataClass must match registered capability")
+		}
+		return nil
+	}
+	eventActor := cleanPrincipalPart(event.Actor, "")
+	if eventActor != principal.Actor {
+		return fmt.Errorf("event actor must match authenticated harness actor")
+	}
+	eventService := cleanPrincipalPart(event.Service, "")
+	if eventService != "" && eventService != principal.Actor {
+		return fmt.Errorf("event service must match authenticated harness actor")
+	}
+	if capability, found := h.capabilities.Get(event.Capability); found {
+		if cleanPrincipalPart(capability.Owner, "") != principal.Actor {
+			return fmt.Errorf("authenticated actor does not own event capability")
+		}
+		if capability.DataClass != event.DataClass {
+			return fmt.Errorf("event dataClass must match registered capability")
+		}
+	}
+	return nil
+}
+
 func (h *HarnessService) runEventType(status string) string {
 	switch status {
 	case StatusCompleted:
@@ -646,14 +709,16 @@ func (h *HarnessService) policyDecisionHandler(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
+	principal, ok := h.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
 	var req PolicyRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
-	if req.Actor == "" {
-		req.Actor = "agent"
-	}
+	req.Actor = principal.Role
 	decision, err := h.policy.Decide(req.Action, req.Actor, req.Target)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

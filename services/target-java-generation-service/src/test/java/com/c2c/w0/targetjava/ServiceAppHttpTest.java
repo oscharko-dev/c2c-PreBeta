@@ -38,7 +38,7 @@ class ServiceAppHttpTest {
         // Reuse the real handler from ServiceApp so the test covers the
         // production code path, not a parallel implementation.
         server.createContext("/v0/generate", exchange ->
-                ServiceApp.handleGenerate(exchange, service, null));
+                ServiceApp.handleGenerate(exchange, service, null, null));
         server.start();
     }
 
@@ -107,7 +107,7 @@ class ServiceAppHttpTest {
             String eventEndpoint = "http://127.0.0.1:" + eventServer.getAddress().getPort() + "/v0/events";
             HttpServer local = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             local.createContext("/v0/generate", exchange ->
-                    ServiceApp.handleGenerate(exchange, new TargetJavaGenerationService(), eventEndpoint));
+                    ServiceApp.handleGenerate(exchange, new TargetJavaGenerationService(), eventEndpoint, null));
             local.start();
             try {
                 Map<String, Object> body = Map.of("runId", "run-events", "ir", smallIr("EVENTDEMO"));

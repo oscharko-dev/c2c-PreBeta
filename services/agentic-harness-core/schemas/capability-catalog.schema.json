@@ -2,11 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "CapabilityCatalog",
   "type": "object",
-  "required": ["callerRole", "capability"],
+  "required": ["capability"],
   "properties": {
     "callerRole": {
       "type": "string",
-      "enum": ["agent", "orchestrator", "workflow", "service"]
+      "enum": ["agent", "orchestrator", "workflow", "service"],
+      "deprecated": true,
+      "description": "Ignored by the service. The caller role is derived from the authenticated X-Harness-Role header."
     },
     "capability": {
       "type": "object",

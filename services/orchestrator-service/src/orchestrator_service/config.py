@@ -12,8 +12,8 @@ DEFAULT_RETRY_DELAY_MS = 200
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 5
 DEFAULT_PARSE_CAPABILITY = "cobol.parse"
 DEFAULT_IR_CAPABILITY = "cobol.ir"
-DEFAULT_GENERATOR_CAPABILITY = "java.generator"
-DEFAULT_BUILD_TEST_CAPABILITY = "java.build-test"
+DEFAULT_GENERATOR_CAPABILITY = "target.java.generate"
+DEFAULT_BUILD_TEST_CAPABILITY = "build-test.run"
 DEFAULT_EVIDENCE_CAPABILITY = "evidence.writer"
 DEFAULT_MODEL_GATEWAY_CAPABILITY = "model-gateway"
 
@@ -32,6 +32,7 @@ class OrchestratorConfig:
     build_test_capability_id: str
     evidence_capability_id: str
     model_gateway_capability_id: str
+    harness_token: str = ""
     service_name: str = "orchestrator-service"
 
 
@@ -80,6 +81,7 @@ def load_config() -> OrchestratorConfig:
         "ORCHESTRATOR_MODEL_GATEWAY_CAPABILITY_ID",
         DEFAULT_MODEL_GATEWAY_CAPABILITY,
     ).strip()
+    harness_token = os.environ.get("ORCHESTRATOR_HARNESS_TOKEN", "").strip()
 
     if not parse_capability_id or not ir_capability_id or not generator_capability_id or not build_test_capability_id or not evidence_capability_id:
         raise ValueError("capability ids are required")
@@ -97,4 +99,5 @@ def load_config() -> OrchestratorConfig:
         build_test_capability_id=build_test_capability_id,
         evidence_capability_id=evidence_capability_id,
         model_gateway_capability_id=model_gateway_capability_id,
+        harness_token=harness_token,
     )

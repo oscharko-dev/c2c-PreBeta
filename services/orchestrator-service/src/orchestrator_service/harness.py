@@ -30,11 +30,12 @@ class DataReference:
 
 
 class HarnessGateway:
-    def __init__(self, base_url: str, http: JSONHTTPClient):
+    def __init__(self, base_url: str, http: JSONHTTPClient, harness_headers: Optional[Dict[str, str]] = None):
         if not base_url:
             raise ValueError("harness base URL is required")
         self.base_url = base_url.rstrip("/")
         self.http = http
+        self.harness_headers = dict(harness_headers or {})
 
     def create_run(self, workflow_id: str, requester: str = "orchestrator", evidence_refs=None) -> Dict[str, Any]:
         if evidence_refs is None:
@@ -44,7 +45,7 @@ class HarnessGateway:
             "requester": requester,
             "evidenceRefs": list(evidence_refs),
         }
-        resp = self.http.post_json(f"{self.base_url}/v0/runs", payload)
+        resp = self.http.post_json(f"{self.base_url}/v0/runs", payload, headers=self.harness_headers)
         if resp.status != 201:
             raise HarnessFailure(resp.status, str(resp.payload))
         if not isinstance(resp.payload, dict) or "runId" not in resp.payload:
@@ -70,7 +71,7 @@ class HarnessGateway:
             "evidenceRefs": list(evidence_refs or []),
             "policyDecision": policy_decision,
         }
-        resp = self.http.patch_json(f"{self.base_url}/v0/runs/{urllib.parse.quote(run_id)}", payload)
+        resp = self.http.patch_json(f"{self.base_url}/v0/runs/{urllib.parse.quote(run_id)}", payload, headers=self.harness_headers)
         if resp.status != 200:
             raise HarnessFailure(resp.status, str(resp.payload))
         if not isinstance(resp.payload, dict):
@@ -112,7 +113,7 @@ class HarnessGateway:
         if "schemaVersion" not in event:
             event = dict(event)
             event["schemaVersion"] = "v0"
-        resp = self.http.post_json(f"{self.base_url}/v0/events", event)
+        resp = self.http.post_json(f"{self.base_url}/v0/events", event, headers=self.harness_headers)
         if resp.status != 201:
             raise HarnessFailure(resp.status, str(resp.payload))
         if not isinstance(resp.payload, dict):

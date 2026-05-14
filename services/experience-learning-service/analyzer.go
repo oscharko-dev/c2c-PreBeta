@@ -74,6 +74,7 @@ func (a *PatternAnalyzer) AnalyzeRun(runID string, events []EventEnvelopeV0, led
 		candidates := analyzeBucket(a, runID, key, bucket)
 		combined = append(combined, candidates...)
 	}
+	combined = append(combined, analyzeRetrySequences(a, runID, eventsForRun)...)
 
 	for _, ledger := range filterLedgersByRun(ledgers, runID) {
 		combined = append(combined, analyzeLedger(ledger, runID, a)...)
@@ -387,6 +388,99 @@ func analyzeBucket(analyzer *PatternAnalyzer, runID string, key PatternKey, item
 				"pattern":       patternRetry,
 				"reason":        "failure followed by completion in same action context",
 				"key":           key.String(),
+			},
+		}))
+	}
+	return out
+}
+
+type retrySequenceKey struct {
+	Actor        string
+	Capability   string
+	InputHash    string
+	OutputHash   string
+	BuildOutcome string
+}
+
+func analyzeRetrySequences(analyzer *PatternAnalyzer, runID string, events []EventEnvelopeV0) []ExperienceEventV0 {
+	now := analyzer.now()
+	groups := make(map[retrySequenceKey][]EventEnvelopeV0)
+	for _, event := range events {
+		if strings.TrimSpace(event.Actor) == "" || strings.TrimSpace(event.Capability) == "" {
+			continue
+		}
+		if strings.TrimSpace(event.InputRef.SHA256) == "" || strings.TrimSpace(event.OutputRef.SHA256) == "" {
+			continue
+		}
+		key := retrySequenceKey{
+			Actor:        event.Actor,
+			Capability:   event.Capability,
+			InputHash:    event.InputRef.SHA256,
+			OutputHash:   event.OutputRef.SHA256,
+			BuildOutcome: classifyBuildOutcome(event),
+		}
+		groups[key] = append(groups[key], event)
+	}
+
+	out := make([]ExperienceEventV0, 0)
+	for key, items := range groups {
+		failedIndex := -1
+		recoveredIndex := -1
+		for i := range items {
+			if failedIndex == -1 && strings.EqualFold(items[i].Status, "failed") {
+				failedIndex = i
+				continue
+			}
+			if failedIndex != -1 && strings.EqualFold(items[i].Status, "completed") {
+				recoveredIndex = i
+				break
+			}
+		}
+		if failedIndex == -1 || recoveredIndex == -1 {
+			continue
+		}
+		failed := items[failedIndex]
+		recovered := items[recoveredIndex]
+		fingerprint := PatternKey{
+			Actor:        key.Actor,
+			Capability:   key.Capability,
+			InputHash:    key.InputHash,
+			OutputHash:   key.OutputHash,
+			Status:       "retry",
+			BuildOutcome: key.BuildOutcome,
+		}.Fingerprint()
+		out = append(out, buildExperienceEvent(ExperienceEventV0{
+			SchemaVersion:      experienceSchemaVersion,
+			EventID:            analyzer.nextEventID(),
+			EventType:          eventTypeObservation,
+			Service:            serviceName,
+			RunID:              runID,
+			Actor:              key.Actor,
+			Capability:         key.Capability,
+			DataClass:          failed.DataClass,
+			RedactionProfile:   failed.RedactionProfile,
+			PolicyDecision:     policyDecisionAllow(),
+			Status:             statusObserved,
+			StateTransition:    "analysis.detected",
+			InputHash:          key.InputHash,
+			OutputHash:         key.OutputHash,
+			Pattern:            patternRetry,
+			PatternFingerprint: "retry:" + fingerprint,
+			BuildTestOutcome:   key.BuildOutcome,
+			Occurrences:        2,
+			Confidence:         analyzer.clamp(0.89, analyzer.policy.Detection.MinConfidence, 1.0),
+			FirstStepID:        failed.StepID,
+			LastStepID:         recovered.StepID,
+			RelatedRecords:     []string{failed.EventID, recovered.EventID},
+			EvidenceRefs:       []string{failed.EventID, recovered.EventID},
+			ObservationOnly:    true,
+			PolicyVersion:      analyzer.policy.PolicyVersion,
+			CreatedAt:          now,
+			ObservedAt:         now,
+			Payload: map[string]any{
+				"evidenceRunId": runID,
+				"pattern":       patternRetry,
+				"reason":        "failure followed by completion in same action context",
 			},
 		}))
 	}

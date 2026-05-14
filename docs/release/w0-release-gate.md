@@ -16,7 +16,7 @@ purely on a verbal claim or a screenshot.
 | Field | Value |
 |-------|-------|
 | Status | **GO for Wave 1 planning** as of the run tag below. |
-| Recorded run tag | `20260514T090008Z` |
+| Recorded run tag | `20260514T104603Z` |
 | Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [sample-evidence-pack/](../showcase/sample-evidence-pack/), CI on `dev` |
 | Sign-off | Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) closing comment links to this document. |
 
@@ -76,7 +76,7 @@ to remove or weaken any of the W0 acceptance bars below.
 
 - [x] Every workflow step posts an envelope-conformant event to the harness
       `/v0/events` endpoint. The scorecard's "Harness Event Envelope ledger
-      entries captured" metric is non-zero (32 across 4 demo runs).
+      entries captured" metric is non-zero (45 across 4 demo runs).
       _Evidence_: scorecard "Aggregate metrics" table.
 - [x] Each Evidence Pack manifest carries a `harnessEvents` ref whose
       sha256 matches the harness snapshot taken at that point in the run.
@@ -114,7 +114,15 @@ to remove or weaken any of the W0 acceptance bars below.
       with `Resolves #16`.
 - [x] No TODOs or temporary workarounds were merged. Any deferred work is
       filed as an explicit follow-up under
-      [`docs/showcase/w0-followups.md`](../showcase/w0-followups.md).
+      [`docs/showcase/w0-followups.md`](../showcase/w0-followups.md):
+      [#64](https://github.com/oscharko-dev/c2c-PreBeta/issues/64),
+      [#65](https://github.com/oscharko-dev/c2c-PreBeta/issues/65),
+      [#66](https://github.com/oscharko-dev/c2c-PreBeta/issues/66),
+      [#67](https://github.com/oscharko-dev/c2c-PreBeta/issues/67),
+      [#68](https://github.com/oscharko-dev/c2c-PreBeta/issues/68).
+      The duplicate-step trajectory-ledger gap originally filed as
+      [#63](https://github.com/oscharko-dev/c2c-PreBeta/issues/63) is fixed
+      in the Epic #1 hardening branch.
 
 ## What is *not* ready (and what must not be claimed)
 
@@ -131,13 +139,12 @@ to remove or weaken any of the W0 acceptance bars below.
   Wave 1 task — see [`w0-followups.md`](../showcase/w0-followups.md).
 - **Model gateway.** Zero model calls in W0. Wave 1 will exercise
   `model-gateway-service` end-to-end with a documented allowlist.
-- **Harness-driven orchestration semantics.** The W0 orchestrator-service
-  exists (Python) and exposes the W0 contract, but the demo drives services
-  directly over HTTP rather than through harness capability invocation
-  because (a) capability registration for parser/generator/build-test is
-  forbidden by default policy and (b) the harness's
-  `/v0/runs/{id}/ledger` endpoint requires unique `stepId`s across services,
-  which today's services do not yet supply. Both are tracked.
+- **Harness-driven orchestration semantics.** The W0 demo registers every
+  W0 capability in the Harness catalog and resolves service endpoints from
+  that catalog before invocation. The remaining Wave 1 gap is moving this
+  bootstrap and live payload adaptation into `orchestrator-service.main`
+  itself; the direct demo driver stays only as the deterministic release-gate
+  harness.
 
 ## Scope
 

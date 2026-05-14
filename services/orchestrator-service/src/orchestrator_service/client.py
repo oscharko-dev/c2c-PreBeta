@@ -20,32 +20,39 @@ class HttpResponse:
 
 
 class JSONHTTPClient:
-    def __init__(self, timeout_seconds: int = 5) -> None:
+    def __init__(self, timeout_seconds: int = 5, default_headers: Mapping[str, str] | None = None) -> None:
         self.timeout_seconds = timeout_seconds
+        self.default_headers = dict(default_headers or {})
 
-    def post_json(self, url: str, payload: Mapping[str, Any]) -> HttpResponse:
+    def post_json(self, url: str, payload: Mapping[str, Any], headers: Mapping[str, str] | None = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,
             data=raw,
-            headers={"Content-Type": "application/json"},
+            headers=self._headers({"Content-Type": "application/json"}, headers),
             method="POST",
         )
         return self._send(request)
 
-    def patch_json(self, url: str, payload: Mapping[str, Any]) -> HttpResponse:
+    def patch_json(self, url: str, payload: Mapping[str, Any], headers: Mapping[str, str] | None = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,
             data=raw,
-            headers={"Content-Type": "application/json"},
+            headers=self._headers({"Content-Type": "application/json"}, headers),
             method="PATCH",
         )
         return self._send(request)
 
-    def get_json(self, url: str) -> HttpResponse:
-        request = Request(url=url, method="GET")
+    def get_json(self, url: str, headers: Mapping[str, str] | None = None) -> HttpResponse:
+        request = Request(url=url, headers=self._headers({}, headers), method="GET")
         return self._send(request)
+
+    def _headers(self, headers: Mapping[str, str], extra_headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        merged = dict(self.default_headers)
+        merged.update(headers)
+        merged.update(extra_headers or {})
+        return merged
 
     def _send(self, request: Request) -> HttpResponse:
         try:

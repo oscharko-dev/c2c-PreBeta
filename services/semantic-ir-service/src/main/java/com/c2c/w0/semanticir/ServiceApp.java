@@ -29,6 +29,7 @@ public final class ServiceApp {
     public static void main(String[] args) throws Exception {
         int port = readPort(System.getenv("SEMANTIC_IR_LISTEN_ADDR"));
         String eventEndpoint = normalizeEndpoint(System.getenv("HARNESS_EVENT_ENDPOINT"));
+        String eventToken = normalizeToken(System.getenv("HARNESS_EVENT_TOKEN"));
         SemanticIrService service = new SemanticIrService();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
 
@@ -52,7 +53,7 @@ public final class ServiceApp {
                 response.put("outputRef", SemanticIrService.reference(SERVICE_NAME, "semantic-ir", response.get("ir")));
                 int status = "ok".equals(response.get("status")) ? 200 : 422;
                 sendJson(exchange, status, response);
-                emitEvent(eventEndpoint, response);
+                emitEvent(eventEndpoint, eventToken, response);
             } catch (IllegalArgumentException e) {
                 sendJson(exchange, 400, Map.of("status", "failed", "error", e.getMessage()));
             } catch (Exception e) {
@@ -65,7 +66,7 @@ public final class ServiceApp {
         Thread.currentThread().join();
     }
 
-    private static void emitEvent(String endpoint, Map<String, Object> response) {
+    private static void emitEvent(String endpoint, String eventToken, Map<String, Object> response) {
         if (endpoint == null) {
             return;
         }
@@ -88,8 +89,14 @@ public final class ServiceApp {
             event.put("outputRef", response.get("outputRef"));
             event.put("payload", Map.of("irId", ((Map<?, ?>) response.get("ir")).get("irId")));
             event.put("createdAt", Instant.now().toString());
-            HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
                     .header("Content-Type", "application/json")
+                    .header("X-Harness-Actor", SERVICE_NAME)
+                    .header("X-Harness-Role", "service");
+            if (eventToken != null) {
+                builder.header("Authorization", "Bearer " + eventToken);
+            }
+            HttpRequest request = builder
                     .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(event)))
                     .build();
             HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding());
@@ -124,6 +131,13 @@ public final class ServiceApp {
             return endpoint;
         }
         return endpoint.endsWith("/") ? endpoint + "v0/events" : endpoint + "/v0/events";
+    }
+
+    private static String normalizeToken(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        return token.trim();
     }
 
     private static void sendText(HttpExchange exchange, int status, String body) throws IOException {

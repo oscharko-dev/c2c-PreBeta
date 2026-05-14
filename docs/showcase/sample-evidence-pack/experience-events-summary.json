@@ -1,5 +1,14 @@
 [
   {
+    "pattern": "test_failure",
+    "occurrences": 1,
+    "runId": "run-1",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
     "pattern": "repeat_action",
     "occurrences": 2,
     "runId": "run-1",
@@ -18,15 +27,6 @@
     "dataClass": "generator"
   },
   {
-    "pattern": "test_failure",
-    "occurrences": 1,
-    "runId": "run-1",
-    "actor": "build-test-runner-service",
-    "capability": "build-test.run",
-    "status": "observed",
-    "dataClass": "build-test"
-  },
-  {
     "pattern": "repeat_action",
     "occurrences": 2,
     "runId": "run-2",
@@ -52,6 +52,15 @@
     "capability": "build-test.run",
     "status": "observed",
     "dataClass": "build-test"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-3",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
   },
   {
     "pattern": "test_failure",
@@ -64,15 +73,6 @@
   },
   {
     "pattern": "repeat_action",
-    "occurrences": 2,
-    "runId": "run-3",
-    "actor": "target-java-generation-service",
-    "capability": "target.java.generate",
-    "status": "observed",
-    "dataClass": "generator"
-  },
-  {
-    "pattern": "unchanged_output",
     "occurrences": 2,
     "runId": "run-3",
     "actor": "target-java-generation-service",
@@ -84,10 +84,46 @@
     "pattern": "unchanged_output",
     "occurrences": 2,
     "runId": "run-4",
-    "actor": "build-test-runner-service",
-    "capability": "build-test.run",
+    "actor": "semantic-ir-service",
+    "capability": "cobol.ir",
     "status": "observed",
-    "dataClass": "build-test"
+    "dataClass": "parser"
+  },
+  {
+    "pattern": "retry",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "w0-demo",
+    "capability": "evidence.writer",
+    "status": "observed",
+    "dataClass": "evidence"
+  },
+  {
+    "pattern": "accepted_pattern",
+    "occurrences": 1,
+    "runId": "run-4",
+    "actor": "w0-demo",
+    "capability": "evidence.writer",
+    "status": "observed",
+    "dataClass": "evidence"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
   },
   {
     "pattern": "repeat_action",
@@ -100,24 +136,6 @@
   },
   {
     "pattern": "unchanged_output",
-    "occurrences": 2,
-    "runId": "run-4",
-    "actor": "semantic-ir-service",
-    "capability": "cobol.ir",
-    "status": "observed",
-    "dataClass": "parser"
-  },
-  {
-    "pattern": "unchanged_output",
-    "occurrences": 4,
-    "runId": "run-4",
-    "actor": "target-java-generation-service",
-    "capability": "target.java.generate",
-    "status": "observed",
-    "dataClass": "generator"
-  },
-  {
-    "pattern": "repeat_action",
     "occurrences": 2,
     "runId": "run-4",
     "actor": "build-test-runner-service",
@@ -135,13 +153,13 @@
     "dataClass": "build-test"
   },
   {
-    "pattern": "test_failure",
+    "pattern": "repeat_action",
     "occurrences": 2,
     "runId": "run-4",
-    "actor": "build-test-runner-service",
-    "capability": "build-test.run",
+    "actor": "semantic-ir-service",
+    "capability": "cobol.ir",
     "status": "observed",
-    "dataClass": "build-test"
+    "dataClass": "parser"
   },
   {
     "pattern": "unchanged_output",
@@ -154,20 +172,38 @@
   },
   {
     "pattern": "repeat_action",
-    "occurrences": 2,
-    "runId": "run-4",
-    "actor": "semantic-ir-service",
-    "capability": "cobol.ir",
-    "status": "observed",
-    "dataClass": "parser"
-  },
-  {
-    "pattern": "repeat_action",
     "occurrences": 4,
     "runId": "run-4",
     "actor": "target-java-generation-service",
     "capability": "target.java.generate",
     "status": "observed",
     "dataClass": "generator"
+  },
+  {
+    "pattern": "unchanged_output",
+    "occurrences": 4,
+    "runId": "run-4",
+    "actor": "target-java-generation-service",
+    "capability": "target.java.generate",
+    "status": "observed",
+    "dataClass": "generator"
+  },
+  {
+    "pattern": "repeat_action",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
+  },
+  {
+    "pattern": "test_failure",
+    "occurrences": 2,
+    "runId": "run-4",
+    "actor": "build-test-runner-service",
+    "capability": "build-test.run",
+    "status": "observed",
+    "dataClass": "build-test"
   }
 ]

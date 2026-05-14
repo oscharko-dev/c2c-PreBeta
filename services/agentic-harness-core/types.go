@@ -11,28 +11,28 @@ import (
 
 const (
 	ActionRegisterCapability = "register_capability"
-	ActionStartRun          = "start_run"
-	ActionUpdateRun         = "update_run"
-	ActionCompleteRun       = "complete_run"
+	ActionStartRun           = "start_run"
+	ActionUpdateRun          = "update_run"
+	ActionCompleteRun        = "complete_run"
 )
 
 const (
-	DataClassModel       = "model"
-	DataClassEvidence    = "evidence"
-	DataClassRAG         = "rag"
-	DataClassGraph       = "graph"
-	DataClassParser      = "parser"
-	DataClassGenerator   = "generator"
+	DataClassModel        = "model"
+	DataClassEvidence     = "evidence"
+	DataClassRAG          = "rag"
+	DataClassGraph        = "graph"
+	DataClassParser       = "parser"
+	DataClassGenerator    = "generator"
 	DataClassBuildTest    = "build-test"
-	DataClassTest        = "test"
+	DataClassTest         = "test"
 	DataClassModelGateway = "model-gateway"
-	DataClassOther       = "other"
+	DataClassOther        = "other"
 )
 
 const (
 	ProfileControlledByHarness = "harness-control-plane"
-	ProfileAgentManaged       = "agent-managed"
-	ProfileNoRedaction       = "none"
+	ProfileAgentManaged        = "agent-managed"
+	ProfileNoRedaction         = "none"
 )
 
 const (
@@ -44,16 +44,16 @@ const (
 )
 
 var allowedDataClasses = map[string]struct{}{
-	DataClassModel:       {},
-	DataClassEvidence:    {},
-	DataClassRAG:        {},
-	DataClassGraph:      {},
-	DataClassParser:     {},
-	DataClassGenerator:  {},
-	DataClassBuildTest:  {},
-	DataClassTest:       {},
+	DataClassModel:        {},
+	DataClassEvidence:     {},
+	DataClassRAG:          {},
+	DataClassGraph:        {},
+	DataClassParser:       {},
+	DataClassGenerator:    {},
+	DataClassBuildTest:    {},
+	DataClassTest:         {},
 	DataClassModelGateway: {},
-	DataClassOther:      {},
+	DataClassOther:        {},
 }
 
 var allowedRedactionProfiles = map[string]struct{}{
@@ -130,27 +130,27 @@ type EventCost struct {
 }
 
 type EventEnvelopeV0 struct {
-	SchemaVersion    string                 `json:"schemaVersion"`
-	EventID          string                 `json:"eventId"`
-	EventType        string                 `json:"eventType"`
-	Service          string                 `json:"service"`
-	RunID            string                 `json:"runId"`
-	StepID           int64                  `json:"stepId"`
-	Actor            string                 `json:"actor"`
-	Capability       string                 `json:"capability"`
-	DataClass        string                 `json:"dataClass"`
-	RedactionProfile string                 `json:"redactionProfile"`
-	PolicyDecision   string                 `json:"policyDecision"`
-	Status           string                 `json:"status"`
-	StateTransition  string                 `json:"stateTransition"`
-	ErrorClass       string                 `json:"errorClass,omitempty"`
-	LatencyMs        *int64                 `json:"latencyMs,omitempty"`
-	Cost             *EventCost             `json:"cost,omitempty"`
-	InputRef         EventReference         `json:"inputRef"`
-	OutputRef        EventReference         `json:"outputRef"`
-	CreatedAt        time.Time              `json:"createdAt"`
-	Payload          map[string]any         `json:"payload,omitempty"`
-	RelatedRecords   []string               `json:"relatedRecords,omitempty"`
+	SchemaVersion    string         `json:"schemaVersion"`
+	EventID          string         `json:"eventId"`
+	EventType        string         `json:"eventType"`
+	Service          string         `json:"service"`
+	RunID            string         `json:"runId"`
+	StepID           int64          `json:"stepId"`
+	Actor            string         `json:"actor"`
+	Capability       string         `json:"capability"`
+	DataClass        string         `json:"dataClass"`
+	RedactionProfile string         `json:"redactionProfile"`
+	PolicyDecision   string         `json:"policyDecision"`
+	Status           string         `json:"status"`
+	StateTransition  string         `json:"stateTransition"`
+	ErrorClass       string         `json:"errorClass,omitempty"`
+	LatencyMs        *int64         `json:"latencyMs,omitempty"`
+	Cost             *EventCost     `json:"cost,omitempty"`
+	InputRef         EventReference `json:"inputRef"`
+	OutputRef        EventReference `json:"outputRef"`
+	CreatedAt        time.Time      `json:"createdAt"`
+	Payload          map[string]any `json:"payload,omitempty"`
+	RelatedRecords   []string       `json:"relatedRecords,omitempty"`
 }
 
 func (e EventEnvelopeV0) Validate() error {
@@ -215,29 +215,29 @@ func (e EventEnvelopeV0) Validate() error {
 }
 
 type AgentTrajectoryEntry struct {
-	EventID         string    `json:"eventId"`
-	StepID          int64     `json:"stepId"`
-	Actor           string    `json:"actor"`
-	Capability      string    `json:"capability"`
-	DataClass       string    `json:"dataClass"`
-	EventType       string    `json:"eventType"`
-	StateTransition string    `json:"stateTransition"`
-	Status          string    `json:"status"`
-	ErrorClass      string    `json:"errorClass,omitempty"`
+	EventID         string         `json:"eventId"`
+	StepID          int64          `json:"stepId"`
+	Actor           string         `json:"actor"`
+	Capability      string         `json:"capability"`
+	DataClass       string         `json:"dataClass"`
+	EventType       string         `json:"eventType"`
+	StateTransition string         `json:"stateTransition"`
+	Status          string         `json:"status"`
+	ErrorClass      string         `json:"errorClass,omitempty"`
 	InputRef        EventReference `json:"inputRef"`
 	OutputRef       EventReference `json:"outputRef"`
-	RelatedRecords  []string  `json:"relatedRecords,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
+	RelatedRecords  []string       `json:"relatedRecords,omitempty"`
+	CreatedAt       time.Time      `json:"createdAt"`
 }
 
 type AgentTrajectoryLedgerV0 struct {
-	SchemaVersion string                `json:"schemaVersion"`
-	RunID         string                `json:"runId"`
-	Status        string                `json:"status"`
-	WorkflowID    string                `json:"workflowId,omitempty"`
-	StartedAt     time.Time             `json:"startedAt"`
-	CompletedAt   time.Time             `json:"completedAt,omitempty"`
-	CapturedAt    time.Time             `json:"capturedAt"`
+	SchemaVersion string                 `json:"schemaVersion"`
+	RunID         string                 `json:"runId"`
+	Status        string                 `json:"status"`
+	WorkflowID    string                 `json:"workflowId,omitempty"`
+	StartedAt     time.Time              `json:"startedAt"`
+	CompletedAt   time.Time              `json:"completedAt,omitempty"`
+	CapturedAt    time.Time              `json:"capturedAt"`
 	Steps         []AgentTrajectoryEntry `json:"steps"`
 }
 
@@ -315,10 +315,10 @@ func BuildAgentTrajectoryLedger(runID string, events []EventEnvelopeV0) (AgentTr
 		CapturedAt:    time.Now().UTC(),
 		Steps:         make([]AgentTrajectoryEntry, 0, len(filtered)),
 	}
-	for _, event := range filtered {
+	for i, event := range filtered {
 		steps = append(steps, AgentTrajectoryEntry{
 			EventID:         event.EventID,
-			StepID:          event.StepID,
+			StepID:          int64(i + 1),
 			Actor:           event.Actor,
 			Capability:      event.Capability,
 			DataClass:       event.DataClass,
@@ -388,15 +388,15 @@ type RunCreateRequest struct {
 
 type RegisterCapabilityRequest struct {
 	CallerRole string `json:"callerRole"`
-	Capability        `json:"capability"`
+	Capability `json:"capability"`
 }
 
 type RegisterMcpServerRequest struct {
-	CallerRole  string   `json:"callerRole"`
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Endpoint    string   `json:"endpoint"`
-	Protocol    string   `json:"protocol"`
+	CallerRole   string   `json:"callerRole"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Endpoint     string   `json:"endpoint"`
+	Protocol     string   `json:"protocol"`
 	Capabilities []string `json:"capabilities"`
 }
 

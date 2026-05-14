@@ -72,6 +72,9 @@ attached to the manifest at any point in the run.
 - Export destinations must be **relative** paths under the configured
   `EVIDENCE_EXPORT_DIR`; absolute paths and `..` traversal are rejected with
   `400`.
+- Export records expose stable `urn:c2c/evidence-export/<name>` URIs instead
+  of host-local `file://` paths, so committed manifests do not leak workstation
+  or CI filesystem layouts.
 - Exports require `validation.ok == true`; an incomplete pack returns `422`.
 - JSON request bodies use `DisallowUnknownFields` and are size-capped at
   1 MiB to bound memory use on adversarial input.

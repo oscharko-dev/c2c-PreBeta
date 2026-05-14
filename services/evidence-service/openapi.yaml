@@ -285,7 +285,9 @@ components:
             required: [format, uri, createdAt]
             properties:
               format: { type: string, enum: [directory, tar] }
-              uri: { type: string }
+              uri:
+                type: string
+                description: Stable export reference, not a host-local file path.
               sha256: { type: string }
               byteSize: { type: integer }
               createdAt: { type: string, format: date-time }

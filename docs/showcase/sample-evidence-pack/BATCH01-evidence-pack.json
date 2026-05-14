@@ -8,7 +8,7 @@
   "wave": "w0",
   "status": "complete",
   "summary": "W0 demo run for BATCH01",
-  "createdAt": "2026-05-14T09:07:54.5089Z",
+  "createdAt": "2026-05-14T10:46:17.063074Z",
   "createdBy": "w0-demo",
   "artifacts": {
     "sourceCobol": [
@@ -63,15 +63,15 @@
     ],
     "harnessEvents": {
       "uri": "urn:c2c/harness-events/run-3",
-      "sha256": "45404829d5e3359f5eefcf7184de361a2fc681090c05c5f3bc2f984c5eeff1b5",
-      "byteSize": 20745,
+      "sha256": "232274d14a4f8fecd808bcdbdccaea43c6c3756bd8334ec4715de45fa9ea7662",
+      "byteSize": 27132,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },
     "trajectoryLedger": {
       "uri": "urn:c2c/trajectory-ledger/run-3",
-      "sha256": "866d5310406e2a1f70f584617a59a76020f00840f24ca97dab2f6253d9f86269",
-      "byteSize": 5871,
+      "sha256": "1989688070fffe84324d83511f3379071a786ad482f79df8f9d8a9ada8a6b1e4",
+      "byteSize": 5370,
       "mimeType": "application/json",
       "kind": "evidence-input"
     }
@@ -97,10 +97,10 @@
   "exports": [
     {
       "format": "directory",
-      "uri": "file:///Users/oscharko-dev/Projects/c2c-PreBeta/.claude/worktrees/interesting-yalow-f86560/var/w0-demo/exports/epk-run-3-0003",
-      "sha256": "5993f8236dd7a11cf6fd27040e54c9f164ec79a64068147a71d653444ff523bc",
-      "byteSize": 2914,
-      "createdAt": "2026-05-14T09:07:54.537129Z"
+      "uri": "urn:c2c/evidence-export/epk-run-3-0003",
+      "sha256": "f6b0a8735491b96ed73623355c97cce3c46a19a1563d60e7632139bec4bfa707",
+      "byteSize": 2916,
+      "createdAt": "2026-05-14T10:46:17.092938Z"
     }
   ]
 }

@@ -179,3 +179,65 @@ func TestPatternAnalyzer_RepeatedFailureDetection(t *testing.T) {
 		t.Fatalf("expected pattern %s in generated events", patternRepeatedFailure)
 	}
 }
+
+func TestPatternAnalyzer_RetryDetectionIgnoresStatusInGrouping(t *testing.T) {
+	cfgNow := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	now := func() time.Time { return cfgNow }
+
+	harnessStore := NewInMemoryHarnessEventStore()
+	ledgerStore := NewInMemoryTrajectoryLedgerStore()
+	experienceStore := NewInMemoryExperienceEventStore()
+
+	service := NewExperienceLearningService(
+		experienceLearningConfig{
+			autoAnalyzeOnIngest: false,
+		},
+		harnessStore,
+		ledgerStore,
+		experienceStore,
+		DefaultLearningPolicy(),
+		now,
+	)
+
+	runID := "run-retry"
+	refInput, err := NewEventReference("urn:experience-learning/input/retry", map[string]any{"operation": "export"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refOutput, err := NewEventReference("urn:experience-learning/output/retry", map[string]any{"artifact": "pack"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	statuses := []string{"failed", "completed"}
+	for i, status := range statuses {
+		if err := harnessStore.Append(EventEnvelopeV0{
+			SchemaVersion:    experienceSchemaVersion,
+			EventID:          "evt-retry-" + status,
+			EventType:        "evidence.export." + status,
+			Service:          serviceName,
+			RunID:            runID,
+			StepID:           int64(i + 1),
+			Actor:            "orchestrator-service",
+			Capability:       "evidence.writer",
+			DataClass:        dataClassEvidence,
+			RedactionProfile: redactionProfileControlled,
+			PolicyDecision:   "policy allow",
+			Status:           status,
+			StateTransition:  "export." + status,
+			CreatedAt:        cfgNow.Add(time.Duration(i) * time.Second),
+			InputRef:         refInput,
+			OutputRef:        refOutput,
+		}); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	summary, err := service.RunLearningSummary(runID)
+	if err != nil {
+		t.Fatalf("run summary: %v", err)
+	}
+	if got := summary.CandidateByPattern[patternRetry]; got != 1 {
+		t.Fatalf("expected retry candidate count 1, got %d", got)
+	}
+}

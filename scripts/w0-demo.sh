@@ -41,6 +41,12 @@ PARSER_URL="http://127.0.0.1:${PARSER_PORT}"
 IR_URL="http://127.0.0.1:${IR_PORT}"
 GENERATOR_URL="http://127.0.0.1:${GENERATOR_PORT}"
 BTR_URL="http://127.0.0.1:${BTR_PORT}"
+HARNESS_TOKEN="${W0_DEMO_HARNESS_TOKEN:-w0-demo-local-control-plane-token}"
+HARNESS_AUTH_HEADERS=(
+  -H "Authorization: Bearer ${HARNESS_TOKEN}"
+  -H "X-Harness-Actor: w0-demo"
+  -H "X-Harness-Role: orchestrator"
+)
 
 START_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 RUN_TAG="${W0_DEMO_RUN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -58,6 +64,7 @@ else
   PROGRAMS=("${DEFAULT_PROGRAMS[@]}")
 fi
 
+rm -rf "$LOG_DIR" "$PID_DIR" "$ARTIFACTS_DIR" "$EXPORTS_DIR" "$EVENT_DIR" "$VAR_DIR/bin"
 mkdir -p "$VAR_DIR" "$LOG_DIR" "$PID_DIR" "$ARTIFACTS_DIR" "$EXPORTS_DIR" "$EVENT_DIR"
 
 log()  { printf '[w0-demo] %s\n' "$*" >&2; }
@@ -182,7 +189,8 @@ start_harness() {
   bin="$(build_go_binary harness services/agentic-harness-core)"
   start_go_service harness "$bin" "$LOG_DIR/harness.log" \
     "HARNESS_PORT=$HARNESS_PORT" \
-    "HARNESS_EVENT_LOG_PATH=$EVENT_DIR/harness-events.jsonl"
+    "HARNESS_EVENT_LOG_PATH=$EVENT_DIR/harness-events.jsonl" \
+    "HARNESS_CONTROL_PLANE_TOKEN=$HARNESS_TOKEN"
   wait_http harness "$HARNESS_URL/v0/health"
 }
 
@@ -212,6 +220,7 @@ start_experience() {
 start_parser() {
   COBOL_PARSER_LISTEN_ADDR="$PARSER_PORT" \
   HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
+  HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     start_bg parser "$LOG_DIR/parser.log" \
       java -jar "$(shaded_jar cobol-parser-service)"
   wait_http parser "$PARSER_URL/health"
@@ -220,6 +229,7 @@ start_parser() {
 start_ir() {
   SEMANTIC_IR_LISTEN_ADDR="$IR_PORT" \
   HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
+  HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     start_bg semantic-ir "$LOG_DIR/semantic-ir.log" \
       java -jar "$(shaded_jar semantic-ir-service)"
   wait_http semantic-ir "$IR_URL/health"
@@ -228,6 +238,7 @@ start_ir() {
 start_generator() {
   TARGET_JAVA_GENERATION_LISTEN_ADDR="$GENERATOR_PORT" \
   HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
+  HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     start_bg target-java-generation "$LOG_DIR/target-java-generation.log" \
       java -jar "$(shaded_jar target-java-generation-service)"
   wait_http target-java-generation "$GENERATOR_URL/health"
@@ -236,10 +247,81 @@ start_generator() {
 start_btr() {
   BUILD_TEST_RUNNER_LISTEN_ADDR="$BTR_PORT" \
   HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
+  HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
   EXPERIENCE_EVENT_ENDPOINT="$EXPERIENCE_URL" \
     start_bg build-test-runner "$LOG_DIR/build-test-runner.log" \
       java -jar "$(shaded_jar build-test-runner-service)"
   wait_http build-test-runner "$BTR_URL/health"
+}
+
+register_capability() {
+  local id="$1" name="$2" owner="$3" endpoint="$4" dataClass="$5"
+  local body="$VAR_DIR/capability-${id//[^a-zA-Z0-9]/-}.json"
+  jq -n \
+    --arg id "$id" \
+    --arg name "$name" \
+    --arg owner "$owner" \
+    --arg endpoint "$endpoint" \
+    --arg dataClass "$dataClass" \
+    '{capability:{
+       id:$id,
+       name:$name,
+       owner:$owner,
+       endpoint:$endpoint,
+       dataClass:$dataClass,
+       policyProfile:"harness-control-plane",
+       version:"v0.1.0"
+     }}' >"$body"
+
+  curl -fsS -X POST -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
+    --data-binary "@$body" "$HARNESS_URL/v0/capabilities" \
+    >"$VAR_DIR/capability-${id//[^a-zA-Z0-9]/-}-registered.json" \
+    || fail "capability registration failed: $id"
+}
+
+register_w0_capabilities() {
+  log "registering W0 capabilities in harness"
+  register_capability "cobol.parse" "COBOL Parser" "cobol-parser-service" "$PARSER_URL/v0/parse" "parser"
+  register_capability "cobol.ir" "Semantic IR Generator" "semantic-ir-service" "$IR_URL/v0/ir" "parser"
+  register_capability "target.java.generate" "Target Java Generator" "target-java-generation-service" "$GENERATOR_URL/v0/generate" "generator"
+  register_capability "build-test.run" "Build/Test Runner" "build-test-runner-service" "$BTR_URL/v0/run-verification" "build-test"
+  register_capability "evidence.writer" "Evidence Pack Writer" "evidence-service" "$EVIDENCE_URL/v0/packs" "evidence"
+}
+
+capability_endpoint() {
+  local id="$1"
+  local endpoint
+  endpoint="$(curl -fsS "$HARNESS_URL/v0/capabilities/$id" | jq -r '.endpoint')"
+  [[ -n "$endpoint" && "$endpoint" != "null" ]] || fail "capability endpoint missing: $id"
+  printf '%s' "$endpoint"
+}
+
+post_controlled_harness_event() {
+  local runId="$1" eventType="$2" status="$3" stateTransition="$4"
+  local emptySha="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  jq -n \
+    --arg eventType "$eventType" \
+    --arg runId "$runId" \
+    --arg status "$status" \
+    --arg stateTransition "$stateTransition" \
+    --arg emptySha "$emptySha" \
+    '{schemaVersion:"v0",
+      eventType:$eventType,
+      service:"w0-demo",
+      runId:$runId,
+      actor:"w0-demo",
+      capability:"evidence.writer",
+      dataClass:"evidence",
+      redactionProfile:"harness-control-plane",
+      policyDecision:"policy allow",
+      status:$status,
+      stateTransition:$stateTransition,
+      inputRef:{uri:"urn:c2c/w0-demo/controlled/input", sha256:$emptySha, byteSize:0},
+      outputRef:{uri:"urn:c2c/w0-demo/controlled/output", sha256:$emptySha, byteSize:0},
+      payload:{controlled:true, accepted:($status == "accepted")}}' \
+  | curl -fsS -X POST -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
+      --data-binary @- "$HARNESS_URL/v0/events" >/dev/null \
+      || fail "controlled harness event failed: $eventType"
 }
 
 # ----------------------------------------------------------------------------
@@ -280,16 +362,22 @@ run_program() {
   local programId="$1" cobolPath="$2"
   local workflowId="w0-migration-v0"
   local outDir="$ARTIFACTS_DIR/$programId"
+  local parseEndpoint irEndpoint generatorEndpoint btrEndpoint evidenceEndpoint
   mkdir -p "$outDir"
 
   log "================= $programId ($cobolPath) ================="
   [[ -f "$cobolPath" ]] || fail "$programId: source not found at $cobolPath"
+  parseEndpoint="$(capability_endpoint "cobol.parse")"
+  irEndpoint="$(capability_endpoint "cobol.ir")"
+  generatorEndpoint="$(capability_endpoint "target.java.generate")"
+  btrEndpoint="$(capability_endpoint "build-test.run")"
+  evidenceEndpoint="$(capability_endpoint "evidence.writer")"
 
   # ---- Step 0: register the run with the harness so subsequent capability
   # event posts (parser/IR/generator/BTR -> POST /v0/events) are accepted.
   # The harness assigns the runId — capture it and use it from here on.
   local runRegistration="$outDir/00-run-create-response.json"
-  curl -fsS -X POST -H "Content-Type: application/json" \
+  curl -fsS -X POST -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
     --data "$(jq -n --arg w "$workflowId" --arg p "$programId" \
                 '{workflowId:$w, requester:"w0-demo", evidenceRefs:[("urn:c2c/cobol/" + $p)]}')" \
     "$HARNESS_URL/v0/runs" >"$runRegistration" \
@@ -309,7 +397,7 @@ run_program() {
     '{runId:$runId, workflowId:$workflowId, source:$source}' \
     >"$parseRequest"
   curl -fsS -X POST -H "Content-Type: application/json" \
-    --data-binary "@$parseRequest" "$PARSER_URL/v0/parse" \
+    --data-binary "@$parseRequest" "$parseEndpoint" \
     >"$parseResponse" \
     || fail "$programId: parser HTTP call failed"
   local parseStatus
@@ -326,7 +414,7 @@ run_program() {
     '{runId:$runId, workflowId:$workflowId, parseOutput:$parse[0]}' \
     >"$irRequest"
   curl -fsS -X POST -H "Content-Type: application/json" \
-    --data-binary "@$irRequest" "$IR_URL/v0/ir" \
+    --data-binary "@$irRequest" "$irEndpoint" \
     >"$irResponse" \
     || fail "$programId: semantic-ir HTTP call failed"
   local irStatus
@@ -342,7 +430,7 @@ run_program() {
     '{runId:$runId, ir:($ir[0].ir)}' \
     >"$genRequest"
   curl -fsS -X POST -H "Content-Type: application/json" \
-    --data-binary "@$genRequest" "$GENERATOR_URL/v0/generate" \
+    --data-binary "@$genRequest" "$generatorEndpoint" \
     >"$genResponse" \
     || fail "$programId: target-java-generation HTTP call failed"
   local genStatus
@@ -360,7 +448,7 @@ run_program() {
     '{runId:$runId, workflowId:$workflowId, programId:$programId, generationResponse:$gen[0]}' \
     >"$btrRequest"
   curl -fsS -X POST -H "Content-Type: application/json" \
-    --data-binary "@$btrRequest" "$BTR_URL/v0/run-verification" \
+    --data-binary "@$btrRequest" "$btrEndpoint" \
     >"$btrResponse" \
     || fail "$programId: build-test-runner HTTP call failed"
   local btrStatus btrClassification compileOk ran
@@ -441,7 +529,7 @@ run_program() {
 
   local evidenceCreated="$outDir/13-evidence-created.json"
   curl -fsS -X POST -H "Content-Type: application/json" \
-    --data-binary "@$createBody" "$EVIDENCE_URL/v0/packs" \
+    --data-binary "@$createBody" "$evidenceEndpoint" \
     >"$evidenceCreated" \
     || fail "$programId: evidence pack create failed"
   local packId
@@ -475,7 +563,7 @@ run_program() {
   packStatus="$(jq -r '.status // "unknown"' "$finalManifest")"
 
   # ---- Step 6: close out the harness run -----------------------------------
-  curl -fsS -X PATCH -H "Content-Type: application/json" \
+  curl -fsS -X PATCH -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
     --data "$(jq -n --arg pack "$packId" \
         '{status:"completed",
           updatedBy:"w0-demo",
@@ -532,11 +620,12 @@ run_controlled_repeat_scenario() {
   local cobolPath="corpus/synthetic/programs/branch-account-guard.cbl"
   local workflowId="w0-migration-v0"
   local outDir="$ARTIFACTS_DIR/_controlled-repeat-${programId}"
+  local parseEndpoint irEndpoint generatorEndpoint btrEndpoint
   mkdir -p "$outDir"
   log "================= controlled repeat scenario ($programId x2) ================="
 
   local runRegistration="$outDir/00-run-create-response.json"
-  curl -fsS -X POST -H "Content-Type: application/json" \
+  curl -fsS -X POST -H "Content-Type: application/json" "${HARNESS_AUTH_HEADERS[@]}" \
     --data "$(jq -n --arg w "$workflowId" \
                 '{workflowId:$w, requester:"w0-demo-controlled", evidenceRefs:[]}')" \
     "$HARNESS_URL/v0/runs" >"$runRegistration" \
@@ -544,6 +633,10 @@ run_controlled_repeat_scenario() {
   local runId
   runId="$(jq -r '.runId' "$runRegistration")"
   log "controlled-scenario harness runId=$runId"
+  parseEndpoint="$(capability_endpoint "cobol.parse")"
+  irEndpoint="$(capability_endpoint "cobol.ir")"
+  generatorEndpoint="$(capability_endpoint "target.java.generate")"
+  btrEndpoint="$(capability_endpoint "build-test.run")"
 
   local parseRequest="$outDir/parse-request.json"
   jq -n --arg runId "$runId" --arg workflowId "$workflowId" \
@@ -554,7 +647,7 @@ run_controlled_repeat_scenario() {
   for iteration in 1 2; do
     local parseResp="$outDir/iter-${iteration}-parse.json"
     curl -fsS -X POST -H "Content-Type: application/json" \
-      --data-binary "@$parseRequest" "$PARSER_URL/v0/parse" >"$parseResp" \
+      --data-binary "@$parseRequest" "$parseEndpoint" >"$parseResp" \
       || fail "controlled scenario: parser call $iteration failed"
 
     local irReq="$outDir/iter-${iteration}-ir-req.json"
@@ -564,7 +657,7 @@ run_controlled_repeat_scenario() {
           '{runId:$runId, workflowId:$workflowId, parseOutput:$parse[0]}' \
       >"$irReq"
     curl -fsS -X POST -H "Content-Type: application/json" \
-      --data-binary "@$irReq" "$IR_URL/v0/ir" >"$irResp" \
+      --data-binary "@$irReq" "$irEndpoint" >"$irResp" \
       || fail "controlled scenario: IR call $iteration failed"
 
     local genReq="$outDir/iter-${iteration}-gen-req.json"
@@ -572,7 +665,7 @@ run_controlled_repeat_scenario() {
     jq -n --arg runId "$runId" --slurpfile ir "$irResp" \
           '{runId:$runId, ir:($ir[0].ir)}' >"$genReq"
     curl -fsS -X POST -H "Content-Type: application/json" \
-      --data-binary "@$genReq" "$GENERATOR_URL/v0/generate" >"$genResp" \
+      --data-binary "@$genReq" "$generatorEndpoint" >"$genResp" \
       || fail "controlled scenario: generator call $iteration failed"
 
     local btrReq="$outDir/iter-${iteration}-btr-req.json"
@@ -582,9 +675,13 @@ run_controlled_repeat_scenario() {
           '{runId:$runId, workflowId:$workflowId, programId:$programId, generationResponse:$gen[0]}' \
       >"$btrReq"
     curl -fsS -X POST -H "Content-Type: application/json" \
-      --data-binary "@$btrReq" "$BTR_URL/v0/run-verification" >"$btrResp" \
+      --data-binary "@$btrReq" "$btrEndpoint" >"$btrResp" \
       || fail "controlled scenario: BTR call $iteration failed"
   done
+
+  post_controlled_harness_event "$runId" "controlled.retry.failed" "failed" "controlled.retry.failed"
+  post_controlled_harness_event "$runId" "controlled.retry.completed" "completed" "controlled.retry.completed"
+  post_controlled_harness_event "$runId" "controlled.artifact.accepted" "accepted" "controlled.artifact.accepted"
 
   echo "$runId" >"$outDir/runId.txt"
 }
@@ -596,7 +693,14 @@ ingest_experience() {
     || fail "failed to snapshot harness events"
 
   local normalized="$EVENT_DIR/harness-events-observed.json"
-  cp "$snapshot" "$normalized"
+  jq 'map(
+        if .status == "starting" then .status = "started"
+        elif .status == "output-divergence" then .status = "failed"
+        elif .status == "compile-failed" then .status = "failed"
+        elif .status == "run-failed" then .status = "failed"
+        else .
+        end
+      )' "$snapshot" >"$normalized"
   local ingestStatus
   ingestStatus="$(curl -sS -o "$EVENT_DIR/experience-harness-ingest-response.json" \
     -w "%{http_code}" \
@@ -712,6 +816,7 @@ main() {
   start_ir
   start_generator
   start_btr
+  register_w0_capabilities
 
   for spec in "${PROGRAMS[@]}"; do
     local programId="${spec%%:*}"
