@@ -67,3 +67,13 @@ jobs:
         if: hashFiles('libs/c2c-target-java-runtime/pom.xml') != ''
         working-directory: libs/c2c-target-java-runtime
         run: mvn -B -ntp verify
+
+      - name: Install c2c-target-java-runtime to local repo
+        if: hashFiles('services/target-java-generation-service/pom.xml') != ''
+        working-directory: libs/c2c-target-java-runtime
+        run: mvn -B -ntp -DskipTests install
+
+      - name: Build target-java-generation-service
+        if: hashFiles('services/target-java-generation-service/pom.xml') != ''
+        working-directory: services/target-java-generation-service
+        run: mvn -B -ntp verify
