@@ -1,4 +1,4 @@
-# c2c : AI-First COBOL-to-Code
+# c2c : COBOL-to-Code
 
 Experience Learning Harness · Open Source · Open Weight · EU Sovereignty
 
