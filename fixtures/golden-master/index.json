@@ -7,24 +7,24 @@
       "cobolSource": "corpus/synthetic/programs/branch-account-guard.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/branch-account-guard-output.txt",
       "classification": "synthetic",
-      "knownDivergenceAtW0": true,
-      "rationale": "Hand-curated expected output. The W0 generator does not yet translate PERFORM/EVALUATE/IF/ADD, so a generated-Java run is expected to diverge until generator coverage extends past W0."
+      "knownDivergenceAtW0": false,
+      "rationale": "Synthetic expected output now matches generated Java for the W0 PERFORM/EVALUATE/IF/ADD/OCCURS subset."
     },
     {
       "programId": "CTRLDEC01",
       "cobolSource": "corpus/synthetic/programs/ctrl-decimal-payroll.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/ctrl-decimal-payroll-output.txt",
       "classification": "synthetic",
-      "knownDivergenceAtW0": true,
-      "rationale": "Hand-curated expected output. The W0 generator does not yet translate COMPUTE or DISPLAY of computed values, so generated-Java runs diverge by design at W0."
+      "knownDivergenceAtW0": false,
+      "rationale": "Synthetic expected output now matches generated Java for the W0 COMPUTE/IF/DISPLAY subset using fixed-point HALF_EVEN rescale semantics."
     },
     {
       "programId": "BATCH01",
       "cobolSource": "corpus/synthetic/programs/decimal-batch-aggregator.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/decimal-batch-aggregator-output.txt",
       "classification": "synthetic",
-      "knownDivergenceAtW0": true,
-      "rationale": "Hand-curated expected output. The W0 generator does not yet translate PERFORM/COMPUTE/ADD, so generated-Java runs diverge by design at W0."
+      "knownDivergenceAtW0": false,
+      "rationale": "Synthetic expected output now matches generated Java for the W0 PERFORM/COMPUTE/ADD/DISPLAY subset."
     }
   ]
 }

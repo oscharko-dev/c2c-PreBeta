@@ -47,13 +47,13 @@ to remove or weaken any of the W0 acceptance bars below.
 - [x] Generated Java compiles cleanly for **3 / 3** W0 programs.
       _Evidence_: scorecard "Generated Java compiled cleanly" row.
 
-### 3. Documented coverage gaps, not silent failures
+### 3. Golden Master comparison is byte-equal for the W0 subset
 
 - [x] All three W0 corpus programs end with
-      `classification == divergence-known-w0-coverage-gap`. The runner
-      cross-references [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
-      entries that pre-declare `knownDivergenceAtW0: true` and a rationale.
-      An undocumented divergence (`divergence-unknown`) would fail this gate.
+      `classification == match`. The runner cross-references
+      [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
+      entries that now declare `knownDivergenceAtW0: false`.
+      Any undocumented divergence (`divergence-unknown`) fails this gate.
       _Evidence_: scorecard "Per-program results" table.
 
 ### 4. Evidence Pack v0 fully validated end-to-end
@@ -130,10 +130,9 @@ to remove or weaken any of the W0 acceptance bars below.
   fixtures. No customer source has ever been ingested. Marketing must not
   claim "production-ready"; the README and the
   [release gate scope](#scope) constrain the narrative.
-- **COBOL coverage beyond the W0 subset.** The generator does not yet
-  translate `PERFORM`, `EVALUATE`, `IF`, `ADD`, or `COMPUTE`. Generated
-  programs diverge from Golden Master output by design; the gate accepts
-  `divergence-known-w0-coverage-gap` only.
+- **COBOL coverage beyond the selected W0 subset.** The generator now covers the
+  checked-in W0 arithmetic/control-flow/OCCURS fixtures byte-for-byte, but it is
+  still not a feature-complete COBOL translator.
 - **True `cobcrun` golden masters.** All W0 fixtures are documented as
   `synthetic`. Hosting `cobc` in CI and re-running fixtures under it is a
   Wave 1 task — see [`w0-followups.md`](../showcase/w0-followups.md).

@@ -21,11 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * it to build-test-runner-service, and assert the build/run path completes
  * with a registered Golden Master comparison.
  * <p>
- * Generation is expected to succeed and the generated Java is expected to
- * compile cleanly. The runner is expected to either match (if a future-wave
- * generator pass extends coverage) or classify divergence as a documented W0
- * coverage gap. Any other classification — most importantly
- * {@code divergence-unknown} — surfaces as a test failure here.
+ * Generation is expected to succeed, compile cleanly, execute, and match the
+ * synthetic Golden Master fixtures for the W0 arithmetic/control-flow subset.
  */
 class W0SmokeIntegrationTest {
 
@@ -94,14 +91,11 @@ class W0SmokeIntegrationTest {
         assertNotNull(golden, "goldenMaster section must be present for " + programId);
         assertEquals("synthetic", golden.get("classification"),
                 "W0 fixtures are documented as synthetic for " + programId);
-        assertTrue((Boolean) golden.get("knownDivergenceAtW0"),
-                "W0 entry must declare knownDivergenceAtW0 for " + programId);
+        assertEquals(false, golden.get("knownDivergenceAtW0"),
+                "W0 entry should no longer declare a known generator divergence for " + programId);
 
-        // Allowed outcomes: either a perfect match (future wave) or a
-        // documented W0 coverage-gap divergence. Anything else fails here.
         Object classification = result.get("classification");
-        assertTrue(List.of("match", "divergence-known-w0-coverage-gap")
-                        .contains(String.valueOf(classification)),
+        assertEquals("match", String.valueOf(classification),
                 "unexpected classification for " + programId + ": "
                         + classification + " (status=" + result.get("status")
                         + ", summary=" + result.get("summary") + ")");

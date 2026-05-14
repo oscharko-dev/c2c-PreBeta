@@ -92,19 +92,16 @@ without waiting for the others.
   `modelInvocations[].status == "completed"` and `ledgerRef.sha256` matches a
   ledger entry on the gateway.
 
-## F-W0-05 · Generator coverage beyond the W0 subset · [#68](https://github.com/oscharko-dev/c2c-PreBeta/issues/68)
+## F-W0-05 · Generator coverage beyond the checked-in W0 subset · [#68](https://github.com/oscharko-dev/c2c-PreBeta/issues/68)
 
-- **Symptom**: every W0 program ends with `divergence-known-w0-coverage-gap`
-  because the generator does not yet translate `PERFORM`, `EVALUATE`, `IF`,
-  `ADD`, `COMPUTE`, or `DISPLAY` of computed values.
+- **Symptom**: the checked-in W0 programs now match their synthetic Golden
+  Masters, but broader COBOL forms remain outside the implemented subset.
 - **Service(s)**: `target-java-generation-service`.
 - **Proposed fix**: Wave 1 sequence covering each construct, each with its
-  own issue, ADR, fixture, and Golden Master byte-equal target. The W0
-  smoke integration test will start asserting `classification == match`
-  for fixtures whose construct has been implemented.
+  own issue, ADR, fixture, and Golden Master byte-equal target.
 - **Owner**: generator.
-- **Acceptance**: at least one W0 corpus program reports
-  `classification: "match"` from the build-test runner.
+- **Acceptance**: new corpus programs beyond `BRNCH01`, `CTRLDEC01`, and
+  `BATCH01` report `classification: "match"` from the build-test runner.
 
 ## Filing on GitHub
 

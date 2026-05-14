@@ -39,19 +39,18 @@ The W0 corpus is the three synthetic COBOL programs under
 [`corpus/synthetic/programs/`](../../corpus/synthetic/programs/):
 `BRNCH01`, `CTRLDEC01`, `BATCH01`. All three are
 [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
-entries with `classification: "synthetic"` and `knownDivergenceAtW0: true`.
+entries with `classification: "synthetic"` and `knownDivergenceAtW0: false`.
 
 ## Honest expectations for W0
 
 This is a **walking skeleton**, not a feature-complete COBOL-to-Java translator.
-At W0 every generator pass is expected to compile and execute, but the
-generated stdout is expected to **diverge** from the Golden Master because the
-W0 generator does not yet translate `PERFORM`, `EVALUATE`, `IF`, `ADD`, or
-`COMPUTE`. The acceptance bar is therefore:
+The checked-in W0 subset now covers deterministic `PERFORM`, `EVALUATE`, `IF`,
+`ADD`/`COMPUTE`, `DISPLAY`, and basic `OCCURS` table access for the synthetic
+corpus. The acceptance bar is therefore:
 
 - `compileOk == true` for every program (the generator emits compilable Java).
 - `execution.ran == true` for every program (the generated entry class runs).
-- `classification ∈ {match, divergence-known-w0-coverage-gap}` for every program.
+- `classification == match` for every program.
 - Evidence Pack `status == complete` and `validation.ok == true` for every program.
 
 Anything else (especially `divergence-unknown`, `compile-failed`,
@@ -216,8 +215,8 @@ echo "$BTR" | jq '{status, classification, compileOk:.build.compileOk, matched:.
 curl -fsS http://127.0.0.1:8190/v0/runs/$RUN/ledger | jq '.steps | length'
 ```
 
-The end-to-end output should report `compileOk: true`, `matched: false`,
-`classification: "divergence-known-w0-coverage-gap"`.
+The end-to-end output should report `compileOk: true`, `matched: true`,
+`classification: "match"`.
 
 ## Reading the captured artifacts
 
@@ -257,4 +256,4 @@ lsof -nP -i :8190 -i :8191 -i :8192 -i :8181 -i :8182 -i :8183 -i :8184
 | Maven test runs blow up the demo time | Tests were not skipped. | The demo uses `-DskipTests` on purpose — full tests run in CI. |
 | `wait_http` times out | Java service hasn't finished starting / Maven warm cache cold. | Check `var/w0-demo/logs/<service>.log` for the actual error. |
 | `experience-learning harness-event ingest failed (HTTP 400)` | A new event type from a service has a `status` the experience-learning enum does not yet allow. | Add the mapping to the `jq` normalization block in `scripts/w0-demo.sh` and file a follow-up in [`w0-followups.md`](w0-followups.md). |
-| `classification: "divergence-unknown"` reported | A program is not in `fixtures/golden-master/index.json`, or the runner is hitting a fixture without `knownDivergenceAtW0: true`. This is a **release-gate fail**. | Either register the fixture with a `synthetic` classification + W0-known divergence rationale, or treat the regression as a real generator bug. |
+| `classification: "divergence-unknown"` reported | A program is not in `fixtures/golden-master/index.json`, or generated output no longer matches an undeclared fixture. This is a **release-gate fail**. | Register an intentionally divergent fixture with a rationale only if the divergence is expected; otherwise treat it as a generator bug. |

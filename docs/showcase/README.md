@@ -35,7 +35,7 @@ The W0 showcase is intentionally narrow:
 - Three synthetic COBOL programs, no customer source.
 - No model-gateway calls. Each manifest records the absence with a
   `status: "skipped"` model-invocation entry rather than hiding it.
-- Generated stdout diverges from Golden Master output by design at W0; the
-  acceptance bar is `classification ∈ {match, divergence-known-w0-coverage-gap}`.
+- Generated stdout matches the checked-in synthetic Golden Master fixtures for
+  the selected W0 subset; the acceptance bar is `classification == match`.
 - Synthetic Golden Masters only. True `cobcrun` reproduction is a Wave 1
   task (see [w0-followups.md](w0-followups.md) F-W0-04).

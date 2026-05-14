@@ -51,8 +51,7 @@ function generatedJavaStub(programId: string, className: string): string {
   return [
     `// Synthetic W0 generated-Java stub for programId=${programId}.`,
     '// In live mode this content comes from target-java-generation-service.',
-    '// At W0 the generator does not yet translate PERFORM/EVALUATE/COMPUTE,',
-    '// so the live output for this fixture is documented as a known divergence.',
+    '// The checked-in W0 fixtures now match the Java generator subset.',
     'package c2c.w0.generated;',
     '',
     `public final class ${className} {`,
@@ -108,7 +107,7 @@ export function mockOutcomeFor(sample: SampleDetail, runId: string): MockRunOutc
     actualOutput: `W0-STUB ${sample.programId}\n`,
     outputRef: `sha256:mock/${sample.programId.toLowerCase()}`,
     note: knownDivergence
-      ? 'Build/test diverges from the Golden Master by design at W0. The Evidence Pack records this as a known coverage gap, not an unknown regression.'
+      ? 'Build/test divergence is explicitly declared by the fixture registry.'
       : 'Build/test matched the Golden Master fixture.',
   };
 
@@ -116,7 +115,7 @@ export function mockOutcomeFor(sample: SampleDetail, runId: string): MockRunOutc
     status: 'incomplete',
     packId: `epk-${runId}-1`,
     manifestUri: `urn:c2c-bff/mock-evidence-pack/${runId}`,
-    exportUri: `file://evidence/mock/${runId}/evidence-pack-v0.zip`,
+    exportUri: `urn:c2c-bff/mock-evidence-export/${runId}`,
     missingArtifacts: ['sourceCobol', 'semanticIr', 'harnessEvents', 'modelInvocations'],
     note: 'Mock Evidence Pack manifest reference. Live exports come from evidence-service /v0/packs.',
   };

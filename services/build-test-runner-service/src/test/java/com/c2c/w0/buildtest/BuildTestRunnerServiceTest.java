@@ -165,7 +165,7 @@ class BuildTestRunnerServiceTest {
     }
 
     @Test
-    void resolvesBranchAccountGuardFromRegistryWithoutInlineHint() {
+    void registryDivergenceIsUnknownWhenFixtureDoesNotDeclareKnownGap() {
         Map<String, Object> generatedProject = trivialProject(
                 "sample.SilentBrnch",
                 "package sample; public class SilentBrnch { "
@@ -175,10 +175,8 @@ class BuildTestRunnerServiceTest {
                 "programId", "BRNCH01",
                 "generatedProject", generatedProject);
         Map<String, Object> response = service.runVerification(request);
-        // Empty actual vs non-empty COBOL expected output: divergence,
-        // classified as known (registry sets knownDivergenceAtW0=true).
         assertEquals("output-divergence", response.get("status"));
-        assertEquals("divergence-known-w0-coverage-gap", response.get("classification"));
+        assertEquals("divergence-unknown", response.get("classification"));
         Map<?, ?> golden = (Map<?, ?>) response.get("goldenMaster");
         assertEquals("synthetic", golden.get("classification"));
         assertTrue(((String) golden.get("source"))

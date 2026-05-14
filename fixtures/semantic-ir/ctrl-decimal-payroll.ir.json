@@ -1,53 +1,428 @@
 {
-  "schemaVersion": "v0",
-  "irId": "ir-ctrldec01-sample",
-  "programId": "CTRLDEC01",
-  "sourceHash": "sample",
-  "sourceKind": "cobol",
-  "symbols": {
-    "WS-GROSS-SALARY": {
-      "id": "d-ws-gross-salary-8",
-      "kind": "data-item",
-      "level": 1,
-      "line": 8,
-      "numeric": true,
-      "scale": 2
+  "schemaVersion" : "v0",
+  "irId" : "ir-ctrldec01-c61683c95fc180d8a74a0a5fe8dc2460f7b4b029b49942d0f55ba234b3c562fe",
+  "programId" : "CTRLDEC01",
+  "sourceHash" : "c61683c95fc180d8a74a0a5fe8dc2460f7b4b029b49942d0f55ba234b3c562fe",
+  "sourceKind" : "cobol",
+  "symbols" : {
+    "WS-BASE-SALARY" : {
+      "id" : "d-ws-base-salary-46807adf5d36",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 6,
+      "numeric" : true,
+      "scale" : 2
+    },
+    "WS-EMPLOYEE-COUNT" : {
+      "id" : "d-ws-employee-count-ef159269a35a",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 7,
+      "numeric" : true,
+      "scale" : 0
+    },
+    "WS-TAX-RATE" : {
+      "id" : "d-ws-tax-rate-b51781d5ffa3",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 8,
+      "numeric" : true,
+      "scale" : 4
+    },
+    "WS-GROSS-SALARY" : {
+      "id" : "d-ws-gross-salary-6ad03fdf79b7",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 9,
+      "numeric" : true,
+      "scale" : 2
+    },
+    "WS-TAX-AMOUNT" : {
+      "id" : "d-ws-tax-amount-ef750bf292ee",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 10,
+      "numeric" : true,
+      "scale" : 2
+    },
+    "WS-NET-SALARY" : {
+      "id" : "d-ws-net-salary-4ec3d1a8930a",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 11,
+      "numeric" : true,
+      "scale" : 2
     }
   },
-  "fieldLayouts": [
-    {
-      "id": "d-ws-gross-salary-8",
-      "name": "WS-GROSS-SALARY",
-      "level": 1,
-      "picture": "S9(7)V99",
-      "byteSize": 9,
-      "occurs": null,
-      "numeric": true,
-      "signed": true,
-      "scale": 2,
-      "sourceLine": 8
-    }
-  ],
-  "statements": [
-    {
-      "id": "s-compute-12-1",
-      "operation": "compute",
-      "sourceLine": 12,
-      "operands": {
-        "target": "WS-GROSS-SALARY",
-        "expression": "WS-BASE-SALARY * WS-EMPLOYEE-COUNT"
-      },
-      "raw": "COMPUTE WS-GROSS-SALARY = WS-BASE-SALARY * WS-EMPLOYEE-COUNT"
-    }
-  ],
-  "controlFlow": [],
-  "assumptions": [
-    "W0 assumes display-compatible fixed-point decimal semantics for PIC S9/V fields."
-  ],
-  "traceability": {
-    "s-compute-12-1": {
-      "line": 12,
-      "raw": "COMPUTE WS-GROSS-SALARY = WS-BASE-SALARY * WS-EMPLOYEE-COUNT"
+  "fieldLayouts" : [ {
+    "id" : "d-ws-base-salary-46807adf5d36",
+    "name" : "WS-BASE-SALARY",
+    "level" : 1,
+    "picture" : "S9(5)V99",
+    "byteSize" : 7,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "125.75",
+    "sourceLine" : 6
+  }, {
+    "id" : "d-ws-employee-count-ef159269a35a",
+    "name" : "WS-EMPLOYEE-COUNT",
+    "level" : 1,
+    "picture" : "9(3)",
+    "byteSize" : 3,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : false,
+    "scale" : 0,
+    "value" : "8",
+    "sourceLine" : 7
+  }, {
+    "id" : "d-ws-tax-rate-b51781d5ffa3",
+    "name" : "WS-TAX-RATE",
+    "level" : 1,
+    "picture" : "S9V9(4)",
+    "byteSize" : 5,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 4,
+    "value" : "+0.1887",
+    "sourceLine" : 8
+  }, {
+    "id" : "d-ws-gross-salary-6ad03fdf79b7",
+    "name" : "WS-GROSS-SALARY",
+    "level" : 1,
+    "picture" : "S9(7)V99",
+    "byteSize" : 9,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : null,
+    "sourceLine" : 9
+  }, {
+    "id" : "d-ws-tax-amount-ef750bf292ee",
+    "name" : "WS-TAX-AMOUNT",
+    "level" : 1,
+    "picture" : "S9(7)V99",
+    "byteSize" : 9,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : null,
+    "sourceLine" : 10
+  }, {
+    "id" : "d-ws-net-salary-4ec3d1a8930a",
+    "name" : "WS-NET-SALARY",
+    "level" : 1,
+    "picture" : "S9(7)V99",
+    "byteSize" : 9,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : null,
+    "sourceLine" : 11
+  } ],
+  "statements" : [ {
+    "id" : "s-compute-22507f9b2914",
+    "operation" : "compute",
+    "sourceLine" : 14,
+    "operands" : {
+      "target" : "WS-GROSS-SALARY",
+      "expression" : "WS-BASE-SALARY * WS-EMPLOYEE-COUNT",
+      "expressionTokens" : [ "WS-BASE-SALARY", "*", "WS-EMPLOYEE-COUNT" ]
+    },
+    "raw" : "COMPUTE WS-GROSS-SALARY = WS-BASE-SALARY * WS-EMPLOYEE-COUNT"
+  }, {
+    "id" : "s-compute-d18d3937d821",
+    "operation" : "compute",
+    "sourceLine" : 15,
+    "operands" : {
+      "target" : "WS-TAX-AMOUNT",
+      "expression" : "WS-GROSS-SALARY * WS-TAX-RATE",
+      "expressionTokens" : [ "WS-GROSS-SALARY", "*", "WS-TAX-RATE" ]
+    },
+    "raw" : "COMPUTE WS-TAX-AMOUNT = WS-GROSS-SALARY * WS-TAX-RATE"
+  }, {
+    "id" : "s-if-c6450ffab704",
+    "operation" : "if",
+    "sourceLine" : 17,
+    "operands" : {
+      "condition" : "WS-TAX-AMOUNT > 100.00",
+      "conditionTokens" : [ "WS-TAX-AMOUNT", ">", "100.00" ],
+      "conditionModel" : {
+        "raw" : "WS-TAX-AMOUNT > 100.00",
+        "tokens" : [ "WS-TAX-AMOUNT", ">", "100.00" ],
+        "left" : "WS-TAX-AMOUNT",
+        "operator" : ">",
+        "right" : "100.00"
+      }
+    },
+    "raw" : "IF WS-TAX-AMOUNT > 100.00"
+  }, {
+    "id" : "s-display-79b49e11d9c9",
+    "operation" : "display",
+    "sourceLine" : 18,
+    "operands" : {
+      "items" : [ "\"TAX FLAGGED\"" ]
+    },
+    "raw" : "DISPLAY \"TAX FLAGGED\""
+  }, {
+    "id" : "s-else-6854e55c0251",
+    "operation" : "else",
+    "sourceLine" : 19,
+    "operands" : { },
+    "raw" : "ELSE"
+  }, {
+    "id" : "s-display-eb66dc57a3a8",
+    "operation" : "display",
+    "sourceLine" : 20,
+    "operands" : {
+      "items" : [ "\"TAX NORMAL\"" ]
+    },
+    "raw" : "DISPLAY \"TAX NORMAL\""
+  }, {
+    "id" : "s-end-if-68b16ef52398",
+    "operation" : "end_if",
+    "sourceLine" : 21,
+    "operands" : { },
+    "raw" : "END-IF"
+  }, {
+    "id" : "s-compute-798270c88702",
+    "operation" : "compute",
+    "sourceLine" : 23,
+    "operands" : {
+      "target" : "WS-NET-SALARY",
+      "expression" : "WS-GROSS-SALARY - WS-TAX-AMOUNT",
+      "expressionTokens" : [ "WS-GROSS-SALARY", "-", "WS-TAX-AMOUNT" ]
+    },
+    "raw" : "COMPUTE WS-NET-SALARY = WS-GROSS-SALARY - WS-TAX-AMOUNT"
+  }, {
+    "id" : "s-display-6393a03488f7",
+    "operation" : "display",
+    "sourceLine" : 24,
+    "operands" : {
+      "items" : [ "\"GROSS=\"", "WS-GROSS-SALARY" ]
+    },
+    "raw" : "DISPLAY \"GROSS=\" WS-GROSS-SALARY"
+  }, {
+    "id" : "s-display-26f8de64f026",
+    "operation" : "display",
+    "sourceLine" : 25,
+    "operands" : {
+      "items" : [ "\"TAX=\"", "WS-TAX-AMOUNT" ]
+    },
+    "raw" : "DISPLAY \"TAX=\" WS-TAX-AMOUNT"
+  }, {
+    "id" : "s-display-7345630f2992",
+    "operation" : "display",
+    "sourceLine" : 26,
+    "operands" : {
+      "items" : [ "\"NET=\"", "WS-NET-SALARY" ]
+    },
+    "raw" : "DISPLAY \"NET=\" WS-NET-SALARY"
+  }, {
+    "id" : "s-stop-44219d98b27a",
+    "operation" : "stop",
+    "sourceLine" : 27,
+    "operands" : { },
+    "raw" : "STOP RUN."
+  } ],
+  "controlFlow" : [ {
+    "id" : "e-s-compute-22507f9b2914-s-compute-d18d3937d821-next",
+    "from" : "s-compute-22507f9b2914",
+    "to" : "s-compute-d18d3937d821",
+    "label" : "next"
+  }, {
+    "id" : "e-s-compute-d18d3937d821-s-if-c6450ffab704-next",
+    "from" : "s-compute-d18d3937d821",
+    "to" : "s-if-c6450ffab704",
+    "label" : "next"
+  }, {
+    "id" : "e-s-if-c6450ffab704-s-display-79b49e11d9c9-next",
+    "from" : "s-if-c6450ffab704",
+    "to" : "s-display-79b49e11d9c9",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-79b49e11d9c9-s-else-6854e55c0251-next",
+    "from" : "s-display-79b49e11d9c9",
+    "to" : "s-else-6854e55c0251",
+    "label" : "next"
+  }, {
+    "id" : "e-s-if-c6450ffab704-s-else-6854e55c0251-branch",
+    "from" : "s-if-c6450ffab704",
+    "to" : "s-else-6854e55c0251",
+    "label" : "branch"
+  }, {
+    "id" : "e-s-else-6854e55c0251-s-display-eb66dc57a3a8-next",
+    "from" : "s-else-6854e55c0251",
+    "to" : "s-display-eb66dc57a3a8",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-eb66dc57a3a8-s-end-if-68b16ef52398-next",
+    "from" : "s-display-eb66dc57a3a8",
+    "to" : "s-end-if-68b16ef52398",
+    "label" : "next"
+  }, {
+    "id" : "e-s-if-c6450ffab704-s-end-if-68b16ef52398-block-exit",
+    "from" : "s-if-c6450ffab704",
+    "to" : "s-end-if-68b16ef52398",
+    "label" : "block-exit"
+  }, {
+    "id" : "e-s-end-if-68b16ef52398-s-compute-798270c88702-next",
+    "from" : "s-end-if-68b16ef52398",
+    "to" : "s-compute-798270c88702",
+    "label" : "next"
+  }, {
+    "id" : "e-s-compute-798270c88702-s-display-6393a03488f7-next",
+    "from" : "s-compute-798270c88702",
+    "to" : "s-display-6393a03488f7",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-6393a03488f7-s-display-26f8de64f026-next",
+    "from" : "s-display-6393a03488f7",
+    "to" : "s-display-26f8de64f026",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-26f8de64f026-s-display-7345630f2992-next",
+    "from" : "s-display-26f8de64f026",
+    "to" : "s-display-7345630f2992",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-7345630f2992-s-stop-44219d98b27a-next",
+    "from" : "s-display-7345630f2992",
+    "to" : "s-stop-44219d98b27a",
+    "label" : "next"
+  } ],
+  "assumptions" : [ "W0 assumes display-compatible fixed-point decimal semantics for PIC S9/V fields.", "W0 control-flow edges are structural and intentionally conservative." ],
+  "traceability" : {
+    "d-ws-base-salary-46807adf5d36" : {
+      "raw" : "WS-BASE-SALARY",
+      "line" : 6
+    },
+    "d-ws-employee-count-ef159269a35a" : {
+      "raw" : "WS-EMPLOYEE-COUNT",
+      "line" : 7
+    },
+    "d-ws-tax-rate-b51781d5ffa3" : {
+      "raw" : "WS-TAX-RATE",
+      "line" : 8
+    },
+    "d-ws-gross-salary-6ad03fdf79b7" : {
+      "raw" : "WS-GROSS-SALARY",
+      "line" : 9
+    },
+    "d-ws-tax-amount-ef750bf292ee" : {
+      "raw" : "WS-TAX-AMOUNT",
+      "line" : 10
+    },
+    "d-ws-net-salary-4ec3d1a8930a" : {
+      "raw" : "WS-NET-SALARY",
+      "line" : 11
+    },
+    "s-compute-22507f9b2914" : {
+      "raw" : "COMPUTE WS-GROSS-SALARY = WS-BASE-SALARY * WS-EMPLOYEE-COUNT",
+      "line" : 14
+    },
+    "s-compute-d18d3937d821" : {
+      "raw" : "COMPUTE WS-TAX-AMOUNT = WS-GROSS-SALARY * WS-TAX-RATE",
+      "line" : 15
+    },
+    "s-if-c6450ffab704" : {
+      "raw" : "IF WS-TAX-AMOUNT > 100.00",
+      "line" : 17
+    },
+    "s-display-79b49e11d9c9" : {
+      "raw" : "DISPLAY \"TAX FLAGGED\"",
+      "line" : 18
+    },
+    "s-else-6854e55c0251" : {
+      "raw" : "ELSE",
+      "line" : 19
+    },
+    "s-display-eb66dc57a3a8" : {
+      "raw" : "DISPLAY \"TAX NORMAL\"",
+      "line" : 20
+    },
+    "s-end-if-68b16ef52398" : {
+      "raw" : "END-IF",
+      "line" : 21
+    },
+    "s-compute-798270c88702" : {
+      "raw" : "COMPUTE WS-NET-SALARY = WS-GROSS-SALARY - WS-TAX-AMOUNT",
+      "line" : 23
+    },
+    "s-display-6393a03488f7" : {
+      "raw" : "DISPLAY \"GROSS=\" WS-GROSS-SALARY",
+      "line" : 24
+    },
+    "s-display-26f8de64f026" : {
+      "raw" : "DISPLAY \"TAX=\" WS-TAX-AMOUNT",
+      "line" : 25
+    },
+    "s-display-7345630f2992" : {
+      "raw" : "DISPLAY \"NET=\" WS-NET-SALARY",
+      "line" : 26
+    },
+    "s-stop-44219d98b27a" : {
+      "raw" : "STOP RUN.",
+      "line" : 27
+    },
+    "e-s-compute-22507f9b2914-s-compute-d18d3937d821-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-compute-d18d3937d821-s-if-c6450ffab704-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-if-c6450ffab704-s-display-79b49e11d9c9-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-display-79b49e11d9c9-s-else-6854e55c0251-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-if-c6450ffab704-s-else-6854e55c0251-branch" : {
+      "raw" : "edge:branch",
+      "line" : 0
+    },
+    "e-s-else-6854e55c0251-s-display-eb66dc57a3a8-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-display-eb66dc57a3a8-s-end-if-68b16ef52398-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-if-c6450ffab704-s-end-if-68b16ef52398-block-exit" : {
+      "raw" : "edge:block-exit",
+      "line" : 0
+    },
+    "e-s-end-if-68b16ef52398-s-compute-798270c88702-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-compute-798270c88702-s-display-6393a03488f7-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-display-6393a03488f7-s-display-26f8de64f026-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-display-26f8de64f026-s-display-7345630f2992-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-display-7345630f2992-s-stop-44219d98b27a-next" : {
+      "raw" : "edge:next",
+      "line" : 0
     }
   }
 }

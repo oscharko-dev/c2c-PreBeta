@@ -1,245 +1,385 @@
 {
-  "schemaVersion": "v0",
-  "irId": "ir-batch01-sample",
-  "programId": "BATCH01",
-  "sourceHash": "sample",
-  "sourceKind": "cobol",
-  "symbols": {
-    "WS-TOTAL-LINE": {
-      "id": "d-ws-total-line-6",
-      "kind": "data-item",
-      "level": 1,
-      "line": 6,
-      "numeric": false,
-      "scale": 0
+  "schemaVersion" : "v0",
+  "irId" : "ir-batch01-0120d6c79d0e2c78014106fab7e10de8936b01471e87de94c9337bfdf9fe5a08",
+  "programId" : "BATCH01",
+  "sourceHash" : "0120d6c79d0e2c78014106fab7e10de8936b01471e87de94c9337bfdf9fe5a08",
+  "sourceKind" : "cobol",
+  "symbols" : {
+    "WS-TOTAL-LINE" : {
+      "id" : "d-ws-total-line-0545d67a9ace",
+      "kind" : "data-item",
+      "level" : 1,
+      "line" : 6,
+      "numeric" : false,
+      "scale" : 0
     },
-    "WS-ROW": {
-      "id": "d-ws-row-7",
-      "kind": "data-item",
-      "level": 5,
-      "line": 7,
-      "numeric": true,
-      "scale": 0
+    "WS-ROW" : {
+      "id" : "d-ws-row-679a503de3a1",
+      "kind" : "data-item",
+      "level" : 5,
+      "line" : 7,
+      "numeric" : true,
+      "scale" : 0
     },
-    "WS-ROW-LIMIT": {
-      "id": "d-ws-row-limit-8",
-      "kind": "data-item",
-      "level": 5,
-      "line": 8,
-      "numeric": true,
-      "scale": 0
+    "WS-ROW-LIMIT" : {
+      "id" : "d-ws-row-limit-6d99efba544f",
+      "kind" : "data-item",
+      "level" : 5,
+      "line" : 8,
+      "numeric" : true,
+      "scale" : 0
     },
-    "WS-ACCUMULATOR": {
-      "id": "d-ws-accumulator-9",
-      "kind": "data-item",
-      "level": 5,
-      "line": 9,
-      "numeric": true,
-      "scale": 2
+    "WS-ACCUMULATOR" : {
+      "id" : "d-ws-accumulator-2fecd9ea6ccf",
+      "kind" : "data-item",
+      "level" : 5,
+      "line" : 9,
+      "numeric" : true,
+      "scale" : 2
     },
-    "WS-UNIT-COST": {
-      "id": "d-ws-unit-cost-10",
-      "kind": "data-item",
-      "level": 5,
-      "line": 10,
-      "numeric": true,
-      "scale": 2
+    "WS-UNIT-COST" : {
+      "id" : "d-ws-unit-cost-3dca7b665dde",
+      "kind" : "data-item",
+      "level" : 5,
+      "line" : 10,
+      "numeric" : true,
+      "scale" : 2
     },
-    "WS-UNITS": {
-      "id": "d-ws-units-11",
-      "kind": "data-item",
-      "level": 5,
-      "line": 11,
-      "numeric": true,
-      "scale": 0
+    "WS-UNITS" : {
+      "id" : "d-ws-units-8729e1f0e3dd",
+      "kind" : "data-item",
+      "level" : 5,
+      "line" : 11,
+      "numeric" : true,
+      "scale" : 0
     },
-    "WS-LINE-TOTAL": {
-      "id": "d-ws-line-total-12",
-      "kind": "data-item",
-      "level": 5,
-      "line": 12,
-      "numeric": true,
-      "scale": 2
+    "WS-LINE-TOTAL" : {
+      "id" : "d-ws-line-total-f0508b60aea4",
+      "kind" : "data-item",
+      "level" : 5,
+      "line" : 12,
+      "numeric" : true,
+      "scale" : 2
     }
   },
-  "fieldLayouts": [
-    {
-      "id": "d-ws-total-line-6",
-      "name": "WS-TOTAL-LINE",
-      "level": 1,
-      "picture": null,
-      "byteSize": 0,
-      "occurs": null,
-      "numeric": false,
-      "signed": false,
-      "scale": 0,
-      "sourceLine": 6
-    },
-    {
-      "id": "d-ws-row-7",
-      "name": "WS-ROW",
-      "level": 5,
-      "picture": "99",
-      "byteSize": 2,
-      "occurs": null,
-      "numeric": true,
-      "signed": false,
-      "scale": 0,
-      "sourceLine": 7
-    },
-    {
-      "id": "d-ws-row-limit-8",
-      "name": "WS-ROW-LIMIT",
-      "level": 5,
-      "picture": "99",
-      "byteSize": 2,
-      "occurs": null,
-      "numeric": true,
-      "signed": false,
-      "scale": 0,
-      "sourceLine": 8
-    },
-    {
-      "id": "d-ws-accumulator-9",
-      "name": "WS-ACCUMULATOR",
-      "level": 5,
-      "picture": "S9(8)V99",
-      "byteSize": 11,
-      "occurs": null,
-      "numeric": true,
-      "signed": true,
-      "scale": 2,
-      "sourceLine": 9
-    },
-    {
-      "id": "d-ws-unit-cost-10",
-      "name": "WS-UNIT-COST",
-      "level": 5,
-      "picture": "S9(4)V99",
-      "byteSize": 7,
-      "occurs": null,
-      "numeric": true,
-      "signed": true,
-      "scale": 2,
-      "sourceLine": 10
-    },
-    {
-      "id": "d-ws-units-11",
-      "name": "WS-UNITS",
-      "level": 5,
-      "picture": "99",
-      "byteSize": 2,
-      "occurs": null,
-      "numeric": true,
-      "signed": false,
-      "scale": 0,
-      "sourceLine": 11
-    },
-    {
-      "id": "d-ws-line-total-12",
-      "name": "WS-LINE-TOTAL",
-      "level": 5,
-      "picture": "S9(8)V99",
-      "byteSize": 11,
-      "occurs": null,
-      "numeric": true,
-      "signed": true,
-      "scale": 2,
-      "sourceLine": 12
-    }
-  ],
-  "statements": [
-    {
-      "id": "s-perform-15-1",
-      "operation": "perform",
-      "sourceLine": 15,
-      "operands": {
-        "tokens": ["PERFORM", "UNTIL", "WS-ROW", ">", "WS-ROW-LIMIT"]
+  "fieldLayouts" : [ {
+    "id" : "d-ws-total-line-0545d67a9ace",
+    "name" : "WS-TOTAL-LINE",
+    "level" : 1,
+    "picture" : null,
+    "byteSize" : 0,
+    "occurs" : null,
+    "numeric" : false,
+    "signed" : false,
+    "scale" : 0,
+    "value" : null,
+    "sourceLine" : 6
+  }, {
+    "id" : "d-ws-row-679a503de3a1",
+    "name" : "WS-ROW",
+    "level" : 5,
+    "picture" : "99",
+    "byteSize" : 2,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : false,
+    "scale" : 0,
+    "value" : "1",
+    "sourceLine" : 7
+  }, {
+    "id" : "d-ws-row-limit-6d99efba544f",
+    "name" : "WS-ROW-LIMIT",
+    "level" : 5,
+    "picture" : "99",
+    "byteSize" : 2,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : false,
+    "scale" : 0,
+    "value" : "6",
+    "sourceLine" : 8
+  }, {
+    "id" : "d-ws-accumulator-2fecd9ea6ccf",
+    "name" : "WS-ACCUMULATOR",
+    "level" : 5,
+    "picture" : "S9(8)V99",
+    "byteSize" : 10,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "0",
+    "sourceLine" : 9
+  }, {
+    "id" : "d-ws-unit-cost-3dca7b665dde",
+    "name" : "WS-UNIT-COST",
+    "level" : 5,
+    "picture" : "S9(4)V99",
+    "byteSize" : 6,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "7.25",
+    "sourceLine" : 10
+  }, {
+    "id" : "d-ws-units-8729e1f0e3dd",
+    "name" : "WS-UNITS",
+    "level" : 5,
+    "picture" : "99",
+    "byteSize" : 2,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : false,
+    "scale" : 0,
+    "value" : "5",
+    "sourceLine" : 11
+  }, {
+    "id" : "d-ws-line-total-f0508b60aea4",
+    "name" : "WS-LINE-TOTAL",
+    "level" : 5,
+    "picture" : "S9(8)V99",
+    "byteSize" : 10,
+    "occurs" : null,
+    "numeric" : true,
+    "signed" : true,
+    "scale" : 2,
+    "value" : "0",
+    "sourceLine" : 12
+  } ],
+  "statements" : [ {
+    "id" : "s-perform-cc353f1c40d5",
+    "operation" : "perform",
+    "sourceLine" : 15,
+    "operands" : {
+      "tokens" : [ "PERFORM", "UNTIL", "WS-ROW", ">", "WS-ROW-LIMIT" ],
+      "mode" : "until",
+      "until" : "WS-ROW > WS-ROW-LIMIT",
+      "conditionTokens" : [ "WS-ROW", ">", "WS-ROW-LIMIT" ],
+      "performModel" : {
+        "mode" : "until",
+        "until" : "WS-ROW > WS-ROW-LIMIT"
       },
-      "raw": "PERFORM UNTIL WS-ROW > WS-ROW-LIMIT"
+      "conditionModel" : {
+        "raw" : "WS-ROW > WS-ROW-LIMIT",
+        "tokens" : [ "WS-ROW", ">", "WS-ROW-LIMIT" ],
+        "left" : "WS-ROW",
+        "operator" : ">",
+        "right" : "WS-ROW-LIMIT"
+      }
     },
-    {
-      "id": "s-compute-16-1",
-      "operation": "compute",
-      "sourceLine": 16,
-      "operands": {
-        "target": "WS-LINE-TOTAL",
-        "expression": "WS-ROW * WS-UNITS * WS-UNIT-COST"
-      },
-      "raw": "COMPUTE WS-LINE-TOTAL = WS-ROW * WS-UNITS * WS-UNIT-COST"
+    "raw" : "PERFORM UNTIL WS-ROW > WS-ROW-LIMIT"
+  }, {
+    "id" : "s-compute-9e0351f6c91b",
+    "operation" : "compute",
+    "sourceLine" : 16,
+    "operands" : {
+      "target" : "WS-LINE-TOTAL",
+      "expression" : "WS-ROW * WS-UNITS * WS-UNIT-COST",
+      "expressionTokens" : [ "WS-ROW", "*", "WS-UNITS", "*", "WS-UNIT-COST" ]
     },
-    {
-      "id": "s-add-17-1",
-      "operation": "add",
-      "sourceLine": 17,
-      "operands": {
-        "source": "WS-LINE-TOTAL",
-        "target": "WS-ACCUMULATOR"
-      },
-      "raw": "ADD WS-LINE-TOTAL TO WS-ACCUMULATOR"
+    "raw" : "COMPUTE WS-LINE-TOTAL = WS-ROW * WS-UNITS * WS-UNIT-COST"
+  }, {
+    "id" : "s-add-b6bf7738fd34",
+    "operation" : "add",
+    "sourceLine" : 17,
+    "operands" : {
+      "tokens" : [ "ADD", "WS-LINE-TOTAL", "TO", "WS-ACCUMULATOR" ],
+      "sources" : [ "WS-LINE-TOTAL" ],
+      "targets" : [ "WS-ACCUMULATOR" ],
+      "source" : "WS-LINE-TOTAL",
+      "target" : "WS-ACCUMULATOR",
+      "arithmeticModel" : {
+        "operation" : "add",
+        "source" : "WS-LINE-TOTAL",
+        "sources" : [ "WS-LINE-TOTAL" ],
+        "target" : "WS-ACCUMULATOR",
+        "targets" : [ "WS-ACCUMULATOR" ]
+      }
     },
-    {
-      "id": "s-display-18-1",
-      "operation": "display",
-      "sourceLine": 18,
-      "operands": {
-        "items": ["\"LINE=\"", "WS-ROW", "\"TOTAL=\"", "WS-LINE-TOTAL"]
-      },
-      "raw": "DISPLAY \"LINE=\" WS-ROW \"TOTAL=\" WS-LINE-TOTAL"
+    "raw" : "ADD WS-LINE-TOTAL TO WS-ACCUMULATOR"
+  }, {
+    "id" : "s-display-159f5510b53c",
+    "operation" : "display",
+    "sourceLine" : 18,
+    "operands" : {
+      "items" : [ "\"LINE=\"", "WS-ROW", "\"TOTAL=\"", "WS-LINE-TOTAL" ]
     },
-    {
-      "id": "s-add-19-1",
-      "operation": "add",
-      "sourceLine": 19,
-      "operands": {
-        "source": "1",
-        "target": "WS-ROW"
-      },
-      "raw": "ADD 1 TO WS-ROW"
+    "raw" : "DISPLAY \"LINE=\" WS-ROW \"TOTAL=\" WS-LINE-TOTAL"
+  }, {
+    "id" : "s-add-284e828bcdd3",
+    "operation" : "add",
+    "sourceLine" : 19,
+    "operands" : {
+      "tokens" : [ "ADD", "1", "TO", "WS-ROW" ],
+      "sources" : [ "1" ],
+      "targets" : [ "WS-ROW" ],
+      "source" : "1",
+      "target" : "WS-ROW",
+      "arithmeticModel" : {
+        "operation" : "add",
+        "source" : "1",
+        "sources" : [ "1" ],
+        "target" : "WS-ROW",
+        "targets" : [ "WS-ROW" ]
+      }
     },
-    {
-      "id": "s-end-perform-20-1",
-      "operation": "end_perform",
-      "sourceLine": 20,
-      "operands": {},
-      "raw": "END-PERFORM"
+    "raw" : "ADD 1 TO WS-ROW"
+  }, {
+    "id" : "s-end-perform-6ce52ac73fa3",
+    "operation" : "end_perform",
+    "sourceLine" : 20,
+    "operands" : { },
+    "raw" : "END-PERFORM"
+  }, {
+    "id" : "s-display-5794a18bb52c",
+    "operation" : "display",
+    "sourceLine" : 22,
+    "operands" : {
+      "items" : [ "\"BATCH-TOTAL=\"", "WS-ACCUMULATOR" ]
     },
-    {
-      "id": "s-display-22-1",
-      "operation": "display",
-      "sourceLine": 22,
-      "operands": {
-        "items": ["\"BATCH-TOTAL=\"", "WS-ACCUMULATOR"]
-      },
-      "raw": "DISPLAY \"BATCH-TOTAL=\" WS-ACCUMULATOR"
+    "raw" : "DISPLAY \"BATCH-TOTAL=\" WS-ACCUMULATOR"
+  }, {
+    "id" : "s-stop-6e3d18ae3d64",
+    "operation" : "stop",
+    "sourceLine" : 23,
+    "operands" : { },
+    "raw" : "STOP RUN."
+  } ],
+  "controlFlow" : [ {
+    "id" : "e-s-perform-cc353f1c40d5-s-compute-9e0351f6c91b-next",
+    "from" : "s-perform-cc353f1c40d5",
+    "to" : "s-compute-9e0351f6c91b",
+    "label" : "next"
+  }, {
+    "id" : "e-s-compute-9e0351f6c91b-s-add-b6bf7738fd34-next",
+    "from" : "s-compute-9e0351f6c91b",
+    "to" : "s-add-b6bf7738fd34",
+    "label" : "next"
+  }, {
+    "id" : "e-s-add-b6bf7738fd34-s-display-159f5510b53c-next",
+    "from" : "s-add-b6bf7738fd34",
+    "to" : "s-display-159f5510b53c",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-159f5510b53c-s-add-284e828bcdd3-next",
+    "from" : "s-display-159f5510b53c",
+    "to" : "s-add-284e828bcdd3",
+    "label" : "next"
+  }, {
+    "id" : "e-s-add-284e828bcdd3-s-end-perform-6ce52ac73fa3-next",
+    "from" : "s-add-284e828bcdd3",
+    "to" : "s-end-perform-6ce52ac73fa3",
+    "label" : "next"
+  }, {
+    "id" : "e-s-perform-cc353f1c40d5-s-end-perform-6ce52ac73fa3-block-exit",
+    "from" : "s-perform-cc353f1c40d5",
+    "to" : "s-end-perform-6ce52ac73fa3",
+    "label" : "block-exit"
+  }, {
+    "id" : "e-s-end-perform-6ce52ac73fa3-s-display-5794a18bb52c-next",
+    "from" : "s-end-perform-6ce52ac73fa3",
+    "to" : "s-display-5794a18bb52c",
+    "label" : "next"
+  }, {
+    "id" : "e-s-display-5794a18bb52c-s-stop-6e3d18ae3d64-next",
+    "from" : "s-display-5794a18bb52c",
+    "to" : "s-stop-6e3d18ae3d64",
+    "label" : "next"
+  } ],
+  "assumptions" : [ "W0 assumes display-compatible fixed-point decimal semantics for PIC S9/V fields.", "W0 control-flow edges are structural and intentionally conservative." ],
+  "traceability" : {
+    "d-ws-total-line-0545d67a9ace" : {
+      "raw" : "WS-TOTAL-LINE",
+      "line" : 6
     },
-    {
-      "id": "s-stop-23-1",
-      "operation": "stop",
-      "sourceLine": 23,
-      "operands": {},
-      "raw": "STOP RUN."
-    }
-  ],
-  "controlFlow": [
-    {
-      "id": "e-s-perform-15-1-s-compute-16-1-next",
-      "from": "s-perform-15-1",
-      "to": "s-compute-16-1",
-      "label": "next"
-    }
-  ],
-  "assumptions": [
-    "W0 control-flow edges are structural and intentionally conservative."
-  ],
-  "traceability": {
-    "s-perform-15-1": {
-      "line": 15,
-      "raw": "PERFORM UNTIL WS-ROW > WS-ROW-LIMIT"
+    "d-ws-row-679a503de3a1" : {
+      "raw" : "WS-ROW",
+      "line" : 7
     },
-    "s-compute-16-1": {
-      "line": 16,
-      "raw": "COMPUTE WS-LINE-TOTAL = WS-ROW * WS-UNITS * WS-UNIT-COST"
+    "d-ws-row-limit-6d99efba544f" : {
+      "raw" : "WS-ROW-LIMIT",
+      "line" : 8
+    },
+    "d-ws-accumulator-2fecd9ea6ccf" : {
+      "raw" : "WS-ACCUMULATOR",
+      "line" : 9
+    },
+    "d-ws-unit-cost-3dca7b665dde" : {
+      "raw" : "WS-UNIT-COST",
+      "line" : 10
+    },
+    "d-ws-units-8729e1f0e3dd" : {
+      "raw" : "WS-UNITS",
+      "line" : 11
+    },
+    "d-ws-line-total-f0508b60aea4" : {
+      "raw" : "WS-LINE-TOTAL",
+      "line" : 12
+    },
+    "s-perform-cc353f1c40d5" : {
+      "raw" : "PERFORM UNTIL WS-ROW > WS-ROW-LIMIT",
+      "line" : 15
+    },
+    "s-compute-9e0351f6c91b" : {
+      "raw" : "COMPUTE WS-LINE-TOTAL = WS-ROW * WS-UNITS * WS-UNIT-COST",
+      "line" : 16
+    },
+    "s-add-b6bf7738fd34" : {
+      "raw" : "ADD WS-LINE-TOTAL TO WS-ACCUMULATOR",
+      "line" : 17
+    },
+    "s-display-159f5510b53c" : {
+      "raw" : "DISPLAY \"LINE=\" WS-ROW \"TOTAL=\" WS-LINE-TOTAL",
+      "line" : 18
+    },
+    "s-add-284e828bcdd3" : {
+      "raw" : "ADD 1 TO WS-ROW",
+      "line" : 19
+    },
+    "s-end-perform-6ce52ac73fa3" : {
+      "raw" : "END-PERFORM",
+      "line" : 20
+    },
+    "s-display-5794a18bb52c" : {
+      "raw" : "DISPLAY \"BATCH-TOTAL=\" WS-ACCUMULATOR",
+      "line" : 22
+    },
+    "s-stop-6e3d18ae3d64" : {
+      "raw" : "STOP RUN.",
+      "line" : 23
+    },
+    "e-s-perform-cc353f1c40d5-s-compute-9e0351f6c91b-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-compute-9e0351f6c91b-s-add-b6bf7738fd34-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-add-b6bf7738fd34-s-display-159f5510b53c-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-display-159f5510b53c-s-add-284e828bcdd3-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-add-284e828bcdd3-s-end-perform-6ce52ac73fa3-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-perform-cc353f1c40d5-s-end-perform-6ce52ac73fa3-block-exit" : {
+      "raw" : "edge:block-exit",
+      "line" : 0
+    },
+    "e-s-end-perform-6ce52ac73fa3-s-display-5794a18bb52c-next" : {
+      "raw" : "edge:next",
+      "line" : 0
+    },
+    "e-s-display-5794a18bb52c-s-stop-6e3d18ae3d64-next" : {
+      "raw" : "edge:next",
+      "line" : 0
     }
   }
 }

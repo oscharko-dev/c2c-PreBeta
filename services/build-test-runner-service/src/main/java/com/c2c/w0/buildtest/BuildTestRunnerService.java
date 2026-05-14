@@ -214,9 +214,7 @@ public final class BuildTestRunnerService {
                 if (Boolean.TRUE.equals(comparison.get("matched"))) {
                     applyClassification(response, ResultClassifier.match());
                 } else {
-                    boolean known = golden.get().knownDivergenceAtW0()
-                            || ResultClassifier.looksLikeKnownCoverageGap(
-                                    run.stdout(), golden.get().expected());
+                    boolean known = golden.get().knownDivergenceAtW0();
                     applyClassification(response, ResultClassifier.divergence(known,
                             known
                                     ? "Generated stdout diverges from Golden Master; classified as a documented W0 generator coverage gap."

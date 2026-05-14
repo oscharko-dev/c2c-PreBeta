@@ -11,14 +11,11 @@ import java.util.Map;
  * The classifier intentionally distinguishes:
  * <ul>
  *   <li>{@code divergence-known-w0-coverage-gap} — output differs from the
- *       Golden Master because the W0 generator does not (yet) translate the
- *       constructs the program needs (e.g. PERFORM, EVALUATE, COMPUTE). The
- *       classification carries the documented coverage gap so downstream
- *       evidence consumers do not panic.</li>
+ *       Golden Master and the fixture explicitly declares the divergence as
+ *       expected through {@code knownDivergenceAtW0}.</li>
  *   <li>{@code divergence-unknown} — generator claims to support the
  *       constructs in this IR but stdout still diverges. This is the signal
- *       that should fail loudly in CI of a future wave once the generator
- *       grows DISPLAY/MOVE coverage past the W0 baseline.</li>
+ *       that should fail loudly in CI.</li>
  * </ul>
  */
 final class ResultClassifier {
@@ -68,31 +65,6 @@ final class ResultClassifier {
     static Map<String, Object> divergence(boolean knownCoverageGap, String summary) {
         String classifier = knownCoverageGap ? CLASS_DIV_KNOWN : CLASS_DIV_UNKNOWN;
         return classification(STATUS_OUTPUT_DIVERGENCE, classifier, summary);
-    }
-
-    /**
-     * Heuristic for whether an output divergence is explainable by the known
-     * W0 coverage gap. The W0 generator only emits {@code System.out.print}
-     * for {@code DISPLAY} statements with literal/known operands — it does
-     * not translate {@code PERFORM}, {@code EVALUATE}, {@code IF},
-     * {@code COMPUTE}, {@code ADD}, etc. When the generated program prints
-     * nothing while the COBOL Golden Master prints a non-empty line, that
-     * is the documented W0 baseline divergence and gets classified as known.
-     */
-    static boolean looksLikeKnownCoverageGap(String actual, String expected) {
-        if (actual == null) {
-            actual = "";
-        }
-        if (expected == null) {
-            expected = "";
-        }
-        String normalisedActual = actual.replace("\r\n", "\n").trim();
-        String normalisedExpected = expected.replace("\r\n", "\n").trim();
-        if (normalisedExpected.isEmpty()) {
-            return false;
-        }
-        // Empty actual against non-empty expected: classic W0 coverage gap.
-        return normalisedActual.isEmpty();
     }
 
     static Map<String, Object> classification(String status, String classifier, String summary) {

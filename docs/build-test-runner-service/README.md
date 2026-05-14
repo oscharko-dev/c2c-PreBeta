@@ -111,15 +111,16 @@ program, each with:
   Path safety is enforced; absolute paths and `..` traversal are rejected.
 - `classification` — `synthetic` for hand-curated expected output, `true`
   for output produced by a COBOL runtime such as GnuCOBOL `cobcrun`.
-- `knownDivergenceAtW0` — `true` if the W0 generator is not expected to
-  reproduce the output (e.g. the program uses `PERFORM`, `EVALUATE`,
-  `COMPUTE`, `ADD`). The runner uses this to classify divergences as
-  `divergence-known-w0-coverage-gap` rather than `divergence-unknown`.
+- `knownDivergenceAtW0` — `true` only when a fixture is intentionally expected
+  to diverge from generated Java. The runner uses this to classify documented
+  divergences as `divergence-known-w0-coverage-gap` rather than
+  `divergence-unknown`.
 - `rationale` — human prose explaining the classification choice.
 
-All three W0 entries are `synthetic` and `knownDivergenceAtW0=true`. Future
-waves will add `true` Golden Masters by re-executing the COBOL programs in a
-GnuCOBOL container and pinning the resulting stdout by hash.
+All three W0 entries are `synthetic` and now `knownDivergenceAtW0=false`
+because generated Java matches the checked-in fixtures. Future waves will add
+true Golden Masters by re-executing the COBOL programs in a GnuCOBOL container
+and pinning the resulting stdout by hash.
 
 ## Safety constraints
 

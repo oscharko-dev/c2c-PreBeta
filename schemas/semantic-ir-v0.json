@@ -65,9 +65,12 @@
           "picture": { "type": ["string", "null"] },
           "byteSize": { "type": "integer", "minimum": 0 },
           "occurs": { "type": ["integer", "null"], "minimum": 1 },
+          "occursParent": { "type": "string", "minLength": 1 },
+          "occursParentLevel": { "type": "integer", "minimum": 1 },
           "numeric": { "type": "boolean" },
           "signed": { "type": "boolean" },
           "scale": { "type": "integer", "minimum": 0 },
+          "value": { "type": ["string", "null"] },
           "sourceLine": { "type": "integer", "minimum": 0 }
         },
         "additionalProperties": true

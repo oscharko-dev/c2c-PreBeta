@@ -3,8 +3,6 @@ package com.c2c.w0.buildtest;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ResultClassifierTest {
 
@@ -19,23 +17,6 @@ class ResultClassifierTest {
     void matchClassification() {
         assertEquals(ResultClassifier.CLASS_MATCH,
                 ResultClassifier.match().get("classification"));
-    }
-
-    @Test
-    void emptyActualAgainstNonEmptyExpectedIsKnownGap() {
-        assertTrue(ResultClassifier.looksLikeKnownCoverageGap("", "expected text"));
-        assertTrue(ResultClassifier.looksLikeKnownCoverageGap("\n  \r\n", "expected text"));
-    }
-
-    @Test
-    void nonEmptyActualAgainstNonEmptyExpectedIsNotAutoKnownGap() {
-        assertFalse(ResultClassifier.looksLikeKnownCoverageGap("a", "different"));
-    }
-
-    @Test
-    void emptyExpectedNeverClassifiedAsCoverageGap() {
-        assertFalse(ResultClassifier.looksLikeKnownCoverageGap("", ""));
-        assertFalse(ResultClassifier.looksLikeKnownCoverageGap("output", ""));
     }
 
     @Test
