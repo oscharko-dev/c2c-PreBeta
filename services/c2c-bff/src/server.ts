@@ -497,10 +497,18 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           }
         }
 
+        if (!config.diagnosticMode) {
+          jsonResponse(res, 503, {
+            error:
+              'orchestrator URL is required for product runs; set C2C_ORCHESTRATOR_URL or enable C2C_DIAGNOSTIC_MODE=1 to use documented mock fixtures',
+          });
+          return;
+        }
+
         const stored = runStore.create(sample, 'mock');
         const completed = runStore.update(stored.runId, {
           status: 'completed',
-          message: 'mock run completed; outputs are documented fixtures',
+          message: 'mock run completed; outputs are documented fixtures (C2C_DIAGNOSTIC_MODE)',
           evidenceRefs: [stored.mock?.evidence.manifestUri ?? ''],
         }) ?? stored;
         res.writeHead(201, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
