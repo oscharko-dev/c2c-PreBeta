@@ -23,7 +23,7 @@ type RunStore struct {
 type RunStoreSnapshot interface {
 	Create(request RunCreateRequest, actorRole string, decision string) (RunState, error)
 	Get(runID string) (RunState, bool)
-	Update(runID string, request RunUpdateRequest, actorRole string, decision string) (RunState, error)
+	Update(runID string, request RunUpdateRequest, actorRole string, decision string) (RunState, string, error)
 	List() []RunState
 }
 
@@ -89,22 +89,23 @@ func (r *RunStore) List() []RunState {
 	return sorted
 }
 
-func (r *RunStore) Update(runID string, request RunUpdateRequest, actorRole string, decision string) (RunState, error) {
+func (r *RunStore) Update(runID string, request RunUpdateRequest, actorRole string, decision string) (RunState, string, error) {
 	if actorRole == "" {
-		return RunState{}, fmt.Errorf("actor role is required")
+		return RunState{}, "", fmt.Errorf("actor role is required")
 	}
 	if request.Status == "" {
-		return RunState{}, fmt.Errorf("status is required")
+		return RunState{}, "", fmt.Errorf("status is required")
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run, ok := r.runs[runID]
 	if !ok {
-		return RunState{}, fmt.Errorf("run %s not found", runID)
+		return RunState{}, "", fmt.Errorf("run %s not found", runID)
 	}
+	previous := run.Status
 	if err := validateRunTransition(run.Status, request.Status); err != nil {
-		return RunState{}, err
+		return RunState{}, "", err
 	}
 
 	run.Status = request.Status
@@ -114,7 +115,7 @@ func (r *RunStore) Update(runID string, request RunUpdateRequest, actorRole stri
 	run.UpdatedBy = request.UpdatedBy
 	run.LastUpdatedAt = time.Now().UTC()
 	r.runs[runID] = run
-	return run, nil
+	return run, previous, nil
 }
 
 func validateRunTransition(current string, next string) error {
