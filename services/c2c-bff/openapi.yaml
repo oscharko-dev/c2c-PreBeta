@@ -164,6 +164,13 @@ paths:
   /api/v0/runs/{runId}/generated:
     get:
       summary: Return generated Java for side-by-side display
+      description: >
+        The response includes `artifactRef` (the SHA-256-anchored reference to
+        the generated-project manifest) and `traceability` (programId, irId,
+        sourceHash). The same `artifactRef.sha256` appears as
+        `generatedArtifactRef.sha256` on `/build-test` and `/evidence`, which
+        is how Issue #97 guarantees the UI is showing the exact Java the
+        build-test runner compiled and the Evidence Pack vouches for.
       operationId: getGenerated
       parameters:
         - in: path
@@ -178,6 +185,76 @@ paths:
               schema: { $ref: "#/components/schemas/GeneratedView" }
         "404":
           description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}/generated/files:
+    get:
+      summary: List generated Java project files with per-file references
+      description: >
+        Returns the persisted generated-project file index for the run. Each
+        entry includes path, sha256, byteSize, and mimeType so the UI (and any
+        automation) can verify byte-for-byte what `/api/v0/runs/{runId}/generated/files/{encodedPath}`
+        will return. The aggregate `artifactRef` is the SHA-256 of the
+        manifest, identical to the one referenced by `/generated`,
+        `/build-test`, and `/evidence`.
+      operationId: getGeneratedFiles
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GeneratedFilesIndex" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}/generated/files/{filePath}:
+    get:
+      summary: Return the content of a single generated Java project file
+      description: >
+        `filePath` is the relative path inside the generated project tree.
+        Each path segment must be URL-encoded individually so directory
+        separators are preserved (`src/main/java/c2c/CASE01.java` becomes
+        `src/main/java/c2c/CASE01.java`). Path-traversal attempts (`..`,
+        absolute paths, NUL bytes) return `400`. Unknown files inside the
+        project tree return `404`.
+      operationId: getGeneratedFile
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: filePath
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GeneratedFileContent" }
+        "400":
+          description: invalid generated file path
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: file not found in generated project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -386,10 +463,11 @@ components:
 
     RunLinks:
       type: object
-      required: [self, generated, buildTest, evidence, events, artifacts]
+      required: [self, generated, generatedFiles, buildTest, evidence, events, artifacts]
       properties:
         self: { type: string }
         generated: { type: string }
+        generatedFiles: { type: string }
         buildTest: { type: string }
         evidence: { type: string }
         events: { type: string }
@@ -434,6 +512,9 @@ components:
         files:
           type: object
           additionalProperties: { type: string }
+        fileRefs:
+          type: array
+          items: { $ref: "#/components/schemas/GeneratedFileRef" }
         unsupportedFeatures:
           type: array
           items: { type: string }
@@ -448,7 +529,87 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RunArtifactMetadata"
             - type: 'null'
+        artifactRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+          description: >
+            Reference to the generated-project manifest. The same sha256 is
+            reported by /build-test (`generatedArtifactRef`) and /evidence
+            (`generatedArtifactRef`), enforcing the Issue #97 consistency
+            requirement.
+        traceability:
+          $ref: "#/components/schemas/GeneratedTraceability"
         note: { type: string }
+
+    GeneratedFileRef:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        absolutePath: { type: string }
+        uri: { type: string }
+        sha256: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+
+    GeneratedTraceability:
+      type: object
+      required: [programId, irId, sourceHash]
+      properties:
+        programId: { type: string }
+        irId: { type: string }
+        sourceHash: { type: string }
+
+    OutputRef:
+      type: object
+      required: [uri, sha256]
+      properties:
+        uri: { type: string }
+        sha256: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+
+    GeneratedFilesIndex:
+      type: object
+      required: [runId, programId, mode, status, files, fileCount]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
+        status: { type: string, enum: [complete, incomplete] }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/GeneratedFileRef" }
+        fileCount: { type: integer, minimum: 0 }
+        entryFilePath: { type: string }
+        artifactRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        orchestratorRunId: { type: string }
+        note: { type: string }
+
+    GeneratedFileContent:
+      type: object
+      required: [runId, path, content, sha256, byteSize, mimeType]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
+        path: { type: string }
+        absolutePath: { type: string }
+        content: { type: string }
+        sha256: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        uri: { type: string }
+        kind: { type: string }
+        orchestratorRunId: { type: string }
 
     BuildTestView:
       type: object
@@ -487,6 +648,14 @@ components:
         expectedOutput: { type: string }
         actualOutput: { type: string }
         outputRef: { type: string }
+        generatedArtifactRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+          description: >
+            Issue #97 consistency anchor — sha256 of the generated-project
+            manifest that the runner compiled. Equal to the same field on
+            /generated and /evidence.
         note: { type: string }
 
     EvidenceView:
@@ -510,6 +679,13 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RunArtifactMetadata"
             - type: 'null'
+        generatedArtifactRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+          description: >
+            Issue #97 consistency anchor — same sha256 as
+            BuildTestView.generatedArtifactRef and GeneratedView.artifactRef.
         note: { type: string }
 
     RunArtifactMetadata:

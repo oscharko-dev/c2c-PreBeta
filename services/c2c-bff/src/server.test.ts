@@ -79,6 +79,8 @@ function stubSamples(items: SampleDetail[]): SampleRegistry {
 
 interface ArtifactStubResponses {
   generated?: UpstreamResponse;
+  generatedFiles?: UpstreamResponse;
+  generatedFile?: UpstreamResponse | ((path: string) => UpstreamResponse | undefined);
   buildTest?: UpstreamResponse;
   evidence?: UpstreamResponse;
   events?: UpstreamResponse;
@@ -98,6 +100,8 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       options?: unknown;
     }>;
     getGenerated: number;
+    getGeneratedFiles: number;
+    getGeneratedFile: Array<{ runId: string; path: string }>;
     getBuildTest: number;
     getEvidence: number;
     getEvents: number;
@@ -115,6 +119,8 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       options?: unknown;
     }>,
     getGenerated: 0,
+    getGeneratedFiles: 0,
+    getGeneratedFile: [] as Array<{ runId: string; path: string }>,
     getBuildTest: 0,
     getEvidence: 0,
     getEvents: 0,
@@ -181,6 +187,18 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       calls.getGenerated += 1;
       return artifactResponses.generated;
     },
+    async getGeneratedFiles() {
+      calls.getGeneratedFiles += 1;
+      return artifactResponses.generatedFiles;
+    },
+    async getGeneratedFile(runId: string, filePath: string) {
+      calls.getGeneratedFile.push({ runId, path: filePath });
+      const responder = artifactResponses.generatedFile;
+      if (typeof responder === 'function') {
+        return responder(filePath);
+      }
+      return responder;
+    },
     async getBuildTest() {
       calls.getBuildTest += 1;
       return artifactResponses.buildTest;
@@ -213,6 +231,12 @@ function disabledOrchestrator(): OrchestratorClient {
       return undefined;
     },
     async getGenerated() {
+      return undefined;
+    },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
       return undefined;
     },
     async getBuildTest() {
@@ -622,6 +646,12 @@ test('starting a run surfaces orchestrator failures instead of silently falling 
     async getGenerated() {
       return undefined;
     },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
+      return undefined;
+    },
     async getBuildTest() {
       return undefined;
     },
@@ -671,6 +701,12 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
       return undefined;
     },
     async getGenerated() {
+      return undefined;
+    },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
       return undefined;
     },
     async getBuildTest() {
@@ -1392,6 +1428,7 @@ test('transform derives program id, calls orchestrator, and returns the full tra
     assert.deepEqual(body.links, {
       self: `/api/v0/runs/${body.runId}`,
       generated: `/api/v0/runs/${body.runId}/generated`,
+      generatedFiles: `/api/v0/runs/${body.runId}/generated/files`,
       buildTest: `/api/v0/runs/${body.runId}/build-test`,
       evidence: `/api/v0/runs/${body.runId}/evidence`,
       events: `/api/v0/runs/${body.runId}/events`,
@@ -1448,6 +1485,12 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
     async getGenerated() {
       return undefined;
     },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
+      return undefined;
+    },
     async getBuildTest() {
       return undefined;
     },
@@ -1495,6 +1538,12 @@ test('transform does not create a run when the orchestrator throws', async () =>
       return undefined;
     },
     async getGenerated() {
+      return undefined;
+    },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
       return undefined;
     },
     async getBuildTest() {
@@ -1810,6 +1859,211 @@ test('W0 browser acceptance fixtures do not enable diagnostic fixtures', () => {
         `${next} must not enable C2C_ENABLE_DIAGNOSTIC_FIXTURES for browser/acceptance flows`,
       );
     }
+  }
+});
+
+test('Issue #97: generated/files index proxies orchestrator response and exposes artifactRef', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const javaContent = 'package c2c;\npublic final class CASE01 {}\n';
+  const filesIndex = [
+    { path: 'pom.xml', sha256: 'a'.repeat(64), byteSize: 16, mimeType: 'application/xml' },
+    {
+      path: 'src/main/java/c2c/CASE01.java',
+      sha256: 'b'.repeat(64),
+      byteSize: javaContent.length,
+      mimeType: 'text/x-java-source',
+    },
+  ];
+  const { client: orch, calls } = stubOrchestrator({
+    generatedFiles: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        files: filesIndex,
+        fileCount: filesIndex.length,
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        artifactRef: { uri: 'file:///run/generated-project-manifest.json', sha256: 'c'.repeat(64), byteSize: 512 },
+      },
+    },
+    generatedFile: (filePath) => {
+      if (filePath === 'src/main/java/c2c/CASE01.java') {
+        return {
+          status: 200,
+          body: {
+            path: filePath,
+            absolutePath: 'generated-project/src/main/java/c2c/CASE01.java',
+            content: javaContent,
+            sha256: 'b'.repeat(64),
+            byteSize: javaContent.length,
+            mimeType: 'text/x-java-source',
+            uri: 'file:///run/generated-project/CASE01.java',
+            kind: 'generated-project-file',
+          },
+        };
+      }
+      return { status: 404, body: { error: 'generated file not found', path: filePath } };
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(started.status, 201);
+    const startedBody = started.body as { runId: string };
+
+    const index = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files`,
+    );
+    assert.equal(index.status, 200);
+    const indexBody = index.body as {
+      status: string;
+      productMode: string;
+      fileCount: number;
+      files: Array<{ path: string; sha256: string; byteSize: number }>;
+      entryFilePath: string;
+      artifactRef: { sha256: string; byteSize: number } | null;
+    };
+    assert.equal(indexBody.status, 'complete');
+    assert.equal(indexBody.productMode, 'live');
+    assert.equal(indexBody.fileCount, 2);
+    assert.equal(indexBody.entryFilePath, 'src/main/java/c2c/CASE01.java');
+    assert.equal(indexBody.artifactRef?.sha256, 'c'.repeat(64));
+    assert.equal(calls.getGeneratedFiles, 1);
+
+    const file = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/CASE01.java`,
+    );
+    assert.equal(file.status, 200);
+    const fileBody = file.body as { path: string; content: string; sha256: string; byteSize: number };
+    assert.equal(fileBody.path, 'src/main/java/c2c/CASE01.java');
+    assert.equal(fileBody.content, javaContent);
+    assert.equal(fileBody.byteSize, javaContent.length);
+    assert.equal(calls.getGeneratedFile.length, 1);
+    assert.equal(calls.getGeneratedFile[0]?.path, 'src/main/java/c2c/CASE01.java');
+
+    // Path traversal attempts are rejected by the BFF before reaching the orchestrator.
+    const traversal = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/..%2F..%2Fetc%2Fpasswd`,
+    );
+    assert.equal(traversal.status, 400);
+
+    // Unknown file inside the generated tree returns 404, not 200.
+    const missing = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/does/not/exist.java`,
+    );
+    assert.equal(missing.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test('Issue #97: /generated, /build-test, and /evidence all carry the same generated artifact hash', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const javaContent = 'package c2c;\npublic final class CASE01 { public static void main(String[] a) {} }\n';
+  const manifestHash = 'f'.repeat(64);
+  const generatedArtifactRef = {
+    uri: 'file:///run/generated-project-manifest.json',
+    sha256: manifestHash,
+    byteSize: 512,
+  };
+  const { client: orch } = stubOrchestrator({
+    generated: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        entryClass: 'CASE01',
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        fileCount: 1,
+        files: { 'src/main/java/c2c/CASE01.java': javaContent },
+        unsupportedFeatures: [],
+        openAssumptions: [],
+        artifactRef: generatedArtifactRef,
+        traceability: { programId: 'CASE01', irId: 'ir-CASE01', sourceHash: 'aa' },
+      },
+    },
+    buildTest: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        data: { status: 'ok', classification: 'match', actualOutput: '', outputRef: null },
+        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
+        generatedArtifactRef,
+      },
+    },
+    evidence: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        data: { packId: 'epk-1', status: 'complete' },
+        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'd'.repeat(64), byteSize: 512 },
+        generatedArtifactRef,
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+
+    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    const genBody = generated.body as {
+      artifactRef: { sha256: string } | null;
+      traceability: { programId: string; irId: string; sourceHash: string };
+    };
+    assert.equal(genBody.artifactRef?.sha256, manifestHash);
+    assert.equal(genBody.traceability.programId, 'CASE01');
+    assert.equal(genBody.traceability.irId, 'ir-CASE01');
+
+    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    const btBody = buildTest.body as { generatedArtifactRef: { sha256: string } | null };
+    assert.equal(btBody.generatedArtifactRef?.sha256, manifestHash);
+
+    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    const evBody = evidence.body as { generatedArtifactRef: { sha256: string } | null };
+    assert.equal(evBody.generatedArtifactRef?.sha256, manifestHash);
+  } finally {
+    await server.close();
   }
 });
 

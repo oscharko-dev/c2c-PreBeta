@@ -110,8 +110,10 @@ paths:
       summary: Retrieve generated Java for a run
       description: >
         Returns the persisted Java project files together with the
-        generation-response metadata. Files are read from disk and equal the
-        exact bytes recorded in `generated-project/`.
+        generation-response metadata, an `artifactRef` pointing at the
+        generated-project manifest (Issue #97), traceability fields
+        (programId, irId, sourceHash), and per-file refs. Files are read
+        from disk and equal the exact bytes recorded in `generated-project/`.
       operationId: getRunGenerated
       parameters:
         - in: path
@@ -126,6 +128,62 @@ paths:
               schema: { $ref: "#/components/schemas/GeneratedResponse" }
         "404":
           description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/generated/files:
+    get:
+      summary: List generated Java project files for a run
+      description: >
+        Returns the persisted file index (per-file path, sha256, byteSize,
+        mimeType) plus the manifest `artifactRef`. The manifest sha256 is
+        identical to the one returned by `/generated` and by the build-test
+        and evidence envelopes — that equality is the Issue #97 consistency
+        contract.
+      operationId: getRunGeneratedFiles
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Generated file index
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/generated/files/{filePath}:
+    get:
+      summary: Return a single generated Java project file by relative path
+      description: >
+        `filePath` is the relative path inside the persisted
+        `generated-project/` directory. Path-traversal attempts (`..`,
+        absolute paths, NUL bytes) return `400`. Files that do not exist in
+        the persisted tree return `404`. The returned payload includes the
+        file content as UTF-8 text plus sha256/byteSize/mimeType so callers
+        can verify the bytes against the manifest.
+      operationId: getRunGeneratedFile
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: filePath
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Generated file content
+        "400":
+          description: Invalid generated file path
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Generated file not found
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }

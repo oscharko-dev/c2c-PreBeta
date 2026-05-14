@@ -1,6 +1,8 @@
 import type {
   BuildTestView,
   EvidenceView,
+  GeneratedFileContent,
+  GeneratedFilesIndex,
   GeneratedView,
   ModeResponse,
   RunSummary,
@@ -35,6 +37,8 @@ export interface BffApi {
   startRun(programId: string): Promise<RunSummary>;
   getRun(runId: string): Promise<RunSummary>;
   getGenerated(runId: string): Promise<GeneratedView>;
+  getGeneratedFiles(runId: string): Promise<GeneratedFilesIndex>;
+  getGeneratedFile(runId: string, filePath: string): Promise<GeneratedFileContent>;
   getBuildTest(runId: string): Promise<BuildTestView>;
   getEvidence(runId: string): Promise<EvidenceView>;
 }
@@ -81,6 +85,18 @@ export function createBffApi(options: { baseUrl?: string; fetchImpl?: FetchLike 
     startRun: (programId) => request<RunSummary>('/api/v0/runs', { method: 'POST', body: { programId } }),
     getRun: (runId) => request<RunSummary>(`/api/v0/runs/${encodeURIComponent(runId)}`),
     getGenerated: (runId) => request<GeneratedView>(`/api/v0/runs/${encodeURIComponent(runId)}/generated`),
+    getGeneratedFiles: (runId) =>
+      request<GeneratedFilesIndex>(`/api/v0/runs/${encodeURIComponent(runId)}/generated/files`),
+    getGeneratedFile: (runId, filePath) => {
+      const encodedPath = filePath
+        .split('/')
+        .filter((segment) => segment.length > 0)
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+      return request<GeneratedFileContent>(
+        `/api/v0/runs/${encodeURIComponent(runId)}/generated/files/${encodedPath}`,
+      );
+    },
     getBuildTest: (runId) => request<BuildTestView>(`/api/v0/runs/${encodeURIComponent(runId)}/build-test`),
     getEvidence: (runId) => request<EvidenceView>(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`),
   };

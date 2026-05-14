@@ -7,16 +7,20 @@ import logging
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
 from .artifacts import (
     KIND_BUILD_TEST_RESULT,
     KIND_EVIDENCE_PACK_MANIFEST,
     KIND_GENERATED_PROJECT_FILE,
+    KIND_GENERATED_PROJECT_MANIFEST,
     KIND_GENERATION_RESPONSE,
     KIND_MODEL_INVOCATION_LEDGER,
     KIND_MODEL_POLICY_SKIPPED,
     KIND_TRAJECTORY_LEDGER,
+    MIME_JAVA,
+    MIME_PLAIN,
     RunArtifactStore,
 )
 from .client import JSONHTTPClient
@@ -133,6 +137,25 @@ class OrchestratorService:
                         status, payload = service._artifact_endpoint(run_id, artifact_path)
                         self._write_json(status, payload)
                         return
+                    if (
+                        len(parts) >= 5
+                        and parts[0] == "v0"
+                        and parts[1] == "runs"
+                        and parts[3] == "generated"
+                        and parts[4] == "files"
+                    ):
+                        run_id = parts[2]
+                        if len(parts) == 5:
+                            status, payload = service._generated_files_index(run_id)
+                            self._write_json(status, payload)
+                            return
+                        encoded_segments = parts[5:]
+                        decoded = "/".join(
+                            urllib.parse.unquote(segment) for segment in encoded_segments
+                        )
+                        status, payload = service._generated_file_content(run_id, decoded)
+                        self._write_json(status, payload)
+                        return
                     self._write_json(404, {"error": "not found"})
                 except Exception as exc:
                     if isinstance(exc, UpstreamServiceError):
@@ -192,22 +215,27 @@ class OrchestratorService:
             }
         if action == "generated":
             return 200, self._generated_view(run_id, envelope_base)
+        generated_artifact_ref = self._generated_artifact_ref(run_id)
         if action == "build-test":
-            return 200, self._artifact_payload(
+            payload = self._artifact_payload(
                 run_id,
                 envelope_base,
                 relpath="build-test-result.json",
                 kind=KIND_BUILD_TEST_RESULT,
                 missing_label="build-test-result",
             )
+            payload["generatedArtifactRef"] = generated_artifact_ref
+            return 200, payload
         if action == "evidence":
-            return 200, self._artifact_payload(
+            payload = self._artifact_payload(
                 run_id,
                 envelope_base,
                 relpath="evidence-pack-manifest.json",
                 kind=KIND_EVIDENCE_PACK_MANIFEST,
                 missing_label="evidence-pack-manifest",
             )
+            payload["generatedArtifactRef"] = generated_artifact_ref
+            return 200, payload
         if action == "events":
             return 200, self._events_view(run_id, envelope_base)
         return 404, {"error": "not found"}
@@ -240,11 +268,26 @@ class OrchestratorService:
             "kind": kind,
         }
 
+    def _generated_artifact_ref(self, run_id: str) -> Optional[Dict[str, Any]]:
+        manifest_meta = self.artifact_store.find_metadata(run_id, "generated-project-manifest.json")
+        if manifest_meta is None:
+            return None
+        return {
+            "uri": manifest_meta.get("uri"),
+            "sha256": manifest_meta.get("sha256"),
+            "byteSize": manifest_meta.get("byteSize"),
+            "path": manifest_meta.get("path"),
+            "kind": manifest_meta.get("kind"),
+        }
+
     def _generated_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
         response = self.artifact_store.read_json(run_id, "generation-response.json")
         response_meta = self.artifact_store.find_metadata(run_id, "generation-response.json")
+        manifest = self.artifact_store.read_json(run_id, "generated-project-manifest.json")
+        manifest_meta = self.artifact_store.find_metadata(run_id, "generated-project-manifest.json")
         file_metas = self.artifact_store.find_by_kind(run_id, KIND_GENERATED_PROJECT_FILE)
         files: Dict[str, str] = {}
+        file_refs: List[Dict[str, Any]] = []
         prefix = "generated-project/"
         for entry in file_metas:
             relpath = str(entry.get("path") or "")
@@ -253,17 +296,45 @@ class OrchestratorService:
             content = self.artifact_store.read_bytes(run_id, relpath)
             if content is None:
                 continue
-            files[relpath[len(prefix):]] = content.decode("utf-8", errors="replace")
+            short = relpath[len(prefix):]
+            files[short] = content.decode("utf-8", errors="replace")
+            file_refs.append(
+                {
+                    "path": short,
+                    "absolutePath": relpath,
+                    "uri": entry.get("uri"),
+                    "sha256": entry.get("sha256"),
+                    "byteSize": entry.get("byteSize"),
+                    "mimeType": entry.get("mimeType"),
+                }
+            )
+        file_refs.sort(key=lambda item: str(item.get("path") or ""))
         missing: List[str] = []
         if response is None:
             missing.append("generation-response")
         if not files:
             missing.append("generated-project")
-        generated_project = {}
+        if manifest is None and files:
+            missing.append("generated-project-manifest")
+        generated_project: Dict[str, Any] = {}
         if isinstance(response, dict):
             project = response.get("generatedProject")
             if isinstance(project, dict):
                 generated_project = project
+        manifest_traceability: Dict[str, Any] = {}
+        if isinstance(manifest, dict):
+            traceability = manifest.get("traceability")
+            if isinstance(traceability, dict):
+                manifest_traceability = traceability
+        artifact_ref: Optional[Dict[str, Any]] = None
+        if manifest_meta is not None:
+            artifact_ref = {
+                "uri": manifest_meta.get("uri"),
+                "sha256": manifest_meta.get("sha256"),
+                "byteSize": manifest_meta.get("byteSize"),
+                "path": manifest_meta.get("path"),
+                "kind": manifest_meta.get("kind"),
+            }
         return {
             **envelope,
             "status": "incomplete" if missing else "complete",
@@ -272,11 +343,124 @@ class OrchestratorService:
             "entryFilePath": str(generated_project.get("entryFilePath") or ""),
             "fileCount": len(files),
             "files": files,
+            "fileRefs": file_refs,
             "unsupportedFeatures": list(generated_project.get("unsupportedFeatures", []) or []),
             "openAssumptions": list(generated_project.get("openAssumptions", []) or []),
             "generationResponse": response,
             "generationResponseRef": response_meta,
-            "fileRefs": file_metas,
+            "artifactRef": artifact_ref,
+            "manifest": manifest,
+            "manifestRef": manifest_meta,
+            "traceability": {
+                "programId": str(manifest_traceability.get("programId") or envelope.get("programId") or ""),
+                "irId": str(manifest_traceability.get("irId") or ""),
+                "sourceHash": str(manifest_traceability.get("sourceHash") or ""),
+            },
+        }
+
+    @staticmethod
+    def _safe_generated_relpath(raw: str) -> Optional[str]:
+        if not raw:
+            return None
+        if "\x00" in raw:
+            return None
+        normalized = raw.replace("\\", "/").strip()
+        normalized = normalized.lstrip("/")
+        if not normalized:
+            return None
+        parts = PurePosixPath(normalized).parts
+        for segment in parts:
+            if segment in ("", ".", ".."):
+                return None
+        return "/".join(parts)
+
+    def _generated_files_index(self, run_id: str) -> Tuple[int, Dict[str, Any]]:
+        if not self.artifact_store.has_run(run_id):
+            return 404, {"error": "run not found", "runId": run_id}
+        summary = self.artifact_store.read_summary(run_id) or {}
+        envelope = {
+            "runId": run_id,
+            "workflowId": summary.get("workflowId") or self.config.workflow_id,
+            "programId": summary.get("programId") or "",
+            "runStatus": str(summary.get("status") or "incomplete"),
+        }
+        manifest = self.artifact_store.read_json(run_id, "generated-project-manifest.json")
+        manifest_meta = self.artifact_store.find_metadata(run_id, "generated-project-manifest.json")
+        file_metas = self.artifact_store.find_by_kind(run_id, KIND_GENERATED_PROJECT_FILE)
+        prefix = "generated-project/"
+        file_refs: List[Dict[str, Any]] = []
+        for entry in file_metas:
+            relpath = str(entry.get("path") or "")
+            if not relpath.startswith(prefix):
+                continue
+            short = relpath[len(prefix):]
+            file_refs.append(
+                {
+                    "path": short,
+                    "absolutePath": relpath,
+                    "uri": entry.get("uri"),
+                    "sha256": entry.get("sha256"),
+                    "byteSize": entry.get("byteSize"),
+                    "mimeType": entry.get("mimeType"),
+                }
+            )
+        file_refs.sort(key=lambda item: str(item.get("path") or ""))
+        missing: List[str] = []
+        if not file_refs:
+            missing.append("generated-project")
+        if manifest is None and file_refs:
+            missing.append("generated-project-manifest")
+        artifact_ref: Optional[Dict[str, Any]] = None
+        if manifest_meta is not None:
+            artifact_ref = {
+                "uri": manifest_meta.get("uri"),
+                "sha256": manifest_meta.get("sha256"),
+                "byteSize": manifest_meta.get("byteSize"),
+                "path": manifest_meta.get("path"),
+                "kind": manifest_meta.get("kind"),
+            }
+        entry_file_path = ""
+        if isinstance(manifest, dict):
+            entry_file_path = str(manifest.get("entryFilePath") or "")
+        return 200, {
+            **envelope,
+            "status": "incomplete" if missing else "complete",
+            "missingArtifacts": missing,
+            "fileCount": len(file_refs),
+            "files": file_refs,
+            "entryFilePath": entry_file_path,
+            "artifactRef": artifact_ref,
+            "manifest": manifest,
+            "manifestRef": manifest_meta,
+        }
+
+    def _generated_file_content(self, run_id: str, raw_path: str) -> Tuple[int, Dict[str, Any]]:
+        if not self.artifact_store.has_run(run_id):
+            return 404, {"error": "run not found", "runId": run_id}
+        safe = self._safe_generated_relpath(raw_path)
+        if safe is None:
+            return 400, {"error": "invalid generated file path", "path": raw_path}
+        absolute = f"generated-project/{safe}"
+        meta = self.artifact_store.find_metadata(run_id, absolute)
+        content_bytes = self.artifact_store.read_bytes(run_id, absolute)
+        if content_bytes is None or meta is None:
+            return 404, {"error": "generated file not found", "path": safe}
+        mime_type = str(meta.get("mimeType") or "")
+        is_text = mime_type.startswith("text/") or mime_type in {MIME_JAVA, MIME_PLAIN, "application/json", "application/xml"}
+        try:
+            content_text = content_bytes.decode("utf-8") if is_text else content_bytes.decode("utf-8", errors="replace")
+        except UnicodeDecodeError:
+            content_text = content_bytes.decode("utf-8", errors="replace")
+        return 200, {
+            "runId": run_id,
+            "path": safe,
+            "absolutePath": absolute,
+            "content": content_text,
+            "sha256": meta.get("sha256"),
+            "byteSize": meta.get("byteSize"),
+            "mimeType": meta.get("mimeType"),
+            "uri": meta.get("uri"),
+            "kind": meta.get("kind"),
         }
 
     def _events_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:

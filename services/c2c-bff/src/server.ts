@@ -183,10 +183,22 @@ function runLinks(runId: string): Record<string, string> {
   return {
     self: `/api/v0/runs/${runId}`,
     generated: `/api/v0/runs/${runId}/generated`,
+    generatedFiles: `/api/v0/runs/${runId}/generated/files`,
     buildTest: `/api/v0/runs/${runId}/build-test`,
     evidence: `/api/v0/runs/${runId}/evidence`,
     artifacts: `/api/v0/runs/${runId}/artifacts`,
   };
+}
+
+function isSafeGeneratedRelpath(raw: string): boolean {
+  if (raw.length === 0) return false;
+  if (raw.includes('\0')) return false;
+  const normalized = raw.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (normalized.length === 0) return false;
+  for (const segment of normalized.split('/')) {
+    if (segment === '' || segment === '.' || segment === '..') return false;
+  }
+  return true;
 }
 
 function transformLinks(runId: string): Record<string, string> {
@@ -444,6 +456,11 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
         missingArtifacts = [...missingArtifacts, 'real-generated-java'];
       }
     }
+    const artifactRef = normalizeOutputRef(envelope.artifactRef);
+    const traceability = asRecord(envelope.traceability) ?? {};
+    const fileRefs = Array.isArray(envelope.fileRefs)
+      ? envelope.fileRefs.filter((entry) => asRecord(entry) !== undefined)
+      : [];
     return {
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),
@@ -454,11 +471,18 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
       entryFilePath,
       files,
       fileCount: asNumber(envelope.fileCount) ?? Object.keys(files).length,
+      fileRefs,
       unsupportedFeatures: Array.isArray(envelope.unsupportedFeatures) ? envelope.unsupportedFeatures : [],
       openAssumptions: Array.isArray(envelope.openAssumptions) ? envelope.openAssumptions : [],
       missingArtifacts,
       orchestratorRunId: liveRunId,
       outputRef,
+      artifactRef,
+      traceability: {
+        programId: asString(traceability.programId),
+        irId: asString(traceability.irId),
+        sourceHash: asString(traceability.sourceHash),
+      },
       generationResponseRef: envelope.generationResponseRef ?? null,
       diagnostics,
       ...(placeholderViolation ? { placeholderViolation } : {}),
@@ -575,6 +599,7 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
       artifactRef: envelope.artifactRef ?? null,
+      generatedArtifactRef: normalizeOutputRef(envelope.generatedArtifactRef),
     };
   } catch (err) {
     return {
@@ -688,6 +713,7 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
       artifactRef: artifactRef ?? null,
+      generatedArtifactRef: normalizeOutputRef(envelope.generatedArtifactRef),
     };
   } catch (err) {
     return {
@@ -1022,6 +1048,156 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
         jsonResponse(res, 200, await liveGeneratedView(stored, orchestrator));
         return;
+      }
+
+      const generatedFilesIndex = /^\/api\/v0\/runs\/([^\/]+)\/generated\/files$/.exec(pathname);
+      if (generatedFilesIndex && method === 'GET') {
+        const runId = decodeURIComponent(generatedFilesIndex[1] ?? '');
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === 'diagnostic-fixture') {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: 'diagnostic-fixture',
+            productMode: 'unavailable',
+            status: 'incomplete',
+            missingArtifacts: ['generated-project'],
+            files: [],
+            note: 'Diagnostic-fixture runs do not expose a generated Java project.',
+          });
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId || !orchestrator.enabled) {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: 'live',
+            productMode: 'unavailable',
+            status: 'incomplete',
+            missingArtifacts: ['generated-project'],
+            files: [],
+            note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
+          });
+          return;
+        }
+        try {
+          const upstream = await orchestrator.getGeneratedFiles(liveRunId);
+          if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+            jsonResponse(res, 200, {
+              runId: stored.runId,
+              programId: stored.programId,
+              mode: 'live',
+              productMode: 'unavailable',
+              status: 'incomplete',
+              missingArtifacts: ['generated-project'],
+              files: [],
+              orchestratorRunId: liveRunId,
+              note: 'Orchestrator did not return a generated-Java file index for this run.',
+            });
+            return;
+          }
+          const envelope = asRecord(upstream.body) ?? {};
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId || asString(envelope.programId),
+            mode: 'live',
+            productMode: 'live',
+            status: asString(envelope.status) || 'incomplete',
+            missingArtifacts: Array.isArray(envelope.missingArtifacts)
+              ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+              : [],
+            files: Array.isArray(envelope.files) ? envelope.files : [],
+            fileCount: asNumber(envelope.fileCount) ?? 0,
+            entryFilePath: asString(envelope.entryFilePath),
+            artifactRef: normalizeOutputRef(envelope.artifactRef),
+            orchestratorRunId: liveRunId,
+          });
+          return;
+        } catch (err) {
+          jsonResponse(res, 502, {
+            error: err instanceof Error ? err.message : 'orchestrator request failed',
+          });
+          return;
+        }
+      }
+
+      const generatedFileContent = /^\/api\/v0\/runs\/([^\/]+)\/generated\/files\/(.+)$/.exec(pathname);
+      if (generatedFileContent && method === 'GET') {
+        const runId = decodeURIComponent(generatedFileContent[1] ?? '');
+        const rawPath = generatedFileContent[2] ?? '';
+        const decodedPath = rawPath
+          .split('/')
+          .filter((segment) => segment.length > 0)
+          .map((segment) => decodeURIComponent(segment))
+          .join('/');
+        if (!isSafeGeneratedRelpath(decodedPath)) {
+          jsonResponse(res, 400, { error: 'invalid generated file path' });
+          return;
+        }
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === 'diagnostic-fixture') {
+          jsonResponse(res, 404, {
+            error: 'generated file unavailable for diagnostic-fixture runs',
+          });
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId || !orchestrator.enabled) {
+          jsonResponse(res, 503, {
+            error: 'orchestrator unavailable; generated file cannot be served',
+          });
+          return;
+        }
+        try {
+          const upstream = await orchestrator.getGeneratedFile(liveRunId, decodedPath);
+          if (!upstream) {
+            jsonResponse(res, 502, { error: 'orchestrator request failed' });
+            return;
+          }
+          if (upstream.status === 404) {
+            jsonResponse(res, 404, { error: 'generated file not found', path: decodedPath });
+            return;
+          }
+          if (upstream.status === 400) {
+            jsonResponse(res, 400, { error: 'invalid generated file path', path: decodedPath });
+            return;
+          }
+          if (upstream.status < 200 || upstream.status >= 300) {
+            jsonResponse(res, 502, { error: `orchestrator returned status ${upstream.status}` });
+            return;
+          }
+          const envelope = asRecord(upstream.body) ?? {};
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: 'live',
+            productMode: 'live',
+            path: asString(envelope.path) || decodedPath,
+            absolutePath: asString(envelope.absolutePath),
+            content: asString(envelope.content),
+            sha256: asString(envelope.sha256),
+            byteSize: asNumber(envelope.byteSize) ?? 0,
+            mimeType: asString(envelope.mimeType),
+            uri: asString(envelope.uri),
+            kind: asString(envelope.kind),
+            orchestratorRunId: liveRunId,
+          });
+          return;
+        } catch (err) {
+          jsonResponse(res, 502, {
+            error: err instanceof Error ? err.message : 'orchestrator request failed',
+          });
+          return;
+        }
       }
 
       const btMatch = /^\/api\/v0\/runs\/([^\/]+)\/build-test$/.exec(pathname);

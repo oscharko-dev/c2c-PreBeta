@@ -138,3 +138,66 @@ test('createBffApi url-encodes path parameters', async () => {
   await api.getSample('a/b c').catch(() => undefined);
   assert.equal(captured[0]?.url, '/api/v0/samples/a%2Fb%20c');
 });
+
+test('createBffApi.getGeneratedFiles requests the generated index endpoint', async () => {
+  const { fetchImpl, captured } = makeFetch([
+    {
+      status: 200,
+      body: JSON.stringify({
+        runId: 'run-1',
+        programId: 'CASE01',
+        mode: 'live',
+        productMode: 'live',
+        status: 'complete',
+        fileCount: 1,
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        artifactRef: { uri: 'file:///m.json', sha256: 'a'.repeat(64), byteSize: 1 },
+        missingArtifacts: [],
+        files: [
+          {
+            path: 'src/main/java/c2c/CASE01.java',
+            sha256: 'b'.repeat(64),
+            byteSize: 10,
+            mimeType: 'text/x-java-source',
+          },
+        ],
+      }),
+    },
+  ]);
+  const api = createBffApi({ baseUrl: '', fetchImpl });
+  const result = await api.getGeneratedFiles('run-1');
+  assert.equal(captured[0]?.url, '/api/v0/runs/run-1/generated/files');
+  assert.equal(result.fileCount, 1);
+  assert.equal(result.entryFilePath, 'src/main/java/c2c/CASE01.java');
+  assert.equal(result.artifactRef?.sha256, 'a'.repeat(64));
+});
+
+test('createBffApi.getGeneratedFile encodes path segments but preserves slashes', async () => {
+  const { fetchImpl, captured } = makeFetch([
+    {
+      status: 200,
+      body: JSON.stringify({
+        runId: 'run-1',
+        programId: 'CASE01',
+        mode: 'live',
+        path: 'src/main/java/c2c/CASE 01.java',
+        absolutePath: 'generated-project/src/main/java/c2c/CASE 01.java',
+        content: 'class C {}',
+        sha256: 'b'.repeat(64),
+        byteSize: 10,
+        mimeType: 'text/x-java-source',
+        uri: 'file:///CASE01.java',
+        kind: 'generated-project-file',
+      }),
+    },
+  ]);
+  const api = createBffApi({ baseUrl: '', fetchImpl });
+  const result = await api.getGeneratedFile('run-1', 'src/main/java/c2c/CASE 01.java');
+  assert.equal(
+    captured[0]?.url,
+    '/api/v0/runs/run-1/generated/files/src/main/java/c2c/CASE%2001.java',
+  );
+  assert.equal(result.content, 'class C {}');
+  assert.equal(result.byteSize, 10);
+  assert.equal(result.path, 'src/main/java/c2c/CASE 01.java');
+});
