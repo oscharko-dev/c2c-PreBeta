@@ -2,62 +2,40 @@
 #               Qodana analysis configuration                                   #
 #               https://www.jetbrains.com/help/qodana/qodana-yaml.html          #
 #-------------------------------------------------------------------------------#
+#################################################################################
+#              WARNING: Do not store sensitive information in this file,        #
+#               as its contents will be included in the Qodana report.          #
+#################################################################################
 version: "1.0"
-
+#Specify inspection profile for code analysis
 profile:
   name: qodana.starter
-
-projectJDK: "25"
-
-# Default linter (CI pipeline drives polyglot scanning by overriding --linter
-# per job in .github/workflows/qodana_code_quality.yml).
+#Enable inspections
+#include:
+#  - name: <SomeEnabledInspectionId>
+#Disable inspections
+#exclude:
+#  - name: <SomeDisabledInspectionId>
+#    paths:
+#      - <path/where/not/run/inspection>
+projectJDK: "25" #(Applied in CI/CD pipeline)
+#Execute shell command before Qodana execution (Applied in CI/CD pipeline)
+#bootstrap: sh ./prepare-qodana.sh
+#Install IDE plugins before Qodana execution (Applied in CI/CD pipeline)
+#plugins:
+#  - id: <plugin.id> #(plugin id can be found at https://plugins.jetbrains.com)
+# Quality gate. Will fail the CI/CD pipeline if any condition is not met
+# severityThresholds - configures maximum thresholds for different problem severities
+# testCoverageThresholds - configures minimum code coverage on a whole project and newly added code
+# Code Coverage is available in Ultimate and Ultimate Plus plans
+#failureConditions:
+#  severityThresholds:
+#    any: 15
+#    critical: 5
+#  testCoverageThresholds:
+#    fresh: 70
+#    total: 50
+#Specify Qodana linter for analysis (Applied in CI/CD pipeline)
 linter: jetbrains/qodana-jvm:2026.1
-
-# Project-wide false-positive suppressions. Each entry documents WHY the
-# inspection is excluded so future maintainers can re-evaluate the trade-off.
-exclude:
-  # @dataclass generates __init__ automatically; the inspector does not
-  # recognise the synthesised method and flags every dataclass class.
-  - name: PyClassHasNoInitInspection
-
-  # The qodana-python linter flags valid `Optional[Mapping[str, X]] = None`
-  # PEP 484 annotations as "Invalid type argument" because it does not
-  # resolve the project's Python 3.12 interpreter (pyproject.toml present
-  # but not honoured by the linter image). Suppress narrowly to the
-  # orchestrator-service package where these annotations live.
-  - name: PyTypeHintsInspection
-    paths:
-      - services/orchestrator-service
-
-  # Custom internal control-plane headers (X-Harness-Actor, X-Harness-Role)
-  # are project convention; the inspector only validates RFC-registered
-  # header names.
-  - name: UastIncorrectHttpHeaderInspection
-
-  # Test code intentionally ignores res.Body.Close() / w.Write() errors in
-  # defer chains. Production code paths still fail the inspection.
-  - name: GoUnhandledErrorResult
-    paths:
-      - services/agentic-harness-core/main_test.go
-      - services/agentic-harness-core/events_schema_test.go
-      - services/evidence-service/server_test.go
-      - services/evidence-service/concurrency_test.go
-      - services/evidence-service/hardening_test.go
-      - services/evidence-service/sample_test.go
-
-  # validateInvocation always returns a fully populated value struct
-  # (record pre-seeded) even on error, so accessing validated.record on
-  # the err != nil path is safe. The //goland:noinspection comment in
-  # source is not honoured by the qodana-go linter image.
-  - name: GoDfaInspectionRunner
-    paths:
-      - services/go/model-gateway-service/server.go
-
-  # Qodana's qodana-jvm linter does not honour //noinspection comments for
-  # this rule. The single remaining ScheduledExecutorService allocation in
-  # GeneratedProgramRunner uses shutdownNow() in finally on purpose, so
-  # try-with-resources (which calls graceful close()) would change timeout
-  # semantics. Scope the exclusion narrowly.
-  - name: AutoCloseableResource
-    paths:
-      - services/build-test-runner-service/src/main/java/com/c2c/w0/buildtest/GeneratedProgramRunner.java
+include:
+  - name: JsCoverageInspection
