@@ -63,8 +63,11 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", r.Method)
 		}
-		if r.URL.Path != "/v1/invoke" {
-			t.Fatalf("expected /v1/invoke path, got %s", r.URL.Path)
+		if r.URL.Path != "/openai/deployments/deployment-1/chat/completions" {
+			t.Fatalf("expected Azure chat completions path, got %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("api-version"); got != "2024-05-01-preview" {
+			t.Fatalf("expected api-version query, got %s", got)
 		}
 		if got := r.Header.Get("x-api-key-ref"); got != "api-key-ref-123" {
 			t.Fatalf("expected api-key-ref-123 header, got %s", got)
@@ -80,9 +83,9 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 		}
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": "ok",
-			"model":  "foundry-gpt",
-			"echo":   body["prompt"],
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": "ok"}},
+			},
 		})
 	}))
 	defer server.Close()
@@ -119,6 +122,9 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 	if output.Status != "ok" {
 		t.Fatalf("expected status ok, got %s", output.Status)
 	}
+	if output.Data["text"] != "ok" {
+		t.Fatalf("expected output text")
+	}
 	if _, ok := output.Metadata["provider"]; !ok {
 		t.Fatalf("expected output metadata to include provider")
 	}
@@ -130,6 +136,9 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 func TestFoundryAdapter_Invoke_UsesApiKeyWhenProvided(t *testing.T) {
 	var seen string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/deployments/dep/chat/completions" {
+			t.Fatalf("expected Azure chat completions path, got %s", r.URL.Path)
+		}
 		if got := r.Header.Get("api-key"); got != "direct-secret" {
 			t.Fatalf("expected api-key header, got %s", got)
 		}

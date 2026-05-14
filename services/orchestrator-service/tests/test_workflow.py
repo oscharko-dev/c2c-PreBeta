@@ -70,7 +70,7 @@ class FakeGateway:
 
 
 class W0WorkflowRunnerTests(unittest.TestCase):
-    def _base_config(self, max_retries: int = 0):
+    def _base_config(self, max_retries: int = 0, model_gateway_model_id: str = "gpt-oss-120b"):
         return OrchestratorConfig(
             listen_addr="127.0.0.1:0",
             harness_base_url="http://127.0.0.1:1",
@@ -92,6 +92,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "endpoint": "http://evidence"},
                 {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway", "endpoint": "http://model"},
             ),
+            model_gateway_model_id=model_gateway_model_id,
         )
 
     def _base_capabilities(self):
@@ -175,7 +176,20 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 "packId": "pack-run-1",
                 "outputRef": {"uri": "urn:orchestrator/run-1/evidence"},
             },
-            "model-gateway": {"status": "ok", "advice": "Use standard profile."},
+            "model-gateway": {
+                "invocationId": "mg-run-1-1",
+                "runId": "run-1",
+                "modelId": "gpt-oss-120b",
+                "provider": "foundry-development",
+                "promptTemplateVersion": "v1",
+                "status": "completed",
+                "ledgerRef": {
+                    "uri": "urn:model-gateway/invocations/mg-run-1-1",
+                    "sha256": "b" * 64,
+                    "byteSize": 512,
+                },
+                "output": {"status": "completed"},
+            },
         }
 
     def test_successful_run_without_model_prompt(self):
@@ -205,6 +219,28 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(gateway.updated_runs[0][1], "updating")
         self.assertEqual(gateway.updated_runs[-1][1], "completed")
         self.assertGreater(len(gateway.posted_events), 0)
+        evidence_call = next(entry for entry in gateway.calls if entry[0] == "invoke" and entry[1] == "evidence.writer")
+        model_invocation = evidence_call[2]["artifacts"]["modelInvocations"][0]
+        self.assertEqual(model_invocation["status"], "skipped")
+        self.assertEqual(model_invocation["provider"], "orchestrator")
+
+    def test_skipped_model_invocation_uses_configured_model_id(self):
+        gateway = FakeGateway(self._base_capabilities(), self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(model_gateway_model_id="phi-4"), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt=None,
+        )
+
+        runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        evidence_call = next(entry for entry in gateway.calls if entry[0] == "invoke" and entry[1] == "evidence.writer")
+        model_invocation = evidence_call[2]["artifacts"]["modelInvocations"][0]
+        self.assertEqual(model_invocation["status"], "skipped")
+        self.assertEqual(model_invocation["modelId"], "phi-4")
 
     def test_successful_run_with_optional_model_prompt(self):
         gateway = FakeGateway(self._base_capabilities(), self._base_responses())
@@ -225,6 +261,23 @@ class W0WorkflowRunnerTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertIn("model-gateway", invoked)
+        model_call = next(entry for entry in gateway.calls if entry[0] == "invoke" and entry[1] == "model-gateway")
+        self.assertEqual(model_call[2]["modelId"], "gpt-oss-120b")
+        self.assertEqual(model_call[2]["dataClass"], "model-gateway")
+        model_events = [
+            event for event in gateway.posted_events
+            if event.get("capability") == "model-gateway"
+            and event.get("stateTransition") == "step.completed"
+        ]
+        self.assertEqual(len(model_events), 1)
+        self.assertNotIn("prompt", model_events[0]["payload"]["input"])
+        self.assertEqual(model_events[0]["payload"]["input"]["promptRedacted"], True)
+        evidence_call = next(entry for entry in gateway.calls if entry[0] == "invoke" and entry[1] == "evidence.writer")
+        model_invocation = evidence_call[2]["artifacts"]["modelInvocations"][0]
+        self.assertEqual(model_invocation["status"], "completed")
+        self.assertEqual(model_invocation["provider"], "foundry-development")
+        self.assertEqual(model_invocation["promptTemplateVersion"], "v1")
+        self.assertEqual(model_invocation["ledgerRef"]["sha256"], "b" * 64)
 
     def test_retry_happy_path_on_temporary_parse_failure(self):
         gateway = FakeGateway(

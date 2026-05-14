@@ -40,9 +40,9 @@ DATA_CLASS_BUILD_TEST = "build-test"
 DATA_CLASS_EVIDENCE = "evidence"
 DATA_CLASS_MODEL = "model-gateway"
 
-DEFAULT_MODEL_ID = "orchestrator"
-DEFAULT_PROMPT_TEMPLATE_VERSION = "v0"
-DEFAULT_MODEL_TIMEOUT_MS = 30000
+DEFAULT_MODEL_ID = "gpt-oss-120b"
+DEFAULT_PROMPT_TEMPLATE_VERSION = "v1"
+DEFAULT_MODEL_TIMEOUT_MS = 15000
 
 
 @dataclass(frozen=True)
@@ -126,6 +126,20 @@ def _as_reference_payload(ref: DataReference) -> Mapping[str, Any]:
         "byteSize": ref.byte_size,
         "byte_size": ref.byte_size,
     }
+
+
+def _data_reference_from_mapping(raw: Any) -> Optional[DataReference]:
+    if not isinstance(raw, Mapping):
+        return None
+    uri = _text(raw.get("uri"))
+    sha = _text(raw.get("sha256"))
+    if uri is None or sha is None:
+        return None
+    return DataReference(
+        uri=uri,
+        sha256=sha,
+        byte_size=_to_non_negative_int(raw.get("byteSize", raw.get("byte_size", 0))),
+    )
 
 
 def _first_non_empty_mapping(value: Any) -> Dict[str, Any]:
@@ -278,6 +292,7 @@ class W0WorkflowRunner:
                     context.run_id,
                     self.config.model_gateway_capability_id,
                 )
+                model_id = _text(getattr(self.config, "model_gateway_model_id", None)) or DEFAULT_MODEL_ID
                 model_output_step = self._invoke_step(
                     context,
                     "model-guidance",
@@ -288,8 +303,8 @@ class W0WorkflowRunner:
                         "runId": context.run_id,
                         "workflowId": context.workflow_id,
                         "actor": self.config.service_name,
-                        "modelId": DEFAULT_MODEL_ID,
-                        "dataClass": "model",
+                        "modelId": model_id,
+                        "dataClass": DATA_CLASS_MODEL,
                         "promptTemplateVersion": DEFAULT_PROMPT_TEMPLATE_VERSION,
                         "prompt": context.model_prompt,
                         "structuredOutput": False,
@@ -433,16 +448,17 @@ class W0WorkflowRunner:
         }
 
     def _build_model_invocation_ref(self, context: W0RunContext, model_output: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        configured_model_id = _text(getattr(self.config, "model_gateway_model_id", None)) or DEFAULT_MODEL_ID
         if model_output is None:
             payload = {
                 "runId": context.run_id,
-                "modelId": DEFAULT_MODEL_ID,
+                "modelId": configured_model_id,
                 "status": "skipped",
                 "actor": self.config.service_name,
             }
             return {
                 "invocationId": f"inv-{context.run_id}-00",
-                "modelId": DEFAULT_MODEL_ID,
+                "modelId": configured_model_id,
                 "provider": "orchestrator",
                 "promptTemplateVersion": DEFAULT_PROMPT_TEMPLATE_VERSION,
                 "status": "skipped",
@@ -460,23 +476,26 @@ class W0WorkflowRunner:
         provider = _text(payload.get("provider"))
         template = _text(payload.get("promptTemplateVersion")) or DEFAULT_PROMPT_TEMPLATE_VERSION
         status = _text(payload.get("status")) or "completed"
-        ledger_payload = {
-            "invocationId": invocation_id,
-            "modelId": model_id,
-            "status": status,
-        }
+        ledger_ref = _data_reference_from_mapping(payload.get("ledgerRef"))
+        if ledger_ref is None:
+            ledger_payload = {
+                "invocationId": invocation_id,
+                "modelId": model_id,
+                "provider": provider,
+                "promptTemplateVersion": template,
+                "status": status,
+            }
+            ledger_ref = _build_reference(
+                f"urn:orchestrator/{context.run_id}/model-invocation",
+                ledger_payload,
+            )
         return {
             "invocationId": invocation_id,
             "modelId": model_id,
             "provider": provider,
             "promptTemplateVersion": template,
             "status": status,
-            "ledgerRef": _as_reference_payload(
-                _build_reference(
-                    f"urn:orchestrator/{context.run_id}/model-invocation",
-                    ledger_payload,
-                )
-            ),
+            "ledgerRef": _as_reference_payload(ledger_ref),
         }
 
     def _resolve_program_id(self, *payloads: Mapping[str, Any]) -> str:
@@ -539,6 +558,8 @@ class W0WorkflowRunner:
         if not endpoint:
             raise CapabilityMissingError(f"{step_name} capability endpoint is missing")
 
+        event_input_payload = self._event_input_payload(data_class, payload)
+
         for attempt in range(0, self.config.max_retries + 1):
             attempt_number = attempt + 1
             try:
@@ -555,7 +576,7 @@ class W0WorkflowRunner:
                     data_class=data_class,
                     status="ok",
                     state_transition=STATE_TRANSITION_STEP_COMPLETED,
-                    input_payload=dict(payload),
+                    input_payload=event_input_payload,
                     output_payload=output_payload,
                     input_ref=input_ref,
                     output_ref=output_ref,
@@ -600,7 +621,7 @@ class W0WorkflowRunner:
                     data_class=data_class,
                     status="failed",
                     state_transition=STATE_TRANSITION_STEP_FAILED,
-                    input_payload=dict(payload),
+                    input_payload=event_input_payload,
                     output_payload={"error": str(exc), "attempts": attempt_number},
                     input_ref=input_ref,
                     output_ref=_build_reference(
@@ -619,7 +640,7 @@ class W0WorkflowRunner:
                     data_class=data_class,
                     status="failed",
                     state_transition=STATE_TRANSITION_STEP_FAILED,
-                    input_payload=dict(payload),
+                    input_payload=event_input_payload,
                     output_payload={"error": str(exc), "attempts": attempt_number},
                     input_ref=input_ref,
                     output_ref=_build_reference(
@@ -629,6 +650,16 @@ class W0WorkflowRunner:
                     policy_decision=POLICY_ALLOW,
                 )
                 raise StepExecutionError(f"step {step_name} failed: {exc}") from exc
+
+    @staticmethod
+    def _event_input_payload(data_class: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
+        event_payload = dict(payload)
+        if data_class != DATA_CLASS_MODEL:
+            return event_payload
+        if "prompt" in event_payload:
+            event_payload.pop("prompt", None)
+            event_payload["promptRedacted"] = True
+        return event_payload
 
     def _coerce_step_output_ref(self, output_payload: Mapping[str, Any], step_name: str, run_id: str) -> DataReference:
         output_ref_raw = _first_non_empty_mapping(output_payload.get("outputRef"))

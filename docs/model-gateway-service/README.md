@@ -14,6 +14,9 @@
   - Returns registry metadata for a single model.
 - `POST /v0/invoke`
   - Executes a model invocation through the configured provider mode.
+  - Returns safe invocation metadata, including `provider`,
+    `promptTemplateVersion`, `status`, and `ledgerRef`; raw prompts are not
+    embedded in the ledger record or evidence manifest.
 
 ## Configuration
 

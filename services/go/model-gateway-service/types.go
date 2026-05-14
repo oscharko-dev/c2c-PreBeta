@@ -14,11 +14,11 @@ const (
 	defaultAllowlistPath     = "config/foundry-development-allowlist-v0.yaml"
 	defaultLedgerPath        = "data/model-invocation-ledger-v0.jsonl"
 	defaultEventLogPath      = "data/model-gateway-events-v0.jsonl"
-	defaultModelListenAddr   = ":8082"
+	defaultModelListenAddr   = ":8085"
 
 	gatewayEventSchemaVersion       = "v0"
-	eventServiceName               = "model-gateway-service"
-	eventDataClassModelGateway     = "model-gateway"
+	eventServiceName                = "model-gateway-service"
+	eventDataClassModelGateway      = "model-gateway"
 	eventProfileControlledByHarness = "harness-control-plane"
 )
 
@@ -28,29 +28,29 @@ const (
 )
 
 const (
-	DataClassModel       = "model"
-	DataClassEvidence    = "evidence"
-	DataClassRAG         = "rag"
-	DataClassGraph       = "graph"
-	DataClassParser      = "parser"
-	DataClassGenerator   = "generator"
-	DataClassBuildTest   = "build-test"
-	DataClassTest        = "test"
+	DataClassModel        = "model"
+	DataClassEvidence     = "evidence"
+	DataClassRAG          = "rag"
+	DataClassGraph        = "graph"
+	DataClassParser       = "parser"
+	DataClassGenerator    = "generator"
+	DataClassBuildTest    = "build-test"
+	DataClassTest         = "test"
 	DataClassModelGateway = "model-gateway"
-	DataClassOther       = "other"
+	DataClassOther        = "other"
 )
 
 var allowedDataClasses = map[string]struct{}{
-	DataClassModel:       {},
-	DataClassEvidence:    {},
-	DataClassRAG:         {},
-	DataClassGraph:       {},
-	DataClassParser:      {},
-	DataClassGenerator:   {},
-	DataClassBuildTest:   {},
-	DataClassTest:        {},
+	DataClassModel:        {},
+	DataClassEvidence:     {},
+	DataClassRAG:          {},
+	DataClassGraph:        {},
+	DataClassParser:       {},
+	DataClassGenerator:    {},
+	DataClassBuildTest:    {},
+	DataClassTest:         {},
 	DataClassModelGateway: {},
-	DataClassOther:       {},
+	DataClassOther:        {},
 }
 
 var allowedModelStatuses = map[string]struct{}{
@@ -58,14 +58,14 @@ var allowedModelStatuses = map[string]struct{}{
 }
 
 var allowedLicenseStatuses = map[string]struct{}{
-	"approved": {},
+	"approved":  {},
 	"compliant": {},
 }
 
 var allowedRedactionProfiles = map[string]struct{}{
-	"agent-managed": {},
+	"agent-managed":                 {},
 	eventProfileControlledByHarness: {},
-	"none":                        {},
+	"none":                          {},
 }
 
 const (
@@ -145,26 +145,26 @@ func (r DataReference) Validate() error {
 }
 
 type EventEnvelopeV0 struct {
-	SchemaVersion    string                 `json:"schemaVersion"`
-	EventID          string                 `json:"eventId"`
-	EventType        string                 `json:"eventType"`
-	Service          string                 `json:"service"`
-	RunID            string                 `json:"runId"`
-	StepID           int64                  `json:"stepId"`
-	Actor            string                 `json:"actor"`
-	Capability       string                 `json:"capability"`
-	DataClass        string                 `json:"dataClass"`
-	RedactionProfile string                 `json:"redactionProfile"`
-	PolicyDecision   string                 `json:"policyDecision"`
-	Status           string                 `json:"status"`
-	StateTransition  string                 `json:"stateTransition"`
-	ErrorClass       string                 `json:"errorClass,omitempty"`
-	LatencyMs        int64                  `json:"latencyMs,omitempty"`
-	InputRef         DataReference          `json:"inputRef"`
-	OutputRef        DataReference          `json:"outputRef"`
-	CreatedAt        time.Time              `json:"createdAt"`
-	Payload          map[string]any         `json:"payload,omitempty"`
-	RelatedRecords   []string               `json:"relatedRecords,omitempty"`
+	SchemaVersion    string         `json:"schemaVersion"`
+	EventID          string         `json:"eventId"`
+	EventType        string         `json:"eventType"`
+	Service          string         `json:"service"`
+	RunID            string         `json:"runId"`
+	StepID           int64          `json:"stepId"`
+	Actor            string         `json:"actor"`
+	Capability       string         `json:"capability"`
+	DataClass        string         `json:"dataClass"`
+	RedactionProfile string         `json:"redactionProfile"`
+	PolicyDecision   string         `json:"policyDecision"`
+	Status           string         `json:"status"`
+	StateTransition  string         `json:"stateTransition"`
+	ErrorClass       string         `json:"errorClass,omitempty"`
+	LatencyMs        int64          `json:"latencyMs,omitempty"`
+	InputRef         DataReference  `json:"inputRef"`
+	OutputRef        DataReference  `json:"outputRef"`
+	CreatedAt        time.Time      `json:"createdAt"`
+	Payload          map[string]any `json:"payload,omitempty"`
+	RelatedRecords   []string       `json:"relatedRecords,omitempty"`
 }
 
 func (e EventEnvelopeV0) Validate() error {
@@ -233,12 +233,15 @@ type ModelInvocationRequest struct {
 }
 
 type ModelInvocationResponse struct {
-	InvocationID string         `json:"invocationId"`
-	RunID       string         `json:"runId"`
-	ModelID     string         `json:"modelId"`
-	Status      string         `json:"status"`
-	LatencyMs   int64          `json:"latencyMs"`
-	Output      map[string]any `json:"output"`
+	InvocationID          string         `json:"invocationId"`
+	RunID                 string         `json:"runId"`
+	ModelID               string         `json:"modelId"`
+	Provider              string         `json:"provider"`
+	PromptTemplateVersion string         `json:"promptTemplateVersion"`
+	Status                string         `json:"status"`
+	LatencyMs             int64          `json:"latencyMs"`
+	LedgerRef             DataReference  `json:"ledgerRef"`
+	Output                map[string]any `json:"output"`
 }
 
 type ModelInvocationOutput struct {
@@ -248,23 +251,23 @@ type ModelInvocationOutput struct {
 }
 
 type ModelInvocationLedgerV0 struct {
-	SchemaVersion       string                 `json:"schemaVersion"`
-	InvocationID        string                 `json:"invocationId"`
-	RunID               string                 `json:"runId"`
-	ModelID             string                 `json:"modelId"`
-	Provider            string                 `json:"provider"`
-	DataClass           string                 `json:"dataClass"`
-	PromptTemplate      string                 `json:"promptTemplateVersion"`
-	PolicyDecision      string                 `json:"policyDecision"`
-	Status              string                 `json:"status"`
-	LatencyMs           int64                  `json:"latencyMs"`
-	RequestRef          DataReference          `json:"requestRef"`
-	OutputRef           DataReference          `json:"outputRef"`
-	ErrorClass          string                 `json:"errorClass,omitempty"`
-	ErrorMessage        string                 `json:"errorMessage,omitempty"`
-	Parameters          map[string]any         `json:"parameters"`
-	StructuredOutput    bool                   `json:"structuredOutput"`
-	CreatedAt           time.Time              `json:"createdAt"`
+	SchemaVersion    string         `json:"schemaVersion"`
+	InvocationID     string         `json:"invocationId"`
+	RunID            string         `json:"runId"`
+	ModelID          string         `json:"modelId"`
+	Provider         string         `json:"provider"`
+	DataClass        string         `json:"dataClass"`
+	PromptTemplate   string         `json:"promptTemplateVersion"`
+	PolicyDecision   string         `json:"policyDecision"`
+	Status           string         `json:"status"`
+	LatencyMs        int64          `json:"latencyMs"`
+	RequestRef       DataReference  `json:"requestRef"`
+	OutputRef        DataReference  `json:"outputRef"`
+	ErrorClass       string         `json:"errorClass,omitempty"`
+	ErrorMessage     string         `json:"errorMessage,omitempty"`
+	Parameters       map[string]any `json:"parameters"`
+	StructuredOutput bool           `json:"structuredOutput"`
+	CreatedAt        time.Time      `json:"createdAt"`
 }
 
 func (l ModelInvocationLedgerV0) Validate() error {
@@ -329,12 +332,16 @@ type ModelInvocationOutputEnvelope struct {
 }
 
 func ComputeSHA256Ref(payload any) (DataReference, error) {
+	return ComputeSHA256RefWithURI("urn:model-gateway/payload", payload)
+}
+
+func ComputeSHA256RefWithURI(uri string, payload any) (DataReference, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return DataReference{}, err
 	}
 	return DataReference{
-		URI:      "urn:model-gateway/payload",
+		URI:      uri,
 		SHA256:   ComputeSHA256Hex(raw),
 		ByteSize: int64(len(raw)),
 	}, nil

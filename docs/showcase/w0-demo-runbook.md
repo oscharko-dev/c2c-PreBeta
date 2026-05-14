@@ -246,7 +246,7 @@ The script's `EXIT` trap kills every PID it recorded under
 crash, leftover Go binaries may still be holding ports. Check with:
 
 ```bash
-lsof -nP -i :8190 -i :8191 -i :8192 -i :8181 -i :8182 -i :8183 -i :8184
+lsof -nP -i :8190 -i :8191 -i :8192 -i :8193 -i :8181 -i :8182 -i :8183 -i :8184
 ```
 
 …and `kill` the stragglers before re-running.
@@ -257,6 +257,7 @@ lsof -nP -i :8190 -i :8191 -i :8192 -i :8181 -i :8182 -i :8183 -i :8184
 |---------|--------------|-----|
 | `address already in use` on `:8190` (or any demo port) | Previous run left a Go binary alive. | `lsof -nP -i :<port>` → `kill <pid>`. |
 | Maven test runs blow up the demo time | Tests were not skipped. | The demo uses `-DskipTests` on purpose — full tests run in CI. |
+| `model-gateway invocation failed` | Foundry development credentials, endpoint, deployment, or allowlist variables are missing or rejected. | Populate `.env` with the approved Foundry development values, or run with `W0_DEMO_MODEL_GATEWAY_ENABLED=false` to produce explicit skipped entries. |
 | `wait_http` times out | Java service hasn't finished starting / Maven warm cache cold. | Check `var/w0-demo/logs/<service>.log` for the actual error. |
 | `experience-learning harness-event ingest failed (HTTP 400)` | A service emitted a malformed harness event or a status outside the Harness Event Envelope status contract. | Add the missing harness status to `experience-learning-service` validation and analysis mapping, then file a follow-up in [`w0-followups.md`](w0-followups.md) if the producer contract changed. |
 | `classification: "divergence-unknown"` reported | A program is not in `fixtures/golden-master/index.json`, or generated output no longer matches an undeclared fixture. This is a **release-gate fail**. | Register an intentionally divergent fixture with a rationale only if the divergence is expected; otherwise treat it as a generator bug. |

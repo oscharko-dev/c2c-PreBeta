@@ -20,6 +20,7 @@ DEFAULT_GENERATOR_CAPABILITY = "target.java.generate"
 DEFAULT_BUILD_TEST_CAPABILITY = "build-test.run"
 DEFAULT_EVIDENCE_CAPABILITY = "evidence.writer"
 DEFAULT_MODEL_GATEWAY_CAPABILITY = "model-gateway"
+DEFAULT_MODEL_GATEWAY_MODEL_ID = "gpt-oss-120b"
 DEFAULT_CAPABILITY_POLICY_PROFILE = "harness-control-plane"
 DEFAULT_CAPABILITY_VERSION = "v0.1.0"
 
@@ -33,6 +34,8 @@ DEFAULT_BUILD_TEST_SERVICE_HOST = "127.0.0.1"
 DEFAULT_BUILD_TEST_SERVICE_PORT = 8084
 DEFAULT_EVIDENCE_SERVICE_HOST = "127.0.0.1"
 DEFAULT_EVIDENCE_SERVICE_PORT = 8080
+DEFAULT_MODEL_GATEWAY_SERVICE_HOST = "127.0.0.1"
+DEFAULT_MODEL_GATEWAY_SERVICE_PORT = 8085
 
 
 DEFAULT_W0_CAPABILITIES = [
@@ -86,6 +89,16 @@ DEFAULT_W0_CAPABILITIES = [
         "version": DEFAULT_CAPABILITY_VERSION,
         "description": "Writes Evidence Pack manifests for W0 migration runs.",
     },
+    {
+        "id": DEFAULT_MODEL_GATEWAY_CAPABILITY,
+        "name": "Model Gateway",
+        "owner": "model-gateway-service",
+        "endpoint": f"http://{DEFAULT_MODEL_GATEWAY_SERVICE_HOST}:{DEFAULT_MODEL_GATEWAY_SERVICE_PORT}/v0/invoke",
+        "dataClass": "model-gateway",
+        "policyProfile": DEFAULT_CAPABILITY_POLICY_PROFILE,
+        "version": DEFAULT_CAPABILITY_VERSION,
+        "description": "Routes optional model guidance through the governed model gateway.",
+    },
 ]
 
 
@@ -106,6 +119,7 @@ class OrchestratorConfig:
     w0_capabilities: tuple[dict[str, Any], ...]
     harness_token: str = ""
     service_name: str = "orchestrator-service"
+    model_gateway_model_id: str = DEFAULT_MODEL_GATEWAY_MODEL_ID
 
 
 def _read_env_int(name: str, default: int) -> int:
@@ -153,9 +167,15 @@ def load_config() -> OrchestratorConfig:
         "ORCHESTRATOR_MODEL_GATEWAY_CAPABILITY_ID",
         DEFAULT_MODEL_GATEWAY_CAPABILITY,
     ).strip()
+    model_gateway_model_id = os.environ.get(
+        "ORCHESTRATOR_MODEL_GATEWAY_MODEL_ID",
+        os.environ.get("C2C_MODEL_DEFAULT_DEPLOYMENT", DEFAULT_MODEL_GATEWAY_MODEL_ID),
+    ).strip()
+    if not model_gateway_model_id:
+        model_gateway_model_id = DEFAULT_MODEL_GATEWAY_MODEL_ID
     harness_token = os.environ.get("ORCHESTRATOR_HARNESS_TOKEN", "").strip()
 
-    if not parse_capability_id or not ir_capability_id or not generator_capability_id or not build_test_capability_id or not evidence_capability_id:
+    if not parse_capability_id or not ir_capability_id or not generator_capability_id or not build_test_capability_id or not evidence_capability_id or not model_gateway_capability_id:
         raise ValueError("capability ids are required")
 
     w0_capabilities = _load_w0_capabilities(
@@ -165,6 +185,7 @@ def load_config() -> OrchestratorConfig:
             generator_capability_id,
             build_test_capability_id,
             evidence_capability_id,
+            model_gateway_capability_id,
         )
     )
 
@@ -183,6 +204,7 @@ def load_config() -> OrchestratorConfig:
         model_gateway_capability_id=model_gateway_capability_id,
         w0_capabilities=w0_capabilities,
         harness_token=harness_token,
+        model_gateway_model_id=model_gateway_model_id,
     )
 
 
@@ -236,6 +258,10 @@ def _default_w0_capabilities_from_env(required_ids: Iterable[str]) -> tuple[dict
         DEFAULT_EVIDENCE_CAPABILITY: os.environ.get(
             "ORCHESTRATOR_EVIDENCE_CAPABILITY_ENDPOINT",
             DEFAULT_W0_CAPABILITIES[4]["endpoint"],
+        ).strip(),
+        DEFAULT_MODEL_GATEWAY_CAPABILITY: os.environ.get(
+            "ORCHESTRATOR_MODEL_GATEWAY_CAPABILITY_ENDPOINT",
+            os.environ.get("ORCHESTRATOR_MODEL_GATEWAY_ENDPOINT", DEFAULT_W0_CAPABILITIES[5]["endpoint"]),
         ).strip(),
     }
 

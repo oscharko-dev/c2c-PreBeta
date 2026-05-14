@@ -17,6 +17,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+ENV_FILE="${W0_DEMO_ENV_FILE:-$ROOT_DIR/.env}"
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
 VAR_DIR="${W0_DEMO_VAR_DIR:-$ROOT_DIR/var/w0-demo}"
 LOG_DIR="$VAR_DIR/logs"
 PID_DIR="$VAR_DIR/pids"
@@ -33,6 +41,7 @@ PARSER_PORT="${W0_DEMO_PARSER_PORT:-8181}"
 IR_PORT="${W0_DEMO_IR_PORT:-8182}"
 GENERATOR_PORT="${W0_DEMO_GENERATOR_PORT:-8183}"
 BTR_PORT="${W0_DEMO_BTR_PORT:-8184}"
+MODEL_GATEWAY_PORT="${W0_DEMO_MODEL_GATEWAY_PORT:-8193}"
 
 HARNESS_URL="http://127.0.0.1:${HARNESS_PORT}"
 EVIDENCE_URL="http://127.0.0.1:${EVIDENCE_PORT}"
@@ -41,6 +50,7 @@ PARSER_URL="http://127.0.0.1:${PARSER_PORT}"
 IR_URL="http://127.0.0.1:${IR_PORT}"
 GENERATOR_URL="http://127.0.0.1:${GENERATOR_PORT}"
 BTR_URL="http://127.0.0.1:${BTR_PORT}"
+MODEL_GATEWAY_URL="http://127.0.0.1:${MODEL_GATEWAY_PORT}"
 HARNESS_TOKEN="${W0_DEMO_HARNESS_TOKEN:-w0-demo-local-control-plane-token}"
 HARNESS_AUTH_HEADERS=(
   -H "Authorization: Bearer ${HARNESS_TOKEN}"
@@ -50,6 +60,12 @@ HARNESS_AUTH_HEADERS=(
 
 START_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 RUN_TAG="${W0_DEMO_RUN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
+MODEL_GATEWAY_ENABLED="${W0_DEMO_MODEL_GATEWAY_ENABLED:-true}"
+MODEL_GATEWAY_MODEL_ID="${W0_DEMO_MODEL_GATEWAY_MODEL_ID:-${C2C_MODEL_DEFAULT_DEPLOYMENT:-gpt-oss-120b}}"
+MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION="${W0_DEMO_MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION:-v1}"
+MODEL_GATEWAY_TIMEOUT_MS="${W0_DEMO_MODEL_GATEWAY_TIMEOUT_MS:-15000}"
+MODEL_GATEWAY_COMPLETION_LIMIT="${W0_DEMO_MODEL_GATEWAY_COMPLETION_LIMIT:-1}"
+MODEL_GATEWAY_COMPLETED_COUNT=0
 
 # All three documented W0 corpus programs unless the caller asks for a subset.
 DEFAULT_PROGRAMS=(
@@ -69,6 +85,13 @@ mkdir -p "$VAR_DIR" "$LOG_DIR" "$PID_DIR" "$ARTIFACTS_DIR" "$EXPORTS_DIR" "$EVEN
 
 log()  { printf '[w0-demo] %s\n' "$*" >&2; }
 fail() { printf '[w0-demo][error] %s\n' "$*" >&2; exit 1; }
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 require() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required tool: $1"
@@ -254,6 +277,20 @@ start_btr() {
   wait_http build-test-runner "$BTR_URL/health"
 }
 
+start_model_gateway() {
+  local bin
+  bin="$(build_go_binary model-gateway services/go/model-gateway-service)"
+  start_go_service model-gateway "$bin" "$LOG_DIR/model-gateway.log" \
+    "MODEL_GATEWAY_LISTEN_ADDR=:$MODEL_GATEWAY_PORT" \
+    "MODEL_GATEWAY_MODEL_REGISTRY_PATH=${MODEL_GATEWAY_MODEL_REGISTRY_PATH:-config/model-registry.example.yaml}" \
+    "MODEL_GATEWAY_ALLOWLIST_PATH=${MODEL_GATEWAY_ALLOWLIST_PATH:-config/foundry-development-allowlist-v0.yaml}" \
+    "MODEL_GATEWAY_LEDGER_PATH=$EVENT_DIR/model-invocation-ledger-v0.jsonl" \
+    "MODEL_GATEWAY_EVENT_LOG_PATH=$EVENT_DIR/model-gateway-events-v0.jsonl" \
+    "C2C_MODEL_INVOCATION_LEDGER_ENABLED=true" \
+    "C2C_HARNESS_EVENT_EMISSION_ENABLED=true"
+  wait_http model-gateway "$MODEL_GATEWAY_URL/v0/health"
+}
+
 register_capability() {
   local id="$1" name="$2" owner="$3" endpoint="$4" dataClass="$5"
   local body="$VAR_DIR/capability-${id//[^a-zA-Z0-9]/-}.json"
@@ -286,6 +323,9 @@ register_w0_capabilities() {
   register_capability "target.java.generate" "Target Java Generator" "target-java-generation-service" "$GENERATOR_URL/v0/generate" "generator"
   register_capability "build-test.run" "Build/Test Runner" "build-test-runner-service" "$BTR_URL/v0/run-verification" "build-test"
   register_capability "evidence.writer" "Evidence Pack Writer" "evidence-service" "$EVIDENCE_URL/v0/packs" "evidence"
+  if is_truthy "$MODEL_GATEWAY_ENABLED"; then
+    register_capability "model-gateway" "Model Gateway" "model-gateway-service" "$MODEL_GATEWAY_URL/v0/invoke" "model-gateway"
+  fi
 }
 
 capability_endpoint() {
@@ -458,7 +498,7 @@ run_program() {
   ran="$(jq -r '.execution.ran // false' "$btrResponse")"
 
   # ---- Step 5: build the Evidence Pack -----------------------------------
-  local sourceRef irRef genRef btrRef harnessRef modelRef trajRef
+  local sourceRef irRef genRef btrRef harnessRef trajRef modelInvocations
   sourceRef="$(data_ref_json "$cobolPath" "urn:c2c/cobol/$programId" "text/x-cobol" "evidence-input")"
   irRef="$(data_ref_json "$irResponse" "urn:c2c/semantic-ir/$programId/$runId")"
   genRef="$(data_ref_json "$genResponse" "urn:c2c/generated-java/$programId/$runId")"
@@ -471,19 +511,78 @@ run_program() {
     || fail "$programId: failed to fetch harness events"
   harnessRef="$(data_ref_json "$harnessSnapshot" "urn:c2c/harness-events/$runId")"
 
-  # W0 model gateway is not exercised end-to-end; we record an explicit
-  # observation-only ledger entry so the manifest's modelInvocations field
-  # is honest about what happened (no model call, recorded by orchestrator).
-  local modelLedger="$outDir/10-model-invocations.json"
-  jq -n \
-    --arg runId "$runId" \
-    '[{invocationId:("inv-" + $runId + "-noop"),
-       modelId:"none",
-       provider:"observation-only",
-       promptTemplateVersion:"none",
-       status:"skipped"}]' \
-    >"$modelLedger"
-  modelRef="$(data_ref_json "$modelLedger" "urn:c2c/model-invocations/$runId")"
+  if is_truthy "$MODEL_GATEWAY_ENABLED" && (( MODEL_GATEWAY_COMPLETED_COUNT < MODEL_GATEWAY_COMPLETION_LIMIT )); then
+    local modelEndpoint modelRequest modelResponse modelStatus modelProvider modelLedgerSha
+    modelEndpoint="$(capability_endpoint "model-gateway")"
+    modelRequest="$outDir/10-model-invocation-request.json"
+    modelResponse="$outDir/10-model-invocation-response.json"
+    jq -n \
+      --arg runId "$runId" \
+      --arg actor "w0-demo" \
+      --arg modelId "$MODEL_GATEWAY_MODEL_ID" \
+      --arg dataClass "model-gateway" \
+      --arg promptTemplateVersion "$MODEL_GATEWAY_PROMPT_TEMPLATE_VERSION" \
+      --arg prompt "Provide concise migration guidance for public synthetic program $programId using referenced artifacts only." \
+      --arg programId "$programId" \
+      --argjson timeoutMs "$MODEL_GATEWAY_TIMEOUT_MS" \
+      --argjson sourceRef "$sourceRef" \
+      --argjson semanticIr "$irRef" \
+      --argjson generatedJava "$genRef" \
+      --argjson buildTest "$btrRef" \
+      '{runId:$runId,
+        actor:$actor,
+        modelId:$modelId,
+        dataClass:$dataClass,
+        promptTemplateVersion:$promptTemplateVersion,
+        prompt:$prompt,
+        structuredOutput:false,
+        parameters:{
+          programId:$programId,
+          sourceRef:$sourceRef,
+          semanticIrRef:$semanticIr,
+          generatedJavaRef:$generatedJava,
+          buildTestRef:$buildTest
+        },
+        timeoutMs:$timeoutMs}' \
+      >"$modelRequest"
+    curl -fsS -X POST -H "Content-Type: application/json" \
+      --data-binary "@$modelRequest" "$modelEndpoint" \
+      >"$modelResponse" \
+      || fail "$programId: model-gateway invocation failed"
+    modelStatus="$(jq -r '.status // "unknown"' "$modelResponse")"
+    modelProvider="$(jq -r '.provider // "unknown"' "$modelResponse")"
+    modelLedgerSha="$(jq -r '.ledgerRef.sha256 // ""' "$modelResponse")"
+    [[ "$modelStatus" == "completed" ]] || fail "$programId: model-gateway returned status=$modelStatus"
+    [[ "$modelProvider" == "foundry-development" ]] || fail "$programId: model-gateway provider=$modelProvider"
+    [[ "$modelLedgerSha" =~ ^[0-9a-fA-F]{64}$ ]] || fail "$programId: model-gateway ledgerRef sha missing"
+    modelInvocations="$(jq -n --slurpfile response "$modelResponse" \
+      '[{invocationId:$response[0].invocationId,
+         modelId:$response[0].modelId,
+         provider:$response[0].provider,
+         promptTemplateVersion:$response[0].promptTemplateVersion,
+         status:$response[0].status,
+         ledgerRef:$response[0].ledgerRef}]')"
+    MODEL_GATEWAY_COMPLETED_COUNT=$((MODEL_GATEWAY_COMPLETED_COUNT + 1))
+  else
+    local modelLedger="$outDir/10-model-invocations.json"
+    jq -n \
+      --arg runId "$runId" \
+      '[{invocationId:("inv-" + $runId + "-noop"),
+         modelId:"none",
+         provider:"observation-only",
+         promptTemplateVersion:"none",
+         status:"skipped"}]' \
+      >"$modelLedger"
+    local modelRef
+    modelRef="$(data_ref_json "$modelLedger" "urn:c2c/model-invocations/$runId")"
+    modelInvocations="$(jq -n --argjson r "$modelRef" --arg runId "$runId" \
+      '[{invocationId:("inv-" + $runId + "-noop"),
+         modelId:"none",
+         provider:"observation-only",
+         promptTemplateVersion:"none",
+         status:"skipped",
+         ledgerRef:$r}]')"
+  fi
 
   # Trajectory ledger for this run from the harness source of truth.
   local trajectoryLedger="$outDir/11-trajectory-ledger.json"
@@ -502,12 +601,7 @@ run_program() {
     --argjson buildTestResults "[$btrRef]" \
     --argjson harnessEvents "$harnessRef" \
     --argjson trajectoryLedger "$trajRef" \
-    --argjson modelInvocations "$(jq -n --argjson r "$modelRef" --arg runId "$runId" \
-        '[{invocationId:("inv-" + $runId + "-noop"),
-           modelId:"none",
-           provider:"observation-only",
-           status:"skipped",
-           ledgerRef:$r}]')" \
+    --argjson modelInvocations "$modelInvocations" \
     '{runId:$runId,
       workflowId:$workflowId,
       summary:$summary,
@@ -771,8 +865,8 @@ write_scorecard() {
     echo "- The W0 Java generator now translates the selected W0 PERFORM/EVALUATE/IF/ADD/COMPUTE/OCCURS subset"
     echo "  and the acceptance bar is \`classification == match\` for every program."
     echo "- BRNCH01 is a true \`cobcrun\` Golden Master; CTRLDEC01 and BATCH01 remain synthetic fixtures."
-    echo "- Model-gateway-service is not exercised end-to-end in W0; the manifest"
-    echo "  records an explicit \`status: \"skipped\"\` model invocation entry for honesty."
+    echo "- Model-gateway-service is exercised for up to \`$MODEL_GATEWAY_COMPLETION_LIMIT\` program(s) when enabled;"
+    echo "  remaining manifests record explicit \`status: \"skipped\"\` entries."
     echo "- The Evidence Pack manifest references content by sha256 only; no raw"
     echo "  generated source, model prompt, or secret is embedded in the bundle."
     echo
@@ -805,6 +899,9 @@ main() {
   start_ir
   start_generator
   start_btr
+  if is_truthy "$MODEL_GATEWAY_ENABLED"; then
+    start_model_gateway
+  fi
   register_w0_capabilities
 
   for spec in "${PROGRAMS[@]}"; do
