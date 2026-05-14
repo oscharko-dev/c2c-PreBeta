@@ -10,6 +10,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GoldenMasterTest {
@@ -40,6 +41,39 @@ class GoldenMasterTest {
         assertEquals("synthetic", resolved.get().classification());
         assertTrue(resolved.get().knownDivergenceAtW0(),
                 "BRNCH01 W0 entry must declare knownDivergenceAtW0=true");
+    }
+
+    @Test
+    void expectedRefPathResolvesInsideRepoRoot() throws Exception {
+        Path root = repoRoot();
+        String relativePath = "corpus/synthetic/fixtures/branch-account-guard-output.txt";
+        Path expected = root.resolve(relativePath);
+        Optional<GoldenMaster.Resolved> resolved = GoldenMaster.resolve(
+                "BRNCH01",
+                Map.of("expectedRef", Map.of("path", relativePath)),
+                root);
+        assertTrue(resolved.isPresent());
+        assertEquals(Files.readString(expected), resolved.get().expected());
+        assertEquals(relativePath, resolved.get().source());
+    }
+
+    @Test
+    void expectedRefPathTraversalIsRejected() {
+        Path root = repoRoot();
+        assertThrows(IllegalArgumentException.class, () ->
+                GoldenMaster.resolve("BRNCH01",
+                        Map.of("expectedRef", Map.of("path", "../escape.txt")),
+                        root));
+    }
+
+    @Test
+    void expectedRefAbsolutePathIsRejected() {
+        Path root = repoRoot();
+        Path absolute = root.resolve("fixtures/golden-master/index.json").toAbsolutePath();
+        assertThrows(IllegalArgumentException.class, () ->
+                GoldenMaster.resolve("BRNCH01",
+                        Map.of("expectedRef", Map.of("path", absolute.toString())),
+                        root));
     }
 
     @Test

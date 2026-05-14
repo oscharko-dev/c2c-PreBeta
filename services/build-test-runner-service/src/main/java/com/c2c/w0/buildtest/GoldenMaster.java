@@ -111,7 +111,7 @@ final class GoldenMaster {
     private static Path resolveSafePath(Path repoRoot, String relativePath) {
         Path candidate = Paths.get(relativePath);
         if (candidate.isAbsolute()) {
-            return candidate.normalize();
+            throw new IllegalArgumentException("Golden Master path must be repo-relative: " + relativePath);
         }
         Path resolved = repoRoot.resolve(relativePath).normalize();
         if (!resolved.startsWith(repoRoot)) {
