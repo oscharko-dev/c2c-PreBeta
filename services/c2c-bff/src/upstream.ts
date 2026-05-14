@@ -1,5 +1,6 @@
 import * as http from 'node:http';
 import * as https from 'node:https';
+import { createHash } from 'node:crypto';
 import { URL } from 'node:url';
 
 export interface UpstreamResponse {
@@ -87,6 +88,13 @@ export function createNodeHttpClient(): HttpClient {
 export interface OrchestratorClient {
   enabled: boolean;
   startRun(input: { programId: string; cobolSourcePath: string; requester?: string }): Promise<UpstreamResponse | undefined>;
+  startTransformRun(input: {
+    programId: string;
+    sourceText: string;
+    requester?: string;
+    sourceName?: string;
+    options?: unknown;
+  }): Promise<UpstreamResponse | undefined>;
   getRun(runId: string): Promise<UpstreamResponse | undefined>;
 }
 
@@ -100,6 +108,9 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
     return {
       enabled: false,
       async startRun() {
+        return undefined;
+      },
+      async startTransformRun() {
         return undefined;
       },
       async getRun() {
@@ -119,6 +130,30 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
         modelPrompt: '',
         programId,
         cobolSourcePath,
+      };
+      return http.request(`${baseUrl}/v0/runs`, {
+        method: 'POST',
+        body: payload,
+        timeoutMs,
+      });
+    },
+    async startTransformRun({ programId, sourceText, requester, sourceName, options }) {
+      const sha256 = createHash('sha256').update(sourceText, 'utf8').digest('hex');
+      const payload = {
+        requester: requester ?? 'c2c-ui',
+        inputRef: {
+          kind: 'source',
+          uri: `urn:c2c/ui-source/${sha256}`,
+          sourceText,
+          sha256,
+          byteSize: Buffer.byteLength(sourceText, 'utf8'),
+          mimeType: 'text/x-cobol',
+        },
+        evidenceRefs: [],
+        modelPrompt: '',
+        programId,
+        ...(typeof sourceName === 'string' && sourceName.length > 0 ? { sourceName } : {}),
+        ...(options === undefined ? {} : { options }),
       };
       return http.request(`${baseUrl}/v0/runs`, {
         method: 'POST',

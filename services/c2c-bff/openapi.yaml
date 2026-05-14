@@ -72,10 +72,42 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/transform:
+    post:
+      summary: Start a product-mode transform from COBOL source text
+      operationId: startTransform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransformInput" }
+      responses:
+        "201":
+          description: started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransformResponse" }
+        "400":
+          description: validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: orchestrator rejected request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable or not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/runs:
     post:
-      summary: Start a W0 migration run for a given sample
+      summary: Legacy sample-based run start path
       operationId: startRun
+      deprecated: true
       requestBody:
         required: true
         content:
@@ -177,6 +209,27 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/runs/{runId}/events:
+    get:
+      summary: Return a lightweight event view for the run
+      operationId: getRunEvents
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunEventsView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
 components:
   schemas:
     HealthResponse:
@@ -219,6 +272,17 @@ components:
         programId: { type: string }
         requester: { type: string }
 
+    TransformInput:
+      type: object
+      required: [sourceText]
+      properties:
+        sourceText: { type: string }
+        programId: { type: string }
+        sourceName: { type: string }
+        options:
+          type: object
+          additionalProperties: true
+
     RunSummary:
       type: object
       required: [runId, programId, status, mode, createdAt]
@@ -236,6 +300,38 @@ components:
         policyDecision: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    RunLinks:
+      type: object
+      required: [self, generated, buildTest, evidence, events]
+      properties:
+        self: { type: string }
+        generated: { type: string }
+        buildTest: { type: string }
+        evidence: { type: string }
+        events: { type: string }
+
+    TransformResponse:
+      type: object
+      required: [runId, orchestratorRunId, status, programId, productMode, links, createdAt, mode]
+      properties:
+        runId: { type: string }
+        orchestratorRunId: { type: string }
+        programId: { type: string }
+        status:
+          type: string
+          enum: [starting, updating, completed, failed]
+        mode: { type: string, enum: [live, mock] }
+        productMode: { type: string, enum: [live] }
+        message: { type: string }
+        evidenceRefs:
+          type: array
+          items: { type: string }
+        policyDecision: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        links:
+          $ref: "#/components/schemas/RunLinks"
 
     GeneratedView:
       type: object
@@ -313,6 +409,23 @@ components:
           type: array
           items: { type: string }
         note: { type: string }
+
+    RunEventsView:
+      type: object
+      required: [runId, programId, mode, events]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, mock] }
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              status: { type: string }
+              message: { type: string }
+              createdAt: { type: string }
 
     ErrorResponse:
       type: object

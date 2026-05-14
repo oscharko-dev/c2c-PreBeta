@@ -21,6 +21,22 @@ export interface SampleDetail extends SampleSummary {
   expectedOutput: string;
 }
 
+export interface TransformRequest {
+  sourceText: string;
+  programId?: string;
+  sourceName?: string;
+  options?: Record<string, unknown>;
+}
+
+export interface TransformResponse {
+  runId: string;
+  orchestratorRunId: string;
+  status: RunStatus;
+  programId: string;
+  productMode: RunMode;
+  links: Record<string, string>;
+}
+
 export type RunMode = 'live' | 'mock';
 export type RunStatus = 'starting' | 'updating' | 'completed' | 'failed';
 

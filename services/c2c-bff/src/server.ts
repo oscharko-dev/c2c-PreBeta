@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { URL } from 'node:url';
 
 import type { BffConfig } from './config';
@@ -77,11 +78,14 @@ async function readJsonBody(req: http.IncomingMessage, maxBytes = 1_000_000): Pr
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let received = 0;
+    let tooLarge = false;
     req.on('data', (chunk: Buffer) => {
+      if (tooLarge) return;
       received += chunk.length;
       if (received > maxBytes) {
+        tooLarge = true;
         reject(new Error('request body too large'));
-        req.destroy();
+        req.resume();
         return;
       }
       chunks.push(chunk);
@@ -166,6 +170,59 @@ function runSummary(stored: StoredRun): Record<string, unknown> {
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };
+}
+
+function runLinks(runId: string): Record<string, string> {
+  return {
+    self: `/api/v0/runs/${runId}`,
+    generated: `/api/v0/runs/${runId}/generated`,
+    buildTest: `/api/v0/runs/${runId}/build-test`,
+    evidence: `/api/v0/runs/${runId}/evidence`,
+  };
+}
+
+function transformLinks(runId: string): Record<string, string> {
+  return {
+    ...runLinks(runId),
+    events: `/api/v0/runs/${runId}/events`,
+  };
+}
+
+function transformResponse(stored: StoredRun): Record<string, unknown> {
+  return {
+    ...runSummary(stored),
+    orchestratorRunId: stored.liveRunId ?? '',
+    productMode: 'live',
+    links: transformLinks(stored.runId),
+  };
+}
+
+function createSourceTextSample(programId: string, sourceText: string, sourceName?: string): SampleDetail {
+  return {
+    programId,
+    title: sourceName ? `Transform run from ${sourceName}` : `Transform run for ${programId}`,
+    description: 'Synthetic sample created from source text',
+    knownDivergenceAtW0: false,
+    cobolSource: sourceText,
+    cobolSourcePath: `transforms/${programId}.cbl`,
+    expectedOutput: '',
+  };
+}
+
+function extractProgramIdFromSourceText(sourceText: string): string {
+  const match = /PROGRAM-ID\.\s*([A-Z0-9-]+)/i.exec(sourceText);
+  if (match?.[1]) {
+    return match[1].toUpperCase();
+  }
+  const digest = createHash('sha256').update(sourceText, 'utf8').digest('hex').slice(0, 12).toUpperCase();
+  return `SRC-${digest}`;
+}
+
+function resolveTransformProgramId(sourceText: string, requestedProgramId?: string): string {
+  if (typeof requestedProgramId === 'string' && requestedProgramId.trim().length > 0) {
+    return requestedProgramId.trim();
+  }
+  return extractProgramIdFromSourceText(sourceText);
 }
 
 function generatedView(stored: StoredRun): Record<string, unknown> {
@@ -296,6 +353,83 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
+      if (pathname === '/api/v0/transform' && method === 'POST') {
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, { error: 'request body too large' });
+            return;
+          }
+          badRequest(res, err instanceof Error ? err.message : 'invalid body');
+          return;
+        }
+        if (!body || typeof body !== 'object') {
+          badRequest(res, 'request body must be a JSON object');
+          return;
+        }
+        const sourceTextRaw = (body as Record<string, unknown>).sourceText;
+        const requestedProgramIdRaw = (body as Record<string, unknown>).programId;
+        const sourceNameRaw = (body as Record<string, unknown>).sourceName;
+        const optionsRaw = (body as Record<string, unknown>).options;
+        if (typeof sourceTextRaw !== 'string' || sourceTextRaw.trim().length === 0) {
+          badRequest(res, 'sourceText must be a non-empty string');
+          return;
+        }
+        if (requestedProgramIdRaw !== undefined && (typeof requestedProgramIdRaw !== 'string' || requestedProgramIdRaw.trim().length === 0)) {
+          badRequest(res, 'programId must be a non-empty string when provided');
+          return;
+        }
+        if (sourceNameRaw !== undefined && (typeof sourceNameRaw !== 'string' || sourceNameRaw.trim().length === 0)) {
+          badRequest(res, 'sourceName must be a non-empty string when provided');
+          return;
+        }
+        if (optionsRaw !== undefined && (typeof optionsRaw !== 'object' || optionsRaw === null || Array.isArray(optionsRaw))) {
+          badRequest(res, 'options must be an object when provided');
+          return;
+        }
+        if (!orchestrator.enabled) {
+          jsonResponse(res, 503, { error: 'orchestrator URL is required for /api/v0/transform' });
+          return;
+        }
+
+        const sourceText = sourceTextRaw;
+        const programId = resolveTransformProgramId(sourceText, typeof requestedProgramIdRaw === 'string' ? requestedProgramIdRaw : undefined);
+        const sourceName = typeof sourceNameRaw === 'string' ? sourceNameRaw : undefined;
+
+        try {
+          const upstream = await orchestrator.startTransformRun({
+            programId,
+            sourceText,
+            requester: 'c2c-ui',
+            sourceName,
+            options: optionsRaw,
+          });
+          if (upstream && upstream.status >= 200 && upstream.status < 300) {
+            const liveRunId = extractLiveRunId(upstream.body);
+            const stored = runStore.create(createSourceTextSample(programId, sourceText, sourceName), 'live', liveRunId, {
+              status: 'starting',
+              message: 'run accepted by orchestrator',
+            });
+            const synced = applyLiveRunPayload(stored, runStore, upstream.body);
+            res.writeHead(201, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+            res.end(JSON.stringify(transformResponse(synced)));
+            return;
+          }
+          const status = upstream?.status ?? 502;
+          jsonResponse(res, 502, {
+            error: `orchestrator rejected transform request${status ? ` (${status})` : ''}`,
+          });
+          return;
+        } catch (err) {
+          jsonResponse(res, 502, {
+            error: err instanceof Error ? err.message : 'orchestrator request failed',
+          });
+          return;
+        }
+      }
+
       const sampleMatch = /^\/api\/v0\/samples\/([^\/]+)$/.exec(pathname);
       if (sampleMatch && method === 'GET') {
         const programId = decodeURIComponent(sampleMatch[1] ?? '');
@@ -422,6 +556,23 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         jsonResponse(res, 200, evidenceView(stored));
+        return;
+      }
+
+      const eventsMatch = /^\/api\/v0\/runs\/([^\/]+)\/events$/.exec(pathname);
+      if (eventsMatch && method === 'GET') {
+        const runId = decodeURIComponent(eventsMatch[1] ?? '');
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        jsonResponse(res, 200, {
+          runId: stored.runId,
+          programId: stored.programId,
+          mode: stored.mode,
+          events: [],
+        });
         return;
       }
 

@@ -6,6 +6,8 @@ import type {
   RunSummary,
   SampleDetail,
   SampleSummary,
+  TransformResponse,
+  TransformRequest,
 } from './types.js';
 
 export class BffError extends Error {
@@ -29,6 +31,7 @@ export interface BffApi {
   getMode(): Promise<ModeResponse>;
   listSamples(): Promise<SampleSummary[]>;
   getSample(programId: string): Promise<SampleDetail>;
+  transform(request: TransformRequest): Promise<TransformResponse>;
   startRun(programId: string): Promise<RunSummary>;
   getRun(runId: string): Promise<RunSummary>;
   getGenerated(runId: string): Promise<GeneratedView>;
@@ -74,6 +77,7 @@ export function createBffApi(options: { baseUrl?: string; fetchImpl?: FetchLike 
     getMode: () => request<ModeResponse>('/api/v0/mode'),
     listSamples: () => request<SampleSummary[]>('/api/v0/samples'),
     getSample: (programId) => request<SampleDetail>(`/api/v0/samples/${encodeURIComponent(programId)}`),
+    transform: (requestBody) => request<TransformResponse>('/api/v0/transform', { method: 'POST', body: requestBody }),
     startRun: (programId) => request<RunSummary>('/api/v0/runs', { method: 'POST', body: { programId } }),
     getRun: (runId) => request<RunSummary>(`/api/v0/runs/${encodeURIComponent(runId)}`),
     getGenerated: (runId) => request<GeneratedView>(`/api/v0/runs/${encodeURIComponent(runId)}/generated`),

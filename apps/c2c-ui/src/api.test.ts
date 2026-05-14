@@ -72,6 +72,47 @@ test('createBffApi.startRun posts the program id and parses response', async () 
   assert.deepEqual(parsed, { programId: 'BRNCH01' });
 });
 
+test('createBffApi.transform posts COBOL source with optional metadata', async () => {
+  const { fetchImpl, captured } = makeFetch([
+    {
+      status: 201,
+      body: JSON.stringify({
+        runId: 'run-2',
+        orchestratorRunId: 'orch-2',
+        status: 'starting',
+        programId: 'BRNCH01',
+        productMode: 'live',
+        links: {
+          self: '/api/v0/runs/run-2',
+        },
+      }),
+    },
+  ]);
+  const api = createBffApi({ baseUrl: '', fetchImpl });
+  const result = await api.transform({
+    sourceText: 'IDENTIFICATION DIVISION.',
+    programId: 'BRNCH01',
+    sourceName: 'fixtures/BRNCH01.cbl',
+    options: { skipExecution: true },
+  });
+  assert.equal(result.runId, 'run-2');
+  assert.equal(result.orchestratorRunId, 'orch-2');
+  assert.equal(result.status, 'starting');
+  assert.equal(result.programId, 'BRNCH01');
+  assert.equal(result.productMode, 'live');
+  assert.deepEqual(result.links, { self: '/api/v0/runs/run-2' });
+  assert.equal(captured[0]?.method, 'POST');
+  assert.equal(captured[0]?.url, '/api/v0/transform');
+  assert.equal(captured[0]?.headers['content-type'], 'application/json');
+  const parsed = JSON.parse(captured[0]?.body ?? '{}');
+  assert.deepEqual(parsed, {
+    sourceText: 'IDENTIFICATION DIVISION.',
+    programId: 'BRNCH01',
+    sourceName: 'fixtures/BRNCH01.cbl',
+    options: { skipExecution: true },
+  });
+});
+
 test('createBffApi raises BffError on non-2xx', async () => {
   const { fetchImpl } = makeFetch([
     { status: 404, body: JSON.stringify({ error: 'unknown programId "NOPE"' }) },

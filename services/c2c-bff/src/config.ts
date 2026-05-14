@@ -9,11 +9,13 @@ export interface BffConfig {
   orchestratorUrl: string;
   evidenceUrl: string;
   upstreamTimeoutMs: number;
+  transformSourceMaxBytes: number;
 }
 
 const SERVICE_NAME = 'c2c-bff';
 const DEFAULT_PORT = 8090;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 4_000;
+const DEFAULT_TRANSFORM_SOURCE_MAX_BYTES = 1_000_000;
 
 function parsePort(raw: string | undefined, fallback: number): number {
   if (!raw || raw.trim() === '') return fallback;
@@ -29,6 +31,15 @@ function parseTimeoutMs(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`invalid timeout ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+function parseSizeBytes(raw: string | undefined, fallback: number): number {
+  if (!raw || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`invalid size limit ${JSON.stringify(raw)}`);
   }
   return value;
 }
@@ -66,5 +77,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, packageRoot: st
     orchestratorUrl: env.C2C_ORCHESTRATOR_URL?.trim() ?? '',
     evidenceUrl: env.C2C_EVIDENCE_URL?.trim() ?? '',
     upstreamTimeoutMs: parseTimeoutMs(env.C2C_UPSTREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS),
+    transformSourceMaxBytes: parseSizeBytes(env.C2C_TRANSFORM_SOURCE_MAX_BYTES, DEFAULT_TRANSFORM_SOURCE_MAX_BYTES),
   };
 }
