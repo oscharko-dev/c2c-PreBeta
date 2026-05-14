@@ -45,9 +45,11 @@ export interface RunSummary {
   programId: string;
   status: RunStatus;
   mode: RunMode;
+  productMode: RunMode;
   message: string;
   policyDecision: string;
   evidenceRefs: string[];
+  orchestratorRunId: string;
   createdAt: string;
   updatedAt: string;
 }

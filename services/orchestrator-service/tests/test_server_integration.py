@@ -424,6 +424,10 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             )
             self.assertGreaterEqual(len(state.events), 5)
             self.assertGreater(len(run_state.get("evidenceRefs", [])), 0)
+            event_types = [event.get("eventType") for event in state.events]
+            self.assertIn("orchestrator.workflow.accepted", event_types)
+            self.assertIn("orchestrator.workflow.completed", event_types)
+            self.assertNotIn("orchestrator.workflow.failed", event_types)
         finally:
             mock_server.shutdown()
             mock_server.server_close()

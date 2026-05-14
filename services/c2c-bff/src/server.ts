@@ -164,9 +164,11 @@ function runSummary(stored: StoredRun): Record<string, unknown> {
     programId: stored.programId,
     status: stored.status,
     mode: stored.mode,
+    productMode: stored.mode,
     message: stored.message,
     policyDecision: stored.policyDecision,
     evidenceRefs: stored.evidenceRefs,
+    orchestratorRunId: stored.liveRunId ?? '',
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };
@@ -191,8 +193,6 @@ function transformLinks(runId: string): Record<string, string> {
 function transformResponse(stored: StoredRun): Record<string, unknown> {
   return {
     ...runSummary(stored),
-    orchestratorRunId: stored.liveRunId ?? '',
-    productMode: 'live',
     links: transformLinks(stored.runId),
   };
 }
@@ -484,8 +484,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               res.end(JSON.stringify(runSummary(synced)));
               return;
             }
-          } catch {
-            // fall through to mock so the reference run stays usable when upstream is misconfigured
+            const status = upstream?.status ?? 502;
+            jsonResponse(res, 502, {
+              error: `orchestrator rejected run request${status ? ` (${status})` : ''}`,
+            });
+            return;
+          } catch (err) {
+            jsonResponse(res, 502, {
+              error: err instanceof Error ? err.message : 'orchestrator request failed',
+            });
+            return;
           }
         }
 
