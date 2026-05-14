@@ -22,6 +22,9 @@ class MockHarnessState:
         self.events: list[dict] = []
         self.run_sequence = 0
         self.capability_invocations: list[tuple[str, dict]] = []
+        self.pause_parse_seconds = 0.0
+        self.fail_run_reads = False
+        self.fail_run_list = False
 
         self.capabilities = {
             "cobol.parse": {
@@ -87,9 +90,15 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parts = self._path_parts()
         if len(parts) == 2 and parts[0] == "v0" and parts[1] == "runs":
+            if self.state.fail_run_list:
+                self._write_json(503, {"error": "harness unavailable"})
+                return
             self._write_json(200, list(self.state.runs.values()))
             return
         if len(parts) == 3 and parts[0] == "v0" and parts[1] == "runs":
+            if self.state.fail_run_reads:
+                self._write_json(503, {"error": "harness unavailable"})
+                return
             run_id = parts[2]
             if run_id not in self.state.runs:
                 self._write_json(404, {"error": "run not found"})
@@ -132,6 +141,8 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             self.state.capability_invocations.append((capability, payload))
             if capability == "parse":
+                if self.state.pause_parse_seconds > 0:
+                    time.sleep(self.state.pause_parse_seconds)
                 self._write_json(200, {"irRef": {"uri": "urn:test/ir"}})
             elif capability == "ir":
                 self._write_json(200, {"irRef": {"uri": "urn:test/normalized-ir"}})
@@ -175,6 +186,23 @@ def _start_server(handler_cls) -> tuple[HTTPServer, int, threading.Thread]:
 
 
 class OrchestratorIntegrationTests(unittest.TestCase):
+    def _create_orchestrator(self, host: str, mock_port: int):
+        config = OrchestratorConfig(
+            listen_addr=f"{host}:0",
+            harness_base_url=f"http://{host}:{mock_port}",
+            workflow_id="w0-migration-v0",
+            max_retries=0,
+            retry_delay_ms=1,
+            request_timeout_seconds=2,
+            parse_capability_id="cobol.parse",
+            ir_capability_id="cobol.ir",
+            generator_capability_id="java.generator",
+            build_test_capability_id="java.build-test",
+            evidence_capability_id="evidence.writer",
+            model_gateway_capability_id="model-gateway",
+        )
+        return create_configured_server(config)
+
     def test_run_is_executed_and_status_becomes_completed(self):
         mock_server, mock_port, mock_thread = _start_server(MockHarnessHandler)
         try:
@@ -182,22 +210,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             state = MockHarnessState(host=host, port=mock_port)
             MockHarnessHandler.state = state
 
-            config = OrchestratorConfig(
-                listen_addr=f"{host}:0",
-                harness_base_url=f"http://{host}:{mock_port}",
-                workflow_id="w0-migration-v0",
-                max_retries=0,
-                retry_delay_ms=1,
-                request_timeout_seconds=2,
-                parse_capability_id="cobol.parse",
-                ir_capability_id="cobol.ir",
-                generator_capability_id="java.generator",
-                build_test_capability_id="java.build-test",
-                evidence_capability_id="evidence.writer",
-                model_gateway_capability_id="model-gateway",
-            )
-
-            orchestrator_server, _runner = create_configured_server(config)
+            orchestrator_server, _runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             orchestrator_thread = threading.Thread(target=orchestrator_server.serve_forever, daemon=True)
             orchestrator_thread.start()
@@ -245,6 +258,82 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             )
             self.assertGreaterEqual(len(state.events), 5)
             self.assertGreater(len(run_state.get("evidenceRefs", [])), 0)
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            try:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+            except UnboundLocalError:
+                pass
+
+    def test_run_status_is_visible_while_workflow_is_in_flight(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.pause_parse_seconds = 0.25
+            MockHarnessHandler.state = state
+            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps({"requester": "integration", "inputRef": {"uri": "urn:integration/main.cob"}}),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 201)
+                run_id = json.loads(response.read().decode("utf-8"))["run"]["runId"]
+            finally:
+                connection.close()
+            time.sleep(0.05)
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request("GET", f"/v0/runs/{run_id}")
+                mid_response = connection.getresponse()
+                run_state = json.loads(mid_response.read().decode("utf-8"))
+                self.assertEqual(mid_response.status, 200)
+                self.assertIn(run_state.get("status"), {"starting", "updating", "completed"})
+            finally:
+                connection.close()
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            try:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+            except UnboundLocalError:
+                pass
+
+    def test_status_endpoints_return_503_when_harness_is_unavailable(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.fail_run_list = True
+            state.fail_run_reads = True
+            MockHarnessHandler.state = state
+            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request("GET", "/v0/runs")
+                list_response = connection.getresponse()
+                self.assertEqual(list_response.status, 503)
+            finally:
+                connection.close()
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request("GET", "/v0/runs/run-1")
+                run_response = connection.getresponse()
+                self.assertEqual(run_response.status, 503)
+            finally:
+                connection.close()
         finally:
             mock_server.shutdown()
             mock_server.server_close()

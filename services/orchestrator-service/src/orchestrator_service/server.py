@@ -15,6 +15,10 @@ from .harness import HarnessGateway
 from .workflow import W0RunContext, W0WorkflowRunner
 
 
+class UpstreamServiceError(Exception):
+    """Raised when Harness cannot be reached or returns an invalid upstream result."""
+
+
 class OrchestratorService:
     """Small HTTP facade for asynchronous workflow execution."""
 
@@ -79,6 +83,9 @@ class OrchestratorService:
                         return
                     self._write_json(404, {"error": "not found"})
                 except Exception as exc:
+                    if isinstance(exc, UpstreamServiceError):
+                        self._write_json(503, {"error": str(exc)})
+                        return
                     service.logger.error("GET handling failed", exc_info=exc)
                     self._write_json(500, {"error": "internal server error"})
 
@@ -109,16 +116,18 @@ class OrchestratorService:
     def _run_state(self, run_id: str) -> Optional[dict[str, Any]]:
         try:
             return self.runner.gateway.get_run(run_id)
-        except Exception:
-            return None
+        except Exception as exc:
+            if "404" in str(exc):
+                return None
+            raise UpstreamServiceError("harness run status unavailable") from exc
 
     def _runs_list(self) -> list[dict[str, Any]]:
         try:
             list_response = self.runner.gateway.http.get_json(f"{self.runner.gateway.base_url}/v0/runs")
             if isinstance(list_response.payload, list):
                 return list_response.payload
-        except Exception:
-            return []
+        except Exception as exc:
+            raise UpstreamServiceError("harness run list unavailable") from exc
         return []
 
     def _start_run(self, request_handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None:
