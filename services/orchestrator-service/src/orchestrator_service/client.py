@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import urllib.error
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Dict, Mapping, Optional
 from urllib.request import Request, urlopen
 
 
@@ -13,6 +13,7 @@ class HttpClientError(Exception):
     """Raised when an HTTP interaction fails."""
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass
 class HttpResponse:
     status: int
@@ -20,11 +21,11 @@ class HttpResponse:
 
 
 class JSONHTTPClient:
-    def __init__(self, timeout_seconds: int = 5, default_headers: Mapping[str, str] | None = None) -> None:
+    def __init__(self, timeout_seconds: int = 5, default_headers: Optional[Mapping[str, str]] = None) -> None:
         self.timeout_seconds = timeout_seconds
         self.default_headers = dict(default_headers or {})
 
-    def post_json(self, url: str, payload: Mapping[str, Any], headers: Mapping[str, str] | None = None) -> HttpResponse:
+    def post_json(self, url: str, payload: Mapping[str, Any], headers: Optional[Mapping[str, str]] = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,
@@ -34,7 +35,7 @@ class JSONHTTPClient:
         )
         return self._send(request)
 
-    def patch_json(self, url: str, payload: Mapping[str, Any], headers: Mapping[str, str] | None = None) -> HttpResponse:
+    def patch_json(self, url: str, payload: Mapping[str, Any], headers: Optional[Mapping[str, str]] = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,
@@ -44,11 +45,11 @@ class JSONHTTPClient:
         )
         return self._send(request)
 
-    def get_json(self, url: str, headers: Mapping[str, str] | None = None) -> HttpResponse:
+    def get_json(self, url: str, headers: Optional[Mapping[str, str]] = None) -> HttpResponse:
         request = Request(url=url, headers=self._headers({}, headers), method="GET")
         return self._send(request)
 
-    def _headers(self, headers: Mapping[str, str], extra_headers: Mapping[str, str] | None = None) -> dict[str, str]:
+    def _headers(self, headers: Mapping[str, str], extra_headers: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
         merged = dict(self.default_headers)
         merged.update(headers)
         merged.update(extra_headers or {})

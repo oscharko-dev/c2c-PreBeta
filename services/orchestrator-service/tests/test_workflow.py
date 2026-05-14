@@ -71,7 +71,8 @@ class StubGateway:
 
 
 class W0WorkflowRunnerTests(unittest.TestCase):
-    def _base_config(self, max_retries: int = 0, model_gateway_model_id: str = "gpt-oss-120b"):
+    @staticmethod
+    def _base_config(max_retries: int = 0, model_gateway_model_id: str = "gpt-oss-120b"):
         return OrchestratorConfig(
             listen_addr="127.0.0.1:0",
             harness_base_url="http://127.0.0.1:1",
@@ -96,7 +97,8 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             model_gateway_model_id=model_gateway_model_id,
         )
 
-    def _base_capabilities(self):
+    @staticmethod
+    def _base_capabilities():
         return {
             "cobol.parse": {"id": "cobol.parse", "owner": "parser-service", "endpoint": "http://parser"},
             "cobol.ir": {"id": "cobol.ir", "owner": "ir-service", "endpoint": "http://ir"},
@@ -106,7 +108,8 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             "model-gateway": {"id": "model-gateway", "owner": "model", "endpoint": "http://model"},
         }
 
-    def _base_responses(self):
+    @staticmethod
+    def _base_responses():
         return {
             "cobol.parse": {
                 "schemaVersion": "v0",

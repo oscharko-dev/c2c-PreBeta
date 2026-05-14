@@ -387,7 +387,3 @@ func ensureDir(path string) error {
 func nowTimestampKey() time.Time {
 	return time.Now().UTC()
 }
-
-func _nowTimestampUnused() time.Time {
-	return nowTimestampKey()
-}

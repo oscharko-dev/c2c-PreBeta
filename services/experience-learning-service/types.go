@@ -14,7 +14,6 @@ import (
 const (
 	experienceSchemaVersion = "v0"
 	serviceName             = "experience-learning-service"
-	serviceActor            = "experience-learning-service"
 	eventTypeObservation    = "experience.observed"
 )
 

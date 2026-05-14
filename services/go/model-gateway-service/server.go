@@ -153,33 +153,6 @@ func (s *ModelGatewayService) applyGatewayRuntimeConfig(cfg gatewayConfig) error
 	return nil
 }
 
-func NewModelGatewayServiceFromFiles(
-	registryPath string,
-	allowlistPath string,
-	ledgerPath string,
-	eventSink EventSink,
-) (*ModelGatewayService, error) {
-	registry, err := LoadModelRegistry(registryPath)
-	if err != nil {
-		return nil, err
-	}
-	allowlist, err := LoadFoundryAllowlist(allowlistPath)
-	if err != nil {
-		return nil, err
-	}
-	if ledgerPath == "" {
-		ledgerPath = defaultLedgerPath
-	}
-	ledger, err := NewJSONLModelInvocationLedger(ledgerPath)
-	if err != nil {
-		return nil, err
-	}
-	if eventSink == nil {
-		return nil, fmt.Errorf("event sink is required")
-	}
-	return NewModelGatewayService(registry, allowlist, ledger, eventSink, func() time.Time { return time.Now().UTC() })
-}
-
 func (s *ModelGatewayService) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v0/health", s.healthHandler)

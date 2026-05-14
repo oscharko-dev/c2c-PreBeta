@@ -63,14 +63,10 @@ func (e *Exporter) Export(manifest *EvidencePackManifest, req ExportRequest) (Ex
 		return ExportRecord{}, err
 	}
 
-	switch format {
-	case ExportFormatDirectory:
+	if format == ExportFormatDirectory {
 		return e.exportDirectory(manifest, target)
-	case ExportFormatTar:
-		return e.exportTar(manifest, target)
-	default:
-		return ExportRecord{}, fieldError("format", "unsupported format")
 	}
+	return e.exportTar(manifest, target)
 }
 
 func (e *Exporter) resolveDestination(packID, format, requested string) (string, error) {

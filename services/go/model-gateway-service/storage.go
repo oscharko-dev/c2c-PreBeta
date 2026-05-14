@@ -28,10 +28,6 @@ type InMemoryModelInvocationLedger struct {
 	records []ModelInvocationLedgerV0
 }
 
-func NewInMemoryModelInvocationLedger() *InMemoryModelInvocationLedger {
-	return &InMemoryModelInvocationLedger{records: make([]ModelInvocationLedgerV0, 0)}
-}
-
 func (l *InMemoryModelInvocationLedger) Append(record ModelInvocationLedgerV0) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -15,16 +15,9 @@ const (
 )
 
 type RunStore struct {
-	mu     sync.RWMutex
-	runs   map[string]RunState
-	seq    int
-}
-
-type RunStoreSnapshot interface {
-	Create(request RunCreateRequest, actorRole string, decision string) (RunState, error)
-	Get(runID string) (RunState, bool)
-	Update(runID string, request RunUpdateRequest, actorRole string, decision string) (RunState, string, error)
-	List() []RunState
+	mu   sync.RWMutex
+	runs map[string]RunState
+	seq  int
 }
 
 func NewRunStore() *RunStore {

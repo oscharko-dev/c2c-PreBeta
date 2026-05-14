@@ -50,7 +50,7 @@ func (a *PatternAnalyzer) AnalyzeRun(runID string, events []EventEnvelopeV0, led
 		return eventsForRun[i].CreatedAt.Before(eventsForRun[j].CreatedAt)
 	})
 
-	combined := []ExperienceEventV0{}
+	var combined []ExperienceEventV0
 	buckets := make(map[PatternKey][]EventEnvelopeV0)
 	for _, ev := range eventsForRun {
 		if strings.TrimSpace(ev.Actor) == "" || strings.TrimSpace(ev.Capability) == "" {
