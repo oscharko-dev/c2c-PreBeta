@@ -13,6 +13,7 @@ The W0 architecture is organized as a microservice repository with one service s
 
 - `services/java/w0-service` (Java 21 + Maven)
 - `services/go/w0-service` (Go 1.22 + Modules)
+- `services/agentic-harness-core` (Go control-plane for registries and run-state)
 - `services/python/w0-service` (Python 3.12 + stdlib tests)
 - `services/typescript/w0-service` (TypeScript + Node 20)
 
