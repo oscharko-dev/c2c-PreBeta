@@ -17,6 +17,11 @@ const (
 	defaultExportRoot   = "data/evidence-exports"
 	envEventLogPath     = "EVIDENCE_EVENT_LOG_PATH"
 	envExportRoot       = "EVIDENCE_EXPORT_DIR"
+
+	// maxRequestBodyBytes caps incoming JSON ingest so a single oversized
+	// POST cannot OOM the service. W0 evidence requests are reference-only
+	// (no raw payloads) so 1 MiB is generous in practice.
+	maxRequestBodyBytes = 1 << 20
 )
 
 type Service struct {
@@ -95,7 +100,7 @@ func (s *Service) packCollectionHandler(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, s.store.List())
 	case http.MethodPost:
 		var input CreateInput
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -132,7 +137,7 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, manifest)
 		case http.MethodPatch:
 			var patch PatchInput
-			if err := decodeJSON(r, &patch); err != nil {
+			if err := decodeJSON(w, r, &patch); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -183,7 +188,7 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req ExportRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			// Empty body is allowed and means "use defaults".
 			if !errors.Is(err, errEmptyBody) {
 				writeError(w, http.StatusBadRequest, err.Error())
@@ -290,13 +295,15 @@ func (c *stepCounter) next(runID string) int64 {
 
 var errEmptyBody = errors.New("empty request body")
 
-func decodeJSON(r *http.Request, target any) error {
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	if r.Body == nil {
 		return errEmptyBody
 	}
-	if !strings.Contains(r.Header.Get("Content-Type"), "application/json") && r.ContentLength != 0 {
+	ct := r.Header.Get("Content-Type")
+	if ct != "" && !strings.Contains(ct, "application/json") {
 		return fmt.Errorf("content-type must be application/json")
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(target); err != nil {
@@ -322,10 +329,13 @@ func statusForValidationError(err error) int {
 	if IsFieldValidationError(err) {
 		return http.StatusBadRequest
 	}
-	return http.StatusBadRequest
+	return http.StatusInternalServerError
 }
 
 func statusForUpdate(err error) int {
+	if err == nil {
+		return http.StatusInternalServerError
+	}
 	if strings.Contains(err.Error(), "pack not found") {
 		return http.StatusNotFound
 	}

@@ -93,7 +93,7 @@ func NewJSONLFileEventSink(path string) (*JSONLFileEventSink, error) {
 			return nil, fmt.Errorf("create event log directory failed: %w", err)
 		}
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o640)
 	if err != nil {
 		return nil, fmt.Errorf("open event log file failed: %w", err)
 	}

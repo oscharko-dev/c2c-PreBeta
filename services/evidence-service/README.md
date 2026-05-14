@@ -69,10 +69,24 @@ attached to the manifest at any point in the run.
 
 - The manifest never embeds raw secrets, model prompts, or generated code —
   every artifact is referenced by URI and sha256 only.
-- Export destinations are constrained to the configured `EVIDENCE_EXPORT_DIR`;
-  `..` traversal and arbitrary absolute paths are rejected with `400`.
+- Export destinations must be **relative** paths under the configured
+  `EVIDENCE_EXPORT_DIR`; absolute paths and `..` traversal are rejected with
+  `400`.
 - Exports require `validation.ok == true`; an incomplete pack returns `422`.
-- JSON request bodies use `DisallowUnknownFields` to surface drift early.
+- JSON request bodies use `DisallowUnknownFields` and are size-capped at
+  1 MiB to bound memory use on adversarial input.
+- The JSONL event log is opened mode `0o640`; the service is expected to run
+  under a dedicated UID/GID.
+
+## Trust boundary
+
+evidence-service v0 has **no built-in authentication or authorization** and
+serves plaintext HTTP. It is designed to run cluster-local behind an
+authenticating mesh/proxy (mTLS or shared-secret) — never expose it directly
+to a public ingress. Customer-facing access is mediated by the orchestrator
+and the BFF, which add their own auth layer. Cryptographic signing of the
+manifest is intentionally out of scope for v0; consumers rely on artifact
+sha256s plus the harness JSONL ledger.
 
 ## Run locally
 

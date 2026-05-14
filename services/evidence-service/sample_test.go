@@ -71,8 +71,7 @@ func TestRegenerateSampleEvidencePack(t *testing.T) {
 	}
 	onDisk, err := os.ReadFile(target)
 	if err != nil {
-		t.Skipf("sample fixture not yet present at %s (set EVIDENCE_WRITE_SAMPLE=1 to generate)", target)
-		return
+		t.Fatalf("sample fixture missing at %s — regenerate with EVIDENCE_WRITE_SAMPLE=1 go test ./...: %v", target, err)
 	}
 	if strings.TrimSpace(string(onDisk)) != strings.TrimSpace(string(body)) {
 		t.Fatalf("sample evidence pack is out of date; re-run with EVIDENCE_WRITE_SAMPLE=1 to refresh")

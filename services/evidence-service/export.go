@@ -83,9 +83,12 @@ func (e *Exporter) resolveDestination(packID, format, requested string) (string,
 			name = packID + archiveExtension
 		}
 		candidate = filepath.Join(absBase, name)
-	} else if filepath.IsAbs(requested) {
-		candidate = requested
 	} else {
+		// Defense-in-depth: refuse absolute paths outright. Callers should
+		// supply a relative name that lives under the export root.
+		if filepath.IsAbs(requested) {
+			return "", fieldError("destination", "destination must be a relative path under the configured export root")
+		}
 		candidate = filepath.Join(absBase, requested)
 	}
 
