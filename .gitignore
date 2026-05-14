@@ -219,3 +219,6 @@ vendor/
 .tmp/
 .env.local
 .DS_Store?
+
+# Runtime data artifacts
+services/agentic-harness-core/data/*.jsonl
