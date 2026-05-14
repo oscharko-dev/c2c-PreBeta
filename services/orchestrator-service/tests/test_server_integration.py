@@ -676,6 +676,52 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertIn("src/CASE01.java", generated["files"])
             self.assertEqual(generated["files"]["src/CASE01.java"], "class CASE01 {}")
 
+            # Issue #97: /generated must expose an artifactRef pointing at the
+            # generated-project manifest plus traceability fields, and must
+            # include per-file refs for the persisted project.
+            self.assertIn("artifactRef", generated)
+            self.assertIsNotNone(generated["artifactRef"])
+            self.assertEqual(generated["artifactRef"]["path"], "generated-project-manifest.json")
+            self.assertEqual(generated["artifactRef"]["kind"], "generated-project-manifest")
+            self.assertTrue(generated["artifactRef"]["sha256"])
+            self.assertIn("traceability", generated)
+            self.assertEqual(generated["traceability"]["programId"], "CASE01")
+            self.assertEqual(generated["traceability"]["irId"], "ir-CASE01")
+            self.assertTrue(generated["traceability"]["sourceHash"])
+            self.assertIn("fileRefs", generated)
+            file_ref_paths = {entry["path"] for entry in generated["fileRefs"]}
+            self.assertIn("src/CASE01.java", file_ref_paths)
+
+            # Issue #97: dedicated /generated/files endpoint
+            status_code, generated_files = _fetch_json(f"/v0/runs/{run_id}/generated/files")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(generated_files["status"], "complete")
+            file_index_paths = {entry["path"] for entry in generated_files["files"]}
+            self.assertIn("src/CASE01.java", file_index_paths)
+            self.assertEqual(
+                generated_files["artifactRef"]["sha256"],
+                generated["artifactRef"]["sha256"],
+            )
+
+            # Issue #97: dedicated single-file endpoint
+            status_code, file_view = _fetch_json(f"/v0/runs/{run_id}/generated/files/src/CASE01.java")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(file_view["path"], "src/CASE01.java")
+            self.assertEqual(file_view["content"], "class CASE01 {}")
+            self.assertEqual(file_view["byteSize"], len(b"class CASE01 {}"))
+
+            # Issue #97: path traversal is rejected
+            status_code, file_traversal = _fetch_json(
+                f"/v0/runs/{run_id}/generated/files/..%2F..%2Fetc%2Fpasswd"
+            )
+            self.assertEqual(status_code, 400)
+
+            # Issue #97: unknown file inside the generated tree is 404, not leaking
+            status_code, file_missing = _fetch_json(
+                f"/v0/runs/{run_id}/generated/files/does/not/exist.java"
+            )
+            self.assertEqual(status_code, 404)
+
             # Build/test endpoint returns the build-test-result.json content
             status_code, build_test = _fetch_json(f"/v0/runs/{run_id}/build-test")
             self.assertEqual(status_code, 200)
@@ -683,11 +729,56 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(build_test["data"]["status"], "ok")
             self.assertEqual(build_test["artifactRef"]["path"], "build-test-result.json")
 
+            # Issue #97: build/test envelope must reference the same generated
+            # Java artifact hash as /generated (parity between UI and build).
+            self.assertIn("generatedArtifactRef", build_test)
+            self.assertEqual(
+                build_test["generatedArtifactRef"]["sha256"],
+                generated["artifactRef"]["sha256"],
+            )
+
             # Evidence endpoint returns the evidence-pack-manifest
             status_code, evidence = _fetch_json(f"/v0/runs/{run_id}/evidence")
             self.assertEqual(status_code, 200)
             self.assertEqual(evidence["status"], "complete")
             self.assertEqual(evidence["artifactRef"]["path"], "evidence-pack-manifest.json")
+
+            # Issue #97: evidence envelope must reference the same generated
+            # Java artifact hash so the UI can compare what build-test compiled
+            # against what the Evidence Pack vouches for.
+            self.assertIn("generatedArtifactRef", evidence)
+            self.assertEqual(
+                evidence["generatedArtifactRef"]["sha256"],
+                generated["artifactRef"]["sha256"],
+            )
+
+            # Issue #97: the evidence input the orchestrator sent to
+            # evidence-service must already carry the manifest hash as
+            # artifacts.generatedJava.sha256 so the Evidence Pack written by
+            # the downstream service is bound to the exact bytes the UI shows.
+            evidence_invocations = [
+                payload for capability, payload in state.capability_invocations
+                if capability == "evidence"
+            ]
+            self.assertTrue(evidence_invocations, "evidence service was not invoked")
+            evidence_input = evidence_invocations[-1]
+            self.assertEqual(
+                evidence_input["artifacts"]["generatedJava"]["sha256"],
+                generated["artifactRef"]["sha256"],
+            )
+
+            # Issue #97: build-test input the orchestrator sent must also
+            # carry the manifest hash so the runner is compiling the exact
+            # bytes the UI sees.
+            build_invocations = [
+                payload for capability, payload in state.capability_invocations
+                if capability == "build-test"
+            ]
+            self.assertTrue(build_invocations, "build-test was not invoked")
+            self.assertEqual(
+                build_invocations[-1]["generatedArtifactRef"]["sha256"],
+                generated["artifactRef"]["sha256"],
+            )
 
             # Events endpoint returns the trajectory-ledger contents
             status_code, events = _fetch_json(f"/v0/runs/{run_id}/events")

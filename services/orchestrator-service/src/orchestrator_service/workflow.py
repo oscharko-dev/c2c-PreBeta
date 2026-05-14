@@ -19,6 +19,7 @@ from .artifacts import (
     KIND_BUILD_TEST_RESULT,
     KIND_EVIDENCE_PACK_MANIFEST,
     KIND_GENERATED_PROJECT_FILE,
+    KIND_GENERATED_PROJECT_MANIFEST,
     KIND_GENERATION_RESPONSE,
     KIND_MODEL_INVOCATION_LEDGER,
     KIND_MODEL_POLICY_SKIPPED,
@@ -28,6 +29,7 @@ from .artifacts import (
     KIND_SOURCE,
     KIND_SOURCE_REF,
     KIND_TRAJECTORY_LEDGER,
+    ArtifactMetadata,
     NullArtifactStore,
     RunArtifactStore,
 )
@@ -185,6 +187,59 @@ def _first_non_empty_mapping(value: Any) -> Dict[str, Any]:
     if isinstance(value, Mapping) and value:
         return dict(value)
     return {}
+
+
+GENERATED_PROJECT_DIR = "generated-project"
+GENERATED_PROJECT_MANIFEST_FILE = "generated-project-manifest.json"
+
+
+def _build_generated_project_manifest(
+    *,
+    run_id: str,
+    workflow_id: str,
+    generated_project: Mapping[str, Any],
+    persisted_files: Sequence[Mapping[str, Any]],
+    program_id: Optional[str],
+    ir_id: Optional[str],
+    source_sha256: Optional[str],
+) -> Dict[str, Any]:
+    """Build the deterministic manifest describing the persisted Java project.
+
+    The manifest pairs every persisted file with its on-disk sha256 and byte
+    size, then sorts the entries by path so the canonical JSON encoding is
+    stable. The orchestrator hashes this manifest to produce the single
+    ``artifactRef`` referenced by `/generated`, build-test, and Evidence Pack,
+    which is how Issue #97 guarantees those three consumers point at byte-for-
+    byte identical generated Java.
+    """
+    files: list[Dict[str, Any]] = []
+    prefix = f"{GENERATED_PROJECT_DIR}/"
+    for entry in persisted_files:
+        path = str(entry.get("path") or "")
+        if not path.startswith(prefix):
+            continue
+        files.append(
+            {
+                "path": path[len(prefix):],
+                "sha256": str(entry.get("sha256") or ""),
+                "byteSize": int(entry.get("byteSize") or 0),
+                "mimeType": str(entry.get("mimeType") or ""),
+            }
+        )
+    files.sort(key=lambda item: item["path"])
+    return {
+        "runId": run_id,
+        "workflowId": workflow_id,
+        "entryClass": _text(generated_project.get("entryClass")) or "",
+        "entryFilePath": _text(generated_project.get("entryFilePath")) or "",
+        "fileCount": len(files),
+        "files": files,
+        "traceability": {
+            "programId": program_id or "",
+            "irId": ir_id or "",
+            "sourceHash": source_sha256 or "",
+        },
+    }
 
 
 def _iter_generated_files(generated_project: Mapping[str, Any]):
@@ -474,16 +529,45 @@ class W0WorkflowRunner:
                     kind=KIND_GENERATION_RESPONSE,
                 )
             )
+            persisted_file_metas: list[ArtifactMetadata] = []
             for file_path, file_content in _iter_generated_files(generated_project):
-                _record_artifact(
-                    self.artifact_store.write_text(
-                        context.run_id,
-                        context.workflow_id,
-                        f"generated-project/{file_path}",
-                        file_content,
-                        kind=KIND_GENERATED_PROJECT_FILE,
-                    )
+                meta = self.artifact_store.write_text(
+                    context.run_id,
+                    context.workflow_id,
+                    f"{GENERATED_PROJECT_DIR}/{file_path}",
+                    file_content,
+                    kind=KIND_GENERATED_PROJECT_FILE,
                 )
+                _record_artifact(meta)
+                if meta is not None:
+                    persisted_file_metas.append(meta)
+            ir_document_id = _text(_first_non_empty_mapping(ir_document).get("irId"))
+            project_manifest = _build_generated_project_manifest(
+                run_id=context.run_id,
+                workflow_id=context.workflow_id,
+                generated_project=generated_project,
+                persisted_files=[m.to_dict() for m in persisted_file_metas],
+                program_id=program_id,
+                ir_id=ir_document_id,
+                source_sha256=input_reference.sha256,
+            )
+            manifest_meta = self.artifact_store.write_json(
+                context.run_id,
+                context.workflow_id,
+                GENERATED_PROJECT_MANIFEST_FILE,
+                project_manifest,
+                kind=KIND_GENERATED_PROJECT_MANIFEST,
+            )
+            _record_artifact(manifest_meta)
+            generated_artifact_ref: Optional[Dict[str, Any]] = None
+            if manifest_meta is not None:
+                generated_artifact_ref = {
+                    "uri": manifest_meta.uri,
+                    "sha256": manifest_meta.sha256,
+                    "byteSize": manifest_meta.byteSize,
+                    "path": manifest_meta.path,
+                    "kind": manifest_meta.kind,
+                }
             completed_steps.append("generate-java")
             _write_summary("updating", message="generate-java completed")
 
@@ -496,6 +580,8 @@ class W0WorkflowRunner:
                 "generationResponse": generator_output.payload,
                 "sourceRef": _as_reference_payload(generator_output.input_ref),
             }
+            if generated_artifact_ref is not None:
+                build_test_input["generatedArtifactRef"] = generated_artifact_ref
             oracle_payload = _build_cobol_oracle_payload(
                 raw_source_text,
                 input_reference,
@@ -617,6 +703,7 @@ class W0WorkflowRunner:
                 build_test_output=build_test_output,
                 model_output=model_output,
                 trajectory_payload=trajectory_payload,
+                generated_artifact_ref=generated_artifact_ref,
             )
             evidence_output = self._invoke_step(
                 context,
@@ -717,16 +804,26 @@ class W0WorkflowRunner:
         build_test_output: WorkflowStepResult,
         model_output: Optional[Mapping[str, Any]],
         trajectory_payload: Mapping[str, Any],
+        generated_artifact_ref: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         trajectory_ref = _build_reference(
             f"urn:orchestrator/{context.run_id}/trajectory",
             trajectory_payload,
         )
         model_invocation = self._build_model_invocation_ref(context, model_output)
+        if generated_artifact_ref:
+            generated_java_payload: Mapping[str, Any] = {
+                "uri": str(generated_artifact_ref.get("uri") or ""),
+                "sha256": str(generated_artifact_ref.get("sha256") or ""),
+                "byteSize": int(generated_artifact_ref.get("byteSize") or 0),
+                "kind": str(generated_artifact_ref.get("kind") or KIND_GENERATED_PROJECT_MANIFEST),
+            }
+        else:
+            generated_java_payload = _as_reference_payload(generator_output.output_ref)
         artifacts = {
             "sourceCobol": [_as_reference_payload(input_ref)],
             "semanticIr": _as_reference_payload(_coerce_output_ref(ir_output.payload, generator_output.output_ref.uri, ir_output.payload)),
-            "generatedJava": _as_reference_payload(generator_output.output_ref),
+            "generatedJava": generated_java_payload,
             "buildTestResults": [_as_reference_payload(build_test_output.output_ref)],
             "harnessEvents": _as_reference_payload(trajectory_ref),
             "modelInvocations": [model_invocation],

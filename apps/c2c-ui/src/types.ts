@@ -80,6 +80,21 @@ export interface Diagnostic {
   message: string;
 }
 
+export interface GeneratedFileRef {
+  path: string;
+  absolutePath?: string;
+  uri?: string;
+  sha256?: string;
+  byteSize?: number;
+  mimeType?: string;
+}
+
+export interface GeneratedTraceability {
+  programId: string;
+  irId: string;
+  sourceHash: string;
+}
+
 export interface GeneratedView {
   runId: string;
   programId: string;
@@ -89,12 +104,47 @@ export interface GeneratedView {
   entryClass: string;
   entryFilePath: string;
   files: Record<string, string>;
+  fileRefs?: GeneratedFileRef[];
+  fileCount?: number;
   unsupportedFeatures: string[];
   openAssumptions: string[];
   note: string;
   outputRef?: OutputRef | null;
+  artifactRef?: OutputRef | null;
+  traceability?: GeneratedTraceability;
   diagnostics?: Diagnostic[];
   missingArtifacts?: string[];
+}
+
+export interface GeneratedFilesIndex {
+  runId: string;
+  programId: string;
+  mode: RunMode;
+  productMode?: ProductMode;
+  status: 'complete' | 'incomplete';
+  files: GeneratedFileRef[];
+  fileCount: number;
+  entryFilePath: string;
+  artifactRef: OutputRef | null;
+  missingArtifacts: string[];
+  note?: string;
+  orchestratorRunId?: string;
+}
+
+export interface GeneratedFileContent {
+  runId: string;
+  programId: string;
+  mode: RunMode;
+  productMode?: ProductMode;
+  path: string;
+  absolutePath: string;
+  content: string;
+  sha256: string;
+  byteSize: number;
+  mimeType: string;
+  uri: string;
+  kind: string;
+  orchestratorRunId?: string;
 }
 
 export type BuildTestStatus =

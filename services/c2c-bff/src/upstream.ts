@@ -98,6 +98,8 @@ export interface OrchestratorClient {
   getRun(runId: string): Promise<UpstreamResponse | undefined>;
   getArtifacts(runId: string): Promise<UpstreamResponse | undefined>;
   getGenerated(runId: string): Promise<UpstreamResponse | undefined>;
+  getGeneratedFiles(runId: string): Promise<UpstreamResponse | undefined>;
+  getGeneratedFile(runId: string, filePath: string): Promise<UpstreamResponse | undefined>;
   getBuildTest(runId: string): Promise<UpstreamResponse | undefined>;
   getEvidence(runId: string): Promise<UpstreamResponse | undefined>;
   getEvents(runId: string): Promise<UpstreamResponse | undefined>;
@@ -125,6 +127,12 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
         return undefined;
       },
       async getGenerated() {
+        return undefined;
+      },
+      async getGeneratedFiles() {
+        return undefined;
+      },
+      async getGeneratedFile() {
         return undefined;
       },
       async getBuildTest() {
@@ -200,6 +208,25 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
     },
     async getGenerated(runId: string) {
       return getRunScopedArtifact(runId, 'generated');
+    },
+    async getGeneratedFiles(runId: string) {
+      const safe = encodeURIComponent(runId);
+      return http.request(`${baseUrl}/v0/runs/${safe}/generated/files`, {
+        method: 'GET',
+        timeoutMs,
+      });
+    },
+    async getGeneratedFile(runId: string, filePath: string) {
+      const safeRun = encodeURIComponent(runId);
+      const encodedPath = filePath
+        .split('/')
+        .filter((segment) => segment.length > 0)
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+      return http.request(`${baseUrl}/v0/runs/${safeRun}/generated/files/${encodedPath}`, {
+        method: 'GET',
+        timeoutMs,
+      });
     },
     async getBuildTest(runId: string) {
       return getRunScopedArtifact(runId, 'build-test');
