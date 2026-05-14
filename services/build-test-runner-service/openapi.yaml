@@ -1,0 +1,180 @@
+openapi: 3.1.0
+info:
+  title: build-test-runner-service
+  version: 0.1.0
+  description: >
+    W0 capability service that compiles and runs generated Java projects from
+    target-java-generation-service, compares stdout against a Golden Master
+    fixture, classifies failures, and produces a hash-referenced result for
+    the Evidence Pack v0. Conformant to target-generator-contract-v0 because
+    it consumes a contract-shaped generated project payload.
+servers:
+  - url: http://localhost:8084
+    description: local
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v0/run-verification:
+    post:
+      summary: Compile, run, and compare a generated Java project
+      operationId: runVerification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunVerificationRequest"
+      responses:
+        "200":
+          description: Verification completed (status reflects the build/test outcome)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildTestResult"
+        "400":
+          description: Malformed request payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Verification could not be performed (missing project, missing golden master, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildTestResult"
+        "500":
+          description: Internal error inside the runner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+    RunVerificationRequest:
+      type: object
+      description: >
+        Caller passes either the contract-shaped "generatedProject" object
+        directly, or a "generationResponse" envelope (such as the response
+        returned by target-java-generation-service).
+      required: [programId]
+      properties:
+        runId:
+          type: string
+        workflowId:
+          type: string
+        sourceRef:
+          type: object
+          additionalProperties: true
+        programId:
+          type: string
+          description: Logical COBOL program id used to look up the Golden Master.
+        generatedProject:
+          type: object
+          additionalProperties: true
+        generationResponse:
+          type: object
+          additionalProperties: true
+        goldenMaster:
+          $ref: "#/components/schemas/GoldenMasterHint"
+        options:
+          $ref: "#/components/schemas/RunOptions"
+    GoldenMasterHint:
+      type: object
+      properties:
+        expected:
+          type: string
+        expectedRef:
+          type: object
+          properties:
+            path:
+              type: string
+        classification:
+          type: string
+          enum: [true, synthetic]
+        source:
+          type: string
+    RunOptions:
+      type: object
+      properties:
+        skipExecution:
+          type: boolean
+          default: false
+        compareOutput:
+          type: boolean
+          default: true
+        timeoutMs:
+          type: integer
+          minimum: 100
+          maximum: 30000
+          default: 5000
+    BuildTestResult:
+      type: object
+      required: [schemaVersion, capability, status, classification, outputRef]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        capability:
+          type: string
+          enum: ["build-test.run"]
+        runId:
+          type: string
+        workflowId:
+          type: string
+        programId:
+          type: string
+        status:
+          type: string
+          enum: [ok, compile-failed, run-failed, output-divergence, missing-golden-master, skipped]
+        classification:
+          type: string
+          enum:
+            - match
+            - divergence-known-w0-coverage-gap
+            - divergence-unknown
+            - compile-error
+            - run-error
+            - skipped-no-execution
+            - missing-golden-master
+        build:
+          type: object
+        execution:
+          type: object
+        tests:
+          type: object
+        goldenMaster:
+          type: object
+        comparison:
+          type: object
+        outputRef:
+          type: object
+        diagnostics:
+          type: array
+          items:
+            type: object
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        error:
+          type: string

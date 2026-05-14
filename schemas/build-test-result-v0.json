@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/build-test-result-v0.json",
+  "title": "Build/Test Result v0",
+  "description": "Structured envelope produced by build-test-runner-service for one verification of a generated target-language project against a Golden Master.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "capability",
+    "service",
+    "programId",
+    "status",
+    "classification",
+    "outputRef"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "capability": {
+      "type": "string",
+      "const": "build-test.run"
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string"
+    },
+    "workflowId": {
+      "type": "string"
+    },
+    "sourceRef": {
+      "type": "object"
+    },
+    "programId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "compile-failed",
+        "run-failed",
+        "output-divergence",
+        "missing-golden-master",
+        "skipped"
+      ]
+    },
+    "classification": {
+      "type": "string",
+      "enum": [
+        "match",
+        "divergence-known-w0-coverage-gap",
+        "divergence-unknown",
+        "compile-error",
+        "run-error",
+        "skipped-no-execution",
+        "missing-golden-master"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "build": {
+      "type": "object",
+      "properties": {
+        "compileOk": { "type": "boolean" },
+        "sourceCount": { "type": "integer", "minimum": 0 },
+        "fileCount": { "type": "integer", "minimum": 0 },
+        "diagnostics": { "type": "array" }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "ran": { "type": "boolean" },
+        "ok": { "type": "boolean" },
+        "exitCode": { "type": "integer" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "stdoutSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
+      }
+    },
+    "tests": {
+      "type": "object"
+    },
+    "goldenMaster": {
+      "type": "object",
+      "properties": {
+        "expected": { "type": "string" },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "classification": {
+          "type": "string",
+          "enum": ["true", "synthetic"]
+        },
+        "source": { "type": "string" }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "properties": {
+        "matched": { "type": "boolean" },
+        "actualSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
+      }
+    },
+    "outputRef": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string" },
+        "kind": { "type": "string" }
+      }
+    },
+    "diagnostics": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": true
+}

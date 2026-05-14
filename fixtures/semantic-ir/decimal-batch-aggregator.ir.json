@@ -1,0 +1,245 @@
+{
+  "schemaVersion": "v0",
+  "irId": "ir-batch01-sample",
+  "programId": "BATCH01",
+  "sourceHash": "sample",
+  "sourceKind": "cobol",
+  "symbols": {
+    "WS-TOTAL-LINE": {
+      "id": "d-ws-total-line-6",
+      "kind": "data-item",
+      "level": 1,
+      "line": 6,
+      "numeric": false,
+      "scale": 0
+    },
+    "WS-ROW": {
+      "id": "d-ws-row-7",
+      "kind": "data-item",
+      "level": 5,
+      "line": 7,
+      "numeric": true,
+      "scale": 0
+    },
+    "WS-ROW-LIMIT": {
+      "id": "d-ws-row-limit-8",
+      "kind": "data-item",
+      "level": 5,
+      "line": 8,
+      "numeric": true,
+      "scale": 0
+    },
+    "WS-ACCUMULATOR": {
+      "id": "d-ws-accumulator-9",
+      "kind": "data-item",
+      "level": 5,
+      "line": 9,
+      "numeric": true,
+      "scale": 2
+    },
+    "WS-UNIT-COST": {
+      "id": "d-ws-unit-cost-10",
+      "kind": "data-item",
+      "level": 5,
+      "line": 10,
+      "numeric": true,
+      "scale": 2
+    },
+    "WS-UNITS": {
+      "id": "d-ws-units-11",
+      "kind": "data-item",
+      "level": 5,
+      "line": 11,
+      "numeric": true,
+      "scale": 0
+    },
+    "WS-LINE-TOTAL": {
+      "id": "d-ws-line-total-12",
+      "kind": "data-item",
+      "level": 5,
+      "line": 12,
+      "numeric": true,
+      "scale": 2
+    }
+  },
+  "fieldLayouts": [
+    {
+      "id": "d-ws-total-line-6",
+      "name": "WS-TOTAL-LINE",
+      "level": 1,
+      "picture": null,
+      "byteSize": 0,
+      "occurs": null,
+      "numeric": false,
+      "signed": false,
+      "scale": 0,
+      "sourceLine": 6
+    },
+    {
+      "id": "d-ws-row-7",
+      "name": "WS-ROW",
+      "level": 5,
+      "picture": "99",
+      "byteSize": 2,
+      "occurs": null,
+      "numeric": true,
+      "signed": false,
+      "scale": 0,
+      "sourceLine": 7
+    },
+    {
+      "id": "d-ws-row-limit-8",
+      "name": "WS-ROW-LIMIT",
+      "level": 5,
+      "picture": "99",
+      "byteSize": 2,
+      "occurs": null,
+      "numeric": true,
+      "signed": false,
+      "scale": 0,
+      "sourceLine": 8
+    },
+    {
+      "id": "d-ws-accumulator-9",
+      "name": "WS-ACCUMULATOR",
+      "level": 5,
+      "picture": "S9(8)V99",
+      "byteSize": 11,
+      "occurs": null,
+      "numeric": true,
+      "signed": true,
+      "scale": 2,
+      "sourceLine": 9
+    },
+    {
+      "id": "d-ws-unit-cost-10",
+      "name": "WS-UNIT-COST",
+      "level": 5,
+      "picture": "S9(4)V99",
+      "byteSize": 7,
+      "occurs": null,
+      "numeric": true,
+      "signed": true,
+      "scale": 2,
+      "sourceLine": 10
+    },
+    {
+      "id": "d-ws-units-11",
+      "name": "WS-UNITS",
+      "level": 5,
+      "picture": "99",
+      "byteSize": 2,
+      "occurs": null,
+      "numeric": true,
+      "signed": false,
+      "scale": 0,
+      "sourceLine": 11
+    },
+    {
+      "id": "d-ws-line-total-12",
+      "name": "WS-LINE-TOTAL",
+      "level": 5,
+      "picture": "S9(8)V99",
+      "byteSize": 11,
+      "occurs": null,
+      "numeric": true,
+      "signed": true,
+      "scale": 2,
+      "sourceLine": 12
+    }
+  ],
+  "statements": [
+    {
+      "id": "s-perform-15-1",
+      "operation": "perform",
+      "sourceLine": 15,
+      "operands": {
+        "tokens": ["PERFORM", "UNTIL", "WS-ROW", ">", "WS-ROW-LIMIT"]
+      },
+      "raw": "PERFORM UNTIL WS-ROW > WS-ROW-LIMIT"
+    },
+    {
+      "id": "s-compute-16-1",
+      "operation": "compute",
+      "sourceLine": 16,
+      "operands": {
+        "target": "WS-LINE-TOTAL",
+        "expression": "WS-ROW * WS-UNITS * WS-UNIT-COST"
+      },
+      "raw": "COMPUTE WS-LINE-TOTAL = WS-ROW * WS-UNITS * WS-UNIT-COST"
+    },
+    {
+      "id": "s-add-17-1",
+      "operation": "add",
+      "sourceLine": 17,
+      "operands": {
+        "source": "WS-LINE-TOTAL",
+        "target": "WS-ACCUMULATOR"
+      },
+      "raw": "ADD WS-LINE-TOTAL TO WS-ACCUMULATOR"
+    },
+    {
+      "id": "s-display-18-1",
+      "operation": "display",
+      "sourceLine": 18,
+      "operands": {
+        "items": ["\"LINE=\"", "WS-ROW", "\"TOTAL=\"", "WS-LINE-TOTAL"]
+      },
+      "raw": "DISPLAY \"LINE=\" WS-ROW \"TOTAL=\" WS-LINE-TOTAL"
+    },
+    {
+      "id": "s-add-19-1",
+      "operation": "add",
+      "sourceLine": 19,
+      "operands": {
+        "source": "1",
+        "target": "WS-ROW"
+      },
+      "raw": "ADD 1 TO WS-ROW"
+    },
+    {
+      "id": "s-end-perform-20-1",
+      "operation": "end_perform",
+      "sourceLine": 20,
+      "operands": {},
+      "raw": "END-PERFORM"
+    },
+    {
+      "id": "s-display-22-1",
+      "operation": "display",
+      "sourceLine": 22,
+      "operands": {
+        "items": ["\"BATCH-TOTAL=\"", "WS-ACCUMULATOR"]
+      },
+      "raw": "DISPLAY \"BATCH-TOTAL=\" WS-ACCUMULATOR"
+    },
+    {
+      "id": "s-stop-23-1",
+      "operation": "stop",
+      "sourceLine": 23,
+      "operands": {},
+      "raw": "STOP RUN."
+    }
+  ],
+  "controlFlow": [
+    {
+      "id": "e-s-perform-15-1-s-compute-16-1-next",
+      "from": "s-perform-15-1",
+      "to": "s-compute-16-1",
+      "label": "next"
+    }
+  ],
+  "assumptions": [
+    "W0 control-flow edges are structural and intentionally conservative."
+  ],
+  "traceability": {
+    "s-perform-15-1": {
+      "line": 15,
+      "raw": "PERFORM UNTIL WS-ROW > WS-ROW-LIMIT"
+    },
+    "s-compute-16-1": {
+      "line": 16,
+      "raw": "COMPUTE WS-LINE-TOTAL = WS-ROW * WS-UNITS * WS-UNIT-COST"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "v0",
+  "description": "Golden Master registry consumed by build-test-runner-service. Each entry maps a COBOL programId to an expected stdout fixture and records whether the fixture was produced by a true COBOL runtime (e.g. GnuCOBOL cobcrun) or hand-curated as a synthetic expected output. W0 entries are all synthetic; true GnuCOBOL re-execution will be added in a follow-up wave once the host CI image carries cobc.",
+  "entries": [
+    {
+      "programId": "BRNCH01",
+      "cobolSource": "corpus/synthetic/programs/branch-account-guard.cbl",
+      "expectedOutputPath": "corpus/synthetic/fixtures/branch-account-guard-output.txt",
+      "classification": "synthetic",
+      "knownDivergenceAtW0": true,
+      "rationale": "Hand-curated expected output. The W0 generator does not yet translate PERFORM/EVALUATE/IF/ADD, so a generated-Java run is expected to diverge until generator coverage extends past W0."
+    },
+    {
+      "programId": "CTRLDEC01",
+      "cobolSource": "corpus/synthetic/programs/ctrl-decimal-payroll.cbl",
+      "expectedOutputPath": "corpus/synthetic/fixtures/ctrl-decimal-payroll-output.txt",
+      "classification": "synthetic",
+      "knownDivergenceAtW0": true,
+      "rationale": "Hand-curated expected output. The W0 generator does not yet translate COMPUTE or DISPLAY of computed values, so generated-Java runs diverge by design at W0."
+    },
+    {
+      "programId": "BATCH01",
+      "cobolSource": "corpus/synthetic/programs/decimal-batch-aggregator.cbl",
+      "expectedOutputPath": "corpus/synthetic/fixtures/decimal-batch-aggregator-output.txt",
+      "classification": "synthetic",
+      "knownDivergenceAtW0": true,
+      "rationale": "Hand-curated expected output. The W0 generator does not yet translate PERFORM/COMPUTE/ADD, so generated-Java runs diverge by design at W0."
+    }
+  ]
+}

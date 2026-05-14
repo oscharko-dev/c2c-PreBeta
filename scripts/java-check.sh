@@ -14,6 +14,7 @@ SERVICES=(
   "services/cobol-parser-service"
   "services/semantic-ir-service"
   "services/target-java-generation-service"
+  "services/build-test-runner-service"
 )
 
 # target-java-generation-service depends on c2c-target-java-runtime, so install
@@ -21,6 +22,14 @@ SERVICES=(
 if [ -f "libs/c2c-target-java-runtime/pom.xml" ]; then
   echo "Installing c2c-target-java-runtime to the local Maven repository"
   (cd "libs/c2c-target-java-runtime" && mvn -q -DskipTests install)
+fi
+
+# build-test-runner-service uses target-java-generation-service as a test-scope
+# dependency (the W0 smoke integration test re-runs the generator before
+# invoking the runner). Install it to the local repo before per-service tests.
+if [ -f "services/target-java-generation-service/pom.xml" ]; then
+  echo "Installing target-java-generation-service to the local Maven repository"
+  (cd "services/target-java-generation-service" && mvn -q -DskipTests install)
 fi
 
 for service_dir in "${SERVICES[@]}"; do
