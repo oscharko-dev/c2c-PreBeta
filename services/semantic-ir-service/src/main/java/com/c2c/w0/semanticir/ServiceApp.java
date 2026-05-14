@@ -89,6 +89,7 @@ public final class ServiceApp {
             event.put("outputRef", response.get("outputRef"));
             event.put("payload", Map.of("irId", ((Map<?, ?>) response.get("ir")).get("irId")));
             event.put("createdAt", Instant.now().toString());
+            //noinspection HttpHeaders
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
                     .header("Content-Type", "application/json")
                     .header("X-Harness-Actor", SERVICE_NAME)
@@ -99,7 +100,9 @@ public final class ServiceApp {
             HttpRequest request = builder
                     .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(event)))
                     .build();
-            HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding());
+            try (HttpClient client = HttpClient.newHttpClient()) {
+                client.send(request, HttpResponse.BodyHandlers.discarding());
+            }
         } catch (Exception ignored) {
             // Harness eventing is best effort for capability services.
         }

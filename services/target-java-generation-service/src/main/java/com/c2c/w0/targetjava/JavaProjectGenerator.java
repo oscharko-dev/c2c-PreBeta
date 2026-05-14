@@ -303,9 +303,10 @@ final class JavaProjectGenerator {
             if (target == null) {
                 continue;
             }
-            String expr = target.accessor() + ".numericValue()";
+            StringBuilder expr = new StringBuilder(target.accessor()).append(".numericValue()");
             for (String source : sources) {
-                expr += "." + method + "(" + numericExpression(source, state, line, stmtId) + ")";
+                expr.append(".").append(method).append("(")
+                        .append(numericExpression(source, state, line, stmtId)).append(")");
             }
             code.add(target.accessor() + ".setNumericValue(" + expr + ");");
         }
@@ -1293,7 +1294,7 @@ final class JavaProjectGenerator {
         }
 
         private String parseAddSub() {
-            String left = parseMulDiv();
+            StringBuilder left = new StringBuilder(parseMulDiv());
             while (pos < tokens.size()) {
                 String op = tokens.get(pos);
                 if (!"+".equals(op) && !"-".equals(op)) {
@@ -1301,13 +1302,13 @@ final class JavaProjectGenerator {
                 }
                 pos++;
                 String right = parseMulDiv();
-                left = left + ("+".equals(op) ? ".add(" : ".subtract(") + right + ")";
+                left.append("+".equals(op) ? ".add(" : ".subtract(").append(right).append(")");
             }
-            return left;
+            return left.toString();
         }
 
         private String parseMulDiv() {
-            String left = parseFactor();
+            StringBuilder left = new StringBuilder(parseFactor());
             while (pos < tokens.size()) {
                 String op = tokens.get(pos);
                 if (!"*".equals(op) && !"/".equals(op)) {
@@ -1315,9 +1316,9 @@ final class JavaProjectGenerator {
                 }
                 pos++;
                 String right = parseFactor();
-                left = left + ("*".equals(op) ? ".multiply(" : ".divide(") + right + ")";
+                left.append("*".equals(op) ? ".multiply(" : ".divide(").append(right).append(")");
             }
-            return left;
+            return left.toString();
         }
 
         private String parseFactor() {

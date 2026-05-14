@@ -174,6 +174,7 @@ public final class ServiceApp {
                 event.put("payload", payload);
 
                 String eventText = JSON.writeValueAsString(event);
+                //noinspection HttpHeaders
                 HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(eventEndpoint))
                         .header("Content-Type", "application/json")
                         .header("X-Harness-Actor", SERVICE_NAME)
@@ -184,7 +185,9 @@ public final class ServiceApp {
                 HttpRequest request = builder
                         .POST(HttpRequest.BodyPublishers.ofString(eventText))
                         .build();
-                HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding());
+                try (HttpClient client = HttpClient.newHttpClient()) {
+                    client.send(request, HttpResponse.BodyHandlers.discarding());
+                }
             } catch (Exception ignored) {
                 // best effort eventing
             }

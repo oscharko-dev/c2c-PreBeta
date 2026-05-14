@@ -74,6 +74,9 @@ final class GeneratedProgramRunner {
         PrintStream stdoutStream = new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8);
         PrintStream stderrStream = new PrintStream(stderrCapture, true, StandardCharsets.UTF_8);
 
+        // shutdownNow() in the finally block is required so timed-out tasks are
+        // forcibly cancelled instead of waiting for graceful executor.close().
+        //noinspection AutoCloseableResource
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "c2c-build-test-runner");
             t.setDaemon(true);

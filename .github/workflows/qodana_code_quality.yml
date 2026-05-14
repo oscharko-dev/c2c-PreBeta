@@ -12,8 +12,12 @@ on:
       - main
       - dev
 
+# Polyglot coverage: each linter scans the languages it supports. A repo with
+# Java + Python + Go + TypeScript needs four separate Qodana jobs because a
+# single linter image only inspects one ecosystem.
 jobs:
-  qodana:
+  qodana-jvm:
+    name: Qodana (JVM)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,17 +28,90 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: 'Qodana Scan'
+      - name: 'Qodana Scan (JVM)'
         uses: JetBrains/qodana-action@v2026.1
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
         with:
-          # When pr-mode is set to true, Qodana analyzes only the files that have been changed
+          args: --linter,jetbrains/qodana-jvm:2026.1
           pr-mode: false
           use-caches: true
           post-pr-comment: true
           use-annotations: true
-          # Upload Qodana results (SARIF, other artifacts, logs) as an artifact to the job
           upload-result: false
-          # quick-fixes available in Ultimate and Ultimate Plus plans
+          push-fixes: 'none'
+
+  qodana-python:
+    name: Qodana (Python)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: 'Qodana Scan (Python)'
+        uses: JetBrains/qodana-action@v2026.1
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_PYTHON || secrets.QODANA_TOKEN }}
+        with:
+          args: --linter,jetbrains/qodana-python:2026.1
+          pr-mode: false
+          use-caches: true
+          post-pr-comment: false
+          use-annotations: true
+          upload-result: false
+          push-fixes: 'none'
+
+  qodana-go:
+    name: Qodana (Go)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: 'Qodana Scan (Go)'
+        uses: JetBrains/qodana-action@v2026.1
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_GO || secrets.QODANA_TOKEN }}
+        with:
+          args: --linter,jetbrains/qodana-go:2026.1
+          pr-mode: false
+          use-caches: true
+          post-pr-comment: false
+          use-annotations: true
+          upload-result: false
+          push-fixes: 'none'
+
+  qodana-js:
+    name: Qodana (JS/TS)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: 'Qodana Scan (JS/TS)'
+        uses: JetBrains/qodana-action@v2026.1
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_JS || secrets.QODANA_TOKEN }}
+        with:
+          args: --linter,jetbrains/qodana-js:2026.1
+          pr-mode: false
+          use-caches: true
+          post-pr-comment: false
+          use-annotations: true
+          upload-result: false
           push-fixes: 'none'
