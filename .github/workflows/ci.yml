@@ -21,6 +21,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enforce PR source policy for main
+        if: github.event_name == 'pull_request'
+        run: |
+          if [[ "${{ github.base_ref }}" == "main" && "${{ github.head_ref }}" != "dev" ]]; then
+            echo "Rejecting PR to main. main accepts only PRs from dev."
+            exit 1
+          fi
+
       - name: Check for merge-conflict markers
         run: |
           if git grep -n -I -E '^(<<<<<<< |=======|>>>>>>>)' -- . ':!.git'; then
