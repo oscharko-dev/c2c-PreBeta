@@ -124,10 +124,44 @@ test('orchestrator and evidence clients are disabled when no base url is configu
   assert.equal(await orch.startRun({ programId: 'x', cobolSourcePath: 'y' }), undefined);
   assert.equal(await orch.startTransformRun({ programId: 'x', sourceText: 'y' }), undefined);
   assert.equal(await orch.getRun('z'), undefined);
+  assert.equal(await orch.getArtifacts('z'), undefined);
+  assert.equal(await orch.getGenerated('z'), undefined);
+  assert.equal(await orch.getBuildTest('z'), undefined);
+  assert.equal(await orch.getEvidence('z'), undefined);
+  assert.equal(await orch.getEvents('z'), undefined);
 
   const ev = createEvidenceClient('', client, 1_000);
   assert.equal(ev.enabled, false);
   assert.equal(await ev.getPack('any'), undefined);
+});
+
+test('orchestrator client encodes run id and routes artifact endpoints', async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({ runId: 'run-1' });
+      res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      await orch.getArtifacts('run a/b');
+      await orch.getGenerated('run a/b');
+      await orch.getBuildTest('run a/b');
+      await orch.getEvidence('run a/b');
+      await orch.getEvents('run a/b');
+      assert.deepEqual(
+        captured.map((entry) => entry.path),
+        [
+          '/v0/runs/run%20a%2Fb/artifacts',
+          '/v0/runs/run%20a%2Fb/generated',
+          '/v0/runs/run%20a%2Fb/build-test',
+          '/v0/runs/run%20a%2Fb/evidence',
+          '/v0/runs/run%20a%2Fb/events',
+        ],
+      );
+    },
+  );
 });
 
 test('evidence client encodes pack id and proxies status', async () => {

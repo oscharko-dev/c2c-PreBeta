@@ -9,6 +9,16 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
+from .artifacts import (
+    KIND_BUILD_TEST_RESULT,
+    KIND_EVIDENCE_PACK_MANIFEST,
+    KIND_GENERATED_PROJECT_FILE,
+    KIND_GENERATION_RESPONSE,
+    KIND_MODEL_INVOCATION_LEDGER,
+    KIND_MODEL_POLICY_SKIPPED,
+    KIND_TRAJECTORY_LEDGER,
+    RunArtifactStore,
+)
 from .client import JSONHTTPClient
 from .config import OrchestratorConfig, load_config
 from .client import HttpClientError
@@ -51,9 +61,15 @@ def _register_capabilities_with_harness(
 class OrchestratorService:
     """Small HTTP facade for asynchronous workflow execution."""
 
-    def __init__(self, config: OrchestratorConfig, runner: W0WorkflowRunner):
+    def __init__(
+        self,
+        config: OrchestratorConfig,
+        runner: W0WorkflowRunner,
+        artifact_store: Optional[RunArtifactStore] = None,
+    ):
         self.config = config
         self.runner = runner
+        self.artifact_store = artifact_store or runner.artifact_store
         self.lock = threading.Lock()
         self.logger = logging.getLogger(__name__)
 
@@ -111,6 +127,12 @@ class OrchestratorService:
                             return
                         self._write_json(200, run_state)
                         return
+                    if len(parts) == 4 and parts[0] == "v0" and parts[1] == "runs":
+                        run_id = parts[2]
+                        artifact_path = parts[3]
+                        status, payload = service._artifact_endpoint(run_id, artifact_path)
+                        self._write_json(status, payload)
+                        return
                     self._write_json(404, {"error": "not found"})
                 except Exception as exc:
                     if isinstance(exc, UpstreamServiceError):
@@ -145,6 +167,134 @@ class OrchestratorService:
                 return
 
         return RequestHandler
+
+    def _artifact_endpoint(self, run_id: str, action: str) -> Tuple[int, Dict[str, Any]]:
+        if not self.artifact_store.has_run(run_id):
+            return 404, {"error": "run not found", "runId": run_id}
+        summary = self.artifact_store.read_summary(run_id) or {}
+        run_status = str(summary.get("status") or "incomplete")
+        program_id = summary.get("programId") or ""
+        workflow_id = summary.get("workflowId") or self.config.workflow_id
+        envelope_base = {
+            "runId": run_id,
+            "workflowId": workflow_id,
+            "programId": program_id,
+            "runStatus": run_status,
+        }
+        if action == "artifacts":
+            index = self.artifact_store.read_index(run_id) or {}
+            return 200, {
+                **envelope_base,
+                "artifacts": index.get("artifacts", []),
+                "createdAt": index.get("createdAt"),
+                "updatedAt": index.get("updatedAt"),
+                "summary": summary,
+            }
+        if action == "generated":
+            return 200, self._generated_view(run_id, envelope_base)
+        if action == "build-test":
+            return 200, self._artifact_payload(
+                run_id,
+                envelope_base,
+                relpath="build-test-result.json",
+                kind=KIND_BUILD_TEST_RESULT,
+                missing_label="build-test-result",
+            )
+        if action == "evidence":
+            return 200, self._artifact_payload(
+                run_id,
+                envelope_base,
+                relpath="evidence-pack-manifest.json",
+                kind=KIND_EVIDENCE_PACK_MANIFEST,
+                missing_label="evidence-pack-manifest",
+            )
+        if action == "events":
+            return 200, self._events_view(run_id, envelope_base)
+        return 404, {"error": "not found"}
+
+    def _artifact_payload(
+        self,
+        run_id: str,
+        envelope: Dict[str, Any],
+        *,
+        relpath: str,
+        kind: str,
+        missing_label: str,
+    ) -> Dict[str, Any]:
+        data = self.artifact_store.read_json(run_id, relpath)
+        meta = self.artifact_store.find_metadata(run_id, relpath)
+        if data is None:
+            return {
+                **envelope,
+                "status": "incomplete",
+                "missingArtifacts": [missing_label],
+                "data": None,
+                "artifactRef": None,
+            }
+        return {
+            **envelope,
+            "status": "complete",
+            "missingArtifacts": [],
+            "data": data,
+            "artifactRef": meta,
+            "kind": kind,
+        }
+
+    def _generated_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+        response = self.artifact_store.read_json(run_id, "generation-response.json")
+        response_meta = self.artifact_store.find_metadata(run_id, "generation-response.json")
+        file_metas = self.artifact_store.find_by_kind(run_id, KIND_GENERATED_PROJECT_FILE)
+        files: Dict[str, str] = {}
+        prefix = "generated-project/"
+        for entry in file_metas:
+            relpath = str(entry.get("path") or "")
+            if not relpath.startswith(prefix):
+                continue
+            content = self.artifact_store.read_bytes(run_id, relpath)
+            if content is None:
+                continue
+            files[relpath[len(prefix):]] = content.decode("utf-8", errors="replace")
+        missing: List[str] = []
+        if response is None:
+            missing.append("generation-response")
+        if not files:
+            missing.append("generated-project")
+        generated_project = {}
+        if isinstance(response, dict):
+            project = response.get("generatedProject")
+            if isinstance(project, dict):
+                generated_project = project
+        return {
+            **envelope,
+            "status": "incomplete" if missing else "complete",
+            "missingArtifacts": missing,
+            "entryClass": str(generated_project.get("entryClass") or ""),
+            "entryFilePath": str(generated_project.get("entryFilePath") or ""),
+            "fileCount": len(files),
+            "files": files,
+            "unsupportedFeatures": list(generated_project.get("unsupportedFeatures", []) or []),
+            "openAssumptions": list(generated_project.get("openAssumptions", []) or []),
+            "generationResponse": response,
+            "generationResponseRef": response_meta,
+            "fileRefs": file_metas,
+        }
+
+    def _events_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+        ledger = self.artifact_store.read_json(run_id, "trajectory-ledger.json")
+        ledger_meta = self.artifact_store.find_metadata(run_id, "trajectory-ledger.json")
+        events: List[Dict[str, Any]] = []
+        if isinstance(ledger, dict):
+            raw_events = ledger.get("events")
+            if isinstance(raw_events, list):
+                events = [entry for entry in raw_events if isinstance(entry, dict)]
+        missing = [] if ledger is not None else ["trajectory-ledger"]
+        return {
+            **envelope,
+            "status": "incomplete" if missing else "complete",
+            "missingArtifacts": missing,
+            "events": events,
+            "trajectoryRef": ledger_meta,
+        }
 
     def _run_state(self, run_id: str) -> Optional[Dict[str, Any]]:
         try:
@@ -226,8 +376,9 @@ def create_http_server(
     *,
     host: str = "0.0.0.0",
     port: int = 8084,
+    artifact_store: Optional[RunArtifactStore] = None,
 ) -> HTTPServer:
-    service = OrchestratorService(config, runner)
+    service = OrchestratorService(config, runner, artifact_store=artifact_store)
     server = HTTPServer((host, port), service.handler_factory())
     return server
 
@@ -243,9 +394,17 @@ def create_configured_server(config: OrchestratorConfig) -> Tuple[HTTPServer, W0
     http_client = JSONHTTPClient(timeout_seconds=config.request_timeout_seconds)
     gateway = HarnessGateway(config.harness_base_url, http_client, harness_headers=harness_headers)
     _register_capabilities_with_harness(config=config, gateway=gateway)
-    runner = W0WorkflowRunner(config=config, gateway=gateway)
+    artifact_store = RunArtifactStore(config.run_artifact_root, created_by=config.service_name)
+    runner = W0WorkflowRunner(config=config, gateway=gateway, artifact_store=artifact_store)
     host, port = _split_listen_address(config.listen_addr)
-    return create_http_server(config=config, runner=runner, host=host, port=port), runner
+    server = create_http_server(
+        config=config,
+        runner=runner,
+        host=host,
+        port=port,
+        artifact_store=artifact_store,
+    )
+    return server, runner
 
 
 def _split_listen_address(listen_addr: str) -> Tuple[str, int]:

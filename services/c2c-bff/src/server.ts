@@ -180,6 +180,7 @@ function runLinks(runId: string): Record<string, string> {
     generated: `/api/v0/runs/${runId}/generated`,
     buildTest: `/api/v0/runs/${runId}/build-test`,
     evidence: `/api/v0/runs/${runId}/evidence`,
+    artifacts: `/api/v0/runs/${runId}/artifacts`,
   };
 }
 
@@ -225,72 +226,287 @@ function resolveTransformProgramId(sourceText: string, requestedProgramId?: stri
   return extractProgramIdFromSourceText(sourceText);
 }
 
-function generatedView(stored: StoredRun): Record<string, unknown> {
-  if (stored.mode === 'mock' && stored.mock) {
-    return {
-      runId: stored.runId,
-      programId: stored.programId,
-      mode: 'mock',
-      ...stored.mock.generated,
-    };
-  }
+function mockGeneratedView(stored: StoredRun): Record<string, unknown> {
+  if (!stored.mock) return {};
   return {
     runId: stored.runId,
     programId: stored.programId,
-    mode: stored.mode,
-    status: 'skipped',
-    entryClass: '',
-    entryFilePath: '',
-    files: {},
-    unsupportedFeatures: [],
-    openAssumptions: [],
-    note: 'Live generated-Java retrieval is not wired in W0 BFF; consult target-java-generation-service directly when running the full mesh.',
+    mode: 'mock',
+    ...stored.mock.generated,
   };
 }
 
-function buildTestView(stored: StoredRun): Record<string, unknown> {
-  if (stored.mode === 'mock' && stored.mock) {
-    return {
-      runId: stored.runId,
-      programId: stored.programId,
-      mode: 'mock',
-      expectedOutput: stored.sample.expectedOutput,
-      ...stored.mock.buildTest,
-    };
-  }
+function mockBuildTestView(stored: StoredRun): Record<string, unknown> {
+  if (!stored.mock) return {};
   return {
     runId: stored.runId,
     programId: stored.programId,
-    mode: stored.mode,
-    status: 'skipped',
-    classification: 'skipped-no-execution',
+    mode: 'mock',
     expectedOutput: stored.sample.expectedOutput,
-    actualOutput: '',
-    outputRef: '',
-    note: 'Live build/test retrieval is not wired in W0 BFF; consult build-test-runner-service directly when running the full mesh.',
+    ...stored.mock.buildTest,
   };
 }
 
-function evidenceView(stored: StoredRun): Record<string, unknown> {
-  if (stored.mode === 'mock' && stored.mock) {
-    return {
-      runId: stored.runId,
-      programId: stored.programId,
-      mode: 'mock',
-      ...stored.mock.evidence,
-    };
-  }
+function mockEvidenceView(stored: StoredRun): Record<string, unknown> {
+  if (!stored.mock) return {};
+  return {
+    runId: stored.runId,
+    programId: stored.programId,
+    mode: 'mock',
+    ...stored.mock.evidence,
+  };
+}
+
+function liveArtifactRunId(stored: StoredRun): string | undefined {
+  return stored.liveRunId && stored.liveRunId.length > 0 ? stored.liveRunId : undefined;
+}
+
+function incompleteEnvelope(
+  stored: StoredRun,
+  missing: string[],
+  note: string,
+): Record<string, unknown> {
   return {
     runId: stored.runId,
     programId: stored.programId,
     mode: stored.mode,
     status: 'incomplete',
-    packId: '',
-    manifestUri: '',
-    exportUri: '',
-    missingArtifacts: [],
-    note: 'Live evidence retrieval requires evidence-service to expose a pack id for this run. Use the orchestrator response or evidence-service /v0/packs to look it up.',
+    missingArtifacts: missing,
+    note,
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function classifyGeneratedStatus(missing: string[], runStatus: string | undefined): 'generated' | 'unsupported' | 'skipped' {
+  if (missing.length === 0) return 'generated';
+  if (runStatus === 'failed') return 'unsupported';
+  return 'skipped';
+}
+
+function classifyBuildTestStatus(missing: string[], runStatus: string | undefined, data: Record<string, unknown> | undefined): {
+  status: 'ok' | 'compile-failed' | 'run-failed' | 'output-divergence' | 'golden-master-reproduction-failed' | 'missing-golden-master' | 'skipped';
+  classification: 'match' | 'divergence-known-w0-coverage-gap' | 'divergence-unknown' | 'true-golden-master-reproduction-error' | 'true-golden-master-mismatch' | 'compile-error' | 'run-error' | 'skipped-no-execution';
+} {
+  if (missing.length > 0) {
+    return runStatus === 'failed'
+      ? { status: 'run-failed', classification: 'run-error' }
+      : { status: 'skipped', classification: 'skipped-no-execution' };
+  }
+  const upstreamStatus = typeof data?.status === 'string' ? data.status : '';
+  const upstreamClassification = typeof data?.classification === 'string' ? data.classification : '';
+  const allowedStatus = new Set([
+    'ok',
+    'compile-failed',
+    'run-failed',
+    'output-divergence',
+    'golden-master-reproduction-failed',
+    'missing-golden-master',
+    'skipped',
+  ]);
+  const allowedClassification = new Set([
+    'match',
+    'divergence-known-w0-coverage-gap',
+    'divergence-unknown',
+    'true-golden-master-reproduction-error',
+    'true-golden-master-mismatch',
+    'compile-error',
+    'run-error',
+    'skipped-no-execution',
+  ]);
+  const status = allowedStatus.has(upstreamStatus) ? (upstreamStatus as 'ok') : 'ok';
+  const classification = allowedClassification.has(upstreamClassification) ? (upstreamClassification as 'match') : 'match';
+  return { status, classification };
+}
+
+async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
+  const liveRunId = liveArtifactRunId(stored);
+  if (!liveRunId || !orchestrator.enabled) {
+    return incompleteEnvelope(stored, ['generation-response'], 'Live run id is unavailable; orchestrator has not yet accepted this run.');
+  }
+  try {
+    const upstream = await orchestrator.getGenerated(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return incompleteEnvelope(stored, ['generation-response'], 'Orchestrator did not return generated-Java artifacts for this run.');
+    }
+    const envelope = asRecord(upstream.body) ?? {};
+    const missing = Array.isArray(envelope.missingArtifacts)
+      ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    const runStatus = typeof envelope.runStatus === 'string' ? envelope.runStatus : '';
+    const filesRaw = asRecord(envelope.files) ?? {};
+    const files: Record<string, string> = {};
+    for (const [key, value] of Object.entries(filesRaw)) {
+      if (typeof value === 'string') files[key] = value;
+    }
+    const status = classifyGeneratedStatus(missing, runStatus);
+    return {
+      runId: stored.runId,
+      programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+      mode: 'live',
+      status,
+      entryClass: typeof envelope.entryClass === 'string' ? envelope.entryClass : '',
+      entryFilePath: typeof envelope.entryFilePath === 'string' ? envelope.entryFilePath : '',
+      files,
+      fileCount: typeof envelope.fileCount === 'number' ? envelope.fileCount : Object.keys(files).length,
+      unsupportedFeatures: Array.isArray(envelope.unsupportedFeatures) ? envelope.unsupportedFeatures : [],
+      openAssumptions: Array.isArray(envelope.openAssumptions) ? envelope.openAssumptions : [],
+      missingArtifacts: missing,
+      orchestratorRunId: liveRunId,
+      generationResponseRef: envelope.generationResponseRef ?? null,
+    };
+  } catch (err) {
+    return incompleteEnvelope(stored, ['generation-response'], err instanceof Error ? err.message : 'orchestrator request failed');
+  }
+}
+
+async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
+  const liveRunId = liveArtifactRunId(stored);
+  if (!liveRunId || !orchestrator.enabled) {
+    return {
+      ...incompleteEnvelope(stored, ['build-test-result'], 'Live run id is unavailable; orchestrator has not yet accepted this run.'),
+      classification: 'skipped-no-execution',
+      expectedOutput: stored.sample.expectedOutput,
+    };
+  }
+  try {
+    const upstream = await orchestrator.getBuildTest(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return {
+        ...incompleteEnvelope(stored, ['build-test-result'], 'Orchestrator did not return a build/test result for this run.'),
+        classification: 'skipped-no-execution',
+        expectedOutput: stored.sample.expectedOutput,
+      };
+    }
+    const envelope = asRecord(upstream.body) ?? {};
+    const data = asRecord(envelope.data);
+    const missing = Array.isArray(envelope.missingArtifacts)
+      ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    const runStatus = typeof envelope.runStatus === 'string' ? envelope.runStatus : '';
+    const { status, classification } = classifyBuildTestStatus(missing, runStatus, data);
+    return {
+      runId: stored.runId,
+      programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+      mode: 'live',
+      status,
+      classification,
+      expectedOutput: stored.sample.expectedOutput,
+      actualOutput: typeof data?.actualOutput === 'string' ? data.actualOutput : '',
+      outputRef: typeof data?.outputRef === 'string'
+        ? data.outputRef
+        : (typeof (asRecord(data?.outputRef)?.uri) === 'string' ? String(asRecord(data?.outputRef)!.uri) : ''),
+      missingArtifacts: missing,
+      orchestratorRunId: liveRunId,
+      artifactRef: envelope.artifactRef ?? null,
+    };
+  } catch (err) {
+    return {
+      ...incompleteEnvelope(stored, ['build-test-result'], err instanceof Error ? err.message : 'orchestrator request failed'),
+      classification: 'skipped-no-execution',
+      expectedOutput: stored.sample.expectedOutput,
+    };
+  }
+}
+
+async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
+  const liveRunId = liveArtifactRunId(stored);
+  if (!liveRunId || !orchestrator.enabled) {
+    return {
+      ...incompleteEnvelope(stored, ['evidence-pack-manifest'], 'Live run id is unavailable; orchestrator has not yet accepted this run.'),
+      packId: '',
+      manifestUri: '',
+    };
+  }
+  try {
+    const upstream = await orchestrator.getEvidence(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return {
+        ...incompleteEnvelope(stored, ['evidence-pack-manifest'], 'Orchestrator did not return an evidence pack manifest for this run.'),
+        packId: '',
+        manifestUri: '',
+      };
+    }
+    const envelope = asRecord(upstream.body) ?? {};
+    const data = asRecord(envelope.data);
+    const artifactRef = asRecord(envelope.artifactRef);
+    const missing = Array.isArray(envelope.missingArtifacts)
+      ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    const packId = typeof data?.packId === 'string' ? data.packId : '';
+    const manifestUri = typeof artifactRef?.uri === 'string' ? artifactRef.uri : '';
+    return {
+      runId: stored.runId,
+      programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+      mode: 'live',
+      status: missing.length === 0 ? 'complete' : 'incomplete',
+      packId,
+      manifestUri,
+      missingArtifacts: missing,
+      orchestratorRunId: liveRunId,
+      artifactRef: artifactRef ?? null,
+    };
+  } catch (err) {
+    return {
+      ...incompleteEnvelope(stored, ['evidence-pack-manifest'], err instanceof Error ? err.message : 'orchestrator request failed'),
+      packId: '',
+      manifestUri: '',
+    };
+  }
+}
+
+async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
+  const liveRunId = liveArtifactRunId(stored);
+  if (!liveRunId || !orchestrator.enabled) {
+    return {
+      runId: stored.runId,
+      programId: stored.programId,
+      mode: stored.mode,
+      events: [],
+      missingArtifacts: ['trajectory-ledger'],
+      note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
+    };
+  }
+  try {
+    const upstream = await orchestrator.getEvents(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return {
+        runId: stored.runId,
+        programId: stored.programId,
+        mode: stored.mode,
+        events: [],
+        missingArtifacts: ['trajectory-ledger'],
+        note: 'Orchestrator did not return a trajectory ledger for this run.',
+      };
+    }
+    const envelope = asRecord(upstream.body) ?? {};
+    const events = Array.isArray(envelope.events) ? envelope.events : [];
+    const missing = Array.isArray(envelope.missingArtifacts)
+      ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    return {
+      runId: stored.runId,
+      programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+      mode: 'live',
+      events,
+      missingArtifacts: missing,
+      orchestratorRunId: liveRunId,
+    };
+  } catch (err) {
+    return {
+      runId: stored.runId,
+      programId: stored.programId,
+      mode: stored.mode,
+      events: [],
+      missingArtifacts: ['trajectory-ledger'],
+      note: err instanceof Error ? err.message : 'orchestrator request failed',
+    };
+  }
 }
 
 function extractLiveRunId(body: unknown): string | undefined {
@@ -547,7 +763,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        jsonResponse(res, 200, generatedView(stored));
+        if (stored.mode === 'mock' && stored.mock) {
+          jsonResponse(res, 200, mockGeneratedView(stored));
+          return;
+        }
+        jsonResponse(res, 200, await liveGeneratedView(stored, orchestrator));
         return;
       }
 
@@ -559,7 +779,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        jsonResponse(res, 200, buildTestView(stored));
+        if (stored.mode === 'mock' && stored.mock) {
+          jsonResponse(res, 200, mockBuildTestView(stored));
+          return;
+        }
+        jsonResponse(res, 200, await liveBuildTestView(stored, orchestrator));
         return;
       }
 
@@ -571,7 +795,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        jsonResponse(res, 200, evidenceView(stored));
+        if (stored.mode === 'mock' && stored.mock) {
+          jsonResponse(res, 200, mockEvidenceView(stored));
+          return;
+        }
+        jsonResponse(res, 200, await liveEvidenceView(stored, orchestrator));
         return;
       }
 
@@ -583,13 +811,81 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res, `unknown runId ${JSON.stringify(runId)}`);
           return;
         }
-        jsonResponse(res, 200, {
-          runId: stored.runId,
-          programId: stored.programId,
-          mode: stored.mode,
-          events: [],
-        });
+        if (stored.mode === 'mock') {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: stored.mode,
+            events: [],
+          });
+          return;
+        }
+        jsonResponse(res, 200, await liveEventsView(stored, orchestrator));
         return;
+      }
+
+      const artifactsMatch = /^\/api\/v0\/runs\/([^\/]+)\/artifacts$/.exec(pathname);
+      if (artifactsMatch && method === 'GET') {
+        const runId = decodeURIComponent(artifactsMatch[1] ?? '');
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === 'mock') {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: 'mock',
+            artifacts: [],
+            note: 'Mock runs do not persist on-disk artifacts.',
+          });
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId || !orchestrator.enabled) {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: 'live',
+            artifacts: [],
+            missingArtifacts: ['artifacts-index'],
+            note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
+          });
+          return;
+        }
+        try {
+          const upstream = await orchestrator.getArtifacts(liveRunId);
+          if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+            jsonResponse(res, 200, {
+              runId: stored.runId,
+              programId: stored.programId,
+              mode: 'live',
+              artifacts: [],
+              missingArtifacts: ['artifacts-index'],
+              orchestratorRunId: liveRunId,
+              note: 'Orchestrator did not return an artifacts index for this run.',
+            });
+            return;
+          }
+          const envelope = asRecord(upstream.body) ?? {};
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+            mode: 'live',
+            orchestratorRunId: liveRunId,
+            artifacts: Array.isArray(envelope.artifacts) ? envelope.artifacts : [],
+            summary: envelope.summary ?? null,
+            createdAt: envelope.createdAt ?? null,
+            updatedAt: envelope.updatedAt ?? null,
+          });
+          return;
+        } catch (err) {
+          jsonResponse(res, 502, {
+            error: err instanceof Error ? err.message : 'orchestrator request failed',
+          });
+          return;
+        }
       }
 
       if (pathname.startsWith('/api/')) {
