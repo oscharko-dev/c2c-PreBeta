@@ -283,6 +283,44 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+interface OutputRef {
+  uri: string;
+  sha256: string;
+  byteSize?: number;
+}
+
+function normalizeOutputRef(raw: unknown): OutputRef | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const uri = asString(record.uri);
+  if (uri.length === 0) return null;
+  const ref: OutputRef = {
+    uri,
+    sha256: asString(record.sha256),
+  };
+  const byteSize = asNumber(record.byteSize);
+  if (byteSize !== undefined) ref.byteSize = byteSize;
+  return ref;
+}
+
+function normalizeDiagnostics(raw: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<Record<string, unknown>> = [];
+  for (const entry of raw) {
+    const record = asRecord(entry);
+    if (record) out.push(record);
+  }
+  return out;
+}
+
 function classifyGeneratedStatus(missing: string[], runStatus: string | undefined): 'generated' | 'unsupported' | 'skipped' {
   if (missing.length === 0) return 'generated';
   if (runStatus === 'failed') return 'unsupported';
@@ -327,42 +365,117 @@ function classifyBuildTestStatus(missing: string[], runStatus: string | undefine
 async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
   const liveRunId = liveArtifactRunId(stored);
   if (!liveRunId || !orchestrator.enabled) {
-    return incompleteEnvelope(stored, ['generation-response'], 'Live run id is unavailable; orchestrator has not yet accepted this run.');
+    return {
+      ...incompleteEnvelope(stored, ['generation-response'], 'Live run id is unavailable; orchestrator has not yet accepted this run.'),
+      entryClass: '',
+      entryFilePath: '',
+      files: {},
+      outputRef: null,
+      diagnostics: [],
+      unsupportedFeatures: [],
+      openAssumptions: [],
+    };
   }
   try {
     const upstream = await orchestrator.getGenerated(liveRunId);
     if (!upstream || upstream.status < 200 || upstream.status >= 300) {
-      return incompleteEnvelope(stored, ['generation-response'], 'Orchestrator did not return generated-Java artifacts for this run.');
+      return {
+        ...incompleteEnvelope(stored, ['generation-response'], 'Orchestrator did not return generated-Java artifacts for this run.'),
+        entryClass: '',
+        entryFilePath: '',
+        files: {},
+        outputRef: null,
+        diagnostics: [],
+        unsupportedFeatures: [],
+        openAssumptions: [],
+      };
     }
     const envelope = asRecord(upstream.body) ?? {};
     const missing = Array.isArray(envelope.missingArtifacts)
       ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
       : [];
-    const runStatus = typeof envelope.runStatus === 'string' ? envelope.runStatus : '';
+    const runStatus = asString(envelope.runStatus);
     const filesRaw = asRecord(envelope.files) ?? {};
     const files: Record<string, string> = {};
     for (const [key, value] of Object.entries(filesRaw)) {
       if (typeof value === 'string') files[key] = value;
     }
     const status = classifyGeneratedStatus(missing, runStatus);
+    const generationResponse = asRecord(envelope.generationResponse);
+    const outputRef = normalizeOutputRef(envelope.generationResponseRef);
+    const diagnostics = normalizeDiagnostics(generationResponse?.diagnostics);
+    const entryFilePath = asString(envelope.entryFilePath);
     return {
       runId: stored.runId,
-      programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+      programId: stored.programId || asString(envelope.programId),
       mode: 'live',
       status,
-      entryClass: typeof envelope.entryClass === 'string' ? envelope.entryClass : '',
-      entryFilePath: typeof envelope.entryFilePath === 'string' ? envelope.entryFilePath : '',
+      entryClass: asString(envelope.entryClass),
+      entryFilePath,
       files,
-      fileCount: typeof envelope.fileCount === 'number' ? envelope.fileCount : Object.keys(files).length,
+      fileCount: asNumber(envelope.fileCount) ?? Object.keys(files).length,
       unsupportedFeatures: Array.isArray(envelope.unsupportedFeatures) ? envelope.unsupportedFeatures : [],
       openAssumptions: Array.isArray(envelope.openAssumptions) ? envelope.openAssumptions : [],
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
+      outputRef,
       generationResponseRef: envelope.generationResponseRef ?? null,
+      diagnostics,
     };
   } catch (err) {
-    return incompleteEnvelope(stored, ['generation-response'], err instanceof Error ? err.message : 'orchestrator request failed');
+    return {
+      ...incompleteEnvelope(stored, ['generation-response'], err instanceof Error ? err.message : 'orchestrator request failed'),
+      entryClass: '',
+      entryFilePath: '',
+      files: {},
+      outputRef: null,
+      diagnostics: [],
+      unsupportedFeatures: [],
+      openAssumptions: [],
+    };
   }
+}
+
+function deriveCompileStatus(data: Record<string, unknown> | undefined, status: string): 'ok' | 'failed' | 'skipped' | 'unknown' {
+  const build = asRecord(data?.build);
+  if (build && typeof build.compileOk === 'boolean') {
+    return build.compileOk ? 'ok' : 'failed';
+  }
+  if (status === 'compile-failed') return 'failed';
+  if (status === 'skipped') return 'skipped';
+  return 'unknown';
+}
+
+function deriveExecutionStatus(data: Record<string, unknown> | undefined, status: string): 'ok' | 'failed' | 'skipped' | 'not-run' | 'unknown' {
+  const execution = asRecord(data?.execution);
+  if (execution) {
+    if (execution.ran === false) {
+      return status === 'skipped' ? 'skipped' : 'not-run';
+    }
+    if (typeof execution.ok === 'boolean') return execution.ok ? 'ok' : 'failed';
+  }
+  if (status === 'run-failed') return 'failed';
+  if (status === 'skipped') return 'skipped';
+  if (status === 'compile-failed') return 'not-run';
+  return 'unknown';
+}
+
+function deriveActualOutput(data: Record<string, unknown> | undefined): string {
+  if (!data) return '';
+  if (typeof data.actualOutput === 'string') return data.actualOutput;
+  const execution = asRecord(data.execution);
+  if (execution && typeof execution.stdout === 'string') return execution.stdout;
+  return '';
+}
+
+function deriveExpectedOutput(data: Record<string, unknown> | undefined, fallback: string): string {
+  if (!data) return fallback;
+  if (typeof data.expectedOutput === 'string') return data.expectedOutput;
+  const golden = asRecord(data.goldenMaster);
+  if (golden && typeof golden.expected === 'string') return golden.expected;
+  const comparison = asRecord(data.comparison);
+  if (comparison && typeof comparison.expected === 'string') return comparison.expected;
+  return fallback;
 }
 
 async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
@@ -371,7 +484,12 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
     return {
       ...incompleteEnvelope(stored, ['build-test-result'], 'Live run id is unavailable; orchestrator has not yet accepted this run.'),
       classification: 'skipped-no-execution',
+      compileStatus: 'unknown',
+      executionStatus: 'unknown',
       expectedOutput: stored.sample.expectedOutput,
+      actualOutput: '',
+      outputRef: null,
+      diagnostics: [],
     };
   }
   try {
@@ -380,7 +498,12 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
       return {
         ...incompleteEnvelope(stored, ['build-test-result'], 'Orchestrator did not return a build/test result for this run.'),
         classification: 'skipped-no-execution',
+        compileStatus: 'unknown',
+        executionStatus: 'unknown',
         expectedOutput: stored.sample.expectedOutput,
+        actualOutput: '',
+        outputRef: null,
+        diagnostics: [],
       };
     }
     const envelope = asRecord(upstream.body) ?? {};
@@ -388,19 +511,22 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
     const missing = Array.isArray(envelope.missingArtifacts)
       ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
       : [];
-    const runStatus = typeof envelope.runStatus === 'string' ? envelope.runStatus : '';
+    const runStatus = asString(envelope.runStatus);
     const { status, classification } = classifyBuildTestStatus(missing, runStatus, data);
+    const outputRef = normalizeOutputRef(data?.outputRef);
+    const diagnostics = normalizeDiagnostics(data?.diagnostics);
     return {
       runId: stored.runId,
-      programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+      programId: stored.programId || asString(envelope.programId),
       mode: 'live',
       status,
       classification,
-      expectedOutput: stored.sample.expectedOutput,
-      actualOutput: typeof data?.actualOutput === 'string' ? data.actualOutput : '',
-      outputRef: typeof data?.outputRef === 'string'
-        ? data.outputRef
-        : (typeof (asRecord(data?.outputRef)?.uri) === 'string' ? String(asRecord(data?.outputRef)!.uri) : ''),
+      compileStatus: deriveCompileStatus(data, status),
+      executionStatus: deriveExecutionStatus(data, status),
+      expectedOutput: deriveExpectedOutput(data, stored.sample.expectedOutput),
+      actualOutput: deriveActualOutput(data),
+      outputRef,
+      diagnostics,
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
       artifactRef: envelope.artifactRef ?? null,
@@ -409,9 +535,55 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
     return {
       ...incompleteEnvelope(stored, ['build-test-result'], err instanceof Error ? err.message : 'orchestrator request failed'),
       classification: 'skipped-no-execution',
+      compileStatus: 'unknown',
+      executionStatus: 'unknown',
       expectedOutput: stored.sample.expectedOutput,
+      actualOutput: '',
+      outputRef: null,
+      diagnostics: [],
     };
   }
+}
+
+function deriveValidationStatus(data: Record<string, unknown> | undefined): 'valid' | 'invalid' | 'incomplete' | 'unknown' {
+  if (!data) return 'unknown';
+  const validation = asRecord(data.validation);
+  if (validation) {
+    const validationStatus = asString(validation.status);
+    if (validationStatus === 'valid') return 'valid';
+    if (validationStatus === 'invalid') return 'invalid';
+    if (validationStatus === 'incomplete') return 'incomplete';
+    const missing = Array.isArray(validation.missingArtifacts) ? validation.missingArtifacts : [];
+    if (missing.length > 0) return 'incomplete';
+    return 'valid';
+  }
+  const manifestStatus = asString(data.status);
+  if (manifestStatus === 'complete') return 'valid';
+  if (manifestStatus === 'invalid') return 'invalid';
+  if (manifestStatus === 'incomplete') return 'incomplete';
+  return 'unknown';
+}
+
+function deriveExportRef(data: Record<string, unknown> | undefined): OutputRef | null {
+  if (!data) return null;
+  const exports = data.exports;
+  if (!Array.isArray(exports) || exports.length === 0) return null;
+  for (const entry of exports) {
+    const record = asRecord(entry);
+    if (!record) continue;
+    const ref = normalizeOutputRef(record);
+    if (ref) return ref;
+  }
+  return null;
+}
+
+function deriveMissingFromValidation(data: Record<string, unknown> | undefined): string[] {
+  if (!data) return [];
+  const validation = asRecord(data.validation);
+  if (!validation) return [];
+  const raw = validation.missingArtifacts;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is string => typeof entry === 'string');
 }
 
 async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
@@ -421,6 +593,9 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
       ...incompleteEnvelope(stored, ['evidence-pack-manifest'], 'Live run id is unavailable; orchestrator has not yet accepted this run.'),
       packId: '',
       manifestUri: '',
+      manifestHash: '',
+      validationStatus: 'unknown',
+      exportRef: null,
     };
   }
   try {
@@ -430,23 +605,40 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
         ...incompleteEnvelope(stored, ['evidence-pack-manifest'], 'Orchestrator did not return an evidence pack manifest for this run.'),
         packId: '',
         manifestUri: '',
+        manifestHash: '',
+        validationStatus: 'unknown',
+        exportRef: null,
       };
     }
     const envelope = asRecord(upstream.body) ?? {};
     const data = asRecord(envelope.data);
     const artifactRef = asRecord(envelope.artifactRef);
-    const missing = Array.isArray(envelope.missingArtifacts)
+    const envelopeMissing = Array.isArray(envelope.missingArtifacts)
       ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
       : [];
-    const packId = typeof data?.packId === 'string' ? data.packId : '';
-    const manifestUri = typeof artifactRef?.uri === 'string' ? artifactRef.uri : '';
+    const validationMissing = deriveMissingFromValidation(data);
+    const missing = Array.from(new Set([...envelopeMissing, ...validationMissing]));
+    const packId = asString(data?.packId);
+    const manifestUri = asString(artifactRef?.uri);
+    const manifestHash = asString(artifactRef?.sha256);
+    const exportRef = deriveExportRef(data);
+    const validationStatus = deriveValidationStatus(data);
+    const status: 'complete' | 'incomplete' | 'invalid' =
+      missing.length === 0 && validationStatus === 'valid'
+        ? 'complete'
+        : validationStatus === 'invalid'
+          ? 'invalid'
+          : 'incomplete';
     return {
       runId: stored.runId,
-      programId: stored.programId || (typeof envelope.programId === 'string' ? envelope.programId : ''),
+      programId: stored.programId || asString(envelope.programId),
       mode: 'live',
-      status: missing.length === 0 ? 'complete' : 'incomplete',
+      status,
       packId,
       manifestUri,
+      manifestHash,
+      validationStatus,
+      exportRef,
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
       artifactRef: artifactRef ?? null,
@@ -456,6 +648,9 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
       ...incompleteEnvelope(stored, ['evidence-pack-manifest'], err instanceof Error ? err.message : 'orchestrator request failed'),
       packId: '',
       manifestUri: '',
+      manifestHash: '',
+      validationStatus: 'unknown',
+      exportRef: null,
     };
   }
 }

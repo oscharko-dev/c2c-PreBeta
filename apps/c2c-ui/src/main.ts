@@ -265,6 +265,37 @@ function renderBuildTest(state: UiState): void {
     compare.appendChild(expectedWrap);
     compare.appendChild(actualWrap);
     node.appendChild(compare);
+
+    const meta: string[] = [];
+    if (summary.compileStatus) meta.push(`compile=${summary.compileStatus}`);
+    if (summary.executionStatus) meta.push(`execution=${summary.executionStatus}`);
+    if (meta.length > 0) {
+      const metaRow = document.createElement('div');
+      metaRow.style.marginTop = '6px';
+      metaRow.style.color = 'var(--text-muted)';
+      metaRow.textContent = meta.join(' · ');
+      node.appendChild(metaRow);
+    }
+  }
+  if (summary.diagnostics.length > 0) {
+    const diagWrap = document.createElement('div');
+    diagWrap.style.marginTop = '6px';
+    const label = document.createElement('div');
+    label.style.fontWeight = '600';
+    label.textContent = 'Diagnostics:';
+    diagWrap.appendChild(label);
+    const list = document.createElement('ul');
+    list.className = 'bare';
+    for (const entry of summary.diagnostics.slice(0, 8)) {
+      const li = document.createElement('li');
+      const level = typeof entry.level === 'string' ? entry.level : 'info';
+      const code = typeof entry.code === 'string' ? entry.code : '';
+      const message = typeof entry.message === 'string' ? entry.message : '';
+      li.textContent = `[${level}] ${code ? `${code}: ` : ''}${message}`;
+      list.appendChild(li);
+    }
+    diagWrap.appendChild(list);
+    node.appendChild(diagWrap);
   }
 }
 
@@ -283,6 +314,24 @@ function renderEvidence(state: UiState): void {
     label.textContent = 'manifest:';
     ref.appendChild(label);
     ref.appendChild(document.createTextNode(' ' + summary.manifestUri));
+    node.appendChild(ref);
+  }
+  if (summary.manifestHash) {
+    const ref = document.createElement('div');
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = 'manifest sha256:';
+    ref.appendChild(label);
+    ref.appendChild(document.createTextNode(' ' + summary.manifestHash));
+    node.appendChild(ref);
+  }
+  if (summary.validationStatus) {
+    const ref = document.createElement('div');
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = 'validation:';
+    ref.appendChild(label);
+    ref.appendChild(document.createTextNode(' ' + summary.validationStatus));
     node.appendChild(ref);
   }
   if (summary.exportUri) {

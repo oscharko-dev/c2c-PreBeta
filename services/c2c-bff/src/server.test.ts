@@ -760,6 +760,310 @@ test('live generated/build-test/evidence endpoints return real artifact contents
   }
 });
 
+test('live generated endpoint exposes outputRef, diagnostics, and rejects placeholder markers from upstream payload', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const generatedJava = 'package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); }\n}\n';
+  const { client: orch } = stubOrchestrator({
+    generated: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        entryClass: 'CASE01',
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        fileCount: 1,
+        files: { 'src/main/java/c2c/CASE01.java': generatedJava },
+        unsupportedFeatures: [],
+        openAssumptions: ['IO limited to stdout'],
+        generationResponse: {
+          diagnostics: [
+            { level: 'info', code: 'gen.start', message: 'generation started' },
+            { level: 'info', code: 'gen.complete', message: 'generation complete' },
+          ],
+        },
+        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    assert.equal(generated.status, 200);
+    const body = generated.body as {
+      status: string;
+      outputRef: { uri: string; sha256: string; byteSize?: number } | null;
+      diagnostics: Array<{ code?: string }>;
+      files: Record<string, string>;
+    };
+    assert.equal(body.status, 'generated');
+    assert.ok(body.outputRef, 'outputRef must be present for successful runs');
+    assert.equal(body.outputRef?.uri, 'file:///run/generation-response.json');
+    assert.equal(body.outputRef?.sha256, 'a'.repeat(64));
+    assert.equal(body.diagnostics.length, 2);
+    assert.equal(body.diagnostics[0]?.code, 'gen.start');
+    // Critical safeguard: successful runs must NOT contain placeholder markers.
+    for (const content of Object.values(body.files)) {
+      assert.doesNotMatch(content, /W0-STUB/, 'placeholder marker detected in generated Java for a successful run');
+      assert.doesNotMatch(content, /Synthetic W0/, 'placeholder marker detected in generated Java for a successful run');
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('live build-test extracts execution.stdout, goldenMaster.expected, outputRef, diagnostics, and compile/execution status', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const buildResult = {
+    status: 'ok',
+    classification: 'match',
+    build: { compileOk: true, sourceCount: 1, diagnostics: [] },
+    execution: { ran: true, ok: true, exitCode: 0, stdout: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n', stderr: '', durationMs: 12 },
+    goldenMaster: { expected: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n', expectedOutputPath: 'corpus/expected.txt' },
+    comparison: { matched: true },
+    diagnostics: [
+      { level: 'info', code: 'compile.ok', message: 'compile succeeded' },
+      { level: 'info', code: 'execution.ok', message: 'execution succeeded' },
+    ],
+    outputRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
+    programId: 'CASE01',
+  };
+  const { client: orch } = stubOrchestrator({
+    buildTest: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        kind: 'build-test-result',
+        data: buildResult,
+        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    assert.equal(buildTest.status, 200);
+    const body = buildTest.body as {
+      status: string;
+      classification: string;
+      compileStatus: string;
+      executionStatus: string;
+      expectedOutput: string;
+      actualOutput: string;
+      outputRef: { uri: string; sha256: string } | null;
+      diagnostics: Array<{ code?: string }>;
+    };
+    assert.equal(body.status, 'ok');
+    assert.equal(body.classification, 'match');
+    assert.equal(body.compileStatus, 'ok');
+    assert.equal(body.executionStatus, 'ok');
+    assert.match(body.actualOutput, /APPROVED-COUNT=2/);
+    assert.match(body.expectedOutput, /APPROVED-COUNT=2/);
+    assert.equal(body.outputRef?.uri, 'file:///run/build-test-result.json');
+    assert.equal(body.outputRef?.sha256, 'c'.repeat(64));
+    assert.equal(body.diagnostics.length, 2);
+    assert.equal(body.diagnostics[0]?.code, 'compile.ok');
+  } finally {
+    await server.close();
+  }
+});
+
+test('live build-test surfaces compile failure as compileStatus=failed and executionStatus=not-run', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const buildResult = {
+    status: 'compile-failed',
+    classification: 'compile-error',
+    build: { compileOk: false, sourceCount: 1, diagnostics: [{ level: 'error', code: 'javac', message: 'cannot resolve symbol' }] },
+    execution: { ran: false, ok: false, stdout: '', stderr: '' },
+    goldenMaster: {},
+    comparison: {},
+    diagnostics: [{ level: 'error', code: 'javac', message: 'cannot resolve symbol' }],
+    outputRef: { uri: 'file:///run/build-test-result.json', sha256: 'd'.repeat(64) },
+  };
+  const { client: orch } = stubOrchestrator({
+    buildTest: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        kind: 'build-test-result',
+        data: buildResult,
+        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'd'.repeat(64) },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    const body = buildTest.body as {
+      status: string;
+      compileStatus: string;
+      executionStatus: string;
+      actualOutput: string;
+    };
+    assert.equal(body.status, 'compile-failed');
+    assert.equal(body.compileStatus, 'failed');
+    assert.equal(body.executionStatus, 'not-run');
+    assert.equal(body.actualOutput, '');
+  } finally {
+    await server.close();
+  }
+});
+
+test('live evidence exposes manifestHash, validationStatus, exportRef, and aggregates missing artifacts', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const manifest = {
+    schemaVersion: 'v0',
+    capability: 'evidence.pack',
+    service: 'evidence-service',
+    packId: 'epk-live-1',
+    runId: 'live-run-1',
+    wave: 'w0',
+    status: 'incomplete',
+    createdAt: '2026-05-14T10:00:30Z',
+    artifacts: {},
+    validation: {
+      status: 'incomplete',
+      requiredArtifacts: ['sourceCobol', 'semanticIr', 'generatedJava'],
+      missingArtifacts: ['semanticIr'],
+      messages: [],
+    },
+    exports: [
+      { format: 'tar.gz', uri: 'file:///run/evidence-pack.tar.gz', sha256: 'e'.repeat(64), byteSize: 1024, createdAt: '2026-05-14T10:00:30Z' },
+    ],
+  };
+  const { client: orch } = stubOrchestrator({
+    evidence: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        data: manifest,
+        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'f'.repeat(64), byteSize: 768 },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    const body = evidence.body as {
+      status: string;
+      packId: string;
+      manifestUri: string;
+      manifestHash: string;
+      validationStatus: string;
+      missingArtifacts: string[];
+      exportRef: { uri: string; sha256: string } | null;
+    };
+    assert.equal(body.status, 'incomplete');
+    assert.equal(body.packId, 'epk-live-1');
+    assert.equal(body.manifestUri, 'file:///run/evidence-pack-manifest.json');
+    assert.equal(body.manifestHash, 'f'.repeat(64));
+    assert.equal(body.validationStatus, 'incomplete');
+    assert.deepEqual(body.missingArtifacts, ['semanticIr']);
+    assert.equal(body.exportRef?.uri, 'file:///run/evidence-pack.tar.gz');
+    assert.equal(body.exportRef?.sha256, 'e'.repeat(64));
+  } finally {
+    await server.close();
+  }
+});
+
+test('live evidence with missing manifest reports incomplete status and zero pack id; never claims complete', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch } = stubOrchestrator(); // no evidence stub => returns undefined
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    const body = evidence.body as { status: string; packId: string; manifestUri: string; missingArtifacts: string[]; validationStatus: string };
+    assert.equal(body.status, 'incomplete');
+    assert.equal(body.packId, '');
+    assert.equal(body.manifestUri, '');
+    assert.equal(body.validationStatus, 'unknown');
+    assert.deepEqual(body.missingArtifacts, ['evidence-pack-manifest']);
+  } finally {
+    await server.close();
+  }
+});
+
 test('transform rejects blank source text and does not create a run', async () => {
   const runStore = createRunStore();
   const handler = createApp({
