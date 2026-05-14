@@ -2,7 +2,7 @@ version: 0.1.0
 created_at: 2026-05-14
 owner: c2c-prebeta
 curation_phase: W0
-status: draft
+status: approved
 items:
   - id: W0-SYN-001
     name: "W0-CTRL-DECIMAL-PAYROLL"
