@@ -103,7 +103,7 @@ public final class CobolParser {
             }
 
             if (division == Division.DATA) {
-                Model.DataItem item = parseDataItem(upper, lineNo, result);
+                Model.DataItem item = parseDataItem(upper, lineNo, sourceHash, result);
                 if (item != null) {
                     result.program.dataItems.add(item);
                 }
@@ -161,9 +161,13 @@ public final class CobolParser {
         result.program.controlFlow.add(new Model.ControlEdge(block.startId, statement.id, "block-exit"));
     }
 
-    private static Model.DataItem parseDataItem(String upper, int lineNo, Model.ParseResult result) {
+    private static Model.DataItem parseDataItem(String upper, int lineNo, String sourceHash, Model.ParseResult result) {
         Matcher matcher = DATA_DECLARATION.matcher(stripTrailingPeriod(upper));
         if (!matcher.matches()) {
+            if (!(upper.endsWith("SECTION.") || upper.endsWith("SECTION"))) {
+                result.diagnostics.add(new Model.Diagnostic("error", lineNo, "unsupported-data-declaration",
+                        "Unsupported W0 DATA declaration: " + upper));
+            }
             return null;
         }
 
@@ -172,7 +176,7 @@ public final class CobolParser {
         item.level = Integer.parseInt(matcher.group(1));
         item.name = matcher.group(2);
         item.line = lineNo;
-        item.id = "d-" + Model.stableToken(item.name) + "-" + lineNo;
+        item.id = "d-" + Model.stableToken(item.name) + "-" + shortHash(sourceHash + "|data|" + item.name);
         item.picture = match(PICTURE, rest);
         item.value = match(VALUE, rest);
         item.occurs = intMatch(OCCURS, rest);
@@ -257,9 +261,12 @@ public final class CobolParser {
         statement.kind = kind;
         statement.line = lineNo;
         statement.raw = raw;
-        statement.id = "s-" + Model.stableToken(kind) + "-" + lineNo + "-" + sequence;
+        statement.id = "s-" + Model.stableToken(kind) + "-" + shortHash(raw.toUpperCase(Locale.ROOT) + "|" + sequence);
         statement.operands.putAll(operands);
         return new StatementParse(statement, opens, closes);
+    }
+    private static String shortHash(String value) {
+        return Model.sha256(value).substring(0, 12);
     }
 
     private static void parseMove(String statementText, Map<String, Object> operands) {

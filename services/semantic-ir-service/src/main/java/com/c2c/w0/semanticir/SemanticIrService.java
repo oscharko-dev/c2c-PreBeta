@@ -83,6 +83,21 @@ public final class SemanticIrService {
                 symbols.put(name, symbol);
             }
         }
+        for (Map<String, Object> statement : mapList(program.get("statements"))) {
+            if (!"PARAGRAPH".equals(text(statement.get("kind"), ""))) {
+                continue;
+            }
+            Map<String, Object> operands = objectMap(statement.get("operands"));
+            String name = text(operands.get("name"), "");
+            if (name.isBlank()) {
+                continue;
+            }
+            Map<String, Object> symbol = new LinkedHashMap<>();
+            symbol.put("id", statement.get("id"));
+            symbol.put("kind", "paragraph");
+            symbol.put("line", statement.get("line"));
+            symbols.put(name, symbol);
+        }
         return symbols;
     }
 
@@ -121,8 +136,17 @@ public final class SemanticIrService {
 
     private static Map<String, Object> traceability(Map<String, Object> program) {
         Map<String, Object> traceability = new LinkedHashMap<>();
+        for (Map<String, Object> item : mapList(program.get("dataItems"))) {
+            traceability.put(String.valueOf(item.get("id")), Map.of("line", item.get("line"), "raw", text(item.get("name"), "")));
+        }
         for (Map<String, Object> statement : mapList(program.get("statements"))) {
             traceability.put(String.valueOf(statement.get("id")), Map.of("line", statement.get("line"), "raw", statement.get("raw")));
+        }
+        for (Map<String, Object> edge : mapList(program.get("controlFlow"))) {
+            String id = text(edge.get("id"), "");
+            if (!id.isBlank()) {
+                traceability.put(id, Map.of("line", 0, "raw", "edge:" + text(edge.get("label"), "next")));
+            }
         }
         return traceability;
     }
