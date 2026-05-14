@@ -99,6 +99,44 @@ jobs:
       - name: Run Java checks
         run: ./scripts/java-check.sh
 
+  c2c-local-smoke:
+    name: C2C local product-mode smoke
+    runs-on: ubuntu-24.04
+    needs:
+      - java-w0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: services/go/model-gateway-service/go.mod
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install launch dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnucobol3 maven
+
+      - name: Run c2c local smoke harness
+        run: ./scripts/smoke-test-c2c-local.sh
+
   security-baseline:
     name: Secret, dependency, license, and SBOM baseline
     runs-on: ubuntu-latest
