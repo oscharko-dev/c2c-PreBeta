@@ -5,10 +5,11 @@ export interface TabsProps extends React.HTMLAttributes<HTMLDivElement> {
   value: string;
   onValueChange: (value: string) => void;
   tabs: { value: string; label: React.ReactNode }[];
+  idBase?: string;
 }
 
 export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
-  ({ className, value, onValueChange, tabs, ...props }, ref) => {
+  ({ className, value, onValueChange, tabs, idBase, ...props }, ref) => {
     const currentIndex = tabs.findIndex((tab) => tab.value === value);
 
     const move = (delta: number) => {
@@ -35,7 +36,9 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
             key={tab.value}
             type="button"
             role="tab"
+            id={idBase ? `${idBase}-tab-${tab.value}` : undefined}
             aria-selected={value === tab.value}
+            aria-controls={idBase ? `${idBase}-panel-${tab.value}` : undefined}
             tabIndex={value === tab.value ? 0 : -1}
             onClick={() => onValueChange(tab.value)}
             onKeyDown={(event) => {

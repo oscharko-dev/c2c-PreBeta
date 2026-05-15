@@ -4,7 +4,7 @@ import { ApiErrorKind, HealthResponse, ModeResponse } from '../types/api';
 
 type StudioErrorKind = ApiErrorKind | 'backend';
 
-interface StudioApiState {
+export interface StudioApiState {
   health: HealthResponse | null;
   mode: ModeResponse | null;
   error: string | null;

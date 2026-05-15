@@ -1,6 +1,7 @@
 'use client';
 
 import { WorkbenchProvider } from '../../stores/workbench';
+import { useC2cApi } from '../../hooks/useC2cApi';
 import { AppTopBar } from './AppTopBar';
 import { ActivityBar } from './ActivityBar';
 import { SecondaryStripe } from './SecondaryStripe';
@@ -11,10 +12,12 @@ import { BottomWorkbench } from './BottomWorkbench';
 import { StatusBar } from './StatusBar';
 
 export function WorkbenchShell() {
+  const apiState = useC2cApi();
+
   return (
     <WorkbenchProvider>
-      <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-0 text-text font-ui">
-        <AppTopBar />
+      <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg-0 text-text font-ui">
+        <AppTopBar apiState={apiState} />
         <div className="flex flex-1 overflow-hidden">
           <ActivityBar />
           <SecondaryStripe />
@@ -27,7 +30,7 @@ export function WorkbenchShell() {
             <BottomWorkbench />
           </div>
         </div>
-        <StatusBar />
+        <StatusBar apiState={apiState} />
       </div>
     </WorkbenchProvider>
   );

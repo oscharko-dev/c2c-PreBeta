@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkbenchShell } from '../src/components/workbench/WorkbenchShell';
 
@@ -22,7 +22,8 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     render(<WorkbenchShell />);
     
     // Topbar readiness should show "Ready"
-    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Product readiness')).getByText('Ready')).toBeInTheDocument();
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     
     // Primary action button should be enabled
     expect(screen.getByRole('button', { name: /start transformation/i })).toBeEnabled();
@@ -39,7 +40,7 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
 
     render(<WorkbenchShell />);
 
-    expect(screen.getByText('Blocked')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Product readiness')).getByText('Blocked')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start transformation/i })).toBeDisabled();
   });
 
@@ -82,7 +83,7 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     expect(evidenceTab).toHaveAttribute('aria-selected', 'false');
     
     // Initially Run panel content is visible
-    expect(screen.getByText('Run output logs will appear here.')).toBeInTheDocument();
+    expect(within(screen.getByRole('tabpanel')).getByText('No run active')).toBeInTheDocument();
 
     // Click evidence tab
     fireEvent.click(evidenceTab);
@@ -91,7 +92,7 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     expect(runTab).toHaveAttribute('aria-selected', 'false');
     
     // Now Evidence panel content is visible
-    expect(screen.getByText('Evidence pack details.')).toBeInTheDocument();
+    expect(within(screen.getByRole('tabpanel')).getByText('No evidence pack loaded')).toBeInTheDocument();
   });
 
   it('allows workbench tabs to be selected through keyboard interaction', () => {
@@ -105,13 +106,61 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
 
     render(<WorkbenchShell />);
 
+    const runTab = screen.getByRole('tab', { name: /run/i });
     const learningTab = screen.getByRole('tab', { name: /learning/i });
     
-    learningTab.focus();
-    fireEvent.keyDown(learningTab, { key: 'Enter', code: 'Enter' });
-    fireEvent.click(learningTab); // Simulated standard interaction
+    runTab.focus();
+    fireEvent.keyDown(runTab, { key: 'End', code: 'End' });
+    fireEvent.click(learningTab);
 
     expect(learningTab).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('Experience learning metrics.')).toBeInTheDocument();
+    expect(within(screen.getByRole('tabpanel')).getByText('No experience learning data yet')).toBeInTheDocument();
+  });
+
+  it('does not report a successful ready state when mode is unavailable', () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: { status: 'ok' },
+      mode: null,
+      error: 'HTTP error 503',
+      errorKind: 'backend',
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    expect(within(screen.getByLabelText('Product readiness')).getByText('Blocked')).toBeInTheDocument();
+    expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /start transformation/i })).toBeDisabled();
+  });
+
+  it('keeps Start enabled when orchestrator is live but evidence is mocked', () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: { status: 'ok' },
+      mode: { orchestrator: 'live', evidence: 'mock' },
+      error: null,
+      errorKind: null,
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    expect(within(screen.getByLabelText('Product readiness')).getByText('Ready · Evidence Mock')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start transformation/i })).toBeEnabled();
+  });
+
+  it('applies truncation and wrapping guards needed for narrow desktop layouts', () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: { status: 'ok' },
+      mode: { orchestrator: 'live', evidence: 'live' },
+      error: null,
+      errorKind: null,
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    expect(screen.getByText('main')).toHaveClass('truncate');
+    expect(screen.getByText('Default Transform')).toHaveClass('truncate');
+    expect(screen.getByLabelText('Status Bar')).toHaveClass('flex-wrap');
   });
 });
