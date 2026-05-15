@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import urllib.error
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence, Union
 from urllib.request import Request, urlopen
 
 
@@ -20,12 +20,18 @@ class HttpResponse:
     payload: Any
 
 
+# Issue #96 EL ingestion accepts both single envelopes (mappings) and
+# batches (sequences of mappings) at /v0/harness-events. Spell that
+# explicitly so callers stay type-safe instead of falling back to ``Any``.
+JSONBody = Union[Mapping[str, Any], Sequence[Mapping[str, Any]]]
+
+
 class JSONHTTPClient:
     def __init__(self, timeout_seconds: int = 5, default_headers: Optional[Mapping[str, str]] = None) -> None:
         self.timeout_seconds = timeout_seconds
         self.default_headers = dict(default_headers or {})
 
-    def post_json(self, url: str, payload: Any, headers: Optional[Mapping[str, str]] = None) -> HttpResponse:
+    def post_json(self, url: str, payload: JSONBody, headers: Optional[Mapping[str, str]] = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,
