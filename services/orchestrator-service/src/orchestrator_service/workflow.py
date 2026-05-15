@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 
 def _iso_now() -> str:
@@ -936,8 +936,13 @@ class W0WorkflowRunner:
             # Issue #96: forward Harness events + trajectory ledger to the
             # experience-learning-service so the EL system can analyze runs
             # started from the UI. Best-effort; failures must not break the
-            # successful run reported above.
-            self._flush_to_experience_learning(context.run_id, trajectory_payload)
+            # successful run reported above. Wrapped defensively so a
+            # gateway implementation that surfaces unexpected exceptions
+            # cannot regress the success path.
+            try:
+                self._flush_to_experience_learning(context.run_id, trajectory_payload)
+            except Exception:
+                pass
             return {
                 "runId": context.run_id,
                 "workflowId": context.workflow_id,
