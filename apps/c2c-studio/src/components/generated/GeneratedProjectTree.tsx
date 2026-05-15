@@ -15,7 +15,7 @@ export function GeneratedProjectTree({ tree, selectedPath, onSelectFile, unavail
   }
 
   return (
-    <div className="w-full overflow-y-auto">
+    <div className="w-full overflow-y-auto" role="tree" aria-label="Generated project files">
       {tree.map(node => (
         <TreeNode 
           key={node.path} 
@@ -53,15 +53,28 @@ function TreeNode({ node, selectedPath, onSelectFile, unavailableFiles }: {
     }
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleSelect();
+    }
+  };
+
   return (
     <div className="text-sm">
-      <div 
-        className={`flex items-center gap-1.5 py-1 px-2 cursor-pointer hover:bg-bg-3 ${isSelected ? 'bg-accent/10 text-accent' : 'text-text'} ${isUnavailable ? 'opacity-50 cursor-not-allowed' : ''}`}
+      <button
+        type="button"
+        className={`flex w-full items-center gap-1.5 py-1 px-2 text-left hover:bg-bg-3 ${isSelected ? 'bg-accent/10 text-accent' : 'text-text'} ${isUnavailable ? 'opacity-50 cursor-not-allowed' : ''}`}
         onClick={handleSelect}
+        onKeyDown={handleKeyDown}
+        aria-disabled={isUnavailable || undefined}
+        aria-expanded={!isFile ? isOpen : undefined}
+        aria-selected={isSelected}
+        role="treeitem"
         style={{ paddingLeft: `${node.path.split('/').length * 0.75}rem` }}
       >
         {!isFile ? (
-          <span onClick={toggleOpen} className="text-text-dim">
+          <span onClick={toggleOpen} className="text-text-dim" aria-hidden="true">
             {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>
         ) : (
@@ -70,10 +83,10 @@ function TreeNode({ node, selectedPath, onSelectFile, unavailableFiles }: {
         {isFile ? <File size={14} className="text-text-dim" /> : <Folder size={14} className="text-text-dim" />}
         <span className="truncate">{node.name}</span>
         {isUnavailable && <span className="ml-2 text-[10px] text-error">Unavailable</span>}
-      </div>
+      </button>
       
       {!isFile && isOpen && node.children && (
-        <div>
+        <div role="group">
           {node.children.map(child => (
             <TreeNode 
               key={child.path} 
