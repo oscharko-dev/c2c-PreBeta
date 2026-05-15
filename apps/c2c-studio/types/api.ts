@@ -1,10 +1,11 @@
 export interface ApiHealthResponse {
   status: string;
+  service?: string;
 }
 
 export interface ApiModeResponse {
-  mode: string;
-  upstream_reachable: boolean;
+  orchestrator: 'live' | 'mock';
+  evidence: 'live' | 'mock';
 }
 
 export interface ApiSuccessResult<T> {

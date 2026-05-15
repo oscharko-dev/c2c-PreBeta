@@ -69,6 +69,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 log "starting launcher"
+rm -f "$READY_MARKER"
 "$ROOT_DIR/scripts/start-c2c-local.sh" --ci >"$launcher_log" 2>&1 &
 launcher_pid=$!
 
@@ -97,6 +98,12 @@ fi
 if ! wait_http "$STUDIO_URL"; then
   tail -n 120 "$launcher_log" >&2 || true
   fail "c2c-studio endpoint never became ready"
+fi
+
+studio_html="$(curl -fsS --max-time 2 "$STUDIO_URL")"
+if ! grep -Fq 'c2c Transformation Studio' <<<"$studio_html"; then
+  tail -n 120 "$launcher_log" >&2 || true
+  fail "c2c-studio root did not render the expected Studio shell"
 fi
 
 mode_json="$(curl -fsS --max-time 2 "$BFF_URL/api/v0/mode")"
