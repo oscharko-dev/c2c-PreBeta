@@ -159,7 +159,13 @@ class W0CorpusGenerationTest {
         pb.directory(projectDir.toFile());
         pb.redirectErrorStream(true);
         Process process = pb.start();
-        String output = new String(process.getInputStream().readAllBytes());
+        // try-with-resources: the merged stdout+stderr stream owned by the
+        // process must be closed once we have drained it (Qodana
+        // AutoCloseable used without 'try'-with-resources warning).
+        String output;
+        try (var stdout = process.getInputStream()) {
+            output = new String(stdout.readAllBytes());
+        }
         int exitCode = process.waitFor();
         assertEquals(0, exitCode, "Generated project maven package failed:\n" + output);
     }
