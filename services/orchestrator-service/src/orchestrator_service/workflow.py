@@ -496,6 +496,8 @@ class W0WorkflowRunner:
         step_results: list[WorkflowStepResult] = []
         model_output = None
         model_policy_skipped_meta: Optional[ArtifactMetadata] = None
+        model_invocation_input_ref: Optional[DataReference] = None
+        model_invocation_request: Optional[Dict[str, Any]] = None
         program_id: Optional[str] = None
         completed_steps: list[str] = []
         artifact_refs: list[Dict[str, Any]] = []
@@ -525,6 +527,69 @@ class W0WorkflowRunner:
                 "updatedAt": _iso_now(),
             }
             _record_artifact(self.artifact_store.update_summary(context.run_id, context.workflow_id, summary))
+
+        def _persist_model_policy_skipped(reason: str) -> ArtifactMetadata:
+            nonlocal model_policy_skipped_meta
+            if model_policy_skipped_meta is not None:
+                return model_policy_skipped_meta
+            model_policy_skipped_meta = self.artifact_store.write_json(
+                context.run_id,
+                context.workflow_id,
+                "model-policy-skipped.json",
+                {
+                    "runId": context.run_id,
+                    "workflowId": context.workflow_id,
+                    "modelId": _text(getattr(self.config, "model_gateway_model_id", None))
+                    or DEFAULT_MODEL_ID,
+                    "status": "skipped",
+                    "reason": reason,
+                    "policyVersion": _text(getattr(self.config, "model_policy_version", None)) or "v0",
+                    "timestamp": _iso_now(),
+                    "createdBy": self.config.service_name,
+                },
+                kind=KIND_MODEL_POLICY_SKIPPED,
+            )
+            _record_artifact(model_policy_skipped_meta)
+            return model_policy_skipped_meta
+
+        def _persist_model_invocation_ledger(
+            request_payload: Mapping[str, Any],
+            request_ref: DataReference,
+            response_payload: Mapping[str, Any],
+        ) -> ArtifactMetadata:
+            ledger_payload = {
+                "schemaVersion": "v0",
+                "invocationId": _text(response_payload.get("invocationId")) or f"inv-{context.run_id}-00",
+                "runId": context.run_id,
+                "modelId": _text(response_payload.get("modelId"))
+                or _text(request_payload.get("modelId"))
+                or DEFAULT_MODEL_ID,
+                "provider": _text(response_payload.get("provider")) or "unknown",
+                "dataClass": _text(request_payload.get("dataClass")) or DATA_CLASS_MODEL,
+                "promptTemplateVersion": _text(response_payload.get("promptTemplateVersion"))
+                or _text(request_payload.get("promptTemplateVersion"))
+                or DEFAULT_PROMPT_TEMPLATE_VERSION,
+                "policyDecision": _text(response_payload.get("policyDecision")) or POLICY_ALLOW,
+                "status": _text(response_payload.get("status")) or "completed",
+                "latencyMs": int(response_payload.get("latencyMs") or 0),
+                "requestRef": _as_reference_payload(request_ref),
+                "outputRef": _as_reference_payload(
+                    _build_reference(
+                        f"urn:orchestrator/{context.run_id}/model-output",
+                        _first_non_empty_mapping(response_payload.get("output")),
+                    )
+                ),
+                "parameters": dict(_first_non_empty_mapping(request_payload.get("parameters"))),
+                "structuredOutput": bool(request_payload.get("structuredOutput")),
+                "createdAt": _iso_now(),
+            }
+            return self.artifact_store.write_json(
+                context.run_id,
+                context.workflow_id,
+                "model-invocation-ledger.json",
+                ledger_payload,
+                kind=KIND_MODEL_INVOCATION_LEDGER,
+            )
 
         try:
             self.artifact_store.init_run(
@@ -577,6 +642,10 @@ class W0WorkflowRunner:
                 policy_decision=POLICY_ALLOW,
             )
             _write_summary("updating", message="orchestrator workflow started")
+            if not context.model_prompt:
+                _persist_model_policy_skipped(
+                    "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance"
+                )
 
             parse_capability = self._require_capability(context.run_id, self.config.parse_capability_id)
             ir_capability = self._require_capability(context.run_id, self.config.ir_capability_id)
@@ -788,68 +857,53 @@ class W0WorkflowRunner:
                     self.config.model_gateway_capability_id,
                 )
                 model_id = _text(getattr(self.config, "model_gateway_model_id", None)) or DEFAULT_MODEL_ID
+                model_invocation_request = {
+                    "schemaVersion": "v0",
+                    "runId": context.run_id,
+                    "workflowId": context.workflow_id,
+                    "actor": self.config.service_name,
+                    "modelId": model_id,
+                    "dataClass": DATA_CLASS_MODEL,
+                    "promptTemplateVersion": DEFAULT_PROMPT_TEMPLATE_VERSION,
+                    "prompt": context.model_prompt,
+                    "structuredOutput": False,
+                    "parameters": {
+                        "inputRef": _as_reference_payload(input_reference),
+                        "runId": context.run_id,
+                    },
+                    "timeoutMs": DEFAULT_MODEL_TIMEOUT_MS,
+                }
+                model_invocation_input_ref = _build_reference(
+                    f"urn:orchestrator/{context.run_id}/model-input",
+                    {
+                        "modelPrompt": context.model_prompt,
+                        "runId": context.run_id,
+                        "workflowId": context.workflow_id,
+                    },
+                )
                 model_output_step = self._invoke_step(
                     context,
                     "model-guidance",
                     model_capability,
                     DATA_CLASS_MODEL,
-                    {
-                        "schemaVersion": "v0",
-                        "runId": context.run_id,
-                        "workflowId": context.workflow_id,
-                        "actor": self.config.service_name,
-                        "modelId": model_id,
-                        "dataClass": DATA_CLASS_MODEL,
-                        "promptTemplateVersion": DEFAULT_PROMPT_TEMPLATE_VERSION,
-                        "prompt": context.model_prompt,
-                        "structuredOutput": False,
-                        "parameters": {
-                            "inputRef": _as_reference_payload(input_reference),
-                            "runId": context.run_id,
-                        },
-                        "timeoutMs": DEFAULT_MODEL_TIMEOUT_MS,
-                    },
-                    _build_reference(
-                        f"urn:orchestrator/{context.run_id}/model-input",
-                        {
-                            "modelPrompt": context.model_prompt,
-                            "runId": context.run_id,
-                            "workflowId": context.workflow_id,
-                        },
-                    ),
+                    model_invocation_request,
+                    model_invocation_input_ref,
                 )
                 step_results.append(model_output_step)
                 model_output = model_output_step.payload
                 _record_artifact(
-                    self.artifact_store.write_json(
-                        context.run_id,
-                        context.workflow_id,
-                        "model-invocation-ledger.json",
-                        dict(model_output),
-                        kind=KIND_MODEL_INVOCATION_LEDGER,
+                    _persist_model_invocation_ledger(
+                        model_invocation_request,
+                        model_invocation_input_ref,
+                        model_output,
                     )
                 )
                 completed_steps.append("model-guidance")
                 _write_summary("updating", message="model-guidance completed")
             else:
-                model_policy_skipped_meta = self.artifact_store.write_json(
-                    context.run_id,
-                    context.workflow_id,
-                    "model-policy-skipped.json",
-                    {
-                        "runId": context.run_id,
-                        "workflowId": context.workflow_id,
-                        "modelId": _text(getattr(self.config, "model_gateway_model_id", None))
-                        or DEFAULT_MODEL_ID,
-                        "status": "skipped",
-                        "reason": "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance",
-                        "policyVersion": _text(getattr(self.config, "model_policy_version", None)) or "v0",
-                        "timestamp": _iso_now(),
-                        "createdBy": self.config.service_name,
-                    },
-                    kind=KIND_MODEL_POLICY_SKIPPED,
+                _persist_model_policy_skipped(
+                    "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance"
                 )
-                _record_artifact(model_policy_skipped_meta)
                 # Issue #96: surface the policy skip as a discrete step so the
                 # UI/EL timeline can distinguish it from `model-guidance`
                 # actually running.
@@ -953,6 +1007,18 @@ class W0WorkflowRunner:
                 "artifacts": list(artifact_refs),
             }
         except Exception as exc:
+            try:
+                if model_output is None:
+                    if context.model_prompt:
+                        _persist_model_policy_skipped(
+                            f"workflow failed before required model invocation: {exc}"
+                        )
+                    else:
+                        _persist_model_policy_skipped(
+                            "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance"
+                        )
+            except Exception:
+                pass
             self._emit_workflow_decision_event(
                 context,
                 "orchestrator.workflow.failed",

@@ -104,6 +104,30 @@ class CheckModelGovernanceTest(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
+            (app / "legacy-llm.js").write_text(
+                '\n'.join(
+                    [
+                        'const OpenAI = require("openai");',
+                        "module.exports = { client: new OpenAI({ apiKey: 'token' }) };",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "apps" / "c2c-ui" / "package.json").write_text(
+                '\n'.join(
+                    [
+                        "{",
+                        '  "name": "c2c-ui",',
+                        '  "dependencies": {',
+                        '    "@anthropic-ai/sdk": "^0.54.0"',
+                        "  }",
+                        "}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
             result = self._run_scan(repo)
 
@@ -112,6 +136,8 @@ class CheckModelGovernanceTest(unittest.TestCase):
             self.assertIn("services/go/assistant-service/main.go", result.stdout)
             self.assertIn("services/java/assistant-service/src/main/java/com/c2c/w0/assistant/App.java", result.stdout)
             self.assertIn("apps/c2c-ui/src/llm.ts", result.stdout)
+            self.assertIn("apps/c2c-ui/src/legacy-llm.js", result.stdout)
+            self.assertIn("apps/c2c-ui/package.json", result.stdout)
 
     def test_ignores_allowed_gateway_and_non_product_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

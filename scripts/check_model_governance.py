@@ -64,6 +64,10 @@ DIRECT_PROVIDER_PATTERNS = (
         "direct-model-provider-usage",
     ),
     (
+        re.compile(r'(?i)\brequire\s*\(\s*["\'](?:openai|@anthropic-ai/sdk|cohere-ai|mistralai|ollama)["\']\s*\)'),
+        "direct-model-provider-usage",
+    ),
+    (
         re.compile(r"(?i)\b(azure\.ai\.inference|google\.generativeai|google\.genai|vertexai|huggingface_hub)\b"),
         "direct-model-provider-usage",
     ),
@@ -87,6 +91,10 @@ DIRECT_PROVIDER_PATTERNS = (
             r"software\.amazon\.awssdk\.services\.bedrockruntime|"
             r"com\.google\.cloud\.vertexai|com\.google\.generativeai)\b"
         ),
+        "direct-model-provider-usage",
+    ),
+    (
+        re.compile(r'(?i)["\'](?:openai|@anthropic-ai/sdk|cohere-ai|mistralai|ollama)["\']\s*:'),
         "direct-model-provider-usage",
     ),
 )
