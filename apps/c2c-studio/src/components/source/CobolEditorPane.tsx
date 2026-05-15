@@ -4,6 +4,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useSourceWorkspace } from '../../stores/sourceWorkspace';
 import { Play } from 'lucide-react';
 import { DEFAULT_SOURCE_NAME, deriveDetectedProgramId, deriveDisplayedLineEnding, deriveSourceHash } from '../../lib/sourceAnalysis';
+import { useC2cApi } from '../../hooks/useC2cApi';
+import { getWorkbenchReadiness } from '../workbench/workbenchReadiness';
 
 export function CobolEditorPane() {
   const {
@@ -18,6 +20,9 @@ export function CobolEditorPane() {
     submitTransform,
   } = useSourceWorkspace();
   const [sourceHash, setSourceHash] = useState('00000000');
+
+  const apiState = useC2cApi();
+  const readiness = getWorkbenchReadiness(apiState);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineCount = sourceText.split('\n').length || 1;
@@ -49,7 +54,7 @@ export function CobolEditorPane() {
           </p>
           <button
             type="button"
-            onClick={() => setSourceText('       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMO01.\n')}
+            onClick={() => setSourceText('       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n')}
             className="rounded bg-bg-2 px-4 py-2 text-sm text-text hover:bg-bg-3"
           >
             Start Typing
@@ -83,7 +88,7 @@ export function CobolEditorPane() {
             onClick={() => {
               void submitTransform();
             }}
-            disabled={!canSubmitTransform}
+            disabled={!canSubmitTransform || !readiness.startEnabled}
             className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-bg-0 hover:bg-accent-dim disabled:opacity-50"
           >
             <Play className="w-3.5 h-3.5" />

@@ -27,6 +27,10 @@ vi.mock('@/lib/apiClient', () => ({
   },
 }));
 
+vi.mock('@/hooks/useC2cApi', () => ({
+  useC2cApi: () => ({ health: { status: 'ok' }, mode: { orchestrator: 'live', evidence: 'live' }, error: null, errorKind: null, loading: false })
+}));
+
 describe('Source Workspace', () => {
   beforeEach(() => {
     vi.mocked(apiClient.getRunExperience).mockResolvedValue({ ok: true, data: { status: 'complete', summary: null } } as any);
@@ -196,7 +200,7 @@ describe('Source Workspace', () => {
 
     await waitFor(() => {
       expect(apiClient.transform).toHaveBeenCalledWith({
-        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMO01.\n',
+        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
         programId: undefined,
         sourceName: 'pasted-source.cbl',
       });
@@ -242,7 +246,7 @@ describe('Source Workspace', () => {
 
     expect(await screen.findByText('Backend unavailable. Try again shortly.')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toHaveValue(
-      '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMO01.\n',
+      '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
     );
   });
 

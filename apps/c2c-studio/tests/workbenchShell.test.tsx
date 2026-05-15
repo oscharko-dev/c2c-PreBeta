@@ -17,6 +17,10 @@ vi.mock('../src/hooks/useReferencePrograms', () => ({
 
 import { useC2cApi } from '../src/hooks/useC2cApi';
 
+vi.mock('@/hooks/useC2cApi', () => ({
+  useC2cApi: vi.fn()
+}));
+
 describe('WorkbenchShell Layout & Topbar Readiness', () => {
   it('renders topbar readiness state when connected', () => {
     vi.mocked(useC2cApi).mockReturnValue({

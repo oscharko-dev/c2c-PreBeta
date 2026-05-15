@@ -17,11 +17,16 @@ vi.mock('@/lib/apiClient', () => ({
 const mockTransformationState = vi.fn();
 vi.mock('@/stores/transformationRun', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/transformationRun')>();
+  const { deriveProductState } = await import('@/types/state');
   return {
     ...actual,
-    useTransformationRun: () => ({
-      state: mockTransformationState()
-    })
+    useTransformationRun: () => {
+      const state = mockTransformationState();
+      return {
+        state,
+        productState: deriveProductState(state)
+      };
+    }
   };
 });
 
