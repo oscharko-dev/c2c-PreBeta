@@ -651,14 +651,14 @@ function parseModelGatewayHealth(payload: unknown): ApiResult<ModelGatewayHealth
   if (payload.status !== 'ok' && payload.status !== 'unavailable') {
     return createFailure('Contract error: ModelGatewayHealth payload must contain status="ok" or "unavailable".', { kind: 'contract', body: payload });
   }
-  return { ok: true, data: payload as ModelGatewayHealth };
+  return { ok: true, data: payload as unknown as ModelGatewayHealth };
 }
 
 function parseModelGatewayModels(payload: unknown): ApiResult<ModelGatewayModels> {
   if (!isRecord(payload) || !Array.isArray(payload.models)) {
     return createFailure('Contract error: ModelGatewayModels must contain models array.', { kind: 'contract', body: payload });
   }
-  return { ok: true, data: payload as ModelGatewayModels };
+  return { ok: true, data: payload as unknown as ModelGatewayModels };
 }
 
 function parseHarnessReady(payload: unknown): ApiResult<HarnessReady> {
@@ -666,7 +666,7 @@ function parseHarnessReady(payload: unknown): ApiResult<HarnessReady> {
   if (payload.status !== 'ok' && payload.status !== 'unavailable') {
     return createFailure('Contract error: HarnessReady payload must contain status="ok" or "unavailable".', { kind: 'contract', body: payload });
   }
-  return { ok: true, data: payload as HarnessReady };
+  return { ok: true, data: payload as unknown as HarnessReady };
 }
 
 export const apiClient = {
