@@ -4,13 +4,17 @@ import { useTransformationRun } from '../../stores/transformationRun';
 export function RunLifecyclePanel({ emptyState }: { emptyState: { title: string; message: string } }) {
   const { state } = useTransformationRun();
 
-  if (state.phase === 'idle' || !state.events) {
+  if (state.phase === 'idle') {
     return (
       <div className="p-4 space-y-2 text-sm">
         <p className="font-medium text-text">{emptyState.title}</p>
         <p className="text-text-dim">{emptyState.message}</p>
       </div>
     );
+  }
+
+  if (!state.events || state.events.events.length === 0) {
+    return <div className="p-4 text-sm text-text-dim">Waiting for run lifecycle events...</div>;
   }
 
   return (

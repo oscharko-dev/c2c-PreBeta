@@ -1,6 +1,7 @@
 'use client';
 import { BuildTestView } from '../../types/build-test';
 import { CodeSurface } from '../ui/CodeSurface';
+import { describeClassification, splitOutputLines } from './runPanelUtils';
 
 export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTestView | null; isPending: boolean }) {
   if (isPending || !buildTest) {
@@ -9,7 +10,7 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
 
   const { classification, expectedOutput, actualOutput } = buildTest;
 
-  let classificationLabel: string = classification || 'Skipped / Error';
+  let classificationLabel: string = describeClassification(classification);
   let labelColor = 'text-text-dim';
   if (classification === 'match') {
     classificationLabel = 'Match (Equivalent)';
@@ -20,11 +21,9 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
   } else if (classification === 'divergence-unknown') {
     classificationLabel = 'Divergence (Unknown)';
     labelColor = 'text-error';
-  } else if (classification === 'compile-error' || classification === 'run-error') {
-    classificationLabel = 'Execution Failed';
-    labelColor = 'text-error';
+  } else if (classification === 'compile-error' || classification === 'run-error' || classification === 'skipped-no-execution') {
+    labelColor = 'text-warn';
   } else {
-    classificationLabel = classification || 'Skipped / Error';
     labelColor = 'text-error';
   }
 
@@ -39,7 +38,7 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
           <CodeSurface
             className="flex-1 border border-line-2 rounded"
             label="Expected Output"
-            lines={(expectedOutput || '').split('\\n').map(line => ({ content: line }))}
+            lines={splitOutputLines(expectedOutput).map((line) => ({ content: line }))}
           />
         </div>
         <div className="flex flex-col">
@@ -47,7 +46,7 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
           <CodeSurface
             className="flex-1 border border-line-2 rounded"
             label="Actual Output"
-            lines={(actualOutput || '').split('\\n').map(line => ({ content: line }))}
+            lines={splitOutputLines(actualOutput).map((line) => ({ content: line }))}
           />
         </div>
       </div>

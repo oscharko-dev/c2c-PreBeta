@@ -1,6 +1,7 @@
 'use client';
 import { useTransformationRun } from '../../stores/transformationRun';
 import { StatusChip } from '../ui/StatusChip';
+import { deriveRunProblems } from './runPanelUtils';
 
 export function ProblemsPanel({ emptyState }: { emptyState: { title: string; message: string } }) {
   const { state } = useTransformationRun();
@@ -14,23 +15,7 @@ export function ProblemsPanel({ emptyState }: { emptyState: { title: string; mes
     );
   }
 
-  const problems: { type: string; message: string }[] = [];
-
-  if (state.generated?.unsupportedFeatures && state.generated.unsupportedFeatures.length > 0) {
-    state.generated.unsupportedFeatures.forEach(f => problems.push({ type: 'Unsupported Feature', message: f }));
-  }
-  if (state.generated?.missingArtifacts && state.generated.missingArtifacts.length > 0) {
-    state.generated.missingArtifacts.forEach(m => problems.push({ type: 'Missing Artifact (Generated)', message: m }));
-  }
-  if (state.buildTest?.status !== 'ok' && state.buildTest?.status) {
-    problems.push({ type: 'Build/Test Failure', message: state.buildTest.status });
-  }
-  if (state.buildTest?.classification && state.buildTest.classification !== 'match') {
-    problems.push({ type: 'Equivalence Mismatch', message: state.buildTest.classification });
-  }
-  if (state.evidence?.status === 'incomplete') {
-    problems.push({ type: 'Evidence Incomplete', message: 'The evidence pack is missing required artifacts' });
-  }
+  const problems = deriveRunProblems(state);
 
   return (
     <div className="p-4 h-full overflow-auto bg-bg-0 text-sm">

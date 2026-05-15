@@ -117,6 +117,9 @@ coverage/
 .nyc_output/
 .eslintcache
 .stylelintcache
+*.tsbuildinfo
+playwright-report/
+test-results/
 
 # -------------------------------
 # Python

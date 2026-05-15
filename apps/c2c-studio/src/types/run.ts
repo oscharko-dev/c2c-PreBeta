@@ -24,6 +24,7 @@ export interface TransformationRunState {
   orchestratorRunId: string | null;
   programId: string | null;
   error: string | null;
+  artifactsError: string | null;
   
   // Artifact views
   summary: RunSummary | null;
