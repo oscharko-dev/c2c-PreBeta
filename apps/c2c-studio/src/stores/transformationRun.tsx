@@ -57,8 +57,8 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
       events: null,
       artifacts: null,
       experience: null,
-      modelGatewayHealth: null,
-      harnessReady: null,
+      modelGatewayHealth: state.modelGatewayHealth,
+      harnessReady: state.harnessReady,
     });
 
     const result = await apiClient.transform(request);

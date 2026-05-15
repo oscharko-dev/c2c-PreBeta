@@ -1771,6 +1771,126 @@ function disabledLearning(): { enabled: boolean; baseUrl: string; getRunSummary:
   };
 }
 
+test('model gateway health route normalizes upstream service payload to the Studio contract', async () => {
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: 'http://gateway' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: {
+      enabled: true,
+      async getHealth() {
+        return {
+          status: 200,
+          body: {
+            status: 'ok',
+            service: 'model-gateway',
+            schema: 'v0',
+            providers: ['foundry'],
+            activeModels: 2,
+            configured: {
+              mode: 'foundry-dev',
+              dataPolicy: 'model-gateway',
+              invocationLedgerEnabled: 'true',
+              harnessEventEmissionEnabled: 'false',
+            },
+          },
+        };
+      },
+      async getModels() {
+        return undefined;
+      },
+    },
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/model-gateway/health`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, {
+      status: 'ok',
+      providerMode: 'foundry-dev',
+      activeModelCount: 2,
+      dataPolicy: 'model-gateway',
+      ledgerEnabled: true,
+      eventEmission: false,
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('model gateway models route normalizes upstream registry payload to the Studio contract', async () => {
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: 'http://gateway' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: {
+      enabled: true,
+      async getHealth() {
+        return undefined;
+      },
+      async getModels() {
+        return {
+          status: 200,
+          body: [
+            { id: 'gpt-4.1', displayName: 'GPT 4.1', provider: 'foundry' },
+            { ID: 'internal-a', DisplayName: 'Internal A', Provider: 'customer-internal' },
+          ],
+        };
+      },
+    },
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/model-gateway/models`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, {
+      models: [
+        { id: 'gpt-4.1', name: 'GPT 4.1', provider: 'foundry' },
+        { id: 'internal-a', name: 'Internal A', provider: 'customer-internal' },
+      ],
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('harness ready route keeps upstream ready payload parser-compatible for the Studio', async () => {
+  const handler = createApp({
+    config: { ...baseConfig, harnessUrl: 'http://harness' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    harness: {
+      enabled: true,
+      async getReady() {
+        return {
+          status: 200,
+          body: {
+            status: 'ready',
+            capabilities: 2,
+            runs: 1,
+            policyGateway: 'enabled',
+          },
+        };
+      },
+    },
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/harness/ready`);
+    assert.equal(response.status, 200);
+    assert.equal((response.body as { status: string }).status, 'ok');
+    assert.match((response.body as { summary: string }).summary, /2 capabilities registered/i);
+  } finally {
+    await server.close();
+  }
+});
+
 test('progress route proxies orchestrator step timeline for live runs', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
@@ -1987,6 +2107,61 @@ test('learning route prefers live experience-learning client when configured', a
     assert.match(body.endpoint, /\/v0\/runs\//);
     assert.equal(learningCalls, 1);
     assert.equal(calls.getLearning, 0, 'orchestrator fallback must not be called when EL is live');
+  } finally {
+    await server.close();
+  }
+});
+
+test('experience route maps live learning summaries into the Studio contract', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch } = stubOrchestrator();
+  const liveLearning = {
+    enabled: true,
+    baseUrl: 'http://el.test',
+    async getRunSummary(runId: string) {
+      return {
+        status: 200,
+        body: {
+          runId,
+          runStatus: 'completed',
+          sourceEventCount: 4,
+          sourceLedgerCount: 2,
+          candidateCount: 2,
+          candidateByPattern: { repeated_action: 2 },
+          experienceEventIds: ['evt-1', 'evt-2'],
+          observedPatterns: ['repeated_action'],
+          observationOnly: true,
+          policyVersion: 'v0',
+          policyFingerprint: 'fp-1',
+        },
+      };
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    experienceLearning: liveLearning,
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const runId = (created.body as { runId: string }).runId;
+    const response = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/experience`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, {
+      runId,
+      programId: 'BRNCH01',
+      mode: 'live',
+      productMode: 'live',
+      summary: '2 learning candidates observed • from 4 source events • 2 source ledgers considered • observation-only mode',
+      observationPolicy: 'v0 / fp-1',
+      detectedPatterns: ['repeated_action', 'repeated_action: 2'],
+      artifactRefs: ['evt-1', 'evt-2'],
+    });
   } finally {
     await server.close();
   }
