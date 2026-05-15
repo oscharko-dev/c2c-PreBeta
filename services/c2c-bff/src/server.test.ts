@@ -421,6 +421,41 @@ test('mode endpoint flips with upstream enabled-ness', async () => {
   }
 });
 
+test('API endpoints allow local split-server CORS requests from Studio', async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const preflight = await fetch(`${server.baseUrl}/api/v0/transform`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://127.0.0.1:3000',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'Content-Type',
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), 'http://127.0.0.1:3000');
+    assert.match(preflight.headers.get('access-control-allow-methods') ?? '', /POST/);
+    assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /Content-Type/);
+
+    const health = await fetch(`${server.baseUrl}/api/v0/health`, {
+      headers: {
+        Origin: 'http://127.0.0.1:3000',
+      },
+    });
+    assert.equal(health.status, 200);
+    assert.equal(health.headers.get('access-control-allow-origin'), 'http://127.0.0.1:3000');
+  } finally {
+    await server.close();
+  }
+});
+
 test('samples list and detail return registry contents including reference-program contract', async () => {
   const handler = createApp({
     config: baseConfig,
@@ -2376,6 +2411,7 @@ test('W0 browser acceptance fixtures do not enable diagnostic fixtures', () => {
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
   const candidates = [
     path.join(repoRoot, '.github', 'workflows'),
+    path.join(repoRoot, 'apps', 'c2c-studio', 'tests'),
     path.join(repoRoot, 'apps', 'c2c-ui', 'tests'),
     path.join(repoRoot, 'tests'),
     path.join(repoRoot, 'e2e'),

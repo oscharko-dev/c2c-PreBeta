@@ -63,6 +63,23 @@ jobs:
           java-version: '21'
           cache: maven
 
+      - name: Set up Go
+        if: hashFiles('services/agentic-harness-core/go.mod') != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+
+      - name: Set up Node.js
+        if: hashFiles('apps/c2c-studio/package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            apps/c2c-studio/package-lock.json
+            apps/c2c-ui/package-lock.json
+            services/c2c-bff/package-lock.json
+
       - name: Install GnuCOBOL for true Golden Master verification
         if: hashFiles('services/build-test-runner-service/pom.xml') != ''
         run: |
@@ -95,3 +112,18 @@ jobs:
         if: hashFiles('services/build-test-runner-service/pom.xml') != ''
         working-directory: services/build-test-runner-service
         run: mvn -B -ntp verify
+
+      - name: Install c2c-studio dependencies
+        if: hashFiles('apps/c2c-studio/package.json') != ''
+        working-directory: apps/c2c-studio
+        run: npm ci --no-fund --no-audit
+
+      - name: Install Playwright Chromium
+        if: hashFiles('apps/c2c-studio/package.json') != ''
+        working-directory: apps/c2c-studio
+        run: npx playwright install --with-deps chromium
+
+      - name: Run c2c-studio browser acceptance suite
+        if: hashFiles('apps/c2c-studio/package.json') != ''
+        working-directory: apps/c2c-studio
+        run: npm run test:e2e:ci

@@ -7,31 +7,35 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ci": "playwright test --grep-invert @visual",
+    "test:e2e:update-snapshots": "playwright test --grep @visual --update-snapshots"
   },
   "dependencies": {
-    "next": "^14.2.3",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwindcss": "^3.4.1",
-    "postcss": "^8.4.38",
     "autoprefixer": "^10.4.19",
     "clsx": "^2.1.1",
+    "lucide-react": "^0.378.0",
+    "next": "^14.2.3",
+    "postcss": "^8.4.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tailwind-merge": "^2.3.0",
-    "lucide-react": "^0.378.0"
+    "tailwindcss": "^3.4.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@testing-library/dom": "^10.0.0",
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/react": "^15.0.0",
     "@types/node": "^20.12.7",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.0",
-    "typescript": "^5.4.5",
-    "vitest": "^3.2.0",
-    "@testing-library/react": "^15.0.0",
-    "@testing-library/dom": "^10.0.0",
-    "@testing-library/jest-dom": "^6.4.2",
     "@vitejs/plugin-react": "^4.2.1",
-    "jsdom": "^24.0.0",
     "eslint": "^8.57.0",
-    "eslint-config-next": "^14.2.3"
+    "eslint-config-next": "^14.2.3",
+    "jsdom": "^24.0.0",
+    "typescript": "^5.4.5",
+    "vitest": "^3.2.0"
   }
 }

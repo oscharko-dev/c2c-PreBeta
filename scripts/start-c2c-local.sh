@@ -313,7 +313,7 @@ build_studio() {
   (
     cd "$ROOT_DIR/apps/c2c-studio"
     npm ci --no-fund --no-audit
-    npm run build
+    NEXT_PUBLIC_C2C_BFF_BASE_URL="$BFF_URL" npm run build
   ) >"$LOG_DIR/c2c-studio.log" 2>&1 || fail "apps/c2c-studio build failed (see $LOG_DIR/c2c-studio.log)"
   [[ -d "$ROOT_DIR/apps/c2c-studio/.next" ]] || fail "c2c-studio .next was not built"
 }
