@@ -18,6 +18,8 @@ VAR_DIR="${C2C_LOCAL_VAR_DIR:-$ROOT_DIR/var/c2c-local}"
 READY_MARKER="${C2C_LOCAL_READY_MARKER:-$VAR_DIR/ready}"
 BFF_PORT="${C2C_LOCAL_BFF_PORT:-18089}"
 BFF_URL="http://127.0.0.1:${BFF_PORT}"
+STUDIO_PORT="${C2C_LOCAL_STUDIO_PORT:-3000}"
+STUDIO_URL="http://127.0.0.1:${STUDIO_PORT}"
 
 log() { printf '[c2c-local-smoke] %s\n' "$*" >&2; }
 fail() { printf '[c2c-local-smoke][error] %s\n' "$*" >&2; exit 1; }
@@ -81,15 +83,20 @@ if (( wait_result != 0 )); then
 fi
 
 ready_url="$(tr -d '\r\n' <"$READY_MARKER")"
-[[ "$ready_url" == "$BFF_URL" ]] || fail "ready marker pointed at $ready_url, expected $BFF_URL"
+[[ "$ready_url" == "$STUDIO_URL" ]] || fail "ready marker pointed at $ready_url, expected $STUDIO_URL"
 
-expected_line="c2c local application ready: $BFF_URL"
+expected_line="c2c local application ready: $STUDIO_URL"
 ready_count="$( (grep -Fxc "$expected_line" "$launcher_log" || true) | tr -d '[:space:]')"
 [[ "$ready_count" == "1" ]] || fail "expected exactly one ready line in launcher output"
 
 if ! wait_http "$BFF_URL/api/v0/health"; then
   tail -n 120 "$launcher_log" >&2 || true
   fail "c2c-bff health endpoint never became ready"
+fi
+
+if ! wait_http "$STUDIO_URL"; then
+  tail -n 120 "$launcher_log" >&2 || true
+  fail "c2c-studio endpoint never became ready"
 fi
 
 mode_json="$(curl -fsS --max-time 2 "$BFF_URL/api/v0/mode")"
