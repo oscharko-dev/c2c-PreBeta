@@ -71,57 +71,62 @@ final class GeneratedProgramRunner {
     private static RunResult invokeWithCapture(Method main, long timeoutMs) {
         ByteArrayOutputStream stdoutCapture = new ByteArrayOutputStream();
         ByteArrayOutputStream stderrCapture = new ByteArrayOutputStream();
-        PrintStream stdoutStream = new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8);
-        PrintStream stderrStream = new PrintStream(stderrCapture, true, StandardCharsets.UTF_8);
-
-        // shutdownNow() in the finally block is required so timed-out tasks are
-        // forcibly cancelled instead of waiting for graceful executor.close().
-        //noinspection AutoCloseableResource
-        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "c2c-build-test-runner");
-            t.setDaemon(true);
-            return t;
-        });
-        long started = System.nanoTime();
-        Future<?> task = executor.submit(() -> {
-            PrintStream originalOut = System.out;
-            PrintStream originalErr = System.err;
-            System.setOut(stdoutStream);
-            System.setErr(stderrStream);
+        // PrintStream wraps the in-memory ByteArrayOutputStream and owns no
+        // OS resources, but it is still AutoCloseable. try-with-resources
+        // guarantees flush+close even on exceptional paths and silences the
+        // Qodana "AutoCloseable used without 'try'-with-resources" warning.
+        try (PrintStream stdoutStream = new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8);
+             PrintStream stderrStream = new PrintStream(stderrCapture, true, StandardCharsets.UTF_8)) {
+            // shutdownNow() in the finally block is required so timed-out
+            // tasks are forcibly cancelled instead of waiting for graceful
+            // executor.close().
+            //noinspection AutoCloseableResource
+            ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "c2c-build-test-runner");
+                t.setDaemon(true);
+                return t;
+            });
+            long started = System.nanoTime();
+            Future<?> task = executor.submit(() -> {
+                PrintStream originalOut = System.out;
+                PrintStream originalErr = System.err;
+                System.setOut(stdoutStream);
+                System.setErr(stderrStream);
+                try {
+                    main.invoke(null, (Object) new String[0]);
+                } catch (InvocationTargetException e) {
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    cause.printStackTrace(stderrStream);
+                    throw new RuntimeException(cause);
+                } catch (IllegalAccessException e) {
+                    e.printStackTrace(stderrStream);
+                    throw new RuntimeException(e);
+                } finally {
+                    System.setOut(originalOut);
+                    System.setErr(originalErr);
+                }
+            });
             try {
-                main.invoke(null, (Object) new String[0]);
-            } catch (InvocationTargetException e) {
+                task.get(timeoutMs, TimeUnit.MILLISECONDS);
+                long elapsed = (System.nanoTime() - started) / 1_000_000L;
+                return RunResult.success(stdoutCapture.toString(StandardCharsets.UTF_8),
+                        stderrCapture.toString(StandardCharsets.UTF_8), elapsed);
+            } catch (TimeoutException e) {
+                task.cancel(true);
+                return RunResult.timeout(timeoutMs,
+                        stdoutCapture.toString(StandardCharsets.UTF_8),
+                        stderrCapture.toString(StandardCharsets.UTF_8));
+            } catch (ExecutionException e) {
                 Throwable cause = e.getCause() == null ? e : e.getCause();
-                cause.printStackTrace(stderrStream);
-                throw new RuntimeException(cause);
-            } catch (IllegalAccessException e) {
-                e.printStackTrace(stderrStream);
-                throw new RuntimeException(e);
+                return RunResult.runtimeFailure(cause,
+                        stdoutCapture.toString(StandardCharsets.UTF_8),
+                        stderrCapture.toString(StandardCharsets.UTF_8));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return RunResult.runError("interrupted", e);
             } finally {
-                System.setOut(originalOut);
-                System.setErr(originalErr);
+                executor.shutdownNow();
             }
-        });
-        try {
-            task.get(timeoutMs, TimeUnit.MILLISECONDS);
-            long elapsed = (System.nanoTime() - started) / 1_000_000L;
-            return RunResult.success(stdoutCapture.toString(StandardCharsets.UTF_8),
-                    stderrCapture.toString(StandardCharsets.UTF_8), elapsed);
-        } catch (TimeoutException e) {
-            task.cancel(true);
-            return RunResult.timeout(timeoutMs,
-                    stdoutCapture.toString(StandardCharsets.UTF_8),
-                    stderrCapture.toString(StandardCharsets.UTF_8));
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause() == null ? e : e.getCause();
-            return RunResult.runtimeFailure(cause,
-                    stdoutCapture.toString(StandardCharsets.UTF_8),
-                    stderrCapture.toString(StandardCharsets.UTF_8));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return RunResult.runError("interrupted", e);
-        } finally {
-            executor.shutdownNow();
         }
     }
 

@@ -13,11 +13,31 @@ profile:
 #Enable inspections
 #include:
 #  - name: <SomeEnabledInspectionId>
-#Disable inspections
-#exclude:
-#  - name: <SomeDisabledInspectionId>
-#    paths:
-#      - <path/where/not/run/inspection>
+# Disable inspections that are intentional or context-specific.
+# X-Harness-Actor and X-Harness-Role are intentional Harness control-plane
+# headers, not typos. They are emitted from the four service ServiceApp.java
+# files via dedicated HARNESS_*_HEADER constants. The IntelliJ "Unknown HTTP
+# header" inspection ships under several IDs across versions, so all known
+# aliases are listed here to keep coverage robust.
+exclude:
+  - name: HttpHeaders
+    paths:
+      - services/cobol-parser-service
+      - services/semantic-ir-service
+      - services/target-java-generation-service
+      - services/build-test-runner-service
+  - name: UnknownHttpHeader
+    paths:
+      - services/cobol-parser-service
+      - services/semantic-ir-service
+      - services/target-java-generation-service
+      - services/build-test-runner-service
+  - name: HttpUrlsUsage
+    paths:
+      - services/cobol-parser-service
+      - services/semantic-ir-service
+      - services/target-java-generation-service
+      - services/build-test-runner-service
 projectJDK: "25" #(Applied in CI/CD pipeline)
 #Execute shell command before Qodana execution (Applied in CI/CD pipeline)
 #bootstrap: sh ./prepare-qodana.sh
