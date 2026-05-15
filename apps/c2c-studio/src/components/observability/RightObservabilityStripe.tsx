@@ -1,18 +1,20 @@
 import { FileText, Search, PlayCircle, Shield, Database, GraduationCap, Box, Bell } from 'lucide-react';
 import { useWorkbench } from '../../stores/workbench';
 
+const bottomTabMapping: Record<string, string> = {
+  'evidence': 'evidence',
+  'build': 'build-test',
+  'artifacts': 'artifacts',
+  'experience-learning': 'learning',
+};
+
 export function RightObservabilityStripe() {
-  const { setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
+  const { activeBottomTab, isBottomPanelOpen, setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
   
   const handleShortcutClick = (id: string) => {
-    const bottomTabMapping: Record<string, string> = {
-      'evidence': 'evidence',
-      'build': 'build-test',
-      'artifacts': 'artifacts',
-      'experience-learning': 'learning',
-    };
-    if (bottomTabMapping[id]) {
-      setActiveBottomTab(bottomTabMapping[id]);
+    const mappedTab = bottomTabMapping[id];
+    if (mappedTab) {
+      setActiveBottomTab(mappedTab);
       setBottomPanelOpen(true);
     }
   };
@@ -32,13 +34,20 @@ export function RightObservabilityStripe() {
       <div className="flex flex-col items-center gap-4">
         {items.map(item => {
           const Icon = item.icon;
+          const mappedTab = bottomTabMapping[item.id];
+          const isActive = Boolean(mappedTab && isBottomPanelOpen && activeBottomTab === mappedTab);
+          const canOpen = Boolean(mappedTab);
           return (
             <button
               key={item.id}
               type="button"
-              onClick={() => handleShortcutClick(item.id)}
-              className="p-2 rounded text-text-dim hover:text-text"
-              aria-label={`Open ${item.label}`}
+              onClick={canOpen ? () => handleShortcutClick(item.id) : undefined}
+              className={isActive ? 'p-2 rounded border-l-2 border-accent bg-bg-active text-accent' : `p-2 rounded border-l-2 border-transparent text-text-dim ${canOpen ? 'hover:text-text hover:bg-bg-hover' : 'cursor-not-allowed opacity-50'}`}
+              aria-label={canOpen ? `Open ${item.label}` : `${item.label} unavailable`}
+              aria-controls={canOpen && isBottomPanelOpen ? 'bottom-workbench-region' : undefined}
+              aria-current={isActive ? 'page' : undefined}
+              aria-expanded={canOpen ? isActive : undefined}
+              disabled={!canOpen}
               title={item.label}
             >
               <Icon className="h-5 w-5" />

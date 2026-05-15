@@ -118,6 +118,21 @@ jobs:
         working-directory: apps/c2c-studio
         run: npm ci --no-fund --no-audit
 
+      - name: Run c2c-studio lint
+        if: hashFiles('apps/c2c-studio/package.json') != ''
+        working-directory: apps/c2c-studio
+        run: npm run lint
+
+      - name: Run c2c-studio unit and contract tests
+        if: hashFiles('apps/c2c-studio/package.json') != ''
+        working-directory: apps/c2c-studio
+        run: npm test
+
+      - name: Build c2c-studio
+        if: hashFiles('apps/c2c-studio/package.json') != ''
+        working-directory: apps/c2c-studio
+        run: npm run build
+
       - name: Install Playwright Chromium
         if: hashFiles('apps/c2c-studio/package.json') != ''
         working-directory: apps/c2c-studio

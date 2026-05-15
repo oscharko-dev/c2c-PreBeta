@@ -33,7 +33,7 @@ export const MetadataRow = React.forwardRef<HTMLDivElement, MetadataRowProps>(
       >
         {items.map((item) => (
           <div key={`${item.label}:${item.value}`} className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 text-text-faint">{item.label}</span>
+            <span className="shrink-0 text-text-dim">{item.label}</span>
             <Truncate
               text={item.value}
               maxLength={32}

@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class GoldenMasterTest {
 
+    private static final long CI_SAFE_GNUCOBOL_TIMEOUT_MS = 15_000L;
+
     @Test
     void inlineExpectedTextWins() {
         Map<String, Object> hint = Map.of(
@@ -53,7 +55,7 @@ class GoldenMasterTest {
         GoldenMaster.Resolved resolved = GoldenMaster.resolve("BRNCH01", Map.of(), repoRoot())
                 .orElseThrow();
         CobolRuntimeExecutor.Reproduction reproduction =
-                CobolRuntimeExecutor.reproduce(resolved, repoRoot(), 5000L);
+                CobolRuntimeExecutor.reproduce(resolved, repoRoot(), CI_SAFE_GNUCOBOL_TIMEOUT_MS);
         assertTrue(reproduction.available(), () -> reproduction.toMap().toString());
         assertTrue(reproduction.compileOk(), () -> reproduction.toMap().toString());
         assertTrue(reproduction.ran(), () -> reproduction.toMap().toString());

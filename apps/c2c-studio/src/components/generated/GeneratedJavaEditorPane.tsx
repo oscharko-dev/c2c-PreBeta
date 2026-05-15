@@ -11,8 +11,8 @@ import { VirtualizedCodeBlock } from '../ui/VirtualizedCodeBlock';
 
 export function GeneratedJavaEditorPane() {
   const { 
-    artifactState, 
     selectedFilePath, 
+    selectedFileRef,
     fileContent, 
     isFetchingFile, 
     fileFetchError,
@@ -191,6 +191,9 @@ export function GeneratedJavaEditorPane() {
           <VirtualizedCodeBlock
             code={fileContent}
             label={`Generated Java source for ${selectedFilePath}`}
+            data-file-path={selectedFilePath}
+            data-file-sha256={selectedFileRef?.sha256}
+            data-artifact-sha256={artifactDetails?.sha256}
           />
         )}
       </div>

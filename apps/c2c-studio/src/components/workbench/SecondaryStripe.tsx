@@ -12,7 +12,11 @@ export function SecondaryStripe() {
   if (!isSecondaryStripeOpen) return null;
 
   return (
-    <aside className="hidden h-full w-64 shrink-0 flex-col overflow-hidden border-r border-line bg-bg-1 md:flex" aria-label="Secondary Stripe">
+    <aside
+      id="secondary-stripe"
+      className="absolute bottom-0 left-12 top-0 z-30 flex h-full w-52 shrink-0 flex-col overflow-hidden border-r border-line bg-bg-1 shadow-lg md:static md:z-auto md:w-64 md:shadow-none"
+      aria-label="Secondary Stripe"
+    >
       <div className="flex items-center px-4 h-10 border-b border-line-2 font-medium text-xs uppercase tracking-wider text-text-dim">
         {activeActivityTab === 'harness' ? 'Harness' : 
          activeActivityTab === 'model-gateway' ? 'Model Gateway' : 

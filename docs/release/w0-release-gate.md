@@ -8,10 +8,12 @@ purely on a verbal claim or a screenshot.
 > Issue: [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) ·
 > Parent epic: [#1](https://github.com/oscharko-dev/c2c-PreBeta/issues/1) ·
 > Corrective epic: [#86](https://github.com/oscharko-dev/c2c-PreBeta/issues/86) ·
+> Studio epic: [#118](https://github.com/oscharko-dev/c2c-PreBeta/issues/118) ·
 > Companion: [W0 reference runbook](../showcase/w0-reference-runbook.md),
 > [W0 scorecard](../showcase/w0-scorecard.md),
 > [W0 follow-ups](../showcase/w0-followups.md),
-> [W0 corrective epic #86 closure evidence](w0-corrective-epic-86.md).
+> [W0 corrective epic #86 closure evidence](w0-corrective-epic-86.md),
+> [W0.1 Studio epic #118 closure evidence](w0-studio-epic-118.md).
 
 ## Decision
 
@@ -19,7 +21,7 @@ purely on a verbal claim or a screenshot.
 |-------|-------|
 | Status | **GO for Wave 1 planning** as of the run tag below. |
 | Recorded run tag | `20260514T104603Z` |
-| Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [reference-evidence-pack/](../showcase/reference-evidence-pack/), [w0-corrective-epic-86.md](w0-corrective-epic-86.md), CI on `dev` |
+| Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [reference-evidence-pack/](../showcase/reference-evidence-pack/), [w0-corrective-epic-86.md](w0-corrective-epic-86.md), [w0-studio-epic-118.md](w0-studio-epic-118.md), CI on `dev` |
 | Sign-off | Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) closing comment links to this document. |
 
 Wave 1 planning may proceed under the explicit constraints in
@@ -159,6 +161,24 @@ to remove or weaken any of the W0 acceptance bars below.
       _Evidence_: [`scripts/smoke-test-c2c-local.sh`](../../scripts/smoke-test-c2c-local.sh),
       [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts).
 
+### 12. W0.1 Studio parent epic closure for Issue #118
+
+- [x] The W0.1 Studio parent epic is closed by a first-class evidence map, not
+      by implication from the #86 corrective epic.
+      _Evidence_: [`w0-studio-epic-118.md`](w0-studio-epic-118.md).
+- [x] The Next.js/Tailwind Studio workbench is connected to the BFF and renders
+      only active-run generated Java that is byte-bound to
+      `/api/v0/runs/{runId}/generated/files/{path}`.
+      _Evidence_: [`apps/c2c-studio/src/lib/apiClient.ts`](../../apps/c2c-studio/src/lib/apiClient.ts),
+      [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts).
+- [x] The BFF OpenAPI contract includes the W0.1 browser surfaces for run
+      progress, learning, generated files, build/test, evidence, events, and
+      run artifacts.
+      _Evidence_: [`services/c2c-bff/openapi.yaml`](../../services/c2c-bff/openapi.yaml).
+- [x] Accessibility, keyboard resizing, selected rail state, and responsive
+      workbench behavior have automated regression coverage.
+      _Evidence_: [`apps/c2c-studio/tests/a11y-resizing-perf.test.tsx`](../../apps/c2c-studio/tests/a11y-resizing-perf.test.tsx).
+
 ## What is *not* ready (and what must not be claimed)
 
 - **Production readiness.** W0 is a walking skeleton with synthetic corpus
@@ -196,10 +216,18 @@ A reviewer can re-derive every "ready" item by running:
 
 ```bash
 ./scripts/bootstrap.sh
-./scripts/w0-reference-run.sh
+W0_REFERENCE_RUN_ENV_FILE="$PWD/.env" \
+  W0_REFERENCE_RUN_MODEL_GATEWAY_ENABLED=false \
+  ./scripts/w0-reference-run.sh
 cat var/w0-reference-run/scorecard.md
-./scripts/smoke-test-c2c-local.sh
-cd apps/c2c-studio && npm run test:e2e
+C2C_LOCAL_ENV_FILE="$PWD/.env" \
+  C2C_LOCAL_MODEL_GATEWAY_ENABLED=false \
+  ./scripts/smoke-test-c2c-local.sh
+cd apps/c2c-studio && \
+  CI=1 \
+  C2C_LOCAL_ENV_FILE="../../.env" \
+  C2C_LOCAL_MODEL_GATEWAY_ENABLED=false \
+  npm run test:e2e:ci
 ```
 
 and comparing the produced scorecard and per-program manifests against the

@@ -18,7 +18,7 @@ export function TargetJavaInspector() {
     unavailableFiles
   } = useGeneratedArtifacts();
 
-  const { size, isResizing, startResize } = useResizablePane({
+  const { size, minSize, maxSize, isResizing, startResize } = useResizablePane({
     id: 'target-inspector',
     initialSize: 288, // w-72 is 288px
     minSize: 200,
@@ -31,21 +31,26 @@ export function TargetJavaInspector() {
 
   return (
     <aside
-      className="flex h-full shrink-0 flex-col overflow-hidden bg-bg-2 relative group max-lg:!w-64" 
+      id="target-java-inspector-panel"
+      className="absolute bottom-0 right-0 top-0 z-20 flex h-full w-64 shrink-0 flex-col overflow-hidden bg-bg-2 shadow-lg lg:relative lg:z-auto lg:w-[var(--target-inspector-width)] lg:shadow-none group"
       aria-label="Target Java Inspector"
-      style={{ width: size }}
+      style={{ '--target-inspector-width': `${size}px` } as React.CSSProperties}
     >
       {/* Resize Handle */}
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize Target Inspector"
+        aria-controls="target-java-inspector-panel"
+        aria-valuemin={minSize}
+        aria-valuemax={maxSize}
+        aria-valuenow={size}
         tabIndex={0}
         onMouseDown={startResize}
         onTouchStart={startResize}
         onKeyDown={startResize}
         className={cn(
-          "absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent hover:w-1 focus-visible:w-1 focus-visible:bg-accent outline-none z-10 transition-colors delay-100",
+          "absolute left-0 top-0 bottom-0 hidden w-1 cursor-col-resize hover:bg-accent hover:w-1 focus-visible:w-1 focus-visible:bg-accent outline-none z-10 transition-colors delay-100 lg:block",
           isResizing ? "bg-accent w-1" : "bg-line"
         )}
       />
