@@ -979,6 +979,7 @@ class W0WorkflowRunner:
                 "orchestrator.workflow.completed",
                 "workflow completed",
             )
+            _write_summary("completed", message="W0 migration workflow completed")
             self.gateway.update_run(
                 context.run_id,
                 "completed",
@@ -987,7 +988,6 @@ class W0WorkflowRunner:
                 evidence_refs=evidence_refs,
                 policy_decision=POLICY_ALLOW,
             )
-            _write_summary("completed", message="W0 migration workflow completed")
             # Issue #96: forward Harness events + trajectory ledger to the
             # experience-learning-service so the EL system can analyze runs
             # started from the UI. Best-effort; failures must not break the
