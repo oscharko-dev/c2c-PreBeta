@@ -1,45 +1,43 @@
 'use client';
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSourceWorkspace } from '../../stores/sourceWorkspace';
-import { cn } from '@/lib/utils';
 import { Play } from 'lucide-react';
-import { apiClient } from '../../lib/apiClient';
+import { DEFAULT_SOURCE_NAME, deriveDetectedProgramId, deriveDisplayedLineEnding, deriveSourceHash } from '../../lib/sourceAnalysis';
 
 export function CobolEditorPane() {
-  const { sourceText, setSourceText, isDirty, sourceName, programId } = useSourceWorkspace();
-  const [isTransforming, setIsTransforming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    sourceText,
+    setSourceText,
+    isDirty,
+    sourceName,
+    loadedProgramId,
+    transformError,
+    isTransforming,
+    canSubmitTransform,
+    submitTransform,
+  } = useSourceWorkspace();
+  const [sourceHash, setSourceHash] = useState('00000000');
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const lineCount = sourceText.split('\\n').length || 1;
+  const lineCount = sourceText.split('\n').length || 1;
   const lines = Array.from({ length: lineCount }, (_, i) => i + 1);
+  const detectedProgramId = deriveDetectedProgramId(sourceText) ?? loadedProgramId;
+  const lineEnding = deriveDisplayedLineEnding(sourceText);
 
-  const handleTransform = async () => {
-    if (!sourceText.trim()) return;
+  useEffect(() => {
+    let cancelled = false;
 
-    setIsTransforming(true);
-    setError(null);
-    const result = await apiClient.transform({
-      sourceText,
-      programId: programId || undefined,
-      sourceName: sourceName || 'pasted-source.cbl',
+    deriveSourceHash(sourceText).then((nextHash) => {
+      if (!cancelled) {
+        setSourceHash(nextHash);
+      }
     });
 
-    if (!result.ok) {
-      setError(result.message);
-    }
-    setIsTransforming(false);
-  };
-
-  const calculateHash = (text: string) => {
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-      hash = (hash << 5) - hash + text.charCodeAt(i);
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(16);
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceText]);
 
   if (!sourceText && !isDirty) {
     return (
@@ -50,7 +48,8 @@ export function CobolEditorPane() {
             Load a reference program from the Source Workspace or paste COBOL code here.
           </p>
           <button
-            onClick={() => setSourceText('      * PASTE COBOL HERE')}
+            type="button"
+            onClick={() => setSourceText('       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMO01.\n')}
             className="rounded bg-bg-2 px-4 py-2 text-sm text-text hover:bg-bg-3"
           >
             Start Typing
@@ -65,23 +64,26 @@ export function CobolEditorPane() {
       <div className="flex items-center justify-between border-b border-line px-4 py-2 shrink-0">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-medium text-text">
-            {sourceName || 'Unsaved Buffer'} {isDirty && '*'}
+            {sourceName || DEFAULT_SOURCE_NAME} {isDirty && '*'}
           </h2>
-          {programId && (
+          {detectedProgramId && (
             <span className="rounded bg-bg-2 px-2 py-1 text-[10px] text-text-dim">
-              ID: {programId}
+              ID: {detectedProgramId}
             </span>
           )}
         </div>
         <div className="flex items-center gap-3">
           <div className="text-[10px] text-text-faint uppercase tracking-wider flex gap-3">
             <span>UTF-8</span>
-            <span>CRLF</span>
-            <span title="Source Hash">#{calculateHash(sourceText).padStart(8, '0')}</span>
+            <span>{lineEnding}</span>
+            <span title="Source Hash">#{sourceHash}</span>
           </div>
           <button
-            onClick={handleTransform}
-            disabled={isTransforming || !sourceText.trim()}
+            type="button"
+            onClick={() => {
+              void submitTransform();
+            }}
+            disabled={!canSubmitTransform}
             className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-bg-0 hover:bg-accent-dim disabled:opacity-50"
           >
             <Play className="w-3.5 h-3.5" />
@@ -90,9 +92,9 @@ export function CobolEditorPane() {
         </div>
       </div>
       
-      {error && (
+      {transformError && (
         <div className="bg-error/10 text-error px-4 py-2 text-sm border-b border-error/20">
-          {error}
+          {transformError}
         </div>
       )}
 

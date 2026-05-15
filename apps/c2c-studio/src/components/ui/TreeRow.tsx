@@ -37,6 +37,7 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
       if (isFolder) {
         onToggle?.();
       }
+      onClick?.({} as React.MouseEvent<HTMLDivElement>);
     };
 
     return (
@@ -51,17 +52,19 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
           {
             'bg-bg-active text-text hover:bg-bg-active-strong': active,
             'text-text-dim hover:bg-bg-2 hover:text-text': !active,
-            'cursor-pointer': isFolder,
+            'cursor-pointer': isFolder || typeof onClick === 'function',
           },
           className
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={(event) => {
-          activate();
+          if (isFolder) {
+            onToggle?.();
+          }
           onClick?.(event);
         }}
         onKeyDown={(event) => {
-          if (isFolder && (event.key === 'Enter' || event.key === ' ')) {
+          if ((isFolder || typeof onClick === 'function') && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault();
             activate();
           }

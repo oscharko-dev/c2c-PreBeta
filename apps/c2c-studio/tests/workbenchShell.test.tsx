@@ -7,6 +7,14 @@ vi.mock('../src/hooks/useC2cApi', () => ({
   useC2cApi: vi.fn(),
 }));
 
+vi.mock('../src/hooks/useReferencePrograms', () => ({
+  useReferencePrograms: vi.fn(() => ({
+    programs: [],
+    isLoading: false,
+    error: null,
+  })),
+}));
+
 import { useC2cApi } from '../src/hooks/useC2cApi';
 
 describe('WorkbenchShell Layout & Topbar Readiness', () => {
@@ -25,8 +33,8 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     expect(within(screen.getByLabelText('Product readiness')).getByText('Ready')).toBeInTheDocument();
     expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     
-    // Primary action button should be enabled
-    expect(screen.getByRole('button', { name: /start transformation/i })).toBeEnabled();
+    // Primary action stays disabled until source is loaded or entered.
+    expect(screen.getByRole('button', { name: /start transformation/i })).toBeDisabled();
   });
 
   it('renders blocked state when health fails', () => {
@@ -148,7 +156,7 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     render(<WorkbenchShell />);
 
     expect(within(screen.getByLabelText('Product readiness')).getByText('Ready · Evidence Mock')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /start transformation/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /start transformation/i })).toBeDisabled();
   });
 
   it('applies truncation and wrapping guards needed for narrow desktop layouts', () => {

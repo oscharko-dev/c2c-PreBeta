@@ -7,16 +7,19 @@ import { apiClient } from '../../lib/apiClient';
 
 export function SourceWorkspaceTree() {
   const { programs, isLoading, error } = useReferencePrograms();
-  const { programId: selectedProgramId, loadProgram } = useSourceWorkspace();
+  const { loadedProgramId, loadProgram } = useSourceWorkspace();
 
   const handleProgramClick = async (programId: string, supported: boolean) => {
     if (!supported) return;
 
     const result = await apiClient.getSampleDetail(programId);
     if (result.ok) {
-      loadProgram(result.data.programId, result.data.cobolSource, result.data.sourcePath.split('/').pop() || programId);
+      loadProgram(
+        result.data.programId,
+        result.data.cobolSource,
+        result.data.cobolSourcePath.split('/').pop() || programId,
+      );
     } else {
-      // Handle error visually if possible, or log it
       console.error(result.message);
     }
   };
@@ -39,15 +42,22 @@ export function SourceWorkspaceTree() {
         {programs.map((program) => (
           <div
             key={program.programId}
-            className={!program.supportedInProductMode ? 'opacity-50 cursor-not-allowed' : ''}
-            title={!program.supportedInProductMode ? 'Unsupported in product mode' : program.description}
+            className={!program.supportedInProductMode ? 'opacity-60' : ''}
           >
             <TreeRow
               label={program.title || program.programId}
               type="file"
-              active={selectedProgramId === program.programId}
+              active={loadedProgramId === program.programId}
+              aria-disabled={!program.supportedInProductMode}
+              statusVariant={program.supportedInProductMode ? 'success' : 'blocked'}
               onClick={() => handleProgramClick(program.programId, program.supportedInProductMode)}
             />
+            {!program.supportedInProductMode ? (
+              <p className="px-4 pb-2 text-xs text-text-dim">
+                Unavailable in product mode.
+                {program.knownLimitations.length > 0 ? ` ${program.knownLimitations[0]}` : ''}
+              </p>
+            ) : null}
           </div>
         ))}
       </div>
