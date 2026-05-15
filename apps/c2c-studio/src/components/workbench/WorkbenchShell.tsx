@@ -9,7 +9,7 @@ import { ActivityBar } from './ActivityBar';
 import { SecondaryStripe } from './SecondaryStripe';
 import { SourceWorkspacePanel } from './SourceWorkspacePanel';
 import { SplitEditorArea } from './SplitEditorArea';
-import { TargetJavaInspector } from './TargetJavaInspector';
+import { TargetJavaInspector } from '../generated/TargetJavaInspector';
 import { BottomWorkbench } from './BottomWorkbench';
 import { StatusBar } from './StatusBar';
 

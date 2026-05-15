@@ -16,6 +16,7 @@ import {
   RunArtifactsView,
   RunEvent,
   RunArtifactMetadata,
+  GeneratedFileContent,
 } from '../types/api';
 import { Sample, SampleDetail, TransformRequest } from '../types/reference-program';
 
@@ -576,6 +577,17 @@ function parseRunArtifactsView(payload: unknown): ApiResult<RunArtifactsView> {
   return { ok: true, data: payload };
 }
 
+function parseGeneratedFileContent(payload: unknown): ApiResult<GeneratedFileContent> {
+  if (!isRecord(payload)) {
+    return createFailure('Contract error: GeneratedFileContent payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  // Simplified check for content as doing deep check of all fields might be redundant for this UI
+  if (typeof payload.content !== 'string' || typeof payload.path !== 'string') {
+    return createFailure('Contract error: GeneratedFileContent payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as GeneratedFileContent };
+}
+
 export const apiClient = {
   getHealth: () => fetchJson('/api/v0/health', parseHealthResponse),
   getMode: () => fetchJson('/api/v0/mode', parseModeResponse),
@@ -592,6 +604,7 @@ export const apiClient = {
   getRun: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}`, parseRunSummary),
   getGenerated: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated`, parseGeneratedView),
   getGeneratedFiles: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated/files`, parseGeneratedFilesIndex),
+  getGeneratedFile: (runId: string, filePath: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated/files/${filePath.split('/').map(encodeURIComponent).join('/')}`, parseGeneratedFileContent),
   getBuildTest: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/build-test`, parseBuildTestView),
   getEvidence: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`, parseEvidenceView),
   getRunEvents: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/events`, parseRunEventsView),

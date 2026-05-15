@@ -2,6 +2,7 @@
 
 import { editorPanes } from './workbenchModels';
 import { CobolEditorPane } from '../source/CobolEditorPane';
+import { GeneratedJavaEditorPane } from '../generated/GeneratedJavaEditorPane';
 
 export function SplitEditorArea() {
   return (
@@ -22,6 +23,8 @@ export function SplitEditorArea() {
           <section key={pane.id} className="flex min-h-0 flex-col bg-bg-0" aria-label={pane.label}>
             {pane.id === 'source' ? (
               <CobolEditorPane />
+            ) : pane.id === 'target' ? (
+              <GeneratedJavaEditorPane />
             ) : (
               <>
                 <div className="flex items-center justify-between border-b border-line px-4 py-2">
