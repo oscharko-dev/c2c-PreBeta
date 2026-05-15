@@ -16,7 +16,7 @@ export function SplitEditorArea() {
   });
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-bg-0" aria-label="Split Editor Area">
+    <main className="flex flex-1 flex-col overflow-hidden bg-bg-0" aria-label="Split Editor Area">
       <div className="flex min-h-10 items-center gap-3 border-b border-line px-3 py-2 shrink-0 bg-bg-1 text-sm">
         {editorPanes.map((pane, index) => (
           <div
@@ -58,7 +58,6 @@ export function SplitEditorArea() {
           <GeneratedJavaEditorPane />
         </section>
       </div>
-    </div>
+    </main>
   );
 }
-

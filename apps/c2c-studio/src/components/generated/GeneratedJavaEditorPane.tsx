@@ -7,6 +7,7 @@ import { BlockedState } from '../state/BlockedState';
 import { ErrorNotice } from '../state/ErrorNotice';
 import { Badge } from '../ui/Badge';
 import { useTransformationRun } from '../../stores/transformationRun';
+import { VirtualizedCodeBlock } from '../ui/VirtualizedCodeBlock';
 
 export function GeneratedJavaEditorPane() {
   const { 
@@ -187,9 +188,10 @@ export function GeneratedJavaEditorPane() {
             <p>File content is empty or unavailable.</p>
           </div>
         ) : (
-          <pre className="p-4 text-sm font-mono text-text overflow-auto">
-            <code>{fileContent}</code>
-          </pre>
+          <VirtualizedCodeBlock
+            code={fileContent}
+            label={`Generated Java source for ${selectedFilePath}`}
+          />
         )}
       </div>
     </div>

@@ -23,6 +23,14 @@ export function useKeyboardShortcuts({ onStartTransform, canStartTransform }: Us
         if (canStartTransform && onStartTransform) {
           onStartTransform();
         }
+        return;
+      }
+
+      if (e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        if (canStartTransform && onStartTransform) {
+          onStartTransform();
+        }
       }
     };
 

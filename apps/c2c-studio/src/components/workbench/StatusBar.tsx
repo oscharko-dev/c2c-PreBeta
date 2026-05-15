@@ -31,7 +31,7 @@ export function StatusBar({ apiState }: StatusBarProps) {
                   : 'Backend unavailable';
 
   return (
-    <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line bg-accent-dim px-3 py-1 text-xs text-text-bright shrink-0" aria-label="Status Bar">
+    <footer className="flex min-h-6 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line bg-accent-dim px-3 py-1 text-xs text-text-bright shrink-0" aria-label="Status Bar">
       <div className="flex min-w-0 items-center gap-4">
         <span>c2c Studio</span>
         <span className="opacity-75">{runLabel}</span>
@@ -52,6 +52,6 @@ export function StatusBar({ apiState }: StatusBarProps) {
           <span className="truncate opacity-75">{error}</span>
         ) : null}
       </div>
-    </div>
+    </footer>
   );
 }

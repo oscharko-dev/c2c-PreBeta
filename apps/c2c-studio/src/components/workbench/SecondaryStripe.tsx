@@ -12,7 +12,7 @@ export function SecondaryStripe() {
   if (!isSecondaryStripeOpen) return null;
 
   return (
-    <div className="hidden h-full w-64 shrink-0 flex-col overflow-hidden border-r border-line bg-bg-1 md:flex" aria-label="Secondary Stripe">
+    <aside className="hidden h-full w-64 shrink-0 flex-col overflow-hidden border-r border-line bg-bg-1 md:flex" aria-label="Secondary Stripe">
       <div className="flex items-center px-4 h-10 border-b border-line-2 font-medium text-xs uppercase tracking-wider text-text-dim">
         {activeActivityTab === 'harness' ? 'Harness' : 
          activeActivityTab === 'model-gateway' ? 'Model Gateway' : 
@@ -35,6 +35,6 @@ export function SecondaryStripe() {
         {activeActivityTab === 'model-gateway' && <ModelGatewayPanel />}
         {activeActivityTab === 'experience' && <ExperienceLearningPanel />}
       </div>
-    </div>
+    </aside>
   );
 }
