@@ -297,6 +297,8 @@ const baseConfig: BffConfig = {
   orchestratorUrl: '',
   evidenceUrl: '',
   experienceLearningUrl: '',
+  modelGatewayUrl: '',
+  harnessUrl: '',
   upstreamTimeoutMs: 1_000,
   transformSourceMaxBytes: 1_000_000,
   enableDiagnosticFixtures: false,

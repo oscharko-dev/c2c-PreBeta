@@ -9,6 +9,10 @@ import { loadSampleRegistry, type SampleRegistry, type SampleDetail } from './sa
 import {
   createEvidenceClient,
   createExperienceLearningClient,
+  createModelGatewayClient,
+  createHarnessClient,
+  type ModelGatewayClient,
+  type HarnessClient,
   createNodeHttpClient,
   createOrchestratorClient,
   type EvidenceClient,
@@ -36,6 +40,8 @@ export interface ServerDeps {
   orchestrator?: OrchestratorClient;
   evidence?: EvidenceClient;
   experienceLearning?: ExperienceLearningClient;
+  modelGateway?: ModelGatewayClient;
+  harness?: HarnessClient;
   httpClient?: HttpClient;
   runStore?: RunStore;
   now?: () => Date;
@@ -47,6 +53,8 @@ interface ResolvedDeps {
   orchestrator: OrchestratorClient;
   evidence: EvidenceClient;
   experienceLearning: ExperienceLearningClient;
+  modelGateway: ModelGatewayClient;
+  harness: HarnessClient;
   runStore: RunStore;
 }
 
@@ -60,6 +68,8 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
     experienceLearning:
       deps.experienceLearning
       ?? createExperienceLearningClient(deps.config.experienceLearningUrl, httpClient, deps.config.upstreamTimeoutMs),
+    modelGateway: deps.modelGateway ?? createModelGatewayClient(deps.config.modelGatewayUrl, httpClient, deps.config.upstreamTimeoutMs),
+    harness: deps.harness ?? createHarnessClient(deps.config.harnessUrl, httpClient, deps.config.upstreamTimeoutMs),
     runStore: deps.runStore ?? createRunStore(deps.now),
   };
 }
@@ -969,6 +979,36 @@ async function liveLearningView(
   }
 }
 
+
+async function liveExperienceView(
+  stored: StoredRun,
+  orchestrator: OrchestratorClient,
+  experienceLearning: ExperienceLearningClient,
+): Promise<Record<string, unknown>> {
+  const learningView = await liveLearningView(stored, orchestrator, experienceLearning);
+  if (learningView.status !== 'complete') {
+    return {
+      runId: stored.runId,
+      programId: stored.programId,
+      mode: stored.mode,
+      productMode: 'unavailable',
+    };
+  }
+  const summaryRaw = asRecord(learningView.summary) ?? {};
+  
+  // Extract fields mapping from the learning summary JSON to the RunExperienceView
+  return {
+    runId: stored.runId,
+    programId: stored.programId,
+    mode: learningView.mode,
+    productMode: learningView.productMode,
+    summary: asString(summaryRaw.summary) || asString(summaryRaw.message),
+    observationPolicy: asString(summaryRaw.observationPolicy) || asString(summaryRaw.policy),
+    detectedPatterns: Array.isArray(summaryRaw.detectedPatterns) ? summaryRaw.detectedPatterns : [],
+    artifactRefs: Array.isArray(summaryRaw.artifactRefs) ? summaryRaw.artifactRefs : [],
+  };
+}
+
 async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
   const liveRunId = liveArtifactRunId(stored);
   if (!liveRunId || !orchestrator.enabled) {
@@ -1056,7 +1096,7 @@ function applyLiveRunPayload(stored: StoredRun, runStore: RunStore, payload: unk
 
 export function createApp(deps: ServerDeps): http.RequestListener {
   const resolved = resolveDeps(deps);
-  const { config, samples, orchestrator, evidence, experienceLearning, runStore } = resolved;
+  const { config, samples, orchestrator, evidence, experienceLearning, modelGateway, harness, runStore } = resolved;
 
   return async function handler(req, res) {
     try {
@@ -1165,6 +1205,62 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
+      }
+
+      
+      if (pathname === '/api/v0/model-gateway/health' && method === 'GET') {
+        if (!modelGateway.enabled) {
+          jsonResponse(res, 503, { error: 'Model Gateway unavailable in deterministic W0 mode' });
+          return;
+        }
+        try {
+          const upstream = await modelGateway.getHealth();
+          if (upstream && upstream.status >= 200 && upstream.status < 300) {
+            jsonResponse(res, upstream.status, upstream.body);
+            return;
+          }
+          jsonResponse(res, 503, { error: 'Model Gateway upstream unavailable' });
+        } catch (err) {
+          jsonResponse(res, 503, { error: 'Model Gateway upstream failed' });
+        }
+        return;
+      }
+
+      if (pathname === '/api/v0/model-gateway/models' && method === 'GET') {
+        if (!modelGateway.enabled) {
+          jsonResponse(res, 503, { error: 'Model Gateway unavailable in deterministic W0 mode' });
+          return;
+        }
+        try {
+          const upstream = await modelGateway.getModels();
+          if (upstream && upstream.status >= 200 && upstream.status < 300) {
+            jsonResponse(res, upstream.status, upstream.body);
+            return;
+          }
+          jsonResponse(res, 503, { error: 'Model Gateway upstream unavailable' });
+        } catch (err) {
+          jsonResponse(res, 503, { error: 'Model Gateway upstream failed' });
+        }
+        return;
+      }
+
+      if (pathname === '/api/v0/harness/ready' && method === 'GET') {
+        if (!harness.enabled) {
+          jsonResponse(res, 503, { error: 'Harness unavailable' });
+          return;
+        }
+        try {
+          const upstream = await harness.getReady();
+          if (upstream && upstream.status >= 200 && upstream.status < 300) {
+            // upstream body is empty or simple text/json for /ready usually, but proxying it is fine.
+            jsonResponse(res, 200, { status: 'ok', summary: 'Harness ready' });
+            return;
+          }
+          jsonResponse(res, 503, { error: 'Harness upstream unavailable' });
+        } catch (err) {
+          jsonResponse(res, 503, { error: 'Harness upstream failed' });
+        }
+        return;
       }
 
       const sampleMatch = /^\/api\/v0\/samples\/([^\/]+)$/.exec(pathname);
@@ -1528,6 +1624,28 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         jsonResponse(res, 200, await liveLearningView(stored, orchestrator, experienceLearning));
+        return;
+      }
+
+      
+      const experienceMatch = /^\/api\/v0\/runs\/([^\/]+)\/experience$/.exec(pathname);
+      if (experienceMatch && method === 'GET') {
+        const runId = decodeURIComponent(experienceMatch[1] ?? '');
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === 'diagnostic-fixture') {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: stored.mode,
+            productMode: 'unavailable',
+          });
+          return;
+        }
+        jsonResponse(res, 200, await liveExperienceView(stored, orchestrator, experienceLearning));
         return;
       }
 

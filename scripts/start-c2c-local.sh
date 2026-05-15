@@ -574,6 +574,8 @@ start_bff() {
     C2C_ORCHESTRATOR_URL="$ORCHESTRATOR_URL" \
     C2C_EVIDENCE_URL="$EVIDENCE_URL" \
     C2C_EXPERIENCE_LEARNING_URL="$EXPERIENCE_URL" \
+    C2C_MODEL_GATEWAY_URL="$MODEL_GATEWAY_URL" \
+    C2C_HARNESS_URL="$HARNESS_URL" \
     -- \
     node "$ROOT_DIR/services/c2c-bff/dist/index.js"
   wait_http c2c-bff "$BFF_URL/api/v0/health"

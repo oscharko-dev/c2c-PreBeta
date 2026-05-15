@@ -1,4 +1,9 @@
 import { 
+  RunExperienceView, 
+  ModelGatewayHealth, 
+  HarnessReady 
+} from './observability';
+import { 
   RunSummary, 
   GeneratedView, 
   GeneratedFilesIndex, 
@@ -34,4 +39,7 @@ export interface TransformationRunState {
   evidence: EvidenceView | null;
   events: RunEventsView | null;
   artifacts: RunArtifactsView | null;
+  experience: RunExperienceView | null;
+  modelGatewayHealth: ModelGatewayHealth | null;
+  harnessReady: HarnessReady | null;
 }

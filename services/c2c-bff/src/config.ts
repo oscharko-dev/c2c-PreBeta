@@ -9,6 +9,8 @@ export interface BffConfig {
   orchestratorUrl: string;
   evidenceUrl: string;
   experienceLearningUrl: string;
+  modelGatewayUrl: string;
+  harnessUrl: string;
   upstreamTimeoutMs: number;
   transformSourceMaxBytes: number;
   enableDiagnosticFixtures: boolean;
@@ -85,6 +87,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, packageRoot: st
     orchestratorUrl: env.C2C_ORCHESTRATOR_URL?.trim() ?? '',
     evidenceUrl: env.C2C_EVIDENCE_URL?.trim() ?? '',
     experienceLearningUrl: env.C2C_EXPERIENCE_LEARNING_URL?.trim() ?? '',
+    modelGatewayUrl: env.C2C_MODEL_GATEWAY_URL?.trim() ?? '',
+    harnessUrl: env.C2C_HARNESS_URL?.trim() ?? '',
     upstreamTimeoutMs: parseTimeoutMs(env.C2C_UPSTREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS),
     transformSourceMaxBytes: parseSizeBytes(env.C2C_TRANSFORM_SOURCE_MAX_BYTES, DEFAULT_TRANSFORM_SOURCE_MAX_BYTES),
     enableDiagnosticFixtures: parseBoolFlag(env.C2C_ENABLE_DIAGNOSTIC_FIXTURES),

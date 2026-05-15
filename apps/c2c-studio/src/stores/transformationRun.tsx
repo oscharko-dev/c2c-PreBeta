@@ -31,6 +31,9 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
     evidence: null,
     events: null,
     artifacts: null,
+    experience: null,
+    modelGatewayHealth: null,
+    harnessReady: null,
   });
 
   useRunPolling(state, setState);
@@ -52,6 +55,9 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
       evidence: null,
       events: null,
       artifacts: null,
+      experience: null,
+      modelGatewayHealth: null,
+      harnessReady: null,
     });
 
     const result = await apiClient.transform(request);

@@ -1,11 +1,13 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
 
 interface WorkbenchState {
+  activeActivityTab: string;
   isSecondaryStripeOpen: boolean;
   isSourceWorkspaceOpen: boolean;
   isTargetInspectorOpen: boolean;
   isBottomPanelOpen: boolean;
   activeBottomTab: string;
+  setActiveActivityTab: (tab: string) => void;
   setSecondaryStripeOpen: (open: boolean) => void;
   setSourceWorkspaceOpen: (open: boolean) => void;
   setTargetInspectorOpen: (open: boolean) => void;
@@ -16,6 +18,7 @@ interface WorkbenchState {
 const WorkbenchContext = createContext<WorkbenchState | null>(null);
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
+  const [activeActivityTab, setActiveActivityTab] = useState('explorer');
   const [isSecondaryStripeOpen, setSecondaryStripeOpen] = useState(true);
   const [isSourceWorkspaceOpen, setSourceWorkspaceOpen] = useState(true);
   const [isTargetInspectorOpen, setTargetInspectorOpen] = useState(true);
@@ -25,11 +28,13 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   return (
     <WorkbenchContext.Provider
       value={{
+        activeActivityTab,
         isSecondaryStripeOpen,
         isSourceWorkspaceOpen,
         isTargetInspectorOpen,
         isBottomPanelOpen,
         activeBottomTab,
+        setActiveActivityTab,
         setSecondaryStripeOpen,
         setSourceWorkspaceOpen,
         setTargetInspectorOpen,

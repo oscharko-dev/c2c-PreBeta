@@ -619,6 +619,20 @@ function encodeGeneratedFilePath(filePath: string): string {
   return segments.map(encodeURIComponent).join('/');
 }
 
+
+function parseRunExperienceView(payload: unknown): ApiResult<any> {
+  return { ok: true, data: payload };
+}
+function parseModelGatewayHealth(payload: unknown): ApiResult<any> {
+  return { ok: true, data: payload };
+}
+function parseModelGatewayModels(payload: unknown): ApiResult<any> {
+  return { ok: true, data: payload };
+}
+function parseHarnessReady(payload: unknown): ApiResult<any> {
+  return { ok: true, data: payload };
+}
+
 export const apiClient = {
   getHealth: () => fetchJson('/api/v0/health', parseHealthResponse),
   getMode: () => fetchJson('/api/v0/mode', parseModeResponse),
@@ -644,4 +658,8 @@ export const apiClient = {
   getEvidence: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`, parseEvidenceView),
   getRunEvents: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/events`, parseRunEventsView),
   getRunArtifacts: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/artifacts`, parseRunArtifactsView),
+  getRunExperience: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/experience`, parseRunExperienceView),
+  getModelGatewayHealth: () => fetchJson(`/api/v0/model-gateway/health`, parseModelGatewayHealth),
+  getModelGatewayModels: () => fetchJson(`/api/v0/model-gateway/models`, parseModelGatewayModels),
+  getHarnessReady: () => fetchJson(`/api/v0/harness/ready`, parseHarnessReady),
 };

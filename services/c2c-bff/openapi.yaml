@@ -353,6 +353,75 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/runs/{runId}/experience:
+    get:
+      summary: Return learning summary and policy for the run
+      operationId: getRunExperience
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunExperienceView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/model-gateway/health:
+    get:
+      summary: Report Model Gateway health and configuration
+      operationId: getModelGatewayHealth
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelGatewayHealth" }
+        "503":
+          description: unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/model-gateway/models:
+    get:
+      summary: Return allowed models metadata
+      operationId: getModelGatewayModels
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelGatewayModels" }
+        "503":
+          description: unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/harness/ready:
+    get:
+      summary: Report Harness readiness
+      operationId: getHarnessReady
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HarnessReady" }
+        "503":
+          description: unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
 components:
   schemas:
     HealthResponse:
@@ -752,3 +821,52 @@ components:
       required: [error]
       properties:
         error: { type: string }
+
+    RunExperienceView:
+      type: object
+      required: [runId, programId, mode]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
+        summary: { type: string }
+        observationPolicy: { type: string }
+        detectedPatterns:
+          type: array
+          items: { type: string }
+        artifactRefs:
+          type: array
+          items: { type: string }
+
+    ModelGatewayHealth:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, unavailable] }
+        providerMode: { type: string }
+        activeModelCount: { type: integer }
+        dataPolicy: { type: string }
+        ledgerEnabled: { type: boolean }
+        eventEmission: { type: boolean }
+
+    ModelGatewayModels:
+      type: object
+      required: [models]
+      properties:
+        models:
+          type: array
+          items:
+            type: object
+            required: [id, name, provider]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              provider: { type: string }
+
+    HarnessReady:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, unavailable] }
+        summary: { type: string }

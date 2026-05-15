@@ -33,13 +33,16 @@ export async function hydrateRunArtifacts(
   terminalStatus?: 'completed' | 'failed',
   isActive?: () => boolean
 ) {
-  const [gen, genFiles, bt, ev, evts, arts] = await Promise.all([
+  const [gen, genFiles, bt, ev, evts, arts, exp, mgHealth, hReady] = await Promise.all([
     apiClient.getGenerated(runId),
     apiClient.getGeneratedFiles(runId),
     apiClient.getBuildTest(runId),
     apiClient.getEvidence(runId),
     apiClient.getRunEvents(runId),
     apiClient.getRunArtifacts(runId),
+    apiClient.getRunExperience(runId),
+    apiClient.getModelGatewayHealth(),
+    apiClient.getHarnessReady()
   ]);
 
   if (isActive && !isActive()) return;
@@ -56,6 +59,9 @@ export async function hydrateRunArtifacts(
       events: evts.ok ? evts.data : null,
       artifacts: arts.ok ? arts.data : null,
       artifactsError: arts.ok ? null : arts.message,
+      experience: exp.ok ? exp.data : null,
+      modelGatewayHealth: mgHealth.ok ? mgHealth.data : null,
+      harnessReady: hReady.ok ? hReady.data : null,
     };
 
     if (terminalStatus === 'failed' || prev.summary?.status === 'failed') {
