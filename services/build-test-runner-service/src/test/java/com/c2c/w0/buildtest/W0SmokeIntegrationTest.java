@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class W0SmokeIntegrationTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final long CI_SAFE_GNUCOBOL_TIMEOUT_MS = 15_000L;
 
     private final BuildTestRunnerService runner = new BuildTestRunnerService(repoRoot());
     private final TargetJavaGenerationService generator = new TargetJavaGenerationService();
@@ -92,6 +93,7 @@ class W0SmokeIntegrationTest {
         request.put("workflowId", "w0-build-test-smoke");
         request.put("programId", programId);
         request.put("generationResponse", generation);
+        request.put("options", Map.of("timeoutMs", CI_SAFE_GNUCOBOL_TIMEOUT_MS));
         Map<String, Object> result = runner.runVerification(request);
 
         // Build must succeed: the W0 generator emits compilable Java.
