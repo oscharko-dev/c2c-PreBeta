@@ -133,6 +133,12 @@ public final class ServiceApp {
         }
     }
 
+    // Custom Harness control-plane headers. Hoisted to constants so static
+    // analysis (Qodana / IntelliJ "Unknown HTTP header") does not flag them
+    // as typos at the call sites.
+    private static final String HARNESS_ACTOR_HEADER = "X-Harness-Actor";
+    private static final String HARNESS_ROLE_HEADER = "X-Harness-Role";
+
     private static final class HarnessEventPublisher {
         private final String eventEndpoint;
         private final String eventToken;
@@ -174,11 +180,10 @@ public final class ServiceApp {
                 event.put("payload", payload);
 
                 String eventText = JSON.writeValueAsString(event);
-                //noinspection HttpHeaders
                 HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(eventEndpoint))
                         .header("Content-Type", "application/json")
-                        .header("X-Harness-Actor", SERVICE_NAME)
-                        .header("X-Harness-Role", "service");
+                        .header(HARNESS_ACTOR_HEADER, SERVICE_NAME)
+                        .header(HARNESS_ROLE_HEADER, "service");
                 if (eventToken != null) {
                     builder.header("Authorization", "Bearer " + eventToken);
                 }

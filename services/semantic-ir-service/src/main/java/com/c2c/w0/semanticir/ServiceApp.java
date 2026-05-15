@@ -22,6 +22,11 @@ public final class ServiceApp {
     private static final String SERVICE_NAME = "semantic-ir-service";
     private static final int DEFAULT_PORT = 8082;
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+    // Custom Harness control-plane headers. Hoisted to constants so static
+    // analysis (Qodana / IntelliJ "Unknown HTTP header") does not flag them
+    // as typos at the call sites.
+    private static final String HARNESS_ACTOR_HEADER = "X-Harness-Actor";
+    private static final String HARNESS_ROLE_HEADER = "X-Harness-Role";
 
     private ServiceApp() {
     }
@@ -89,11 +94,10 @@ public final class ServiceApp {
             event.put("outputRef", response.get("outputRef"));
             event.put("payload", Map.of("irId", ((Map<?, ?>) response.get("ir")).get("irId")));
             event.put("createdAt", Instant.now().toString());
-            //noinspection HttpHeaders
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
                     .header("Content-Type", "application/json")
-                    .header("X-Harness-Actor", SERVICE_NAME)
-                    .header("X-Harness-Role", "service");
+                    .header(HARNESS_ACTOR_HEADER, SERVICE_NAME)
+                    .header(HARNESS_ROLE_HEADER, "service");
             if (eventToken != null) {
                 builder.header("Authorization", "Bearer " + eventToken);
             }
