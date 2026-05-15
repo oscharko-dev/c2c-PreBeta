@@ -2,7 +2,7 @@
 
 **Status**: Canonical working concept
 **Last updated**: 2026-05-15
-**Governing issue**: [#161](https://github.com/oscharko-dev/c2c-PreBeta/issues/161)
+**Governing issue**: [#164](https://github.com/oscharko-dev/c2c-PreBeta/issues/164)
 
 This document is the canonical product and architecture concept for c2c. It is
 the first reference point for scope, wave planning, architecture decisions, and
@@ -24,7 +24,8 @@ mainframe modernization through:
 - open-source infrastructure;
 - open-weight model policy;
 - EU sovereignty and customer-internal model endpoints;
-- a Harness-centered agent infrastructure;
+- an Experience Learning Harness that provides agent infrastructure,
+  governance, telemetry, pattern analysis, and reusable optimization signals;
 - neuro-symbolic depth instead of direct prompt-only translation;
 - reproducible equivalence evidence;
 - hard compliance artifacts;
@@ -40,10 +41,13 @@ architecture.
 - **Microservice-based from the beginning.** Parser, Semantic IR, target Java
   generation, build/test, evidence, BFF, model gateway, Harness, Experience
   Learning, and Studio UI remain separate capability boundaries.
-- **Harness is infrastructure, not the orchestrator.** The Harness provides the
-  capability catalog, tool and registry surfaces, run state, events, policy
-  hooks, and Experience Learning data substrate. Orchestrators and agents live
-  inside or consume the Harness; they do not replace it.
+- **Harness is infrastructure, governance, and Experience Learning system, not
+  the orchestrator.** The Harness provides the capability catalog, tool and
+  registry surfaces, MCP access, run state, events, policy hooks, ledgers, and
+  learning services. It observes agent, tool, model, artifact, and verification
+  trajectories, detects patterns, and exposes optimization signals back to
+  orchestrators and agents. It does not decide workflow order, assign agent
+  work, or declare transformation success.
 - **BFF is the browser boundary.** The Studio calls only `/api/v0/*` on the
   c2c BFF. Browser code never calls parser, orchestrator, model gateway,
   evidence, Harness, or customer/internal service URLs directly.
@@ -59,6 +63,76 @@ architecture.
   deterministic compile/run/equivalence/evidence checks.
 - **No success fallback.** Unsupported, unavailable, failed, incomplete, or
   verification-blocked states must be shown honestly in the UI and evidence.
+
+## Role Model
+
+The following role model is normative for c2c and must be preserved in code,
+documentation, and wave planning.
+
+- **Harness**: shared infrastructure, governance layer, and Experience Learning
+  system. It provides capability discovery, tool and MCP access, registries,
+  run-state surfaces, events, ledgers, policy hooks, and learning services. It
+  records and analyzes experience signals such as tool success rates, tool
+  latency, model invocation outcomes, agent communication patterns, repair-loop
+  depth, repeated failures, no-change repairs, database/RAG/graph lookup
+  usefulness, and verification outcomes. It exposes those learnings as
+  recommendations, priors, risk signals, and capability rankings to
+  orchestrators and agents. The Harness does not decide workflow order or agent
+  sequencing.
+- **Orchestrator**: workflow control component. It starts runs, selects the
+  workflow path, assigns work to agents, manages loop boundaries and stop
+  conditions, and decides when deterministic verification must run.
+- **Agents**: bounded execution and analysis roles inside a workflow. Agents
+  transform, inspect, repair, explain, or verify artifacts. Agents use
+  Harness-provided capabilities and may call models only through the Model
+  Gateway.
+- **Model Gateway**: exclusive model-access boundary. It enforces provider
+  routing, model policy, authentication, auditability, and provider abstraction
+  for Microsoft Foundry in development and customer-internal endpoints in
+  production.
+- **BFF**: browser boundary. The Studio speaks only to the c2c BFF; it never
+  calls orchestrator, Harness, model endpoints, or internal services directly.
+- **Deterministic verifier services**: parser, Semantic IR, target generation,
+  build/test, equivalence, and evidence services remain the authoritative proof
+  path. Agent output may influence artifacts, but verified success is granted
+  only by deterministic checks.
+
+Multiple orchestrators and multiple agent teams may run on the same Harness.
+That is a design goal, not an optional future interpretation. The Harness is
+therefore a shared platform layer, not a hidden monolithic orchestrator.
+
+### Harness as Experience Learning System
+
+The Harness is one of the core product differentiators. It is not only a shared
+control plane and governance surface; it is the system that turns operational
+experience into reusable product knowledge.
+
+The Harness must capture experience across the complete agentic modernization
+path:
+
+- which capabilities and tools were available for a task;
+- which tool, MCP, database, RAG, or graph calls were selected;
+- whether those calls were successful, fast, slow, redundant, or unhelpful;
+- which model and prompt template were used through the Model Gateway;
+- which policy decisions were applied;
+- how agents communicated and handed work to each other;
+- how many repair-loop iterations were needed;
+- which generated Java candidates failed compilation, runtime, or equivalence;
+- which repair strategies improved the result;
+- which workflows repeatedly ended in blocked states.
+
+From those records, the Harness should derive experience signals over time:
+recommended capabilities for a task type, risky tool/model combinations,
+patterns of repeated non-progress, repair strategies that historically worked,
+and confidence signals for orchestrator planning. In early waves those signals
+may be read-only analytics and recommendations. In later waves they become a
+learning layer that helps orchestrators and agents choose better next actions.
+
+This learning role still does not make the Harness the Orchestrator. The
+Orchestrator remains responsible for workflow control, sequencing, retry
+decisions, loop boundaries, aborts, and final run classification. The Harness
+learns from experience and makes that learning available; it does not secretly
+run the workflow.
 
 ## Implemented State
 
@@ -135,19 +209,23 @@ The W0.2 target state:
 Studio UI
   -> c2c BFF
   -> orchestrator as Harness consumer
-  -> Harness-executed agent workflow
+  -> orchestrator-steered agent workflow on the Experience Learning Harness
   -> Model Gateway / Microsoft Foundry
   -> Transformation Agent
   -> deterministic build/test gate
   -> Verification/Repair Agent
   -> bounded repair loop
-  -> Evidence Pack with model and agent trajectory records
+  -> Harness records events, model invocations, agent trajectories, and
+     experience signals
+  -> Evidence Pack with model, policy, repair, verification, and agent records
   -> Studio displays final Java and agent activity
 ```
 
 Required W0.2 capabilities:
 
-- Harness-registered agent workflow for a small COBOL-to-Java transformation;
+- orchestrator-steered agent workflow for a small COBOL-to-Java
+  transformation using Harness-provided capabilities, tools, registries,
+  ledgers, and policy hooks;
 - model-gateway-service enabled through approved Foundry development
   configuration;
 - at least one Transformation Agent that uses COBOL source, parser output,
@@ -158,6 +236,8 @@ Required W0.2 capabilities:
 - no browser-visible model credentials or internal service URLs;
 - model invocation ledger entries with completed model calls;
 - agent trajectory ledger entries for each agent action;
+- first Experience Learning signals for repeated failures, repair-loop depth,
+  no-change attempts, tool/capability usage, and verification outcomes;
 - Evidence Pack references to generated Java, build/test, model invocation,
   repair attempts, and agent trajectory;
 - UI progress states that show when agent work, model invocation, and repair
@@ -167,7 +247,9 @@ Required W0.2 capabilities:
 
 W0.2 explicitly does **not** need to deliver:
 
-- full Experience Learning maturity;
+- full Experience Learning maturity. W0.2 must capture structured experience
+  and expose first read-only signals, but it does not yet optimize workflows
+  autonomously;
 - autonomous test generation at enterprise breadth;
 - broad COBOL coverage;
 - customer production readiness;
@@ -191,7 +273,7 @@ current gaps:
 |------|--------|---------|--------------|
 | W0 | Done | Deterministic enterprise kernel and evidence backbone. | Service mesh produces compiled Java, build/test result, Harness/Experience Learning telemetry, and complete Evidence Pack for the W0 corpus without required model calls. |
 | W0.1 | Done | Product Studio UI over the W0 kernel. | Browser workflow loads/pastes supported COBOL, starts a BFF/orchestrator run, displays artifact-backed Java, build/test, evidence, progress, artifacts, and honest blocked states. |
-| W0.2 | Next | First productive AI-agent transformation loop. | At least one small COBOL program is transformed through a Harness-governed model-backed agent workflow with bounded repair and deterministic verification/evidence. |
+| W0.2 | Next | First productive AI-agent transformation loop. | At least one small COBOL program is transformed through an orchestrator-steered, model-backed agent workflow on the Experience Learning Harness, with bounded repair, first learning signals, and deterministic verification/evidence. |
 | W0.3 | Planned | Custom COBOL coverage expansion. | More customer-like small COBOL snippets work or fail honestly, including selected paragraph, literal, and data initialization semantics. |
 | W1 | Planned | Enterprise agentic hardening. | Broader agent roles, stronger mainframe semantics, model governance hardening, richer Experience Learning, and broader corpus evidence. |
 

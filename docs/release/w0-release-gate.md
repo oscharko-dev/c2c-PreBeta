@@ -196,11 +196,13 @@ to remove or weaken any of the W0 acceptance bars below.
   success path. W0.2 is the first wave allowed and required to introduce
   productive model-backed agent work through `model-gateway-service` and the
   approved Foundry development configuration.
-- **Harness-driven orchestration semantics.** The W0 reference run registers every
-  W0 capability in the Harness catalog and resolves service endpoints from
-  that catalog before invocation. The remaining W0.2 gap is moving this
-  bootstrap and live payload adaptation into `orchestrator-service.main`
-  itself; the direct reference-run driver stays only as the deterministic release-gate
+- **Harness-backed orchestration semantics.** The W0 reference run registers every
+  W0 capability in the Harness catalog and resolves service endpoints from that
+  catalog before invocation. The Orchestrator remains the workflow controller;
+  the Harness provides capability discovery, governance, ledgers, and
+  Experience Learning signals. The remaining W0.2 gap is moving this bootstrap
+  and live payload adaptation into `orchestrator-service.main` itself; the
+  direct reference-run driver stays only as the deterministic release-gate
   harness.
 
 ## Scope
@@ -221,6 +223,8 @@ agentic gate:
 - all model calls go through `model-gateway-service`;
 - development model access uses approved Microsoft Foundry configuration;
 - the orchestrator remains a Harness consumer;
+- the Harness records events, agent trajectories, model invocation references,
+  policy decisions, repair attempts, and first Experience Learning signals;
 - the UI still talks only to the BFF;
 - the first agent workflow has a bounded repair loop and a hard iteration
   limit;

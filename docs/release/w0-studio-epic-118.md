@@ -118,7 +118,8 @@ been ingested, and W0.1 still uses the deterministic no-model transformation
 path as the success mechanism.
 
 Per the [c2c Fachkonzept](../concept/c2c-fachkonzept.md), W0.2 is the next
-wave. W0.2 is responsible for the first productive AI transformation loop:
-Harness-governed agents, Model Gateway / Microsoft Foundry calls, a bounded
-verification/repair loop, and the same deterministic build/test/evidence gate
+wave. W0.2 is responsible for the first productive AI transformation loop: an
+orchestrator-steered agent workflow on the Experience Learning Harness, Model
+Gateway / Microsoft Foundry calls, a bounded verification/repair loop, first
+read-only learning signals, and the same deterministic build/test/evidence gate
 before the Studio may show a verified transformation.

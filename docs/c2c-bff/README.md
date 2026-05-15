@@ -27,6 +27,12 @@ flow, and records the open assumptions a reviewer should expect.
 6. Build/test, Evidence Pack, artifacts, progress, Harness, Model Gateway, and
    Experience Learning panels show state for the same run.
 
+In W0.2 and later, the BFF exposes product-level state from the Orchestrator and
+Harness without leaking internal service URLs. The UI should be able to show
+agent activity, model calls, repair attempts, evidence status, and first
+Experience Learning signals such as repeated failure or no-change repair
+patterns.
+
 ## Legacy reference surface flow
 
 1. Open the UI. The header shows whether the BFF is in `mock` or `live`
@@ -87,7 +93,8 @@ allowed to bypass it.
 - Customer-data upload paths.
 - Multi-user authentication, RBAC, or audit dashboards.
 - Productive AI-agent transformation. W0/W0.1 are deterministic; W0.2 adds the
-  first Harness-governed model-backed agent workflow.
+  first orchestrator-steered, model-backed agent workflow on the Experience
+  Learning Harness.
 - Browser access to internal services or model credentials. The Studio calls
   only the BFF.
 

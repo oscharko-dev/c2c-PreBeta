@@ -13,6 +13,6 @@ Please review the following checklist to ensure your PR meets our governance sta
   - [ ] CI is passing.
   - [ ] Tests are included and passing (where applicable).
   - [ ] SBOM/license posture is verified (where applicable).
-  - [ ] Harness event visibility is implemented (where applicable).
+  - [ ] Harness event, trajectory, and Experience Learning visibility is implemented (where applicable).
 - [ ] **ADR**: Any significant architectural changes are documented in an ADR.
 - [ ] **No Temporary Code**: No un-tracked TODOs, commented-out code, or placeholders are left behind.
