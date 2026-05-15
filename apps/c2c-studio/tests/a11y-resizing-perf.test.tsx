@@ -178,14 +178,27 @@ describe('A11y, Keyboard, Resizing, and Performance Hardening', () => {
     });
     render(<WorkbenchShell />);
 
-    expect(screen.getByRole('button', { name: 'Toggle Explorer' })).toHaveAttribute('aria-expanded', 'true');
+    const explorerButton = screen.getByRole('button', { name: 'Toggle Explorer' });
+    expect(explorerButton).toHaveAttribute('aria-controls', 'secondary-stripe');
+    expect(explorerButton).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Search workspace unavailable' })).toBeDisabled();
 
     const evidenceShortcut = screen.getByRole('button', { name: 'Open Evidence' });
+    expect(evidenceShortcut).toHaveAttribute('aria-controls', 'bottom-workbench-region');
+    expect(evidenceShortcut).toHaveAttribute('aria-expanded', 'false');
     expect(evidenceShortcut).not.toHaveAttribute('aria-current');
     fireEvent.click(evidenceShortcut);
     expect(evidenceShortcut).toHaveAttribute('aria-current', 'page');
+    expect(evidenceShortcut).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Traceability unavailable' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Bottom Panel' }));
+    expect(evidenceShortcut).not.toHaveAttribute('aria-controls');
+    expect(evidenceShortcut).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(explorerButton);
+    expect(explorerButton).not.toHaveAttribute('aria-controls');
+    expect(explorerButton).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('Performance test baseline - renders a large component without freezing', () => {

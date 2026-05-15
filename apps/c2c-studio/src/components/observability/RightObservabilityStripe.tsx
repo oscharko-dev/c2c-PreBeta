@@ -44,8 +44,9 @@ export function RightObservabilityStripe() {
               onClick={canOpen ? () => handleShortcutClick(item.id) : undefined}
               className={isActive ? 'p-2 rounded border-l-2 border-accent bg-bg-active text-accent' : `p-2 rounded border-l-2 border-transparent text-text-dim ${canOpen ? 'hover:text-text hover:bg-bg-hover' : 'cursor-not-allowed opacity-50'}`}
               aria-label={canOpen ? `Open ${item.label}` : `${item.label} unavailable`}
-              aria-controls={canOpen ? 'bottom-workbench-region' : undefined}
+              aria-controls={canOpen && isBottomPanelOpen ? 'bottom-workbench-region' : undefined}
               aria-current={isActive ? 'page' : undefined}
+              aria-expanded={canOpen ? isActive : undefined}
               disabled={!canOpen}
               title={item.label}
             >

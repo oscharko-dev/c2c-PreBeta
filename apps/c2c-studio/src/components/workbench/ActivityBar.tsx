@@ -9,6 +9,7 @@ const disabledButtonClass = `${inactiveButtonClass} cursor-not-allowed opacity-5
 
 export function ActivityBar() {
   const { isSecondaryStripeOpen, setSecondaryStripeOpen, activeActivityTab, setActiveActivityTab } = useWorkbench();
+  const secondaryStripeControls = isSecondaryStripeOpen ? 'secondary-stripe' : undefined;
 
   const toggleTab = (tab: string) => {
     if (isSecondaryStripeOpen && activeActivityTab === tab) {
@@ -27,7 +28,7 @@ export function ActivityBar() {
           onClick={() => toggleTab('explorer')}
           className={isSecondaryStripeOpen && activeActivityTab === 'explorer' ? activeButtonClass : inactiveButtonClass}
           aria-label="Toggle Explorer"
-          aria-controls="secondary-stripe"
+          aria-controls={secondaryStripeControls}
           aria-expanded={isSecondaryStripeOpen && activeActivityTab === 'explorer'}
         >
           <Files className="h-6 w-6" />
@@ -44,13 +45,13 @@ export function ActivityBar() {
         <button type="button" className={disabledButtonClass} aria-label="Artifact layers unavailable" disabled>
           <Layers className="h-6 w-6" />
         </button>
-        <button type="button" onClick={() => toggleTab('harness')} className={isSecondaryStripeOpen && activeActivityTab === 'harness' ? activeButtonClass : inactiveButtonClass} aria-label="Open Harness observability" aria-controls="secondary-stripe" aria-expanded={isSecondaryStripeOpen && activeActivityTab === 'harness'}>
+        <button type="button" onClick={() => toggleTab('harness')} className={isSecondaryStripeOpen && activeActivityTab === 'harness' ? activeButtonClass : inactiveButtonClass} aria-label="Open Harness observability" aria-controls={secondaryStripeControls} aria-expanded={isSecondaryStripeOpen && activeActivityTab === 'harness'}>
           <Activity className="h-6 w-6" />
         </button>
-        <button type="button" onClick={() => toggleTab('model-gateway')} className={isSecondaryStripeOpen && activeActivityTab === 'model-gateway' ? activeButtonClass : inactiveButtonClass} aria-label="Open Model Gateway observability" aria-controls="secondary-stripe" aria-expanded={isSecondaryStripeOpen && activeActivityTab === 'model-gateway'}>
+        <button type="button" onClick={() => toggleTab('model-gateway')} className={isSecondaryStripeOpen && activeActivityTab === 'model-gateway' ? activeButtonClass : inactiveButtonClass} aria-label="Open Model Gateway observability" aria-controls={secondaryStripeControls} aria-expanded={isSecondaryStripeOpen && activeActivityTab === 'model-gateway'}>
           <Server className="h-6 w-6" />
         </button>
-        <button type="button" onClick={() => toggleTab('experience')} className={isSecondaryStripeOpen && activeActivityTab === 'experience' ? activeButtonClass : inactiveButtonClass} aria-label="Open Experience Learning observability" aria-controls="secondary-stripe" aria-expanded={isSecondaryStripeOpen && activeActivityTab === 'experience'}>
+        <button type="button" onClick={() => toggleTab('experience')} className={isSecondaryStripeOpen && activeActivityTab === 'experience' ? activeButtonClass : inactiveButtonClass} aria-label="Open Experience Learning observability" aria-controls={secondaryStripeControls} aria-expanded={isSecondaryStripeOpen && activeActivityTab === 'experience'}>
           <GraduationCap className="h-6 w-6" />
         </button>
       </div>
