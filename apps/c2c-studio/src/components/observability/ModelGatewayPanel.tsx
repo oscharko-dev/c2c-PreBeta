@@ -6,15 +6,15 @@ export function ModelGatewayPanel() {
 
   if (!state.modelGatewayHealth || state.modelGatewayHealth.status === 'unavailable') {
     return (
-      <div className="p-4 text-sm text-neutral-400">
+      <div className="p-4 text-sm text-text-dim">
         <p className="mb-2">Model Gateway governance summary unavailable.</p>
         {deterministicNoModel ? (
-          <p className="text-xs italic text-neutral-500">
+          <p className="text-xs italic text-text-dim">
             Note: Deterministic W0 COBOL-to-Java runs do not require model invocations.
             No Foundry or LLM participation was required or performed for this run.
           </p>
         ) : (
-          <p className="text-xs italic text-neutral-500">
+          <p className="text-xs italic text-text-dim">
             The current Model Gateway state could not be verified from the BFF.
           </p>
         )}
@@ -31,29 +31,29 @@ export function ModelGatewayPanel() {
   } = state.modelGatewayHealth || {};
 
   return (
-    <div className="flex flex-col p-4 space-y-4 text-sm text-neutral-300">
-      <h3 className="text-sm font-semibold text-neutral-200">Model Governance Summary</h3>
+    <div className="flex flex-col p-4 space-y-4 text-sm text-text">
+      <h3 className="text-sm font-semibold text-text-bright">Model Governance Summary</h3>
       
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <span className="block text-xs text-neutral-500 uppercase tracking-wider mb-1">Provider Mode</span>
-          <span className="font-medium text-neutral-300">{providerMode || 'Unknown'}</span>
+          <span className="block text-xs text-text-dim uppercase tracking-wider mb-1">Provider Mode</span>
+          <span className="font-medium text-text">{providerMode || 'Unknown'}</span>
         </div>
         <div>
-          <span className="block text-xs text-neutral-500 uppercase tracking-wider mb-1">Active Models</span>
-          <span className="font-medium text-neutral-300">{activeModelCount ?? 0}</span>
+          <span className="block text-xs text-text-dim uppercase tracking-wider mb-1">Active Models</span>
+          <span className="font-medium text-text">{activeModelCount ?? 0}</span>
         </div>
         <div>
-          <span className="block text-xs text-neutral-500 uppercase tracking-wider mb-1">Data Policy</span>
-          <span className="font-medium text-neutral-300">{dataPolicy || 'None'}</span>
+          <span className="block text-xs text-text-dim uppercase tracking-wider mb-1">Data Policy</span>
+          <span className="font-medium text-text">{dataPolicy || 'None'}</span>
         </div>
         <div>
-          <span className="block text-xs text-neutral-500 uppercase tracking-wider mb-1">Invocation Ledger</span>
-          <span className="font-medium text-neutral-300">{ledgerEnabled ? 'Enabled' : 'Disabled'}</span>
+          <span className="block text-xs text-text-dim uppercase tracking-wider mb-1">Invocation Ledger</span>
+          <span className="font-medium text-text">{ledgerEnabled ? 'Enabled' : 'Disabled'}</span>
         </div>
         <div>
-          <span className="block text-xs text-neutral-500 uppercase tracking-wider mb-1">Event Emission</span>
-          <span className="font-medium text-neutral-300">{eventEmission ? 'Enabled' : 'Disabled'}</span>
+          <span className="block text-xs text-text-dim uppercase tracking-wider mb-1">Event Emission</span>
+          <span className="font-medium text-text">{eventEmission ? 'Enabled' : 'Disabled'}</span>
         </div>
       </div>
     </div>

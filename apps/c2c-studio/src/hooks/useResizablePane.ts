@@ -114,5 +114,5 @@ export function useResizablePane({
     }
   }, [isResizing, id]);
 
-  return { size, isResizing, startResize };
+  return { size, minSize, maxSize, isResizing, startResize };
 }

@@ -60,6 +60,7 @@ interface GeneratedArtifactsValue {
   fileTree: FileTreeNode[];
   artifactDetails: ArtifactDetails | null;
   selectedFilePath: string | null;
+  selectedFileRef: GeneratedFileRef | null;
   selectFile: (path: string) => void;
   fileContent: string | null;
   isFetchingFile: boolean;
@@ -116,6 +117,11 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
   const fileTree = useMemo(() => {
     return buildFileTree(generatedFiles?.files);
   }, [generatedFiles?.files]);
+
+  const selectedFileRef = useMemo(() => {
+    if (!selectedFilePath) return null;
+    return generatedFiles?.files.find((file) => file.path === selectedFilePath) ?? null;
+  }, [generatedFiles?.files, selectedFilePath]);
 
   const artifactDetails: ArtifactDetails | null = useMemo(() => {
     if (!generated) return null;
@@ -196,6 +202,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     fileTree,
     artifactDetails,
     selectedFilePath,
+    selectedFileRef,
     selectFile,
     fileContent,
     isFetchingFile,

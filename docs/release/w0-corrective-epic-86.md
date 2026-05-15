@@ -52,6 +52,9 @@ children [#119](https://github.com/oscharko-dev/c2c-PreBeta/issues/119),
 [#137](https://github.com/oscharko-dev/c2c-PreBeta/issues/137), and
 [#121](https://github.com/oscharko-dev/c2c-PreBeta/issues/121) through
 [#130](https://github.com/oscharko-dev/c2c-PreBeta/issues/130) are closed.
+The parent Studio epic has its own closure evidence in
+[`w0-studio-epic-118.md`](w0-studio-epic-118.md) so reviewers can evaluate the
+W0.1 browser workbench independently from the #86 corrective product path.
 
 ## Repository Evidence
 
@@ -72,12 +75,23 @@ children [#119](https://github.com/oscharko-dev/c2c-PreBeta/issues/119),
 A reviewer can re-run the #86 closure gate from a clean checkout with:
 
 ```bash
-./scripts/ci-checks.sh
-./scripts/w0-reference-run.sh
-./scripts/smoke-test-c2c-local.sh
+export C2C_LOCAL_ENV_FILE="$PWD/.env"
+export C2C_LOCAL_MODEL_GATEWAY_ENABLED=false
+
+C2C_LOCAL_ENV_FILE="$C2C_LOCAL_ENV_FILE" ./scripts/ci-checks.sh
+W0_REFERENCE_RUN_ENV_FILE="$PWD/.env" \
+  W0_REFERENCE_RUN_MODEL_GATEWAY_ENABLED=false \
+  ./scripts/w0-reference-run.sh
+C2C_LOCAL_ENV_FILE="$C2C_LOCAL_ENV_FILE" \
+  C2C_LOCAL_MODEL_GATEWAY_ENABLED=false \
+  ./scripts/smoke-test-c2c-local.sh
 npm test --prefix apps/c2c-studio
 npm test --prefix services/c2c-bff
-(cd apps/c2c-studio && CI=1 npm run test:e2e:ci)
+(cd apps/c2c-studio && \
+  CI=1 \
+  C2C_LOCAL_ENV_FILE="$C2C_LOCAL_ENV_FILE" \
+  C2C_LOCAL_MODEL_GATEWAY_ENABLED=false \
+  npm run test:e2e:ci)
 ```
 
 The long-form language gates remain the same as the W0 release gate:

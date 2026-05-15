@@ -9,6 +9,8 @@ const PRODUCT_PATH_COBOL = readFileSync(
   'utf8',
 );
 const BFF_BASE_URL = process.env.NEXT_PUBLIC_C2C_BFF_BASE_URL || 'http://127.0.0.1:18089';
+const MODEL_GATEWAY_FLAG = process.env.C2C_LOCAL_MODEL_GATEWAY_ENABLED?.trim().toLowerCase();
+const EXPECT_MODEL_POLICY_SKIPPED = MODEL_GATEWAY_FLAG === 'false' || MODEL_GATEWAY_FLAG === '0';
 const MOCK_CORS_HEADERS = {
   'access-control-allow-origin': 'http://127.0.0.1:3000',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
@@ -18,6 +20,19 @@ interface ProgressResponse {
   runId?: string;
   status?: string;
   steps: Array<{ name: string; status?: string }>;
+}
+
+interface GeneratedFilesResponse {
+  runId: string;
+  entryFilePath?: string;
+  files: Array<{ path: string; sha256?: string }>;
+}
+
+interface GeneratedFileContentResponse {
+  runId: string;
+  path: string;
+  content: string;
+  sha256: string;
 }
 
 async function expectReadyWorkbench(page: Page) {
@@ -55,6 +70,18 @@ async function fetchJsonFromPage(page: Page, path: string): Promise<unknown> {
     }
     return response.json();
   }, path);
+}
+
+function encodeGeneratedFilePath(filePath: string): string {
+  const segments = filePath.split('/');
+  if (
+    filePath.length === 0 ||
+    filePath.startsWith('/') ||
+    segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..')
+  ) {
+    throw new Error(`Invalid generated file path: ${filePath}`);
+  }
+  return segments.map(encodeURIComponent).join('/');
 }
 
 async function waitForRunProgress(page: Page, runId: string, expectedSteps: string[]): Promise<ProgressResponse> {
@@ -136,10 +163,12 @@ test.describe('c2c Studio browser acceptance', () => {
       'generate-ir',
       'generate-java',
       'compile-test-java',
-      'model-policy-skipped',
       'write-evidence',
       'completed',
     ];
+    if (EXPECT_MODEL_POLICY_SKIPPED) {
+      expectedProgressSteps.splice(5, 0, 'model-policy-skipped');
+    }
     const progressBody = await waitForRunProgress(page, runId, expectedProgressSteps);
 
     expect(generatedBody.runId).toBe(runId);
@@ -160,14 +189,31 @@ test.describe('c2c Studio browser acceptance', () => {
     expect(progressBody.steps.map((step: { name: string }) => step.name)).toEqual(
       expect.arrayContaining(expectedProgressSteps),
     );
-    expect(progressBody.steps).toContainEqual(expect.objectContaining({
-      name: 'model-policy-skipped',
-      status: 'skipped',
-    }));
-    expect(artifactsBody.artifacts).toContainEqual(expect.objectContaining({
-      kind: 'model-policy-skipped',
-      name: 'model-policy-skipped.json',
-    }));
+    if (EXPECT_MODEL_POLICY_SKIPPED) {
+      expect(progressBody.steps).toContainEqual(expect.objectContaining({
+        name: 'model-policy-skipped',
+        status: 'skipped',
+      }));
+      expect(artifactsBody.artifacts).toContainEqual(expect.objectContaining({
+        kind: 'model-policy-skipped',
+        name: 'model-policy-skipped.json',
+      }));
+    }
+
+    const generatedFiles = generatedFilesBody as GeneratedFilesResponse;
+    const entryFilePath = generatedFiles.entryFilePath ?? generatedFiles.files[0]?.path;
+    expect(entryFilePath).toBeTruthy();
+    const entryFile = generatedFiles.files.find((file) => file.path === entryFilePath);
+    expect(entryFile).toBeTruthy();
+
+    const generatedFileBody = await fetchJsonFromPage(
+      page,
+      `${BFF_BASE_URL}/api/v0/runs/${encodeURIComponent(runId)}/generated/files/${encodeGeneratedFilePath(String(entryFilePath))}`,
+    ) as GeneratedFileContentResponse;
+    expect(generatedFileBody.runId).toBe(runId);
+    expect(generatedFileBody.path).toBe(entryFilePath);
+    expect(generatedFileBody.content).toContain('public');
+    expect(generatedFileBody.sha256).toBe(entryFile?.sha256);
 
     const generatedArtifactSha = generatedBody.artifactRef?.sha256;
     expect(generatedArtifactSha).toBeTruthy();
@@ -176,14 +222,21 @@ test.describe('c2c Studio browser acceptance', () => {
 
     const generatedJavaPane = page.getByLabel(GENERATED_JAVA_LABEL);
     await expect(generatedJavaPane).toBeVisible();
-    await expect(generatedJavaPane).toContainText(/public\s+(final\s+)?class/i);
+    await expect(generatedJavaPane).toHaveAttribute('data-file-path', String(entryFilePath));
+    await expect(generatedJavaPane).toHaveAttribute('data-file-sha256', generatedFileBody.sha256);
+    const generatedClass = generatedFileBody.content.match(/\bpublic\s+(?:final\s+)?class\s+([A-Za-z_$][\w$]*)/);
+    const generatedClassName = generatedClass?.[1];
+    expect(generatedClassName).toBeTruthy();
+    await expect(generatedJavaPane).toContainText(new RegExp(`class\\s+${generatedClassName}`));
     await expect(page.getByText('Verified', { exact: true })).toBeVisible();
 
     await page.getByRole('tab', { name: 'Build & Test' }).click();
     await expect(page.getByText('Pipeline Stages')).toBeVisible();
     await expect(page.getByText('Parse COBOL')).toBeVisible();
     await expect(page.getByText('Generate Java')).toBeVisible();
-    await expect(page.getByText('Model Policy Skipped')).toBeVisible();
+    if (EXPECT_MODEL_POLICY_SKIPPED) {
+      await expect(page.getByText('Model Policy Skipped')).toBeVisible();
+    }
     await expect(page.getByText('Equivalence Analysis')).toBeVisible();
 
     await page.getByRole('tab', { name: 'Experience Learning' }).click();
@@ -664,6 +717,268 @@ test.describe('c2c Studio browser acceptance', () => {
     const evidencePanel = page.getByRole('tabpanel');
     await expect(evidencePanel.getByRole('heading', { name: /Evidence Pack Incomplete/i })).toBeVisible();
     await expect(evidencePanel.getByRole('listitem').filter({ hasText: 'harnessEvents' })).toBeVisible();
+  });
+
+  test('blocks verified state when generated, build, and evidence artifact hashes diverge', async ({ page }) => {
+    const runId = 'run-hash-mismatch-browser';
+    const generatedSha = 'generated-artifact-sha';
+    const buildSha = 'build-artifact-sha';
+    const evidenceSha = 'evidence-artifact-sha';
+    const entryFilePath = 'src/main/java/MismatchGate.java';
+    const generatedJava = [
+      'public final class MismatchGate {',
+      '  public static void main(String[] args) {',
+      '    System.out.println("mismatch");',
+      '  }',
+      '}',
+    ].join('\n');
+    const runLinks = {
+      self: `/api/v0/runs/${runId}`,
+      generated: `/api/v0/runs/${runId}/generated`,
+      generatedFiles: `/api/v0/runs/${runId}/generated/files`,
+      buildTest: `/api/v0/runs/${runId}/build-test`,
+      evidence: `/api/v0/runs/${runId}/evidence`,
+      events: `/api/v0/runs/${runId}/events`,
+      artifacts: `/api/v0/runs/${runId}/artifacts`,
+      progress: `/api/v0/runs/${runId}/progress`,
+      learning: `/api/v0/runs/${runId}/learning`,
+    };
+
+    await page.route('**/api/v0/transform', async route => {
+      if (route.request().method() === 'OPTIONS') {
+        await route.fulfill({ status: 204, headers: MOCK_CORS_HEADERS });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          orchestratorRunId: runId,
+          programId: 'MISMATCH01',
+          status: 'starting',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-15T00:00:00Z',
+          updatedAt: '2026-05-15T00:00:00Z',
+          links: runLinks,
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          orchestratorRunId: runId,
+          programId: 'MISMATCH01',
+          status: 'completed',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-15T00:00:00Z',
+          updatedAt: '2026-05-15T00:00:01Z',
+          links: runLinks,
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/generated`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'MISMATCH01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'generated',
+          entryClass: 'MismatchGate',
+          entryFilePath,
+          fileCount: 1,
+          files: { [entryFilePath]: generatedJava },
+          artifactRef: {
+            uri: 'urn:c2c/generated/MISMATCH01',
+            sha256: generatedSha,
+            byteSize: generatedJava.length,
+          },
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/generated/files`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'MISMATCH01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'complete',
+          files: [{ path: entryFilePath, sha256: 'file-sha', byteSize: generatedJava.length, mimeType: 'text/x-java-source' }],
+          fileCount: 1,
+          entryFilePath,
+          artifactRef: {
+            uri: 'urn:c2c/generated/MISMATCH01',
+            sha256: generatedSha,
+            byteSize: generatedJava.length,
+          },
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/generated/files/${entryFilePath}`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'MISMATCH01',
+          mode: 'live',
+          productMode: 'live',
+          path: entryFilePath,
+          content: generatedJava,
+          sha256: 'file-sha',
+          byteSize: generatedJava.length,
+          mimeType: 'text/x-java-source',
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/build-test`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'MISMATCH01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'ok',
+          classification: 'match',
+          generatedArtifactRef: {
+            uri: 'urn:c2c/generated/MISMATCH01-build',
+            sha256: buildSha,
+          },
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/evidence`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'MISMATCH01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'complete',
+          packId: 'pack-mismatch01',
+          manifestUri: 'urn:c2c/evidence/MISMATCH01',
+          generatedArtifactRef: {
+            uri: 'urn:c2c/generated/MISMATCH01-evidence',
+            sha256: evidenceSha,
+          },
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/events`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({ runId, programId: 'MISMATCH01', mode: 'live', productMode: 'live', events: [] }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/progress`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'MISMATCH01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'complete',
+          runStatus: 'completed',
+          currentStep: null,
+          failedStep: null,
+          completedSteps: ['accepted', 'completed'],
+          stepCount: 2,
+          steps: [
+            { stepId: 1, name: 'accepted', capabilityId: 'orchestrator', service: 'orchestrator', actor: 'orchestrator', status: 'ok' },
+            { stepId: 2, name: 'completed', capabilityId: 'orchestrator', service: 'orchestrator', actor: 'orchestrator', status: 'ok' },
+          ],
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/experience`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({ runId, programId: 'MISMATCH01', mode: 'live', productMode: 'live', summary: 'Hash mismatch fixture.' }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/artifacts`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'MISMATCH01',
+          mode: 'live',
+          productMode: 'live',
+          artifacts: [
+            {
+              uri: 'urn:c2c/generated/MISMATCH01',
+              sha256: generatedSha,
+              byteSize: generatedJava.length,
+              mimeType: 'application/json',
+              kind: 'generated-project-manifest',
+              createdBy: 'target-java-generation-service',
+              createdAt: '2026-05-15T00:00:00Z',
+              runId,
+              workflowId: 'wf-mismatch01',
+              path: 'generated-project-manifest.json',
+              name: 'generated-project-manifest.json',
+            },
+          ],
+        }),
+      });
+    });
+
+    await expectReadyWorkbench(page);
+    await page.getByRole('button', { name: 'Start Typing' }).click();
+
+    const editor = page.getByRole('textbox', { name: COBOL_EDITOR_LABEL });
+    await editor.fill(`       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MISMATCH01.
+       PROCEDURE DIVISION.
+           DISPLAY 'MISMATCH'.
+           STOP RUN.`);
+
+    await topBarStartButton(page).click();
+
+    await expect(page.getByLabel(GENERATED_JAVA_LABEL)).toContainText('public final class MismatchGate');
+    await expect(page.getByText('Artifact Mismatch', { exact: true })).toBeVisible();
+    await expect(page.getByText('Verified', { exact: true })).toHaveCount(0);
   });
 
   test('@visual captures the main workbench desktop baseline', async ({ page, browserName }) => {

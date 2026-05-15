@@ -7,7 +7,7 @@ import { useResizablePane } from '../../hooks/useResizablePane';
 import { cn } from '@/lib/utils';
 
 export function SplitEditorArea() {
-  const { size, isResizing, startResize } = useResizablePane({
+  const { size, minSize, maxSize, isResizing, startResize } = useResizablePane({
     id: 'editor-split',
     initialSize: 600, // Reasonable default split
     minSize: 300,
@@ -16,7 +16,7 @@ export function SplitEditorArea() {
   });
 
   return (
-    <main className="flex flex-1 flex-col overflow-hidden bg-bg-0" aria-label="Split Editor Area">
+    <main id="studio-main-workbench" className="flex flex-1 flex-col overflow-hidden bg-bg-0" aria-label="Split Editor Area" tabIndex={-1}>
       <div className="flex min-h-10 items-center gap-3 border-b border-line px-3 py-2 shrink-0 bg-bg-1 text-sm">
         {editorPanes.map((pane, index) => (
           <div
@@ -30,7 +30,8 @@ export function SplitEditorArea() {
       </div>
       <div className="flex flex-1 overflow-hidden bg-line-2 relative group flex-col lg:flex-row">
         {/* Left Pane */}
-        <section 
+        <section
+          id="source-editor-pane"
           className="flex min-h-0 flex-col bg-bg-0 max-lg:!w-full shrink-0" 
           aria-label={editorPanes[0].label}
           style={{ width: size }}
@@ -43,6 +44,10 @@ export function SplitEditorArea() {
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize Editor Split"
+          aria-controls="source-editor-pane"
+          aria-valuemin={minSize}
+          aria-valuemax={maxSize}
+          aria-valuenow={size}
           tabIndex={0}
           onMouseDown={startResize}
           onTouchStart={startResize}

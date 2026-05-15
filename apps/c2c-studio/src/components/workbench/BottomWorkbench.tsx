@@ -17,7 +17,7 @@ export function BottomWorkbench() {
   const { isBottomPanelOpen, activeBottomTab, setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
   const { state } = useTransformationRun();
 
-  const { size, isResizing, startResize } = useResizablePane({
+  const { size, minSize, maxSize, isResizing, startResize } = useResizablePane({
     id: 'bottom-workbench',
     initialSize: 256, // h-64 is 256px
     minSize: 100,
@@ -31,6 +31,7 @@ export function BottomWorkbench() {
 
   return (
     <section
+      id="bottom-workbench-region"
       className="flex flex-col border-t border-line bg-bg-1 shrink-0 w-full relative group" 
       aria-label="Bottom Workbench"
       style={{ height: size }}
@@ -40,6 +41,10 @@ export function BottomWorkbench() {
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize Bottom Workbench"
+        aria-controls="bottom-workbench-region"
+        aria-valuemin={minSize}
+        aria-valuemax={maxSize}
+        aria-valuenow={size}
         tabIndex={0}
         onMouseDown={startResize}
         onTouchStart={startResize}

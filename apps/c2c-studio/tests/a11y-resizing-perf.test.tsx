@@ -40,20 +40,47 @@ describe('A11y, Keyboard, Resizing, and Performance Hardening', () => {
     const targetInspector = screen.getByLabelText('Target Java Inspector');
     const resizeHandle = screen.getByLabelText('Resize Target Inspector');
 
-    expect(targetInspector).toHaveStyle({ width: '288px' });
+    expect(targetInspector).toHaveStyle({ '--target-inspector-width': '288px' });
+    expect(resizeHandle).toHaveAttribute('aria-controls', 'target-java-inspector-panel');
+    expect(resizeHandle).toHaveAttribute('aria-valuemin', '200');
+    expect(resizeHandle).toHaveAttribute('aria-valuemax', '600');
+    expect(resizeHandle).toHaveAttribute('aria-valuenow', '288');
 
     resizeHandle.focus();
     fireEvent.keyDown(resizeHandle, { key: 'ArrowLeft' });
 
     await waitFor(() => {
-      expect(targetInspector).toHaveStyle({ width: '308px' });
+      expect(targetInspector).toHaveStyle({ '--target-inspector-width': '308px' });
+      expect(resizeHandle).toHaveAttribute('aria-valuenow', '308');
     });
 
     fireEvent.keyDown(resizeHandle, { key: 'ArrowRight' });
 
     await waitFor(() => {
-      expect(targetInspector).toHaveStyle({ width: '288px' });
+      expect(targetInspector).toHaveStyle({ '--target-inspector-width': '288px' });
+      expect(resizeHandle).toHaveAttribute('aria-valuenow', '288');
     });
+  });
+
+  it('provides a bypass link to the main transformation workbench', () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      status: 'ready',
+      tone: 'ready',
+      orchestratorMode: 'product',
+      evidenceMode: 'real',
+      orchestratorLive: true,
+      evidenceLive: true,
+      lastCheck: Date.now(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<WorkbenchShell />);
+
+    const skipLink = screen.getByRole('link', { name: /skip to transformation workbench/i });
+    expect(skipLink).toHaveAttribute('href', '#studio-main-workbench');
+    expect(screen.getByLabelText('Split Editor Area')).toHaveAttribute('id', 'studio-main-workbench');
   });
 
   it('Keyboard tab order through primary controls respects disabled states', () => {
@@ -128,7 +155,37 @@ describe('A11y, Keyboard, Resizing, and Performance Hardening', () => {
     // Resize handles
     const splitResizers = screen.getAllByRole('separator');
     expect(splitResizers.length).toBeGreaterThanOrEqual(2); 
-    // Should have Source Workspace resizer, Split editor resizer, target inspector resizer, bottom workbench resizer
+    for (const separator of splitResizers) {
+      expect(separator).toHaveAttribute('aria-valuemin');
+      expect(separator).toHaveAttribute('aria-valuemax');
+      expect(separator).toHaveAttribute('aria-valuenow');
+      expect(separator).toHaveAttribute('aria-controls');
+    }
+  });
+
+  it('exposes selected rail state without relying on color alone', () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      status: 'ready',
+      tone: 'ready',
+      orchestratorMode: 'product',
+      evidenceMode: 'real',
+      orchestratorLive: true,
+      evidenceLive: true,
+      lastCheck: Date.now(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<WorkbenchShell />);
+
+    expect(screen.getByRole('button', { name: 'Toggle Explorer' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Search workspace unavailable' })).toBeDisabled();
+
+    const evidenceShortcut = screen.getByRole('button', { name: 'Open Evidence' });
+    expect(evidenceShortcut).not.toHaveAttribute('aria-current');
+    fireEvent.click(evidenceShortcut);
+    expect(evidenceShortcut).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'Traceability unavailable' })).toBeDisabled();
   });
 
   it('Performance test baseline - renders a large component without freezing', () => {

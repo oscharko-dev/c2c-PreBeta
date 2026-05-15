@@ -322,6 +322,59 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/runs/{runId}/progress:
+    get:
+      summary: Return the orchestrator step timeline for the run
+      description: >
+        Provides the browser-visible pipeline state for the active run:
+        current step, completed steps, failed step diagnostics, per-step
+        status, and the persisted progress artifact reference where available.
+        The Studio uses this endpoint instead of deriving successful pipeline
+        state from final build/test results.
+      operationId: getRunProgress
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunProgressView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}/learning:
+    get:
+      summary: Return raw Experience Learning summary for the run
+      description: >
+        Returns the live Experience Learning service summary when configured,
+        otherwise falls back to the orchestrator-cached learning summary for
+        the run. Diagnostic-fixture runs are explicitly incomplete because
+        they are not observed by Experience Learning.
+      operationId: getRunLearning
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunLearningView" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/runs/{runId}/artifacts:
     get:
       summary: List persisted artifacts and metadata for the run
@@ -532,7 +585,7 @@ components:
 
     RunLinks:
       type: object
-      required: [self, generated, generatedFiles, buildTest, evidence, events, artifacts]
+      required: [self, generated, generatedFiles, buildTest, evidence, events, progress, artifacts, learning]
       properties:
         self: { type: string }
         generated: { type: string }
@@ -540,7 +593,9 @@ components:
         buildTest: { type: string }
         evidence: { type: string }
         events: { type: string }
+        progress: { type: string }
         artifacts: { type: string }
+        learning: { type: string }
 
     TransformResponse:
       type: object
@@ -815,6 +870,100 @@ components:
               status: { type: string }
               message: { type: string }
               createdAt: { type: string }
+
+    RunProgressStep:
+      type: object
+      required: [stepId, name, capabilityId, service, actor, status]
+      properties:
+        stepId: { type: integer, minimum: 0 }
+        name: { type: string }
+        capabilityId: { type: string }
+        service: { type: string }
+        actor: { type: string }
+        status: { type: string, enum: [pending, running, ok, failed, skipped] }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        diagnostic: { type: string }
+        inputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        outputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        latencyMs: { type: integer, minimum: 0 }
+
+    RunProgressView:
+      type: object
+      required:
+        - runId
+        - programId
+        - mode
+        - productMode
+        - status
+        - currentStep
+        - failedStep
+        - completedSteps
+        - stepCount
+        - steps
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
+        status: { type: string, enum: [complete, incomplete] }
+        runStatus: { type: string, enum: [starting, updating, completed, failed] }
+        currentStep:
+          oneOf:
+            - type: string
+            - type: 'null'
+        failedStep:
+          oneOf:
+            - type: string
+            - type: 'null'
+        completedSteps:
+          type: array
+          items: { type: string }
+        stepCount: { type: integer, minimum: 0 }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/RunProgressStep" }
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        orchestratorRunId: { type: string }
+        progressRef:
+          oneOf:
+            - $ref: "#/components/schemas/RunArtifactMetadata"
+            - type: 'null'
+        updatedAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        note: { type: string }
+
+    RunLearningView:
+      type: object
+      required: [runId, programId, mode, productMode, source, status, endpoint]
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
+        source: { type: string }
+        status: { type: string, enum: [complete, incomplete] }
+        endpoint: { type: string }
+        summary:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        note: { type: string }
 
     ErrorResponse:
       type: object
