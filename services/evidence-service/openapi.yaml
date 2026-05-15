@@ -221,7 +221,11 @@ components:
         modelId: { type: string }
         provider: { type: string }
         promptTemplateVersion: { type: string }
+        policyDecision: { type: string }
         status: { type: string }
+        reason: { type: string }
+        policyVersion: { type: string }
+        timestamp: { type: string, format: date-time }
         ledgerRef: { $ref: "#/components/schemas/DataReference" }
 
     OpenAssumption:

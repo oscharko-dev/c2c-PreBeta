@@ -496,6 +496,7 @@ class W0WorkflowRunner:
         evidence_refs: list[str] = list(context.evidence_refs)
         step_results: list[WorkflowStepResult] = []
         model_output = None
+        model_policy_skipped_meta: Optional[ArtifactMetadata] = None
         program_id: Optional[str] = None
         completed_steps: list[str] = []
         artifact_refs: list[Dict[str, Any]] = []
@@ -832,24 +833,24 @@ class W0WorkflowRunner:
                 completed_steps.append("model-guidance")
                 _write_summary("updating", message="model-guidance completed")
             else:
-                _record_artifact(
-                    self.artifact_store.write_json(
-                        context.run_id,
-                        context.workflow_id,
-                        "model-policy-skipped.json",
-                        {
-                            "runId": context.run_id,
-                            "workflowId": context.workflow_id,
-                            "modelId": _text(getattr(self.config, "model_gateway_model_id", None))
-                            or DEFAULT_MODEL_ID,
-                            "status": "skipped",
-                            "reason": "no modelPrompt provided by requester",
-                            "createdBy": self.config.service_name,
-                            "createdAt": _iso_now(),
-                        },
-                        kind=KIND_MODEL_POLICY_SKIPPED,
-                    )
+                model_policy_skipped_meta = self.artifact_store.write_json(
+                    context.run_id,
+                    context.workflow_id,
+                    "model-policy-skipped.json",
+                    {
+                        "runId": context.run_id,
+                        "workflowId": context.workflow_id,
+                        "modelId": _text(getattr(self.config, "model_gateway_model_id", None))
+                        or DEFAULT_MODEL_ID,
+                        "status": "skipped",
+                        "reason": "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance",
+                        "policyVersion": _text(getattr(self.config, "model_policy_version", None)) or "v0",
+                        "timestamp": _iso_now(),
+                        "createdBy": self.config.service_name,
+                    },
+                    kind=KIND_MODEL_POLICY_SKIPPED,
                 )
+                _record_artifact(model_policy_skipped_meta)
                 # Issue #96: surface the policy skip as a discrete step so the
                 # UI/EL timeline can distinguish it from `model-guidance`
                 # actually running.
@@ -882,6 +883,7 @@ class W0WorkflowRunner:
                 generator_output=generator_output,
                 build_test_output=build_test_output,
                 model_output=model_output,
+                model_policy_skipped_meta=model_policy_skipped_meta,
                 trajectory_payload=trajectory_payload,
                 generated_artifact_ref=generated_artifact_ref,
             )
@@ -1017,6 +1019,7 @@ class W0WorkflowRunner:
         generator_output: WorkflowStepResult,
         build_test_output: WorkflowStepResult,
         model_output: Optional[Mapping[str, Any]],
+        model_policy_skipped_meta: Optional[ArtifactMetadata],
         trajectory_payload: Mapping[str, Any],
         generated_artifact_ref: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -1024,7 +1027,11 @@ class W0WorkflowRunner:
             f"urn:orchestrator/{context.run_id}/trajectory",
             trajectory_payload,
         )
-        model_invocation = self._build_model_invocation_ref(context, model_output)
+        model_invocation = self._build_model_invocation_ref(
+            context,
+            model_output,
+            model_policy_skipped_meta=model_policy_skipped_meta,
+        )
         if generated_artifact_ref:
             generated_java_payload: Mapping[str, Any] = {
                 "uri": str(generated_artifact_ref.get("uri") or ""),
@@ -1075,27 +1082,49 @@ class W0WorkflowRunner:
         }
 
     # noinspection PyTypeHints
-    def _build_model_invocation_ref(self, context: W0RunContext, model_output: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    def _build_model_invocation_ref(
+        self,
+        context: W0RunContext,
+        model_output: Optional[Mapping[str, Any]],
+        *,
+        model_policy_skipped_meta: Optional[ArtifactMetadata] = None,
+    ) -> Dict[str, Any]:
         configured_model_id = _text(getattr(self.config, "model_gateway_model_id", None)) or DEFAULT_MODEL_ID
         if model_output is None:
             payload = {
                 "runId": context.run_id,
                 "modelId": configured_model_id,
                 "status": "skipped",
-                "actor": self.config.service_name,
+                "reason": "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance",
+                "policyVersion": _text(getattr(self.config, "model_policy_version", None)) or "v0",
             }
+            ledger_ref = (
+                DataReference(
+                    uri=model_policy_skipped_meta.uri,
+                    sha256=model_policy_skipped_meta.sha256,
+                    byte_size=model_policy_skipped_meta.byteSize,
+                )
+                if model_policy_skipped_meta is not None
+                else _build_reference(
+                    f"urn:orchestrator/{context.run_id}/model-invocation",
+                    payload,
+                )
+            )
             return {
                 "invocationId": f"inv-{context.run_id}-00",
                 "modelId": configured_model_id,
-                "provider": "orchestrator",
+                "provider": "policy-skipped",
                 "promptTemplateVersion": DEFAULT_PROMPT_TEMPLATE_VERSION,
+                "policyDecision": POLICY_ALLOW,
                 "status": "skipped",
-                "ledgerRef": _as_reference_payload(
-                    _build_reference(
-                        f"urn:orchestrator/{context.run_id}/model-invocation",
-                        payload,
-                    )
+                "reason": payload["reason"],
+                "policyVersion": payload["policyVersion"],
+                "timestamp": (
+                    model_policy_skipped_meta.createdAt
+                    if model_policy_skipped_meta is not None
+                    else _iso_now()
                 ),
+                "ledgerRef": _as_reference_payload(ledger_ref),
             }
 
         payload = dict(model_output)
@@ -1103,6 +1132,7 @@ class W0WorkflowRunner:
         model_id = _text(payload.get("modelId")) or DEFAULT_MODEL_ID
         provider = _text(payload.get("provider"))
         template = _text(payload.get("promptTemplateVersion")) or DEFAULT_PROMPT_TEMPLATE_VERSION
+        policy_decision = _text(payload.get("policyDecision"))
         status = _text(payload.get("status")) or "completed"
         ledger_ref = _data_reference_from_mapping(payload.get("ledgerRef"))
         if ledger_ref is None:
@@ -1111,6 +1141,7 @@ class W0WorkflowRunner:
                 "modelId": model_id,
                 "provider": provider,
                 "promptTemplateVersion": template,
+                "policyDecision": policy_decision,
                 "status": status,
             }
             ledger_ref = _build_reference(
@@ -1122,6 +1153,7 @@ class W0WorkflowRunner:
             "modelId": model_id,
             "provider": provider,
             "promptTemplateVersion": template,
+            "policyDecision": policy_decision,
             "status": status,
             "ledgerRef": _as_reference_payload(ledger_ref),
         }

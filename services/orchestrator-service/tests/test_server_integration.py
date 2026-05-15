@@ -276,6 +276,7 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                         "modelId": payload.get("modelId", "gpt-oss-120b"),
                         "provider": "foundry-development",
                         "promptTemplateVersion": payload.get("promptTemplateVersion", "v1"),
+                        "policyDecision": "policy allow",
                         "status": "completed",
                         "latencyMs": 1,
                         "ledgerRef": {
@@ -440,6 +441,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             model_invocation = evidence_payload["artifacts"]["modelInvocations"][0]
             self.assertEqual(model_invocation["status"], "completed")
             self.assertEqual(model_invocation["provider"], "foundry-development")
+            self.assertEqual(model_invocation["policyDecision"], "policy allow")
             self.assertEqual(model_invocation["ledgerRef"]["sha256"], "c" * 64)
             self.assertEqual(
                 sorted(entry.get("id") for entry in state.capability_registrations),
@@ -451,6 +453,81 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertIn("orchestrator.workflow.accepted", event_types)
             self.assertIn("orchestrator.workflow.completed", event_types)
             self.assertNotIn("orchestrator.workflow.failed", event_types)
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_deterministic_run_skips_model_gateway_and_persists_policy_artifact(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: Optional[HTTPServer] = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            MockHarnessHandler.state = state
+
+            orchestrator_server, _runner = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            orchestrator_thread = threading.Thread(target=orchestrator_server.serve_forever, daemon=True)
+            orchestrator_thread.start()
+
+            payload = {
+                "requester": "integration",
+                "inputRef": {
+                    "uri": "urn:integration/main.cob",
+                    "source": "IDENTIFICATION DIVISION.",
+                },
+            }
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps(payload),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 201)
+                response_body = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            run_id = response_body["run"]["runId"]
+            status = ""
+            for _ in range(60):
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request("GET", f"/v0/runs/{run_id}")
+                    status_response = connection.getresponse()
+                    run_state = json.loads(status_response.read().decode("utf-8"))
+                    status = run_state.get("status", "")
+                finally:
+                    connection.close()
+                if status in {"completed", "failed"}:
+                    break
+                time.sleep(0.05)
+
+            self.assertEqual(status, "completed")
+            self.assertEqual(
+                sorted(capability for capability, _ in state.capability_invocations),
+                ["build-test", "evidence", "generator", "ir", "parse"],
+            )
+            evidence_payload = next(
+                payload for capability, payload in state.capability_invocations
+                if capability == "evidence"
+            )
+            model_invocation = evidence_payload["artifacts"]["modelInvocations"][0]
+            self.assertEqual(model_invocation["status"], "skipped")
+            self.assertEqual(model_invocation["provider"], "policy-skipped")
+            self.assertEqual(model_invocation["policyVersion"], "v0")
+            self.assertTrue(model_invocation["ledgerRef"]["uri"].endswith("/model-policy-skipped.json"))
+
+            run_dir = Path(self._artifact_root) / run_id
+            skipped = json.loads((run_dir / "model-policy-skipped.json").read_text("utf-8"))
+            self.assertEqual(skipped["runId"], run_id)
+            self.assertEqual(skipped["policyVersion"], "v0")
         finally:
             mock_server.shutdown()
             mock_server.server_close()

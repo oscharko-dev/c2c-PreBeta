@@ -225,6 +225,7 @@ type ModelInvocationResponse struct {
 	ModelID               string         `json:"modelId"`
 	Provider              string         `json:"provider"`
 	PromptTemplateVersion string         `json:"promptTemplateVersion"`
+	PolicyDecision        string         `json:"policyDecision"`
 	Status                string         `json:"status"`
 	LatencyMs             int64          `json:"latencyMs"`
 	LedgerRef             DataReference  `json:"ledgerRef"`

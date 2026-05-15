@@ -25,6 +25,7 @@ DEFAULT_BUILD_TEST_CAPABILITY = "build-test.run"
 DEFAULT_EVIDENCE_CAPABILITY = "evidence.writer"
 DEFAULT_MODEL_GATEWAY_CAPABILITY = "model-gateway"
 DEFAULT_MODEL_GATEWAY_MODEL_ID = "gpt-oss-120b"
+DEFAULT_MODEL_POLICY_VERSION = "v0"
 DEFAULT_CAPABILITY_POLICY_PROFILE = "harness-control-plane"
 DEFAULT_CAPABILITY_VERSION = "v0.1.0"
 
@@ -125,6 +126,7 @@ class OrchestratorConfig:
     harness_token: str = ""
     service_name: str = "orchestrator-service"
     model_gateway_model_id: str = DEFAULT_MODEL_GATEWAY_MODEL_ID
+    model_policy_version: str = DEFAULT_MODEL_POLICY_VERSION
     run_artifact_root: str = DEFAULT_RUN_ARTIFACT_ROOT
     experience_learning_base_url: str = DEFAULT_EXPERIENCE_LEARNING_BASE_URL
 
@@ -176,10 +178,16 @@ def load_config() -> OrchestratorConfig:
     ).strip()
     model_gateway_model_id = os.environ.get(
         "ORCHESTRATOR_MODEL_GATEWAY_MODEL_ID",
-        os.environ.get("C2C_MODEL_DEFAULT_DEPLOYMENT", DEFAULT_MODEL_GATEWAY_MODEL_ID),
+        DEFAULT_MODEL_GATEWAY_MODEL_ID,
     ).strip()
     if not model_gateway_model_id:
         model_gateway_model_id = DEFAULT_MODEL_GATEWAY_MODEL_ID
+    model_policy_version = os.environ.get(
+        "ORCHESTRATOR_MODEL_POLICY_VERSION",
+        DEFAULT_MODEL_POLICY_VERSION,
+    ).strip()
+    if not model_policy_version:
+        model_policy_version = DEFAULT_MODEL_POLICY_VERSION
     harness_token = os.environ.get("ORCHESTRATOR_HARNESS_TOKEN", "").strip()
 
     experience_learning_base_url = os.environ.get(
@@ -225,6 +233,7 @@ def load_config() -> OrchestratorConfig:
         w0_capabilities=w0_capabilities,
         harness_token=harness_token,
         model_gateway_model_id=model_gateway_model_id,
+        model_policy_version=model_policy_version,
         run_artifact_root=run_artifact_root,
         experience_learning_base_url=experience_learning_base_url,
     )

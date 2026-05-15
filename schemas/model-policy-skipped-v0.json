@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/model-policy-skipped-v0.json",
+  "title": "Model Policy Skipped v0",
+  "description": "Explicit policy record written when a UI-started W0 run completes without requiring a model invocation.",
+  "type": "object",
+  "required": [
+    "runId",
+    "workflowId",
+    "modelId",
+    "status",
+    "reason",
+    "policyVersion",
+    "timestamp",
+    "createdBy"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "modelId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "const": "skipped"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policyVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "createdBy": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}

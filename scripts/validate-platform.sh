@@ -27,6 +27,10 @@ fi
 
 echo "Validated W0 artifact naming docs."
 
+python3 scripts/check_model_governance.py --worktree
+
+echo "Validated model governance scan."
+
 for f in \
   services/go/w0-service/main.go \
   services/go/w0-service/main_test.go \
@@ -83,6 +87,7 @@ for f in \
   fixtures/golden-master/index.json \
   schemas/semantic-ir-v0.json \
   schemas/build-test-result-v0.json \
+  schemas/model-policy-skipped-v0.json \
   schemas/evidence-pack-manifest-v0.json
  do
   if [ ! -f "$f" ]; then
