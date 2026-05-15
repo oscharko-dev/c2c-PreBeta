@@ -1,10 +1,9 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { TransformationRunProvider, useTransformationRun } from '@/stores/transformationRun';
 import { GeneratedJavaEditorPane } from '@/components/generated/GeneratedJavaEditorPane';
 import { TargetJavaInspector } from '@/components/generated/TargetJavaInspector';
-import { WorkbenchProvider } from '@/stores/workbench';
+import { GeneratedArtifactsProvider } from '@/hooks/useGeneratedArtifacts';
 import { apiClient } from '@/lib/apiClient';
 
 vi.mock('@/lib/apiClient', () => ({
@@ -40,7 +39,23 @@ vi.mock('@/stores/workbench', async (importOriginal) => {
 describe('Generated Artifacts UI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(apiClient.getGeneratedFile).mockReset();
+    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
+      ok: false,
+      status: 500,
+      message: 'HTTP error 500',
+      details: { kind: 'http', body: { error: 'HTTP error 500' } },
+    } as any);
   });
+
+  function renderArtifactsUi() {
+    return render(
+      <GeneratedArtifactsProvider>
+        <TargetJavaInspector />
+        <GeneratedJavaEditorPane />
+      </GeneratedArtifactsProvider>,
+    );
+  }
 
   it('renders pending state distinctly', () => {
     mockTransformationState.mockReturnValue({
@@ -50,7 +65,11 @@ describe('Generated Artifacts UI', () => {
       generatedFiles: null,
     });
 
-    render(<GeneratedJavaEditorPane />);
+    render(
+      <GeneratedArtifactsProvider>
+        <GeneratedJavaEditorPane />
+      </GeneratedArtifactsProvider>,
+    );
     expect(screen.getByText(/Generating Java artifacts/i)).toBeInTheDocument();
   });
 
@@ -62,7 +81,11 @@ describe('Generated Artifacts UI', () => {
       generatedFiles: null,
     });
 
-    const { rerender } = render(<GeneratedJavaEditorPane />);
+    const { rerender } = render(
+      <GeneratedArtifactsProvider>
+        <GeneratedJavaEditorPane />
+      </GeneratedArtifactsProvider>,
+    );
     expect(screen.getByText(/Unsupported Features/i)).toBeInTheDocument();
     expect(screen.getByText('COPY REPLACING')).toBeInTheDocument();
 
@@ -73,7 +96,11 @@ describe('Generated Artifacts UI', () => {
       generatedFiles: null,
     });
 
-    rerender(<GeneratedJavaEditorPane />);
+    rerender(
+      <GeneratedArtifactsProvider>
+        <GeneratedJavaEditorPane />
+      </GeneratedArtifactsProvider>,
+    );
     expect(screen.getByText(/Incomplete Generation/i)).toBeInTheDocument();
     expect(screen.getByText('artifact-1')).toBeInTheDocument();
   });
@@ -95,7 +122,11 @@ describe('Generated Artifacts UI', () => {
       },
     });
 
-    render(<TargetJavaInspector />);
+    render(
+      <GeneratedArtifactsProvider>
+        <TargetJavaInspector />
+      </GeneratedArtifactsProvider>,
+    );
     
     expect(screen.getByText('Target Java Inspector')).toBeInTheDocument();
     expect(screen.getByText(/abc123def456/i)).toBeInTheDocument();
@@ -125,12 +156,7 @@ describe('Generated Artifacts UI', () => {
       data: { content: 'public class App {}', path: 'src/App.java' }
     } as any);
 
-    render(
-      <>
-        <TargetJavaInspector />
-        <GeneratedJavaEditorPane />
-      </>
-    );
+    renderArtifactsUi();
 
     // Initial load will fetch the entry file
     await waitFor(() => {
@@ -138,5 +164,141 @@ describe('Generated Artifacts UI', () => {
     });
 
     expect(await screen.findByText('public class App {}')).toBeInTheDocument();
+  });
+
+  it('clears stale fetch errors when the selected file is already known unavailable', async () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: '123',
+      generated: {
+        status: 'generated',
+        files: {},
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/Missing.java',
+        files: [{ path: 'src/Missing.java' }],
+      },
+    });
+
+    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
+      ok: false,
+      status: 404,
+      message: 'HTTP error 404',
+      details: { kind: 'http', body: { error: 'HTTP error 404' } },
+    } as any);
+
+    renderArtifactsUi();
+
+    await waitFor(() => {
+      expect(screen.getByText('Unavailable')).toBeInTheDocument();
+      expect(screen.queryByText(/failed to load file/i)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/file content is empty or unavailable/i)).toBeInTheDocument();
+  });
+
+  it('resets selection when a new run starts and loads the new entry file', async () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: 'run-1',
+      generated: {
+        status: 'generated',
+        files: {
+          'src/OldEntry.java': 'public class OldEntry {}',
+        },
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/OldEntry.java',
+        files: [{ path: 'src/OldEntry.java' }],
+      },
+    });
+
+    const { rerender } = renderArtifactsUi();
+
+    expect(await screen.findByText('public class OldEntry {}')).toBeInTheDocument();
+
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: 'run-2',
+      generated: {
+        status: 'generated',
+        files: {},
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/NewEntry.java',
+        files: [{ path: 'src/NewEntry.java' }],
+      },
+    });
+
+    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
+      ok: true,
+      data: {
+        runId: 'run-2',
+        mode: 'live',
+        productMode: 'live',
+        path: 'src/NewEntry.java',
+        content: 'public class NewEntry {}',
+        sha256: 'a'.repeat(64),
+        byteSize: 24,
+        mimeType: 'text/x-java-source',
+      },
+    } as any);
+
+    rerender(
+      <GeneratedArtifactsProvider>
+        <TargetJavaInspector />
+        <GeneratedJavaEditorPane />
+      </GeneratedArtifactsProvider>,
+    );
+
+    await waitFor(() => {
+      expect(apiClient.getGeneratedFile).toHaveBeenCalledWith('run-2', 'src/NewEntry.java');
+    });
+    expect(await screen.findByText('public class NewEntry {}')).toBeInTheDocument();
+  });
+
+  it('selecting a different file in the inspector updates the editor content', async () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: '123',
+      generated: {
+        status: 'generated',
+        files: {
+          'src/App.java': 'public class App {}',
+        },
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/App.java',
+        files: [{ path: 'src/App.java' }, { path: 'src/Helper.java' }],
+      },
+    });
+
+    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
+      ok: true,
+      data: {
+        runId: '123',
+        mode: 'live',
+        productMode: 'live',
+        path: 'src/Helper.java',
+        content: 'public class Helper {}',
+        sha256: 'b'.repeat(64),
+        byteSize: 22,
+        mimeType: 'text/x-java-source',
+      },
+    } as any);
+
+    renderArtifactsUi();
+
+    expect(await screen.findByText('public class App {}')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Helper\.java/i }));
+
+    await waitFor(() => {
+      expect(apiClient.getGeneratedFile).toHaveBeenCalledWith('123', 'src/Helper.java');
+    });
+    expect(await screen.findByText('public class Helper {}')).toBeInTheDocument();
   });
 });

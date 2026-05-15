@@ -1,4 +1,4 @@
-import { GeneratedFileRef, OutputRef, GeneratedTraceability } from './api';
+import { GeneratedFileRef, GeneratedTraceability } from './api';
 
 export type GeneratedArtifactState = 
   | 'idle'

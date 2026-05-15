@@ -259,6 +259,28 @@ function isGeneratedFilesIndexPayload(payload: unknown): payload is GeneratedFil
   );
 }
 
+function isGeneratedFileContentPayload(payload: unknown): payload is GeneratedFileContent {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return (
+    isString(payload.runId) &&
+    (payload.programId === undefined || isString(payload.programId)) &&
+    isRunMode(payload.mode) &&
+    isRunProductMode(payload.productMode) &&
+    isString(payload.path) &&
+    (payload.absolutePath === undefined || isString(payload.absolutePath)) &&
+    isString(payload.content) &&
+    isString(payload.sha256) &&
+    isNonNegativeInteger(payload.byteSize) &&
+    isString(payload.mimeType) &&
+    (payload.uri === undefined || isString(payload.uri)) &&
+    (payload.kind === undefined || isString(payload.kind)) &&
+    (payload.orchestratorRunId === undefined || isString(payload.orchestratorRunId))
+  );
+}
+
 function isBuildTestViewPayload(payload: unknown): payload is BuildTestView {
   if (!isRecord(payload)) {
     return false;
@@ -578,14 +600,23 @@ function parseRunArtifactsView(payload: unknown): ApiResult<RunArtifactsView> {
 }
 
 function parseGeneratedFileContent(payload: unknown): ApiResult<GeneratedFileContent> {
-  if (!isRecord(payload)) {
+  if (!isGeneratedFileContentPayload(payload)) {
     return createFailure('Contract error: GeneratedFileContent payload has missing or invalid fields.', { kind: 'contract', body: payload });
   }
-  // Simplified check for content as doing deep check of all fields might be redundant for this UI
-  if (typeof payload.content !== 'string' || typeof payload.path !== 'string') {
-    return createFailure('Contract error: GeneratedFileContent payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  return { ok: true, data: payload };
+}
+
+function encodeGeneratedFilePath(filePath: string): string {
+  const segments = filePath.split('/');
+  if (
+    filePath.length === 0 ||
+    filePath.startsWith('/') ||
+    segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..')
+  ) {
+    throw new Error('Generated file path must be a relative, normalized path.');
   }
-  return { ok: true, data: payload as unknown as GeneratedFileContent };
+
+  return segments.map(encodeURIComponent).join('/');
 }
 
 export const apiClient = {
@@ -604,7 +635,11 @@ export const apiClient = {
   getRun: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}`, parseRunSummary),
   getGenerated: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated`, parseGeneratedView),
   getGeneratedFiles: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated/files`, parseGeneratedFilesIndex),
-  getGeneratedFile: (runId: string, filePath: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated/files/${filePath.split('/').map(encodeURIComponent).join('/')}`, parseGeneratedFileContent),
+  getGeneratedFile: (runId: string, filePath: string) =>
+    fetchJson(
+      `/api/v0/runs/${encodeURIComponent(runId)}/generated/files/${encodeGeneratedFilePath(filePath)}`,
+      parseGeneratedFileContent,
+    ),
   getBuildTest: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/build-test`, parseBuildTestView),
   getEvidence: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`, parseEvidenceView),
   getRunEvents: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/events`, parseRunEventsView),

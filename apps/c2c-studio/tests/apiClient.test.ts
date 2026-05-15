@@ -348,4 +348,33 @@ describe('apiClient', () => {
       details: { kind: 'contract', body: { state: 'ok' } },
     });
   });
+
+  it('rejects malformed generated file payloads that miss required metadata', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          path: 'src/App.java',
+          content: 'public class App {}',
+        }),
+    } as Response);
+
+    const result = await apiClient.getGeneratedFile('run-1', 'src/App.java');
+
+    expect(result).toMatchObject({
+      ok: false,
+      details: { kind: 'contract' },
+    });
+  });
+
+  it('rejects absolute and traversal generated file paths before fetch', async () => {
+    expect(() => apiClient.getGeneratedFile('run-1', '/abs/App.java')).toThrow(
+      'Generated file path must be a relative, normalized path.',
+    );
+    expect(() => apiClient.getGeneratedFile('run-1', '../App.java')).toThrow(
+      'Generated file path must be a relative, normalized path.',
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

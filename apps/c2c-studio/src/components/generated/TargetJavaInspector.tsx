@@ -19,7 +19,7 @@ export function TargetJavaInspector() {
   if (!isTargetInspectorOpen) return null;
 
   return (
-    <div className="hidden h-full w-72 shrink-0 flex-col overflow-hidden border-l border-line bg-bg-2 xl:flex" aria-label="Target Java Inspector">
+    <div className="flex h-full w-72 shrink-0 flex-col overflow-hidden border-l border-line bg-bg-2 max-lg:w-64" aria-label="Target Java Inspector">
       <div className="flex items-center px-4 h-10 border-b border-line-2 font-medium text-xs text-text uppercase tracking-wider shrink-0">
         Target Java Inspector
       </div>

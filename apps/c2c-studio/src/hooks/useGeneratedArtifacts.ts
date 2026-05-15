@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { createContext, createElement, useState, useMemo, useEffect, useCallback, useContext, ReactNode } from 'react';
 import { useTransformationRun } from '../stores/transformationRun';
 import { apiClient } from '../lib/apiClient';
 import { GeneratedArtifactState, FileTreeNode, ArtifactDetails } from '../types/generated';
@@ -48,6 +48,28 @@ function buildFileTree(files: GeneratedFileRef[] | undefined): FileTreeNode[] {
 }
 
 export function useGeneratedArtifacts() {
+  const context = useContext(GeneratedArtifactsContext);
+  if (!context) {
+    throw new Error('useGeneratedArtifacts must be used within a GeneratedArtifactsProvider');
+  }
+  return context;
+}
+
+interface GeneratedArtifactsValue {
+  artifactState: GeneratedArtifactState;
+  fileTree: FileTreeNode[];
+  artifactDetails: ArtifactDetails | null;
+  selectedFilePath: string | null;
+  selectFile: (path: string) => void;
+  fileContent: string | null;
+  isFetchingFile: boolean;
+  fileFetchError: { path: string, status: number, message: string } | null;
+  unavailableFiles: Set<string>;
+}
+
+const GeneratedArtifactsContext = createContext<GeneratedArtifactsValue | null>(null);
+
+function useGeneratedArtifactsState(): GeneratedArtifactsValue {
   const { state } = useTransformationRun();
   
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
@@ -58,10 +80,21 @@ export function useGeneratedArtifacts() {
 
   const { generated, generatedFiles, buildTest, evidence } = state;
 
+  useEffect(() => {
+    setSelectedFilePath(null);
+    setFileContent(null);
+    setIsFetchingFile(false);
+    setFileFetchError(null);
+    setUnavailableFiles(new Set());
+  }, [state.runId]);
+
   const artifactState: GeneratedArtifactState = useMemo(() => {
     if (state.phase === 'idle' || !state.runId) return 'idle';
+    if (state.phase === 'starting' || state.phase === 'running') return 'pending';
     if (!generated) return 'pending';
     if (generated.status === 'unsupported') return 'unsupported';
+    if (state.phase === 'incomplete' || state.phase === 'failed' || state.phase === 'unavailable') return 'incomplete';
+    if (state.phase === 'verification-blocked') return 'failed-verification';
     if (generated.status === 'incomplete') return 'incomplete';
     if (!generatedFiles) return 'pending';
     if (generatedFiles.status === 'incomplete') return 'incomplete';
@@ -110,13 +143,16 @@ export function useGeneratedArtifacts() {
     async function fetchFile() {
       if (!selectedFilePath || !state.runId || unavailableFiles.has(selectedFilePath)) {
         setFileContent(null);
+        setIsFetchingFile(false);
+        setFileFetchError(null);
         return;
       }
 
-      // Check if it's already in the generated view (entry file)
+      // Entry-file content can arrive inline on the generated view and avoids an extra fetch.
       if (generated?.files && generated.files[selectedFilePath]) {
         setFileContent(generated.files[selectedFilePath]);
         setFileFetchError(null);
+        setIsFetchingFile(false);
         return;
       }
 
@@ -164,4 +200,9 @@ export function useGeneratedArtifacts() {
     fileFetchError,
     unavailableFiles,
   };
+}
+
+export function GeneratedArtifactsProvider({ children }: { children: ReactNode }) {
+  const value = useGeneratedArtifactsState();
+  return createElement(GeneratedArtifactsContext.Provider, { value }, children);
 }
