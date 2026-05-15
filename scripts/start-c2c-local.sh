@@ -55,6 +55,7 @@ BUILD_TEST_RUNNER_PORT="${C2C_LOCAL_BUILD_TEST_RUNNER_PORT:-18086}"
 MODEL_GATEWAY_PORT="${C2C_LOCAL_MODEL_GATEWAY_PORT:-18087}"
 ORCHESTRATOR_PORT="${C2C_LOCAL_ORCHESTRATOR_PORT:-18088}"
 BFF_PORT="${C2C_LOCAL_BFF_PORT:-18089}"
+STUDIO_PORT="${C2C_LOCAL_STUDIO_PORT:-3000}"
 
 HARNESS_TOKEN="${C2C_LOCAL_HARNESS_TOKEN:-c2c-local-control-plane-token}"
 MODEL_GATEWAY_ENABLED="${C2C_LOCAL_MODEL_GATEWAY_ENABLED:-false}"
@@ -69,6 +70,7 @@ BUILD_TEST_RUNNER_URL="http://127.0.0.1:${BUILD_TEST_RUNNER_PORT}"
 MODEL_GATEWAY_URL="http://127.0.0.1:${MODEL_GATEWAY_PORT}"
 ORCHESTRATOR_URL="http://127.0.0.1:${ORCHESTRATOR_PORT}"
 BFF_URL="http://127.0.0.1:${BFF_PORT}"
+STUDIO_URL="http://127.0.0.1:${STUDIO_PORT}"
 
 log() { printf '[c2c-local] %s\n' "$*" >&2; }
 fail() { printf '[c2c-local][error] %s\n' "$*" >&2; exit 1; }
@@ -304,6 +306,16 @@ build_bff() {
     npm run build
   ) >"$LOG_DIR/c2c-bff.log" 2>&1 || fail "services/c2c-bff build failed (see $LOG_DIR/c2c-bff.log)"
   [[ -f "$ROOT_DIR/services/c2c-bff/dist/index.js" ]] || fail "c2c-bff dist/index.js was not built"
+}
+
+build_studio() {
+  log "building apps/c2c-studio"
+  (
+    cd "$ROOT_DIR/apps/c2c-studio"
+    npm ci --no-fund --no-audit
+    npm run build
+  ) >"$LOG_DIR/c2c-studio.log" 2>&1 || fail "apps/c2c-studio build failed (see $LOG_DIR/c2c-studio.log)"
+  [[ -d "$ROOT_DIR/apps/c2c-studio/.output" ]] || fail "c2c-studio .output was not built"
 }
 
 build_orchestrator_capabilities_json() {
@@ -567,10 +579,20 @@ start_bff() {
   wait_http c2c-bff "$BFF_URL/api/v0/health"
 }
 
+start_studio() {
+  start_bg c2c-studio "$LOG_DIR/c2c-studio.log" \
+    PORT="$STUDIO_PORT" \
+    NUXT_PUBLIC_C2C_BFF_BASE_URL="$BFF_URL" \
+    -- \
+    node "$ROOT_DIR/apps/c2c-studio/.output/server/index.mjs"
+  wait_http c2c-studio "$STUDIO_URL"
+}
+
 build_java_runtime
 build_java_services
 build_ui_bundle
 build_bff
+build_studio
 
 start_harness
 start_evidence
@@ -579,14 +601,15 @@ start_model_gateway
 start_java_services
 start_orchestrator
 start_bff
+start_studio
 
 mode_json="$(curl -fsS --max-time 2 "$BFF_URL/api/v0/mode")"
 if ! jq -e '.orchestrator == "live" and .evidence == "live"' >/dev/null <<<"$mode_json"; then
   fail "c2c-bff did not report live product mode: $mode_json"
 fi
 
-printf '%s\n' "$BFF_URL" >"$READY_MARKER"
-printf 'c2c local application ready: %s\n' "$BFF_URL"
+printf '%s\n' "$STUDIO_URL" >"$READY_MARKER"
+printf 'c2c local application ready: %s\n' "$STUDIO_URL"
 
 while true; do
   for pid_file in "$PID_DIR"/*.pid; do
