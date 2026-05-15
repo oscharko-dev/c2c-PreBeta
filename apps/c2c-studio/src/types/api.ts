@@ -29,8 +29,10 @@ export interface RunLinks {
   generatedFiles: string;
   buildTest: string;
   evidence: string;
+  progress?: string;
   events: string;
   artifacts: string;
+  learning?: string;
 }
 
 export interface TransformResponse {
@@ -182,6 +184,42 @@ export interface RunEventsView {
   mode: 'live' | 'diagnostic-fixture';
   productMode: 'live' | 'unavailable';
   events: RunEvent[];
+}
+
+export type RunProgressStepStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
+
+export interface RunProgressStep {
+  stepId: number;
+  name: string;
+  capabilityId: string;
+  service: string;
+  actor: string;
+  status: RunProgressStepStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  diagnostic?: string;
+  inputRef?: OutputRef | null;
+  outputRef?: OutputRef | null;
+  latencyMs?: number;
+}
+
+export interface RunProgressView {
+  runId: string;
+  programId: string;
+  mode: 'live' | 'diagnostic-fixture';
+  productMode: 'live' | 'unavailable';
+  status: 'complete' | 'incomplete';
+  runStatus?: 'starting' | 'updating' | 'completed' | 'failed';
+  currentStep: string | null;
+  failedStep: string | null;
+  completedSteps: string[];
+  stepCount: number;
+  steps: RunProgressStep[];
+  missingArtifacts?: string[];
+  orchestratorRunId?: string;
+  progressRef?: RunArtifactMetadata | null;
+  updatedAt?: string | null;
+  note?: string;
 }
 
 export interface RunArtifactsView {

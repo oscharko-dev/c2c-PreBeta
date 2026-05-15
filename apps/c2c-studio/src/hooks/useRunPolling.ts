@@ -10,7 +10,8 @@ async function hydrateRunObservability(
   setState: SetTransformationRunState,
   isActive?: () => boolean
 ) {
-  const [evts, exp] = await Promise.all([
+  const [progress, evts, exp] = await Promise.all([
+    apiClient.getRunProgress(runId),
     apiClient.getRunEvents(runId),
     apiClient.getRunExperience(runId),
   ]);
@@ -22,6 +23,7 @@ async function hydrateRunObservability(
 
     return {
       ...prev,
+      progress: progress?.ok ? progress.data : prev.progress,
       events: evts?.ok ? evts.data : prev.events,
       experience: exp?.ok ? exp.data : prev.experience,
     };
@@ -56,11 +58,12 @@ export async function hydrateRunArtifacts(
   terminalStatus?: 'completed' | 'failed',
   isActive?: () => boolean
 ) {
-  const [gen, genFiles, bt, ev, evts, arts, exp] = await Promise.all([
+  const [gen, genFiles, bt, ev, progress, evts, arts, exp] = await Promise.all([
     apiClient.getGenerated(runId),
     apiClient.getGeneratedFiles(runId),
     apiClient.getBuildTest(runId),
     apiClient.getEvidence(runId),
+    apiClient.getRunProgress(runId),
     apiClient.getRunEvents(runId),
     apiClient.getRunArtifacts(runId),
     apiClient.getRunExperience(runId)
@@ -77,6 +80,7 @@ export async function hydrateRunArtifacts(
       generatedFiles: genFiles.ok ? genFiles.data : null,
       buildTest: bt.ok ? bt.data : null,
       evidence: ev.ok ? ev.data : null,
+      progress: progress.ok ? progress.data : prev.progress,
       events: evts.ok ? evts.data : null,
       artifacts: arts.ok ? arts.data : null,
       artifactsError: arts.ok ? null : arts.message,

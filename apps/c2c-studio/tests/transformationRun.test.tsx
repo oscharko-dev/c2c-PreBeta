@@ -12,6 +12,7 @@ vi.mock('@/lib/apiClient', () => ({
     getBuildTest: vi.fn(),
     getEvidence: vi.fn(),
     getRunEvents: vi.fn(),
+    getRunProgress: vi.fn(),
     getRunArtifacts: vi.fn(),
     getRunExperience: vi.fn(),
     getModelGatewayHealth: vi.fn(),
@@ -47,9 +48,57 @@ function makeTerminalResponse(runId: string, programId: string, status: 'complet
         generatedFiles: `/runs/${runId}/generated/files`,
         buildTest: `/runs/${runId}/build-test`,
         evidence: `/runs/${runId}/evidence`,
+        progress: `/runs/${runId}/progress`,
         events: `/runs/${runId}/events`,
         artifacts: `/runs/${runId}/artifacts`,
+        learning: `/runs/${runId}/learning`,
       },
+    },
+  } as const;
+}
+
+function makeProgressFixture(runId: string, programId: string) {
+  return {
+    ok: true,
+    data: {
+      runId,
+      programId,
+      mode: 'live',
+      productMode: 'live',
+      status: 'complete',
+      runStatus: 'completed',
+      currentStep: null,
+      failedStep: null,
+      completedSteps: ['accepted', 'parse-cobol', 'generate-ir', 'generate-java', 'compile-test-java', 'write-evidence', 'completed'],
+      stepCount: 8,
+      steps: [
+        {
+          stepId: 1,
+          name: 'accepted',
+          capabilityId: 'orchestrator-service',
+          service: 'orchestrator-service',
+          actor: 'orchestrator-service',
+          status: 'ok',
+        },
+        {
+          stepId: 2,
+          name: 'parse-cobol',
+          capabilityId: 'parse-cobol-service',
+          service: 'orchestrator-service',
+          actor: 'parse-cobol-service',
+          status: 'ok',
+          latencyMs: 12,
+        },
+        {
+          stepId: 3,
+          name: 'model-policy-skipped',
+          capabilityId: 'orchestrator-service',
+          service: 'orchestrator-service',
+          actor: 'orchestrator-service',
+          status: 'skipped',
+          diagnostic: 'no modelPrompt provided by requester',
+        },
+      ],
     },
   } as const;
 }
@@ -155,6 +204,7 @@ function RunHarness() {
       <div data-testid="generated-files-status">{state.generatedFiles?.status ?? 'none'}</div>
       <div data-testid="build-test-status">{state.buildTest?.status ?? 'none'}</div>
       <div data-testid="evidence-status">{state.evidence?.status ?? 'none'}</div>
+      <div data-testid="progress-count">{state.progress?.steps.length ?? 0}</div>
       <div data-testid="artifacts-count">{state.artifacts?.artifacts.length ?? 0}</div>
       <div data-testid="events-count">{state.events?.events.length ?? 0}</div>
       <div data-testid="experience-summary">{state.experience?.summary ?? 'none'}</div>
@@ -175,6 +225,9 @@ describe('transformation run state machine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getRun).mockResolvedValue({ ok: true, data: { status: 'running' } } as any);
+    vi.mocked(apiClient.getRunProgress).mockImplementation((runId: string) =>
+      Promise.resolve(makeProgressFixture(runId, 'P-A') as any)
+    );
   });
 
   it('hydrates summary and artifacts for a completed terminal start response', async () => {
@@ -429,6 +482,9 @@ describe('transformation run state machine', () => {
         events: [{ type: 'run.accepted', status: 'ok', message: 'accepted', createdAt: '2026-05-15T10:00:04Z' }],
       },
     }) as any);
+    vi.mocked(apiClient.getRunProgress).mockImplementation(async (runId: string) =>
+      makeProgressFixture(runId, runId === 'run-live-a' ? 'P-A' : 'P-B') as any
+    );
     vi.mocked(apiClient.getRunExperience).mockImplementation(async (runId: string) => ({
       ok: true,
       data: {
@@ -452,6 +508,7 @@ describe('transformation run state machine', () => {
     fireEvent.click(screen.getByText('start-a'));
 
     await waitFor(() => expect(screen.getByTestId('events-count')).toHaveTextContent('1'));
+    await waitFor(() => expect(screen.getByTestId('progress-count')).toHaveTextContent('3'));
     expect(screen.getByTestId('experience-summary')).toHaveTextContent('1 learning candidate observed');
 
     await act(async () => {

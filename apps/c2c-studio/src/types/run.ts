@@ -10,6 +10,7 @@ import {
   BuildTestView, 
   EvidenceView, 
   RunEventsView, 
+  RunProgressView,
   RunArtifactsView 
 } from './api';
 
@@ -38,6 +39,7 @@ export interface TransformationRunState {
   buildTest: BuildTestView | null;
   evidence: EvidenceView | null;
   events: RunEventsView | null;
+  progress: RunProgressView | null;
   artifacts: RunArtifactsView | null;
   experience: RunExperienceView | null;
   modelGatewayHealth: ModelGatewayHealth | null;

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+@SuppressWarnings("UastIncorrectHttpHeaderInspection")
 public final class ServiceApp {
 
     private static final String SERVICE_NAME = TargetJavaGenerationService.SERVICE_NAME;

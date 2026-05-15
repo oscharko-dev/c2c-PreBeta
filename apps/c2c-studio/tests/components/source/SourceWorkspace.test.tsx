@@ -20,6 +20,7 @@ vi.mock('@/lib/apiClient', () => ({
     getBuildTest: vi.fn(),
     getEvidence: vi.fn(),
     getRunEvents: vi.fn(),
+    getRunProgress: vi.fn(),
     getRunArtifacts: vi.fn(),
     getRunExperience: vi.fn(),
     getModelGatewayHealth: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock('@/hooks/useC2cApi', () => ({
 
 describe('Source Workspace', () => {
   beforeEach(() => {
+    vi.mocked(apiClient.getRunProgress).mockResolvedValue({ ok: true, data: { runId: 'run-1', programId: 'P1', mode: 'live', productMode: 'live', status: 'complete', currentStep: null, failedStep: null, completedSteps: [], stepCount: 0, steps: [] } } as any);
     vi.mocked(apiClient.getRunExperience).mockResolvedValue({ ok: true, data: { status: 'complete', summary: null } } as any);
     vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
     vi.mocked(apiClient.getHarnessReady).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);

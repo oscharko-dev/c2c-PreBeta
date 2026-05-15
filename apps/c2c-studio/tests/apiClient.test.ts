@@ -264,6 +264,61 @@ describe('apiClient', () => {
     });
   });
 
+  it('accepts live run progress payloads from the BFF progress endpoint', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'BRNCH01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'complete',
+          runStatus: 'completed',
+          currentStep: null,
+          failedStep: null,
+          completedSteps: ['accepted', 'parse-cobol', 'generate-ir', 'generate-java', 'compile-test-java', 'write-evidence'],
+          stepCount: 2,
+          steps: [
+            {
+              stepId: 1,
+              name: 'accepted',
+              capabilityId: 'orchestrator-service',
+              service: 'orchestrator-service',
+              actor: 'orchestrator-service',
+              status: 'ok',
+            },
+            {
+              stepId: 2,
+              name: 'model-policy-skipped',
+              capabilityId: 'orchestrator-service',
+              service: 'orchestrator-service',
+              actor: 'orchestrator-service',
+              status: 'skipped',
+              diagnostic: 'no modelPrompt provided by requester',
+            },
+          ],
+          missingArtifacts: [],
+          orchestratorRunId: 'orch-1',
+        }),
+    } as Response);
+
+    const result = await apiClient.getRunProgress('run-1');
+
+    expect(fetch).toHaveBeenCalledWith('/api/v0/runs/run-1/progress', undefined);
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        runId: 'run-1',
+        status: 'complete',
+        steps: [
+          { name: 'accepted', status: 'ok' },
+          { name: 'model-policy-skipped', status: 'skipped' },
+        ],
+      },
+    });
+  });
+
   it('rejects malformed build-test payloads with invalid classifications', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
