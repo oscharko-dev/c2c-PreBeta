@@ -2,7 +2,10 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { LucideIcon } from 'lucide-react';
 
-export interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+type NativeButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label'>;
+
+export interface IconButtonProps extends NativeButtonProps {
+  'aria-label': string;
   icon: LucideIcon;
   active?: boolean;
   variant?: 'default' | 'primary' | 'danger';

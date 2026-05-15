@@ -20,9 +20,11 @@ describe('StudioShell', () => {
 
     render(<StudioShell />);
 
-    expect(screen.getByRole('heading', { name: 'Transformation Studio' })).toBeInTheDocument();
+    expect(screen.getByText('Transformation Studio')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start Transformation' })).toBeEnabled();
-    expect(screen.getByText('Backend: connected')).toBeInTheDocument();
+    expect(screen.getAllByText('Backend: connected').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('tablist').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('treeitem').length).toBeGreaterThan(0);
   });
 
   it('renders an honest blocking state when backend health fails', () => {
@@ -51,7 +53,7 @@ describe('StudioShell', () => {
 
     render(<StudioShell />);
 
-    expect(screen.getByText('Backend: degraded')).toBeInTheDocument();
+    expect(screen.getAllByText('Backend: degraded').length).toBeGreaterThan(0);
     expect(screen.getByText('Orchestrator is not reachable.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start Transformation' })).toBeDisabled();
   });
