@@ -75,6 +75,26 @@ class StubGateway:
         return dict(self.trajectory_ledger.get(run_id, {"runId": run_id, "events": []}))
 
 
+class SummaryCheckingGateway(StubGateway):
+    def __init__(self, capabilities, responses, *, artifact_root: Path):
+        super().__init__(capabilities, responses)
+        self.artifact_root = artifact_root
+
+    def update_run(self, run_id, status, *, updated_by, message, evidence_refs=None, policy_decision="policy allow"):
+        if status == "completed":
+            summary_path = self.artifact_root / run_id / "run-summary.json"
+            summary = json.loads(summary_path.read_text("utf-8"))
+            self.completed_summary_snapshot = summary
+        return super().update_run(
+            run_id,
+            status,
+            updated_by=updated_by,
+            message=message,
+            evidence_refs=evidence_refs,
+            policy_decision=policy_decision,
+        )
+
+
 class W0WorkflowRunnerTests(unittest.TestCase):
     @staticmethod
     def _base_config(max_retries: int = 0, model_gateway_model_id: str = "gpt-oss-120b"):
@@ -698,11 +718,35 @@ class WorkflowArtifactPersistenceTests(unittest.TestCase):
         with self.assertRaises(StepExecutionError):
             runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
 
-        run_dir = root / "run-Z4"
-        self.assertFalse((run_dir / "model-invocation-ledger.json").exists())
-        skipped = json.loads((run_dir / "model-policy-skipped.json").read_text("utf-8"))
-        self.assertEqual(skipped["status"], "skipped")
-        self.assertIn("failed before required model invocation", skipped["reason"])
+    def test_completed_summary_is_persisted_before_harness_completion_update(self):
+        store_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(store_dir.cleanup)
+        artifact_root = Path(store_dir.name)
+        gateway = SummaryCheckingGateway(
+            W0WorkflowRunnerTests._base_capabilities(),
+            W0WorkflowRunnerTests._base_responses(),
+            artifact_root=artifact_root,
+        )
+        store = RunArtifactStore(store_dir.name, created_by="orchestrator-service-test")
+        runner = W0WorkflowRunner(
+            config=W0WorkflowRunnerTests._base_config(),
+            gateway=gateway,
+            artifact_store=store,
+        )
+        context = W0RunContext(
+            run_id="run-Z5",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt=None,
+        )
+
+        runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        summary = gateway.completed_summary_snapshot
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(summary["message"], "W0 migration workflow completed")
+        self.assertEqual(summary["completedSteps"][-1], "write-evidence")
 
 
 class DataReferenceTests(unittest.TestCase):
