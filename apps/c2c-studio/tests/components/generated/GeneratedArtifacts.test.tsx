@@ -115,6 +115,75 @@ describe('Generated Artifacts UI', () => {
     expect(screen.getByText('artifact-1')).toBeInTheDocument();
   });
 
+  it('keeps generated Java visible with an evidence-incomplete badge and missing artifact details', async () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: '123',
+      generated: {
+        status: 'generated',
+        files: {
+          'src/App.java': 'public class App {}',
+        },
+        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/App.java',
+        files: [{ path: 'src/App.java' }],
+      },
+      buildTest: {
+        status: 'ok',
+        classification: 'match',
+        generatedArtifactRef: { uri: 'air://build', sha256: 'aaa' },
+      },
+      evidence: {
+        status: 'incomplete',
+        missingArtifacts: ['manifest.json'],
+        generatedArtifactRef: { uri: 'air://evidence', sha256: 'aaa' },
+      },
+    });
+
+    renderArtifactsUi();
+
+    expect(await screen.findByText('public class App {}')).toBeInTheDocument();
+    expect(screen.getByText('Evidence Incomplete')).toBeInTheDocument();
+    expect(screen.getByText('manifest.json')).toBeInTheDocument();
+  });
+
+  it('keeps generated Java visible with an artifact mismatch failure notice', async () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: '123',
+      generated: {
+        status: 'generated',
+        files: {
+          'src/App.java': 'public class App {}',
+        },
+        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/App.java',
+        files: [{ path: 'src/App.java' }],
+      },
+      buildTest: {
+        status: 'ok',
+        classification: 'match',
+        generatedArtifactRef: { uri: 'air://build', sha256: 'bbb' },
+      },
+      evidence: {
+        status: 'complete',
+        generatedArtifactRef: { uri: 'air://evidence', sha256: 'aaa' },
+      },
+    });
+
+    renderArtifactsUi();
+
+    expect(await screen.findByText('public class App {}')).toBeInTheDocument();
+    expect(screen.getByText('Artifact Mismatch')).toBeInTheDocument();
+    expect(screen.getByText('Conflicting Artifact References')).toBeInTheDocument();
+  });
+
   it('renders file tree and artifact hash', () => {
     mockTransformationState.mockReturnValue({
       phase: 'completed',
@@ -267,6 +336,31 @@ describe('Generated Artifacts UI', () => {
       expect(apiClient.getGeneratedFile).toHaveBeenCalledWith('run-2', 'src/NewEntry.java');
     });
     expect(await screen.findByText('public class NewEntry {}')).toBeInTheDocument();
+  });
+
+  it('shows a failed-verification artifact state when a failed run still has generated files', async () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'failed',
+      runId: '123',
+      generated: {
+        status: 'generated',
+        files: {
+          'src/App.java': 'public class App {}',
+        },
+        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/App.java',
+        files: [{ path: 'src/App.java' }],
+      },
+    });
+
+    renderArtifactsUi();
+
+    expect(await screen.findByText('public class App {}')).toBeInTheDocument();
+    expect(screen.getByText('Run Failed')).toBeInTheDocument();
+    expect(screen.getByText('Target Java Inspector')).toBeInTheDocument();
   });
 
   it('selecting a different file in the inspector updates the editor content', async () => {

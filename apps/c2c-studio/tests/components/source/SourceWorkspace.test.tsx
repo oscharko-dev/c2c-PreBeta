@@ -250,6 +250,29 @@ describe('Source Workspace', () => {
     );
   });
 
+  it('preserves the editor buffer and shows validation errors for 400 responses', async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({
+      ok: false,
+      status: 400,
+      message: 'Transformation validation failed',
+      details: { kind: 'http', body: { error: 'Transformation validation failed' } },
+    });
+
+    render(
+      <TransformationRunProvider><SourceWorkspaceProvider>
+        <CobolEditorPane />
+      </SourceWorkspaceProvider></TransformationRunProvider>
+    );
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
+
+    expect(await screen.findByText('Transformation validation failed')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue(
+      '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
+    );
+  });
+
   it('does not load unsupported references from the BFF', async () => {
     vi.mocked(apiClient.getSamples).mockResolvedValue({
       ok: true,
