@@ -188,7 +188,7 @@ function parseSamplesResponse(payload: unknown): ApiResult<Sample[]> {
 
 function parseSampleDetailResponse(payload: unknown): ApiResult<SampleDetail> {
   if (!isSampleDetail(payload)) {
-    return createFailure('Contract error: sample detail payload must be a JSON object.', {
+    return createFailure('Contract error: sample detail payload has missing or invalid fields.', {
       kind: 'contract',
       body: payload,
     });
@@ -198,7 +198,7 @@ function parseSampleDetailResponse(payload: unknown): ApiResult<SampleDetail> {
 
 function parseTransformResponse(payload: unknown): ApiResult<TransformResponse> {
   if (!isRecord(payload) || typeof payload.runId !== 'string' || typeof payload.programId !== 'string' || typeof payload.status !== 'string') {
-    return createFailure('Contract error: transform payload must be a JSON object.', {
+    return createFailure('Contract error: transform payload has missing or invalid fields.', {
       kind: 'contract',
       body: payload,
     });

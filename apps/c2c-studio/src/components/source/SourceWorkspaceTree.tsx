@@ -48,9 +48,15 @@ export function SourceWorkspaceTree() {
               label={program.title || program.programId}
               type="file"
               active={loadedProgramId === program.programId}
-              aria-disabled={!program.supportedInProductMode}
+              disabled={!program.supportedInProductMode}
               statusVariant={program.supportedInProductMode ? 'success' : 'blocked'}
-              onClick={() => handleProgramClick(program.programId, program.supportedInProductMode)}
+              onActivate={
+                program.supportedInProductMode
+                  ? () => {
+                      void handleProgramClick(program.programId, true);
+                    }
+                  : undefined
+              }
             />
             {!program.supportedInProductMode ? (
               <p className="px-4 pb-2 text-xs text-text-dim">

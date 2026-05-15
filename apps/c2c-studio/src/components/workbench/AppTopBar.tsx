@@ -12,7 +12,7 @@ interface AppTopBarProps {
 export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
-  const { canSubmitTransform, submitTransform, isTransforming } = useSourceWorkspace();
+  const { canSubmitTransform, submitTransform } = useSourceWorkspace();
 
   return (
     <div className="flex min-h-12 w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-bg-1 px-4 py-2 shrink-0">
