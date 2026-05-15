@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSourceWorkspace } from '../../stores/sourceWorkspace';
 import { Play } from 'lucide-react';
 import { DEFAULT_SOURCE_NAME, deriveDetectedProgramId, deriveDisplayedLineEnding, deriveSourceHash } from '../../lib/sourceAnalysis';
@@ -10,6 +10,9 @@ import { UnsupportedConstructsPanel } from '../state/UnsupportedConstructsPanel'
 import { getWorkbenchReadiness } from '../workbench/workbenchReadiness';
 
 export function CobolEditorPane() {
+  const GUTTER_LINE_HEIGHT = 21;
+  const GUTTER_OVERSCAN = 10;
+  const DEFAULT_VIEWPORT_HEIGHT = 480;
   const {
     sourceText,
     setSourceText,
@@ -28,8 +31,16 @@ export function CobolEditorPane() {
   const readiness = getWorkbenchReadiness(apiState);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const lineCount = sourceText.split('\n').length || 1;
-  const lines = Array.from({ length: lineCount }, (_, i) => i + 1);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(DEFAULT_VIEWPORT_HEIGHT);
+  const lineCount = useMemo(() => sourceText.split('\n').length || 1, [sourceText]);
+  const gutterStartLine = Math.max(0, Math.floor(scrollTop / GUTTER_LINE_HEIGHT) - GUTTER_OVERSCAN);
+  const gutterVisibleCount = Math.ceil(viewportHeight / GUTTER_LINE_HEIGHT) + GUTTER_OVERSCAN * 2;
+  const gutterEndLine = Math.min(lineCount, gutterStartLine + gutterVisibleCount);
+  const visibleLineNumbers = useMemo(
+    () => Array.from({ length: gutterEndLine - gutterStartLine }, (_, index) => gutterStartLine + index + 1),
+    [gutterEndLine, gutterStartLine]
+  );
   const detectedProgramId = deriveDetectedProgramId(sourceText) ?? loadedProgramId;
   const lineEnding = deriveDisplayedLineEnding(sourceText);
 
@@ -46,6 +57,28 @@ export function CobolEditorPane() {
       cancelled = true;
     };
   }, [sourceText]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const measure = () => {
+      setViewportHeight(textarea.clientHeight || DEFAULT_VIEWPORT_HEIGHT);
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, []);
 
   if (!sourceText && !isDirty) {
     return (
@@ -117,21 +150,36 @@ export function CobolEditorPane() {
       ) : null}
 
       <div className="flex flex-1 min-h-0 overflow-hidden font-mono text-[12px]">
-        <div 
+        <div
           className="border-r border-line bg-bg-1 px-2 py-2 text-right text-text-faint overflow-hidden select-none"
           aria-hidden="true"
         >
-          {lines.map((num) => (
-            <div key={num} className="h-[21px] min-w-8 pr-2 leading-[21px]">
-              {num}
-            </div>
-          ))}
+          <div
+            className="relative"
+            style={{ height: lineCount * GUTTER_LINE_HEIGHT }}
+          >
+            {visibleLineNumbers.map((num) => (
+              <div
+                key={num}
+                className="absolute min-w-8 pr-2"
+                style={{
+                  top: (num - 1) * GUTTER_LINE_HEIGHT,
+                  height: GUTTER_LINE_HEIGHT,
+                  lineHeight: `${GUTTER_LINE_HEIGHT}px`,
+                }}
+              >
+                {num}
+              </div>
+            ))}
+          </div>
         </div>
         <textarea
           ref={textareaRef}
           value={sourceText}
           onChange={(e) => setSourceText(e.target.value)}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           spellCheck={false}
+          aria-label={`${sourceName || DEFAULT_SOURCE_NAME} COBOL source editor`}
           className="flex-1 w-full m-0 p-2 leading-[21px] bg-transparent text-text resize-none outline-none overflow-auto whitespace-pre"
           style={{ tabSize: 4 }}
         />

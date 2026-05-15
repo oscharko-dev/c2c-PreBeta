@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useReferencePrograms } from '../../hooks/useReferencePrograms';
 import { useSourceWorkspace } from '../../stores/sourceWorkspace';
 import { TreeRow } from '../ui/TreeRow';
@@ -8,6 +9,9 @@ import { apiClient } from '../../lib/apiClient';
 export function SourceWorkspaceTree() {
   const { programs, isLoading, error } = useReferencePrograms();
   const { loadedProgramId, loadProgram } = useSourceWorkspace();
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const [focusedProgramId, setFocusedProgramId] = useState<string | null>(null);
+  const visiblePrograms = programs;
 
   const handleProgramClick = async (programId: string, supported: boolean) => {
     if (!supported) return;
@@ -21,6 +25,66 @@ export function SourceWorkspaceTree() {
       );
     } else {
       console.error(result.message);
+    }
+  };
+
+  useEffect(() => {
+    if (visiblePrograms.length === 0) {
+      setFocusedProgramId(null);
+      return;
+    }
+
+    const hasFocusedProgram = visiblePrograms.some((program) => program.programId === focusedProgramId);
+    if (!hasFocusedProgram) {
+      setFocusedProgramId(loadedProgramId ?? visiblePrograms[0].programId);
+    }
+  }, [focusedProgramId, loadedProgramId, visiblePrograms]);
+
+  useEffect(() => {
+    if (focusedProgramId) {
+      rowRefs.current.get(focusedProgramId)?.focus();
+    }
+  }, [focusedProgramId]);
+
+  const focusProgramById = (programId: string | null) => {
+    if (!programId) {
+      return;
+    }
+
+    setFocusedProgramId(programId);
+    rowRefs.current.get(programId)?.focus();
+  };
+
+  const handleTreeKeyDown = (event: KeyboardEvent<HTMLDivElement>, programIndex: number) => {
+    if (visiblePrograms.length === 0) {
+      return;
+    }
+
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        focusProgramById(visiblePrograms[Math.min(programIndex + 1, visiblePrograms.length - 1)]?.programId ?? null);
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        focusProgramById(visiblePrograms[Math.max(programIndex - 1, 0)]?.programId ?? null);
+        break;
+      case 'Home':
+        event.preventDefault();
+        focusProgramById(visiblePrograms[0].programId);
+        break;
+      case 'End':
+        event.preventDefault();
+        focusProgramById(visiblePrograms[visiblePrograms.length - 1].programId);
+        break;
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        break;
+      default:
+        break;
     }
   };
 
@@ -39,17 +103,27 @@ export function SourceWorkspaceTree() {
   return (
     <div className="flex-1 overflow-auto" role="tree" aria-label="Reference Programs">
       <div className="py-2">
-        {programs.map((program) => (
+        {visiblePrograms.map((program, index) => (
           <div
             key={program.programId}
             className={!program.supportedInProductMode ? 'opacity-60' : ''}
           >
             <TreeRow
+              ref={(node) => {
+                if (node) {
+                  rowRefs.current.set(program.programId, node);
+                } else {
+                  rowRefs.current.delete(program.programId);
+                }
+              }}
               label={program.title || program.programId}
               type="file"
               active={loadedProgramId === program.programId}
               disabled={!program.supportedInProductMode}
               statusVariant={program.supportedInProductMode ? 'success' : 'blocked'}
+              tabIndex={focusedProgramId === program.programId || (!focusedProgramId && index === 0) ? 0 : -1}
+              onFocus={() => setFocusedProgramId(program.programId)}
+              onKeyDown={(event) => handleTreeKeyDown(event, index)}
               onActivate={
                 program.supportedInProductMode
                   ? () => {

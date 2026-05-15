@@ -30,7 +30,7 @@ export function BottomWorkbench() {
   const activeTab = bottomWorkbenchTabs.find((tab) => tab.id === activeBottomTab) ?? bottomWorkbenchTabs[0];
 
   return (
-    <div 
+    <section
       className="flex flex-col border-t border-line bg-bg-1 shrink-0 w-full relative group" 
       aria-label="Bottom Workbench"
       style={{ height: size }}
@@ -103,7 +103,6 @@ export function BottomWorkbench() {
           )
         )}
       </div>
-    </div>
+    </section>
   );
 }
-

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkbenchShell } from '../src/components/workbench/WorkbenchShell';
 import { useC2cApi } from '../src/hooks/useC2cApi';
@@ -19,6 +19,43 @@ vi.mock('../src/hooks/useReferencePrograms', () => ({
 }));
 
 describe('A11y, Keyboard, Resizing, and Performance Hardening', () => {
+  it('supports keyboard resizing on the target inspector separator', async () => {
+    sessionStorage.clear();
+
+    vi.mocked(useC2cApi).mockReturnValue({
+      status: 'ready',
+      tone: 'ready',
+      orchestratorMode: 'product',
+      evidenceMode: 'real',
+      orchestratorLive: true,
+      evidenceLive: true,
+      lastCheck: Date.now(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<WorkbenchShell />);
+
+    const targetInspector = screen.getByLabelText('Target Java Inspector');
+    const resizeHandle = screen.getByLabelText('Resize Target Inspector');
+
+    expect(targetInspector).toHaveStyle({ width: '288px' });
+
+    resizeHandle.focus();
+    fireEvent.keyDown(resizeHandle, { key: 'ArrowLeft' });
+
+    await waitFor(() => {
+      expect(targetInspector).toHaveStyle({ width: '308px' });
+    });
+
+    fireEvent.keyDown(resizeHandle, { key: 'ArrowRight' });
+
+    await waitFor(() => {
+      expect(targetInspector).toHaveStyle({ width: '288px' });
+    });
+  });
+
   it('Keyboard tab order through primary controls respects disabled states', () => {
     vi.mocked(useC2cApi).mockReturnValue({
       status: 'ready',

@@ -18,7 +18,7 @@ export function SourceWorkspacePanel() {
   if (!isSourceWorkspaceOpen) return null;
 
   return (
-    <div 
+    <aside
       className="hidden h-full shrink-0 flex-col overflow-hidden bg-bg-2 lg:flex relative group" 
       aria-label="Source Workspace"
       style={{ width: size }}
@@ -42,6 +42,6 @@ export function SourceWorkspacePanel() {
           isResizing ? "bg-accent w-1" : "bg-line"
         )}
       />
-    </div>
+    </aside>
   );
 }

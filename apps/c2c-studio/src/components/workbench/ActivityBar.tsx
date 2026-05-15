@@ -16,7 +16,7 @@ export function ActivityBar() {
   };
 
   return (
-    <div className="flex w-12 flex-col items-center justify-between border-r border-line bg-bg-0 py-4 shrink-0 h-full" aria-label="Activity Bar">
+    <nav className="flex w-12 flex-col items-center justify-between border-r border-line bg-bg-0 py-4 shrink-0 h-full" aria-label="Activity Bar">
       <div className="flex flex-col items-center gap-4">
         <button 
           type="button"
@@ -53,6 +53,6 @@ export function ActivityBar() {
           <Settings className="h-6 w-6" />
         </button>
       </div>
-    </div>
+    </nav>
   );
 }

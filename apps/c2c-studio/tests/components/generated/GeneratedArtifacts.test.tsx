@@ -184,6 +184,43 @@ describe('Generated Artifacts UI', () => {
     expect(screen.getByText('Conflicting Artifact References')).toBeInTheDocument();
   });
 
+  it('uses constrained rendering for large generated Java files', async () => {
+    const largeFileContent = Array.from({ length: 1200 }, (_, index) => `LINE_${String(index + 1).padStart(4, '0')}`).join('\n');
+
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: '123',
+      generated: {
+        status: 'generated',
+        files: {
+          'src/App.java': largeFileContent,
+        },
+        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/App.java',
+        files: [{ path: 'src/App.java' }],
+      },
+      buildTest: {
+        status: 'ok',
+        classification: 'match',
+        generatedArtifactRef: { uri: 'air://build', sha256: 'aaa' },
+      },
+      evidence: {
+        status: 'complete',
+        generatedArtifactRef: { uri: 'air://evidence', sha256: 'aaa' },
+      },
+    });
+
+    renderArtifactsUi();
+
+    expect(await screen.findByText(/Large file mode active/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Generated Java source for src/App.java')).toHaveClass('overflow-auto');
+    expect(screen.getByText('LINE_0001')).toBeInTheDocument();
+    expect(screen.queryByText('LINE_1200')).not.toBeInTheDocument();
+  });
+
   it('renders file tree and artifact hash', () => {
     mockTransformationState.mockReturnValue({
       phase: 'completed',

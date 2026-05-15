@@ -30,7 +30,7 @@ export function TargetJavaInspector() {
   if (!isTargetInspectorOpen) return null;
 
   return (
-    <div 
+    <aside
       className="flex h-full shrink-0 flex-col overflow-hidden bg-bg-2 relative group max-lg:!w-64" 
       aria-label="Target Java Inspector"
       style={{ width: size }}
@@ -41,14 +41,7 @@ export function TargetJavaInspector() {
         aria-orientation="vertical"
         aria-label="Resize Target Inspector"
         tabIndex={0}
-        onMouseDown={(e) => {
-          // Invert horizontal direction logic by a slight trick or just rely on mouse coords.
-          // Wait, the hook uses absolute mouse position vs startPos. 
-          // If handle is on the left, dragging left (negative delta) should INCREASE size.
-          // We might need a "reverse" flag in the hook, or just let the hook handle standard right-handle logic and we adjust it here... 
-          // Let's modify the hook to support handle placement or reverse later, or just do the simple startResize if it's fine.
-          startResize(e);
-        }}
+        onMouseDown={startResize}
         onTouchStart={startResize}
         onKeyDown={startResize}
         className={cn(
@@ -99,6 +92,6 @@ export function TargetJavaInspector() {
           </div>
         </div>
       )}
-    </div>
+    </aside>
   );
 }

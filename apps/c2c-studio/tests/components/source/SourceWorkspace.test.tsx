@@ -231,6 +231,31 @@ describe('Source Workspace', () => {
     });
   });
 
+  it('keyboard shortcuts respect blocked state and support Alt+R once ready', async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r4', programId: 'DEMO01', status: 'starting' } as unknown as TransformResponse });
+
+    render(
+      <TransformationRunProvider><SourceWorkspaceProvider>
+        <AppTopBar apiState={{ health: { status: 'ok' }, mode: { orchestrator: 'live', evidence: 'live' }, error: null, errorKind: null, loading: false }} />
+        <CobolEditorPane />
+      </SourceWorkspaceProvider></TransformationRunProvider>
+    );
+
+    fireEvent.keyDown(window, { key: 'r', altKey: true });
+    expect(apiClient.transform).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    fireEvent.keyDown(window, { key: 'r', altKey: true });
+
+    await waitFor(() => {
+      expect(apiClient.transform).toHaveBeenCalledWith({
+        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
+        programId: undefined,
+        sourceName: 'pasted-source.cbl',
+      });
+    });
+  });
+
   it('disabled states prevent submission', async () => {
     render(
       <TransformationRunProvider><SourceWorkspaceProvider>
@@ -249,6 +274,24 @@ describe('Source Workspace', () => {
 
     const btn = screen.getByRole('button', { name: /Start Transformation/i });
     expect(btn).toBeDisabled();
+  });
+
+  it('keeps large source buffers accessible without rendering every gutter row at once', async () => {
+    render(
+      <TransformationRunProvider><SourceWorkspaceProvider>
+        <CobolEditorPane />
+      </SourceWorkspaceProvider></TransformationRunProvider>
+    );
+
+    fireEvent.click(screen.getByText('Start Typing'));
+
+    const largeSource = Array.from({ length: 1200 }, (_, index) => `LINE_${String(index + 1).padStart(4, '0')}`).join('\n');
+    const textarea = screen.getByRole('textbox', { name: /COBOL source editor/i });
+    fireEvent.change(textarea, { target: { value: largeSource } });
+
+    expect(textarea).toHaveAttribute('aria-label', 'pasted-source.cbl COBOL source editor');
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.queryByText('1200')).not.toBeInTheDocument();
   });
 
   it('preserves the editor buffer and shows backend-unavailable errors', async () => {
@@ -329,4 +372,5 @@ describe('Source Workspace', () => {
 
     expect(apiClient.getSampleDetail).not.toHaveBeenCalled();
   });
+
 });
