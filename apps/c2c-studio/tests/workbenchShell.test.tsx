@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkbenchShell } from '../src/components/workbench/WorkbenchShell';
 
@@ -95,7 +95,7 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     expect(within(screen.getByRole('tabpanel')).getByText('No evidence pack loaded')).toBeInTheDocument();
   });
 
-  it('allows workbench tabs to be selected through keyboard interaction', () => {
+  it('allows workbench tabs to be selected through keyboard interaction', async () => {
     vi.mocked(useC2cApi).mockReturnValue({
       health: { status: 'ok' },
       mode: { orchestrator: 'live', evidence: 'live' },
@@ -107,14 +107,17 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     render(<WorkbenchShell />);
 
     const runTab = screen.getByRole('tab', { name: /run/i });
-    const learningTab = screen.getByRole('tab', { name: /learning/i });
+    const problemsTab = screen.getByRole('tab', { name: /problems/i });
     
     runTab.focus();
     fireEvent.keyDown(runTab, { key: 'End', code: 'End' });
-    fireEvent.click(learningTab);
 
-    expect(learningTab).toHaveAttribute('aria-selected', 'true');
-    expect(within(screen.getByRole('tabpanel')).getByText('No experience learning data yet')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(problemsTab).toHaveAttribute('aria-selected', 'true');
+      expect(document.activeElement).toBe(problemsTab);
+    });
+
+    expect(within(screen.getByRole('tabpanel')).getByText('No diagnostics loaded')).toBeInTheDocument();
   });
 
   it('does not report a successful ready state when mode is unavailable', () => {

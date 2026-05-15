@@ -18,7 +18,12 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
       }
 
       const nextIndex = currentIndex === -1 ? 0 : (currentIndex + delta + tabs.length) % tabs.length;
-      onValueChange(tabs[nextIndex].value);
+      const nextValue = tabs[nextIndex].value;
+      onValueChange(nextValue);
+      queueMicrotask(() => {
+        const nextTab = document.getElementById(idBase ? `${idBase}-tab-${nextValue}` : nextValue);
+        nextTab?.focus();
+      });
     };
 
     return (
@@ -54,12 +59,22 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
 
               if (event.key === 'Home') {
                 event.preventDefault();
-                onValueChange(tabs[0].value);
+                const nextValue = tabs[0].value;
+                onValueChange(nextValue);
+                queueMicrotask(() => {
+                  const nextTab = document.getElementById(idBase ? `${idBase}-tab-${nextValue}` : nextValue);
+                  nextTab?.focus();
+                });
               }
 
               if (event.key === 'End') {
                 event.preventDefault();
-                onValueChange(tabs[tabs.length - 1].value);
+                const nextValue = tabs[tabs.length - 1].value;
+                onValueChange(nextValue);
+                queueMicrotask(() => {
+                  const nextTab = document.getElementById(idBase ? `${idBase}-tab-${nextValue}` : nextValue);
+                  nextTab?.focus();
+                });
               }
             }}
             className={cn(
