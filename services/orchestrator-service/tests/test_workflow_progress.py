@@ -293,12 +293,8 @@ class EvidencePackReferencesLearningTests(unittest.TestCase):
             entry for entry in gateway.calls if entry[0] == "invoke" and entry[1] == "evidence.writer"
         )
         artifacts = evidence_call[2]["artifacts"]
-        self.assertIn("experienceLearningSummary", artifacts)
-        learning_ref = artifacts["experienceLearningSummary"]
-        self.assertEqual(
-            learning_ref["endpoint"],
-            "http://el.test/v0/runs/run-evpkg-1/summary",
-        )
+        self.assertIn("experienceEvents", artifacts)
+        learning_ref = artifacts["experienceEvents"][0]
         self.assertTrue(learning_ref["uri"].endswith("/v0/runs/run-evpkg-1/summary"))
         self.assertEqual(len(learning_ref["sha256"]), 64)
 

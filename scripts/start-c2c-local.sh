@@ -139,6 +139,7 @@ prepare_var_dir() {
     "$PID_DIR" \
     "$BIN_DIR" \
     "$READY_MARKER" \
+    "$VAR_DIR/runs" \
     "$VAR_DIR/evidence-exports" \
     "$VAR_DIR/harness-events.jsonl" \
     "$VAR_DIR/evidence-events.jsonl" \
