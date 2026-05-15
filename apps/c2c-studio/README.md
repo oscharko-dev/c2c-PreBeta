@@ -1,47 +1,21 @@
-# c2c Transformation Studio
+# c2c Studio
 
-Nuxt/Tailwind frontend application for the c2c Transformation Studio.
+Next.js/React/Tailwind frontend application for the c2c Transformation Studio.
 
 ## Development
 
-Make sure to install the dependencies:
-
 ```bash
 npm install
-```
-
-Start the development server on `http://localhost:3000`:
-
-```bash
 npm run dev
-```
-
-## Environment Variables
-
-The application requires the BFF URL to be passed during runtime. Create a `.env` file or provide it via process environment variables:
-
-```bash
-NUXT_PUBLIC_C2C_BFF_BASE_URL=http://localhost:8090
 ```
 
 ## Production
 
-Build the application for production:
-
 ```bash
 npm run build
+npm start
 ```
 
-The output will be in `.output/`. You can serve the application using Node:
+## Configuration
 
-```bash
-node .output/server/index.mjs
-```
-
-## Tests
-
-Run the test suite using Vitest:
-
-```bash
-npm run test
-```
+- `NEXT_PUBLIC_C2C_BFF_BASE_URL`: Override the BFF base URL. Defaults to same-origin relative paths.

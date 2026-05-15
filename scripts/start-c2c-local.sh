@@ -315,7 +315,7 @@ build_studio() {
     npm ci --no-fund --no-audit
     npm run build
   ) >"$LOG_DIR/c2c-studio.log" 2>&1 || fail "apps/c2c-studio build failed (see $LOG_DIR/c2c-studio.log)"
-  [[ -d "$ROOT_DIR/apps/c2c-studio/.output" ]] || fail "c2c-studio .output was not built"
+  [[ -d "$ROOT_DIR/apps/c2c-studio/.next" ]] || fail "c2c-studio .next was not built"
 }
 
 build_orchestrator_capabilities_json() {
@@ -582,9 +582,9 @@ start_bff() {
 start_studio() {
   start_bg c2c-studio "$LOG_DIR/c2c-studio.log" \
     PORT="$STUDIO_PORT" \
-    NUXT_PUBLIC_C2C_BFF_BASE_URL="$BFF_URL" \
+    NEXT_PUBLIC_C2C_BFF_BASE_URL="$BFF_URL" \
     -- \
-    node "$ROOT_DIR/apps/c2c-studio/.output/server/index.mjs"
+    npm start --prefix "$ROOT_DIR/apps/c2c-studio"
   wait_http c2c-studio "$STUDIO_URL"
 }
 

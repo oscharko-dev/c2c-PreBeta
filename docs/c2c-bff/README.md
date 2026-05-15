@@ -36,7 +36,7 @@ For the W0.1 product shell, prefer the repository-level launcher:
 ./scripts/start-c2c-local.sh
 ```
 
-This starts the Nuxt Studio on `http://127.0.0.1:3000` and wires it to the BFF
+This starts the Next.js Studio on `http://127.0.0.1:3000` and wires it to the BFF
 API on `http://127.0.0.1:18089`.
 
 For BFF-only validation of the legacy `c2c-ui` surface:
