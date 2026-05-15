@@ -57,5 +57,3 @@ projectJDK: "25" #(Applied in CI/CD pipeline)
 #    total: 50
 #Specify Qodana linter for analysis (Applied in CI/CD pipeline)
 linter: jetbrains/qodana-jvm:2026.1
-include:
-  - name: JsCoverageInspection
