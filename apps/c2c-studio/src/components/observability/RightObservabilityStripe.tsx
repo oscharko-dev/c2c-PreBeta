@@ -1,6 +1,21 @@
 import { FileText, Search, PlayCircle, Shield, Database, GraduationCap, Box, Bell } from 'lucide-react';
+import { useWorkbench } from '../../stores/workbench';
 
 export function RightObservabilityStripe() {
+  const { setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
+  
+  const handleShortcutClick = (id: string) => {
+    const bottomTabMapping: Record<string, string> = {
+      'evidence': 'evidence',
+      'build': 'build-test',
+      'artifacts': 'artifacts',
+      'experience-learning': 'learning',
+    };
+    if (bottomTabMapping[id]) {
+      setActiveBottomTab(bottomTabMapping[id]);
+      setBottomPanelOpen(true);
+    }
+  };
   const items = [
     { id: 'evidence', icon: FileText, label: 'Evidence' },
     { id: 'traceability', icon: Search, label: 'Traceability' },
@@ -21,6 +36,7 @@ export function RightObservabilityStripe() {
             <button
               key={item.id}
               type="button"
+              onClick={() => handleShortcutClick(item.id)}
               className="p-2 rounded text-text-dim hover:text-text"
               aria-label={`Open ${item.label}`}
               title={item.label}

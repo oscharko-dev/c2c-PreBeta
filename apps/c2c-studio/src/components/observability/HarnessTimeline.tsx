@@ -3,7 +3,7 @@ import { useTransformationRun } from '../../stores/transformationRun';
 export function HarnessTimeline() {
   const { state } = useTransformationRun();
 
-  if (state.harnessReady?.status === 'unavailable') {
+  if (!state.harnessReady || state.harnessReady.status === 'unavailable') {
     return (
       <div className="p-4 text-sm text-neutral-400">
         Harness unavailable. Evidence may be marked incomplete.

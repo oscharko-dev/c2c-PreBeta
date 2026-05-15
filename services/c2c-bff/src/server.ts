@@ -1252,8 +1252,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         try {
           const upstream = await harness.getReady();
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
-            // upstream body is empty or simple text/json for /ready usually, but proxying it is fine.
-            jsonResponse(res, 200, { status: 'ok', summary: 'Harness ready' });
+            const body = asRecord(upstream.body) ?? {};
+            jsonResponse(res, 200, { status: 'ok', ...body });
             return;
           }
           jsonResponse(res, 503, { error: 'Harness upstream unavailable' });

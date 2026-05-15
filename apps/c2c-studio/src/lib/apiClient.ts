@@ -620,17 +620,53 @@ function encodeGeneratedFilePath(filePath: string): string {
 }
 
 
-function parseRunExperienceView(payload: unknown): ApiResult<any> {
+import {
+  RunExperienceView,
+  ModelGatewayHealth,
+  ModelGatewayModels,
+  HarnessReady
+} from '../types/observability';
+
+function isRunExperienceViewPayload(payload: unknown): payload is RunExperienceView {
+  if (!isRecord(payload)) return false;
+  return isString(payload.runId) &&
+         isString(payload.programId) &&
+         isRunMode(payload.mode) &&
+         isRunProductMode(payload.productMode) &&
+         (payload.summary === undefined || isString(payload.summary)) &&
+         (payload.observationPolicy === undefined || isString(payload.observationPolicy)) &&
+         (payload.detectedPatterns === undefined || isStringArray(payload.detectedPatterns)) &&
+         (payload.artifactRefs === undefined || isStringArray(payload.artifactRefs));
+}
+
+function parseRunExperienceView(payload: unknown): ApiResult<RunExperienceView> {
+  if (!isRunExperienceViewPayload(payload)) {
+    return createFailure('Contract error: RunExperienceView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
   return { ok: true, data: payload };
 }
-function parseModelGatewayHealth(payload: unknown): ApiResult<any> {
-  return { ok: true, data: payload };
+
+function parseModelGatewayHealth(payload: unknown): ApiResult<ModelGatewayHealth> {
+  if (!isRecord(payload)) return createFailure('Contract error: ModelGatewayHealth must be an object.', { kind: 'contract', body: payload });
+  if (payload.status !== 'ok' && payload.status !== 'unavailable') {
+    return createFailure('Contract error: ModelGatewayHealth payload must contain status="ok" or "unavailable".', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as ModelGatewayHealth };
 }
-function parseModelGatewayModels(payload: unknown): ApiResult<any> {
-  return { ok: true, data: payload };
+
+function parseModelGatewayModels(payload: unknown): ApiResult<ModelGatewayModels> {
+  if (!isRecord(payload) || !Array.isArray(payload.models)) {
+    return createFailure('Contract error: ModelGatewayModels must contain models array.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as ModelGatewayModels };
 }
-function parseHarnessReady(payload: unknown): ApiResult<any> {
-  return { ok: true, data: payload };
+
+function parseHarnessReady(payload: unknown): ApiResult<HarnessReady> {
+  if (!isRecord(payload)) return createFailure('Contract error: HarnessReady must be an object.', { kind: 'contract', body: payload });
+  if (payload.status !== 'ok' && payload.status !== 'unavailable') {
+    return createFailure('Contract error: HarnessReady payload must contain status="ok" or "unavailable".', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as HarnessReady };
 }
 
 export const apiClient = {

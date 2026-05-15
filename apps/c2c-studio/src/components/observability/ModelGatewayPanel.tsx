@@ -3,7 +3,7 @@ import { useTransformationRun } from '../../stores/transformationRun';
 export function ModelGatewayPanel() {
   const { state } = useTransformationRun();
 
-  if (state.modelGatewayHealth?.status === 'unavailable') {
+  if (!state.modelGatewayHealth || state.modelGatewayHealth.status === 'unavailable') {
     return (
       <div className="p-4 text-sm text-neutral-400">
         <p className="mb-2">Model Gateway governance summary unavailable.</p>

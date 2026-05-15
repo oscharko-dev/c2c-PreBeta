@@ -33,16 +33,14 @@ export async function hydrateRunArtifacts(
   terminalStatus?: 'completed' | 'failed',
   isActive?: () => boolean
 ) {
-  const [gen, genFiles, bt, ev, evts, arts, exp, mgHealth, hReady] = await Promise.all([
+  const [gen, genFiles, bt, ev, evts, arts, exp] = await Promise.all([
     apiClient.getGenerated(runId),
     apiClient.getGeneratedFiles(runId),
     apiClient.getBuildTest(runId),
     apiClient.getEvidence(runId),
     apiClient.getRunEvents(runId),
     apiClient.getRunArtifacts(runId),
-    apiClient.getRunExperience(runId),
-    apiClient.getModelGatewayHealth(),
-    apiClient.getHarnessReady()
+    apiClient.getRunExperience(runId)
   ]);
 
   if (isActive && !isActive()) return;
@@ -60,8 +58,6 @@ export async function hydrateRunArtifacts(
       artifacts: arts.ok ? arts.data : null,
       artifactsError: arts.ok ? null : arts.message,
       experience: exp.ok ? exp.data : null,
-      modelGatewayHealth: mgHealth.ok ? mgHealth.data : null,
-      harnessReady: hReady.ok ? hReady.data : null,
     };
 
     if (terminalStatus === 'failed' || prev.summary?.status === 'failed') {
@@ -144,4 +140,33 @@ export function useRunPolling(
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [runId, state.phase, setState]);
+}
+
+export function useGlobalObservabilityPolling(
+  setState: SetTransformationRunState
+) {
+  useEffect(() => {
+    let active = true;
+    const fetchGlobals = async () => {
+      const [mgHealth, hReady] = await Promise.all([
+        apiClient.getModelGatewayHealth(),
+        apiClient.getHarnessReady()
+      ]);
+      if (!active) return;
+      setState(prev => ({
+        ...prev,
+        modelGatewayHealth: mgHealth.ok ? mgHealth.data : null,
+        harnessReady: hReady.ok ? hReady.data : null,
+      }));
+    };
+    
+    fetchGlobals();
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchGlobals, 30000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [setState]);
 }

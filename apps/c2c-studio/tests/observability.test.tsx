@@ -14,6 +14,7 @@ describe('Observability Surfaces', () => {
   it('renders events timeline from RunEventsView', () => {
     vi.mocked(transformationRun.useTransformationRun).mockReturnValue({
       state: {
+        harnessReady: { status: 'ok' },
         events: {
           runId: 'r1',
           programId: 'p1',

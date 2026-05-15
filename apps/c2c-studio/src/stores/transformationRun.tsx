@@ -4,7 +4,7 @@ import { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { TransformationRunState, RunPhase } from '../types/run';
 import { apiClient } from '../lib/apiClient';
 import { TransformRequest } from '../types/reference-program';
-import { hydrateRunArtifacts, useRunPolling } from '../hooks/useRunPolling';
+import { hydrateRunArtifacts, useRunPolling, useGlobalObservabilityPolling } from '../hooks/useRunPolling';
 import { ApiResult, TransformResponse } from '../types/api';
 
 export interface TransformationRunContextValue {
@@ -37,6 +37,7 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
   });
 
   useRunPolling(state, setState);
+  useGlobalObservabilityPolling(setState);
 
   const startTransform = async (request: TransformRequest): Promise<ApiResult<TransformResponse>> => {
     const requestId = ++activeTransformRequestRef.current;
