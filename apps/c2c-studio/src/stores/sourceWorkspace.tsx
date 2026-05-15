@@ -1,10 +1,10 @@
 'use client';
 
 import { createContext, useContext, useState, ReactNode } from 'react';
-import { apiClient } from '../lib/apiClient';
 import { DEFAULT_SOURCE_NAME, MAX_SOURCE_BYTES, getSourceByteSize } from '../lib/sourceAnalysis';
-import { ApiResult } from '../types/api';
-import { TransformResponse } from '../types/reference-program';
+import { ApiResult, TransformResponse } from '../types/api';
+import { TransformRequest } from '../types/reference-program';
+import { useTransformationRun } from './transformationRun';
 
 export interface SourceWorkspaceState {
   sourceText: string;
@@ -28,7 +28,9 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [loadedProgramId, setLoadedProgramId] = useState<string | null>(null);
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [transformError, setTransformError] = useState<string | null>(null);
-  const [isTransforming, setIsTransforming] = useState(false);
+  
+  const { state: runState, startTransform } = useTransformationRun();
+  const isTransforming = runState.phase === 'starting' || runState.phase === 'running';
 
   const setSourceText = (text: string) => {
     setSourceTextInternal(text);
@@ -71,10 +73,9 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       return result;
     }
 
-    setIsTransforming(true);
     setTransformError(null);
 
-    const result = await apiClient.transform({
+    const result = await startTransform({
       sourceText,
       programId: isDirty ? undefined : loadedProgramId ?? undefined,
       sourceName: sourceName || DEFAULT_SOURCE_NAME,
@@ -84,7 +85,6 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       setTransformError(result.status === 503 ? 'Backend unavailable. Try again shortly.' : result.message);
     }
 
-    setIsTransforming(false);
     return result;
   };
 

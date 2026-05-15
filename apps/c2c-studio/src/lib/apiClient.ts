@@ -1,5 +1,18 @@
-import { ApiErrorDetails, ApiResult, HealthResponse, ModeResponse } from '../types/api';
-import { Sample, SampleDetail, TransformRequest, TransformResponse } from '../types/reference-program';
+import { 
+  ApiErrorDetails, 
+  ApiResult, 
+  HealthResponse, 
+  ModeResponse,
+  TransformResponse,
+  RunSummary,
+  GeneratedView,
+  GeneratedFilesIndex,
+  BuildTestView,
+  EvidenceView,
+  RunEventsView,
+  RunArtifactsView
+} from '../types/api';
+import { Sample, SampleDetail, TransformRequest } from '../types/reference-program';
 
 const LOCAL_OVERRIDE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
@@ -203,7 +216,56 @@ function parseTransformResponse(payload: unknown): ApiResult<TransformResponse> 
       body: payload,
     });
   }
-  return { ok: true, data: payload as TransformResponse };
+  return { ok: true, data: payload as unknown as TransformResponse };
+}
+
+function parseRunSummary(payload: unknown): ApiResult<RunSummary> {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || typeof payload.status !== 'string') {
+    return createFailure('Contract error: RunSummary payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as RunSummary };
+}
+
+function parseGeneratedView(payload: unknown): ApiResult<GeneratedView> {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || typeof payload.status !== 'string') {
+    return createFailure('Contract error: GeneratedView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as GeneratedView };
+}
+
+function parseGeneratedFilesIndex(payload: unknown): ApiResult<GeneratedFilesIndex> {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || typeof payload.status !== 'string') {
+    return createFailure('Contract error: GeneratedFilesIndex payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as GeneratedFilesIndex };
+}
+
+function parseBuildTestView(payload: unknown): ApiResult<BuildTestView> {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || typeof payload.status !== 'string') {
+    return createFailure('Contract error: BuildTestView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as BuildTestView };
+}
+
+function parseEvidenceView(payload: unknown): ApiResult<EvidenceView> {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || typeof payload.status !== 'string') {
+    return createFailure('Contract error: EvidenceView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as EvidenceView };
+}
+
+function parseRunEventsView(payload: unknown): ApiResult<RunEventsView> {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || !Array.isArray(payload.events)) {
+    return createFailure('Contract error: RunEventsView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as RunEventsView };
+}
+
+function parseRunArtifactsView(payload: unknown): ApiResult<RunArtifactsView> {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || !Array.isArray(payload.artifacts)) {
+    return createFailure('Contract error: RunArtifactsView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as RunArtifactsView };
 }
 
 export const apiClient = {
@@ -219,4 +281,11 @@ export const apiClient = {
       },
       body: JSON.stringify(request),
     }),
+  getRun: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}`, parseRunSummary),
+  getGenerated: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated`, parseGeneratedView),
+  getGeneratedFiles: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/generated/files`, parseGeneratedFilesIndex),
+  getBuildTest: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/build-test`, parseBuildTestView),
+  getEvidence: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`, parseEvidenceView),
+  getRunEvents: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/events`, parseRunEventsView),
+  getRunArtifacts: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/artifacts`, parseRunArtifactsView),
 };
