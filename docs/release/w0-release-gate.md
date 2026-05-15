@@ -7,9 +7,11 @@ purely on a verbal claim or a screenshot.
 
 > Issue: [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) ·
 > Parent epic: [#1](https://github.com/oscharko-dev/c2c-PreBeta/issues/1) ·
+> Corrective epic: [#86](https://github.com/oscharko-dev/c2c-PreBeta/issues/86) ·
 > Companion: [W0 reference runbook](../showcase/w0-reference-runbook.md),
 > [W0 scorecard](../showcase/w0-scorecard.md),
-> [W0 follow-ups](../showcase/w0-followups.md).
+> [W0 follow-ups](../showcase/w0-followups.md),
+> [W0 corrective epic #86 closure evidence](w0-corrective-epic-86.md).
 
 ## Decision
 
@@ -17,7 +19,7 @@ purely on a verbal claim or a screenshot.
 |-------|-------|
 | Status | **GO for Wave 1 planning** as of the run tag below. |
 | Recorded run tag | `20260514T104603Z` |
-| Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [reference-evidence-pack/](../showcase/reference-evidence-pack/), CI on `dev` |
+| Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [reference-evidence-pack/](../showcase/reference-evidence-pack/), [w0-corrective-epic-86.md](w0-corrective-epic-86.md), CI on `dev` |
 | Sign-off | Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) closing comment links to this document. |
 
 Wave 1 planning may proceed under the explicit constraints in
@@ -127,9 +129,11 @@ to remove or weaken any of the W0 acceptance bars below.
 ### 10. Browser acceptance coverage for c2c Studio
 
 - [x] The c2c Studio has a deterministic no-model browser acceptance suite that
-      starts the local product stack, loads a supported COBOL program through
-      the workbench, triggers `POST /api/v0/transform`, and verifies generated
-      Java plus Build/Test, Evidence Pack, and artifact views for the same run.
+      starts the local product stack, enters supported COBOL through the
+      workbench editor, triggers `POST /api/v0/transform`, and verifies
+      generated Java, build/test equivalence, Evidence Pack, run artifacts,
+      pipeline progress, Experience Learning, and model-governance evidence for
+      the same run.
       _Evidence_: [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts),
       [`apps/c2c-studio/playwright.config.ts`](../../apps/c2c-studio/playwright.config.ts).
 - [x] CI runs the functional browser acceptance checks on every PR to `dev`.
@@ -138,6 +142,22 @@ to remove or weaken any of the W0 acceptance bars below.
       command from the primary local macOS environment to avoid cross-platform
       screenshot churn in CI.
       _Evidence_: `cd apps/c2c-studio && npm run test:e2e:update-snapshots`.
+
+### 11. Corrective product path closure for Issue #86
+
+- [x] The corrective child issues that define the product-grade COBOL-to-Java
+      path are closed and mapped to repository evidence.
+      _Evidence_: [`w0-corrective-epic-86.md`](w0-corrective-epic-86.md).
+- [x] The default product path no longer treats diagnostic fixtures or
+      placeholder generated Java as successful output.
+      _Evidence_: [`services/c2c-bff/src/server.test.ts`](../../services/c2c-bff/src/server.test.ts),
+      [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts).
+- [x] The local product smoke and browser acceptance gates prove the
+      user-facing path: COBOL source on the left, generated Java on the right,
+      build/test, progress, Experience Learning, model governance, evidence,
+      and artifact views for the same active run.
+      _Evidence_: [`scripts/smoke-test-c2c-local.sh`](../../scripts/smoke-test-c2c-local.sh),
+      [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts).
 
 ## What is *not* ready (and what must not be claimed)
 
@@ -178,6 +198,7 @@ A reviewer can re-derive every "ready" item by running:
 ./scripts/bootstrap.sh
 ./scripts/w0-reference-run.sh
 cat var/w0-reference-run/scorecard.md
+./scripts/smoke-test-c2c-local.sh
 cd apps/c2c-studio && npm run test:e2e
 ```
 

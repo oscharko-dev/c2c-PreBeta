@@ -19,7 +19,11 @@ const mockState = {
   buildTest: null,
   evidence: null,
   events: null,
+  progress: null,
   artifacts: null,
+  experience: null,
+  modelGatewayHealth: null,
+  harnessReady: null,
 };
 
 vi.mock('../../../src/stores/transformationRun', () => ({
@@ -72,6 +76,59 @@ describe('Run Panels', () => {
       expect(screen.getByText('COBOL Oracle')).toBeDefined();
       expect(screen.getByText('Golden master unavailable')).toBeDefined();
       expect(screen.getByText('Blocked before compilation started')).toBeDefined();
+    });
+
+    it('renders live orchestrator progress steps when available', () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'running',
+          progress: {
+            runId: 'run-progress',
+            programId: 'BRNCH01',
+            mode: 'live',
+            productMode: 'live',
+            status: 'complete',
+            currentStep: 'compile-test-java',
+            failedStep: null,
+            completedSteps: ['accepted', 'parse-cobol', 'generate-ir', 'generate-java'],
+            stepCount: 3,
+            steps: [
+              {
+                stepId: 1,
+                name: 'accepted',
+                capabilityId: 'orchestrator-service',
+                service: 'orchestrator-service',
+                actor: 'orchestrator-service',
+                status: 'ok'
+              },
+              {
+                stepId: 2,
+                name: 'generate-java',
+                capabilityId: 'java-generator-service',
+                service: 'orchestrator-service',
+                actor: 'java-generator-service',
+                status: 'ok',
+                latencyMs: 31
+              },
+              {
+                stepId: 3,
+                name: 'compile-test-java',
+                capabilityId: 'build-test-runner',
+                service: 'orchestrator-service',
+                actor: 'build-test-runner',
+                status: 'running'
+              }
+            ]
+          }
+        }
+      });
+
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(screen.getByText('Accepted')).toBeDefined();
+      expect(screen.getByText('Generate Java')).toBeDefined();
+      expect(screen.getByText('Compile & Test Java')).toBeDefined();
+      expect(screen.getByText('build-test-runner is running')).toBeDefined();
     });
   });
 

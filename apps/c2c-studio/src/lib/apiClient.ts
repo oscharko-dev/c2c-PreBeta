@@ -13,6 +13,8 @@ import {
   EvidenceView,
   OutputRef,
   RunEventsView,
+  RunProgressStep,
+  RunProgressView,
   RunArtifactsView,
   RunEvent,
   RunArtifactMetadata,
@@ -108,8 +110,10 @@ function isRunLinks(payload: unknown): payload is RunLinks {
     isString(payload.generatedFiles) &&
     isString(payload.buildTest) &&
     isString(payload.evidence) &&
+    (payload.progress === undefined || isString(payload.progress)) &&
     isString(payload.events) &&
-    isString(payload.artifacts)
+    isString(payload.artifacts) &&
+    (payload.learning === undefined || isString(payload.learning))
   );
 }
 
@@ -208,6 +212,35 @@ function isRunEvent(payload: unknown): payload is RunEvent {
     (payload.status === undefined || isString(payload.status)) &&
     (payload.message === undefined || isString(payload.message)) &&
     (payload.createdAt === undefined || isString(payload.createdAt))
+  );
+}
+
+function isRunProgressStepStatus(value: unknown): value is RunProgressStep['status'] {
+  return value === 'pending' || value === 'running' || value === 'ok' || value === 'failed' || value === 'skipped';
+}
+
+function isRunProgressViewStatus(value: unknown): value is RunProgressView['status'] {
+  return value === 'complete' || value === 'incomplete';
+}
+
+function isRunProgressStepPayload(payload: unknown): payload is RunProgressStep {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return (
+    isNonNegativeInteger(payload.stepId) &&
+    isString(payload.name) &&
+    isString(payload.capabilityId) &&
+    isString(payload.service) &&
+    isString(payload.actor) &&
+    isRunProgressStepStatus(payload.status) &&
+    (payload.startedAt === undefined || isString(payload.startedAt)) &&
+    (payload.finishedAt === undefined || isString(payload.finishedAt)) &&
+    (payload.diagnostic === undefined || isString(payload.diagnostic)) &&
+    (payload.inputRef === undefined || payload.inputRef === null || isOutputRef(payload.inputRef)) &&
+    (payload.outputRef === undefined || payload.outputRef === null || isOutputRef(payload.outputRef)) &&
+    (payload.latencyMs === undefined || isNonNegativeInteger(payload.latencyMs))
   );
 }
 
@@ -334,6 +367,32 @@ function isRunEventsViewPayload(payload: unknown): payload is RunEventsView {
     isRunProductMode(payload.productMode) &&
     Array.isArray(payload.events) &&
     payload.events.every(isRunEvent)
+  );
+}
+
+function isRunProgressViewPayload(payload: unknown): payload is RunProgressView {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return (
+    isString(payload.runId) &&
+    isString(payload.programId) &&
+    isRunMode(payload.mode) &&
+    isRunProductMode(payload.productMode) &&
+    isRunProgressViewStatus(payload.status) &&
+    (payload.runStatus === undefined || isRunStatus(payload.runStatus)) &&
+    (payload.currentStep === null || isString(payload.currentStep)) &&
+    (payload.failedStep === null || isString(payload.failedStep)) &&
+    isStringArray(payload.completedSteps) &&
+    isNonNegativeInteger(payload.stepCount) &&
+    Array.isArray(payload.steps) &&
+    payload.steps.every(isRunProgressStepPayload) &&
+    (payload.missingArtifacts === undefined || isStringArray(payload.missingArtifacts)) &&
+    (payload.orchestratorRunId === undefined || isString(payload.orchestratorRunId)) &&
+    (payload.progressRef === undefined || payload.progressRef === null || isRunArtifactMetadata(payload.progressRef)) &&
+    (payload.updatedAt === undefined || payload.updatedAt === null || isString(payload.updatedAt)) &&
+    (payload.note === undefined || isString(payload.note))
   );
 }
 
@@ -592,6 +651,13 @@ function parseRunEventsView(payload: unknown): ApiResult<RunEventsView> {
   return { ok: true, data: payload };
 }
 
+function parseRunProgressView(payload: unknown): ApiResult<RunProgressView> {
+  if (!isRunProgressViewPayload(payload)) {
+    return createFailure('Contract error: RunProgressView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload };
+}
+
 function parseRunArtifactsView(payload: unknown): ApiResult<RunArtifactsView> {
   if (!isRunArtifactsViewPayload(payload)) {
     return createFailure('Contract error: RunArtifactsView payload has missing or invalid fields.', { kind: 'contract', body: payload });
@@ -693,6 +759,7 @@ export const apiClient = {
   getBuildTest: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/build-test`, parseBuildTestView),
   getEvidence: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`, parseEvidenceView),
   getRunEvents: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/events`, parseRunEventsView),
+  getRunProgress: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/progress`, parseRunProgressView),
   getRunArtifacts: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/artifacts`, parseRunArtifactsView),
   getRunExperience: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/experience`, parseRunExperienceView),
   getModelGatewayHealth: () => fetchJson(`/api/v0/model-gateway/health`, parseModelGatewayHealth),

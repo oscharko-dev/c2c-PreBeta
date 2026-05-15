@@ -11,6 +11,7 @@ here is reproducible from a clean checkout via `scripts/w0-reference-run.sh`.
 | [w0-scorecard.md](w0-scorecard.md) | Captured metrics from a real reference run. The release gate refers to this. |
 | [w0-followups.md](w0-followups.md) | Work intentionally deferred to Wave 1. Each item is filed as its own GitHub issue. |
 | [../release/w0-release-gate.md](../release/w0-release-gate.md) | Go/no-go checklist with evidence pointers. |
+| [../release/w0-corrective-epic-86.md](../release/w0-corrective-epic-86.md) | Closure evidence for the product-path corrective epic. |
 
 ## Reference artifacts (frozen for review)
 

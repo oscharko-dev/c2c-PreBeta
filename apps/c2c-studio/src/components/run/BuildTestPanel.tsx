@@ -21,7 +21,7 @@ export function BuildTestPanel({ emptyState }: { emptyState: { title: string; me
 
   const bt = state.buildTest;
   const isPending = !bt || state.phase === 'running' || state.phase === 'starting';
-  const stages = getPipelineStages(bt, isPending);
+  const stages = getPipelineStages(bt, isPending, state.progress);
 
   return (
     <div className="flex flex-col h-full bg-bg-0 text-sm">

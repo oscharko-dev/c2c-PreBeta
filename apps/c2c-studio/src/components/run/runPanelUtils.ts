@@ -1,4 +1,4 @@
-import { BuildTestView, OutputRef } from '../../types/api';
+import { BuildTestView, OutputRef, RunProgressStep, RunProgressView } from '../../types/api';
 import { TransformationRunState } from '../../types/run';
 import { StatusVariant, mapBuildTestClassificationToVariant } from '../../types/design';
 
@@ -76,7 +76,92 @@ export function describeClassification(classification?: BuildTestView['classific
   }
 }
 
-export function getPipelineStages(buildTest: BuildTestView | null, isPending: boolean): PipelineStageState[] {
+const PROGRESS_STEP_LABELS: Record<string, string> = {
+  accepted: 'Accepted',
+  'parse-cobol': 'Parse COBOL',
+  'generate-ir': 'Generate IR',
+  'generate-java': 'Generate Java',
+  'compile-test-java': 'Compile & Test Java',
+  'model-guidance': 'Model Guidance',
+  'model-policy-skipped': 'Model Policy Skipped',
+  'write-evidence': 'Write Evidence',
+  completed: 'Completed',
+  failed: 'Failed',
+};
+
+function formatProgressStepLabel(stepName: string): string {
+  const known = PROGRESS_STEP_LABELS[stepName];
+  if (known) {
+    return known;
+  }
+
+  return stepName
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function mapProgressStepStatus(status: RunProgressStep['status']): StatusVariant {
+  switch (status) {
+    case 'ok':
+      return 'success';
+    case 'failed':
+      return 'error';
+    case 'skipped':
+      return 'neutral';
+    case 'running':
+      return 'pending';
+    case 'pending':
+    default:
+      return 'pending';
+  }
+}
+
+function describeProgressStep(step: RunProgressStep): string {
+  const owner = step.actor || step.service || step.capabilityId || 'pipeline';
+
+  switch (step.status) {
+    case 'ok':
+      return step.latencyMs !== undefined
+        ? `${owner} completed in ${step.latencyMs} ms`
+        : `${owner} completed`;
+    case 'failed':
+      return step.diagnostic ? `Failed: ${step.diagnostic}` : `${owner} failed`;
+    case 'skipped':
+      return step.diagnostic ? `Skipped: ${step.diagnostic}` : `${owner} skipped`;
+    case 'running':
+      return `${owner} is running`;
+    case 'pending':
+    default:
+      return `Waiting for ${owner}`;
+  }
+}
+
+function getProgressPipelineStages(progress?: RunProgressView | null): PipelineStageState[] | null {
+  if (!progress || progress.steps.length === 0) {
+    return null;
+  }
+
+  return [...progress.steps]
+    .sort((left, right) => left.stepId - right.stepId)
+    .map((step) => ({
+      label: formatProgressStepLabel(step.name),
+      status: mapProgressStepStatus(step.status),
+      detail: describeProgressStep(step),
+    }));
+}
+
+export function getPipelineStages(
+  buildTest: BuildTestView | null,
+  isPending: boolean,
+  progress?: RunProgressView | null
+): PipelineStageState[] {
+  const progressStages = getProgressPipelineStages(progress);
+  if (progressStages) {
+    return progressStages;
+  }
+
   if (isPending || !buildTest) {
     return [
       { label: 'COBOL Oracle', status: 'pending', detail: 'Waiting for oracle output' },

@@ -1,25 +1,29 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { expect, test, type Page, type Response } from '@playwright/test';
 
 const COBOL_EDITOR_LABEL = /COBOL source editor/i;
 const GENERATED_JAVA_LABEL = /Generated Java source for/i;
+const PRODUCT_PATH_COBOL = readFileSync(
+  path.resolve(__dirname, '../../../../corpus/synthetic/programs/branch-account-guard.cbl'),
+  'utf8',
+);
+const BFF_BASE_URL = process.env.NEXT_PUBLIC_C2C_BFF_BASE_URL || 'http://127.0.0.1:18089';
 const MOCK_CORS_HEADERS = {
   'access-control-allow-origin': 'http://127.0.0.1:3000',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
   'access-control-allow-headers': 'Content-Type',
 };
+interface ProgressResponse {
+  runId?: string;
+  status?: string;
+  steps: Array<{ name: string; status?: string }>;
+}
 
 async function expectReadyWorkbench(page: Page) {
   await page.goto('/');
   await expect(page.getByRole('application', { name: 'c2c Studio Workbench' })).toBeVisible();
   await expect(page.getByLabel('Product readiness')).toContainText('Ready');
-}
-
-async function loadFirstSupportedReferenceProgram(page: Page) {
-  const sourceWorkspace = page.getByLabel('Source Workspace');
-  const firstSupportedProgram = sourceWorkspace.locator('[role="treeitem"][aria-disabled="false"]').first();
-  await expect(firstSupportedProgram).toBeVisible();
-  await firstSupportedProgram.click();
-  await expect(page.getByRole('textbox', { name: COBOL_EDITOR_LABEL })).not.toHaveValue('');
 }
 
 function topBarStartButton(page: Page) {
@@ -35,10 +39,51 @@ async function waitForJsonResponse(
   return response.json();
 }
 
+async function fetchJsonFromPage(page: Page, path: string): Promise<unknown> {
+  return page.evaluate(async requestPath => {
+    const response = await fetch(requestPath);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} for ${requestPath}`);
+    }
+    return response.json();
+  }, path);
+}
+
+async function waitForRunProgress(page: Page, runId: string, expectedSteps: string[]): Promise<ProgressResponse> {
+  const deadline = Date.now() + 120_000;
+  let latestBody: unknown = null;
+
+  while (Date.now() < deadline) {
+    latestBody = await fetchJsonFromPage(page, `${BFF_BASE_URL}/api/v0/runs/${encodeURIComponent(runId)}/progress`);
+    const steps = typeof latestBody === 'object' && latestBody !== null && 'steps' in latestBody
+      ? (latestBody as { steps?: unknown }).steps
+      : undefined;
+    const stepNames = Array.isArray(steps)
+      ? steps.map((step: { name?: string }) => step.name).filter(Boolean)
+      : [];
+    if (expectedSteps.every(stepName => stepNames.includes(stepName))) {
+      return latestBody as ProgressResponse;
+    }
+    await page.waitForTimeout(1_000);
+  }
+
+  const latestSteps = typeof latestBody === 'object' && latestBody !== null && 'steps' in latestBody
+    ? (latestBody as { steps?: Array<{ name: string }> }).steps
+    : undefined;
+  expect(latestSteps?.map((step) => step.name) ?? []).toEqual(
+    expect.arrayContaining(expectedSteps),
+  );
+  return latestBody as ProgressResponse;
+}
+
 test.describe('c2c Studio browser acceptance', () => {
   test('completes the deterministic W0 product path through browser-visible artifacts', async ({ page }) => {
     await expectReadyWorkbench(page);
-    await loadFirstSupportedReferenceProgram(page);
+    await page.getByRole('button', { name: 'Start Typing' }).click();
+
+    const editor = page.getByRole('textbox', { name: COBOL_EDITOR_LABEL });
+    await editor.fill(PRODUCT_PATH_COBOL);
+    await expect(editor).toHaveValue(/PROGRAM-ID\. BRNCH01\./);
 
     const transformResponsePromise = page.waitForResponse(
       response =>
@@ -55,7 +100,7 @@ test.describe('c2c Studio browser acceptance', () => {
     expect(transformBody.runId).toBeTruthy();
     const runId = String(transformBody.runId);
 
-    const [generatedBody, generatedFilesBody, buildTestBody, evidenceBody, artifactsBody] = await Promise.all([
+    const [generatedBody, generatedFilesBody, buildTestBody, evidenceBody, experienceBody, artifactsBody] = await Promise.all([
       waitForJsonResponse(
         page,
         response => response.url().endsWith(`/api/v0/runs/${runId}/generated`) && response.ok(),
@@ -74,22 +119,51 @@ test.describe('c2c Studio browser acceptance', () => {
       ),
       waitForJsonResponse(
         page,
+        response => response.url().endsWith(`/api/v0/runs/${runId}/experience`) && response.ok(),
+      ),
+      waitForJsonResponse(
+        page,
         response => response.url().endsWith(`/api/v0/runs/${runId}/artifacts`) && response.ok(),
       ),
     ]);
+    const expectedProgressSteps = [
+      'accepted',
+      'parse-cobol',
+      'generate-ir',
+      'generate-java',
+      'compile-test-java',
+      'model-policy-skipped',
+      'write-evidence',
+      'completed',
+    ];
+    const progressBody = await waitForRunProgress(page, runId, expectedProgressSteps);
 
     expect(generatedBody.runId).toBe(runId);
     expect(generatedFilesBody.runId).toBe(runId);
     expect(buildTestBody.runId).toBe(runId);
     expect(evidenceBody.runId).toBe(runId);
+    expect(progressBody.runId).toBe(runId);
+    expect(experienceBody.runId).toBe(runId);
     expect(artifactsBody.runId).toBe(runId);
 
     expect(generatedBody.status).toBe('generated');
     expect(generatedFilesBody.status).toBe('complete');
     expect(buildTestBody.status).toBe('ok');
     expect(evidenceBody.status).toBe('complete');
+    expect(progressBody.status).toBe('complete');
     expect(Array.isArray(artifactsBody.artifacts)).toBeTruthy();
     expect(artifactsBody.artifacts.length).toBeGreaterThan(0);
+    expect(progressBody.steps.map((step: { name: string }) => step.name)).toEqual(
+      expect.arrayContaining(expectedProgressSteps),
+    );
+    expect(progressBody.steps).toContainEqual(expect.objectContaining({
+      name: 'model-policy-skipped',
+      status: 'skipped',
+    }));
+    expect(artifactsBody.artifacts).toContainEqual(expect.objectContaining({
+      kind: 'model-policy-skipped',
+      name: 'model-policy-skipped.json',
+    }));
 
     const generatedArtifactSha = generatedBody.artifactRef?.sha256;
     expect(generatedArtifactSha).toBeTruthy();
@@ -103,7 +177,13 @@ test.describe('c2c Studio browser acceptance', () => {
 
     await page.getByRole('tab', { name: 'Build & Test' }).click();
     await expect(page.getByText('Pipeline Stages')).toBeVisible();
+    await expect(page.getByText('Parse COBOL')).toBeVisible();
+    await expect(page.getByText('Generate Java')).toBeVisible();
+    await expect(page.getByText('Model Policy Skipped')).toBeVisible();
     await expect(page.getByText('Equivalence Analysis')).toBeVisible();
+
+    await page.getByRole('tab', { name: 'Experience Learning' }).click();
+    await expect(page.getByText('Experience Learning Summary')).toBeVisible();
 
     await page.getByRole('tab', { name: 'Evidence Pack' }).click();
     await expect(page.getByRole('heading', { name: /Evidence Pack Complete/i })).toBeVisible();
