@@ -22,10 +22,3 @@ export interface TransformRequest {
   sourceName?: string;
   options?: Record<string, unknown>;
 }
-
-export interface TransformResponse {
-  runId: string;
-  programId: string;
-  status: string;
-  [key: string]: unknown;
-}

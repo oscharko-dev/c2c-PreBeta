@@ -3,20 +3,30 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SourceWorkspaceTree } from '@/components/source/SourceWorkspaceTree';
 import { CobolEditorPane } from '@/components/source/CobolEditorPane';
 import { SourceWorkspaceProvider } from '@/stores/sourceWorkspace';
+import { TransformationRunProvider } from '@/stores/transformationRun';
 import { apiClient } from '@/lib/apiClient';
 import { AppTopBar } from '@/components/workbench/AppTopBar';
+import { TransformResponse } from '@/types/api';
 
 vi.mock('@/lib/apiClient', () => ({
   apiClient: {
     getSamples: vi.fn(),
     getSampleDetail: vi.fn(),
     transform: vi.fn(),
+    getRun: vi.fn(),
+    getGenerated: vi.fn(),
+    getGeneratedFiles: vi.fn(),
+    getBuildTest: vi.fn(),
+    getEvidence: vi.fn(),
+    getRunEvents: vi.fn(),
+    getRunArtifacts: vi.fn(),
   },
 }));
 
 describe('Source Workspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(apiClient.getRun).mockResolvedValue({ ok: true, data: { status: 'running' } } as any);
   });
 
   it('renders reference programs including supported and unsupported entries', async () => {
@@ -29,9 +39,9 @@ describe('Source Workspace', () => {
     });
 
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <SourceWorkspaceTree />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     await waitFor(() => {
@@ -68,10 +78,10 @@ describe('Source Workspace', () => {
     });
 
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <SourceWorkspaceTree />
         <CobolEditorPane />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     await waitFor(() => {
@@ -89,9 +99,9 @@ describe('Source Workspace', () => {
 
   it('editing source marks the buffer dirty and changes submitted text', async () => {
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <CobolEditorPane />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     fireEvent.click(screen.getByText('Start Typing'));
@@ -102,7 +112,7 @@ describe('Source Workspace', () => {
     expect(screen.getByRole('textbox')).toHaveValue('      * NEW TEXT');
     expect(screen.getByText(/pasted-source\.cbl \*/i)).toBeInTheDocument();
 
-    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r1', programId: 'SRC-1', status: 'pending' } });
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r1', programId: 'SRC-1', status: 'starting' } as unknown as TransformResponse });
     
     fireEvent.click(screen.getByText('Start Transformation'));
 
@@ -139,13 +149,13 @@ describe('Source Workspace', () => {
         expectedOutputPath: '',
       },
     });
-    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r2', programId: 'P1A', status: 'pending' } });
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r2', programId: 'P1A', status: 'starting' } as unknown as TransformResponse });
 
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <SourceWorkspaceTree />
         <CobolEditorPane />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     fireEvent.click(await screen.findByText('Prog 1'));
@@ -165,13 +175,13 @@ describe('Source Workspace', () => {
   });
 
   it('top bar start action submits the same current editor buffer', async () => {
-    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r3', programId: 'DEMO01', status: 'pending' } });
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r3', programId: 'DEMO01', status: 'starting' } as unknown as TransformResponse });
 
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <AppTopBar apiState={{ health: { status: 'ok' }, mode: { orchestrator: 'live', evidence: 'live' }, error: null, errorKind: null, loading: false }} />
         <CobolEditorPane />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     fireEvent.click(screen.getByText('Start Typing'));
@@ -188,9 +198,9 @@ describe('Source Workspace', () => {
 
   it('disabled states prevent submission', async () => {
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <CobolEditorPane />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     const transformButton = screen.queryByText('Start Transformation');
@@ -215,9 +225,9 @@ describe('Source Workspace', () => {
     });
 
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <CobolEditorPane />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     fireEvent.click(screen.getByText('Start Typing'));
@@ -238,9 +248,9 @@ describe('Source Workspace', () => {
     });
 
     render(
-      <SourceWorkspaceProvider>
+      <TransformationRunProvider><SourceWorkspaceProvider>
         <SourceWorkspaceTree />
-      </SourceWorkspaceProvider>
+      </SourceWorkspaceProvider></TransformationRunProvider>
     );
 
     fireEvent.click(await screen.findByText('Prog 2'));
