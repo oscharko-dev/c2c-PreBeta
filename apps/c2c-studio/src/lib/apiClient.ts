@@ -50,6 +50,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+function isSample(payload: unknown): payload is Sample {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return (
+    typeof payload.programId === 'string' &&
+    typeof payload.title === 'string' &&
+    typeof payload.description === 'string' &&
+    typeof payload.knownDivergenceAtW0 === 'boolean' &&
+    typeof payload.supportedInProductMode === 'boolean' &&
+    isStringArray(payload.w0Subset) &&
+    (payload.oracleMode === null ||
+      payload.oracleMode === 'cobol-runtime' ||
+      payload.oracleMode === 'synthetic-fixture') &&
+    isStringArray(payload.knownLimitations)
+  );
+}
+
+function isSampleDetail(payload: unknown): payload is SampleDetail {
+  if (!isSample(payload)) {
+    return false;
+  }
+
+  const detail = payload as SampleDetail;
+  return (
+    typeof detail.cobolSource === 'string' &&
+    typeof detail.cobolSourcePath === 'string' &&
+    typeof detail.expectedOutput === 'string' &&
+    typeof detail.expectedOutputPath === 'string'
+  );
+}
+
 function parseHealthResponse(payload: unknown): ApiResult<HealthResponse> {
   if (!isRecord(payload)) {
     return createFailure('Contract error: health payload must be a JSON object.', {
@@ -140,27 +177,33 @@ function parseSamplesResponse(payload: unknown): ApiResult<Sample[]> {
       body: payload,
     });
   }
-  return { ok: true, data: payload as Sample[] };
+  if (!payload.every(isSample)) {
+    return createFailure('Contract error: samples payload contains invalid entries.', {
+      kind: 'contract',
+      body: payload,
+    });
+  }
+  return { ok: true, data: payload };
 }
 
 function parseSampleDetailResponse(payload: unknown): ApiResult<SampleDetail> {
-  if (!isRecord(payload)) {
-    return createFailure('Contract error: sample detail payload must be a JSON object.', {
+  if (!isSampleDetail(payload)) {
+    return createFailure('Contract error: sample detail payload has missing or invalid fields.', {
       kind: 'contract',
       body: payload,
     });
   }
-  return { ok: true, data: payload as unknown as SampleDetail };
+  return { ok: true, data: payload };
 }
 
 function parseTransformResponse(payload: unknown): ApiResult<TransformResponse> {
-  if (!isRecord(payload)) {
-    return createFailure('Contract error: transform payload must be a JSON object.', {
+  if (!isRecord(payload) || typeof payload.runId !== 'string' || typeof payload.programId !== 'string' || typeof payload.status !== 'string') {
+    return createFailure('Contract error: transform payload has missing or invalid fields.', {
       kind: 'contract',
       body: payload,
     });
   }
-  return { ok: true, data: payload as unknown as TransformResponse };
+  return { ok: true, data: payload as TransformResponse };
 }
 
 export const apiClient = {

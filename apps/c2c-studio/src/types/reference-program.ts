@@ -2,17 +2,17 @@ export interface Sample {
   programId: string;
   title: string;
   description: string;
+  knownDivergenceAtW0: boolean;
   supportedInProductMode: boolean;
-  w0Subset: boolean;
-  oracleMode: boolean;
+  w0Subset: string[];
+  oracleMode: 'cobol-runtime' | 'synthetic-fixture' | null;
   knownLimitations: string[];
 }
 
-export interface SampleDetail {
-  programId: string;
+export interface SampleDetail extends Sample {
   cobolSource: string;
+  cobolSourcePath: string;
   expectedOutput: string;
-  sourcePath: string;
   expectedOutputPath: string;
 }
 
@@ -25,6 +25,7 @@ export interface TransformRequest {
 
 export interface TransformResponse {
   runId: string;
+  programId: string;
   status: string;
   [key: string]: unknown;
 }

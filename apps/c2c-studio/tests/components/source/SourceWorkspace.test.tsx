@@ -4,6 +4,7 @@ import { SourceWorkspaceTree } from '@/components/source/SourceWorkspaceTree';
 import { CobolEditorPane } from '@/components/source/CobolEditorPane';
 import { SourceWorkspaceProvider } from '@/stores/sourceWorkspace';
 import { apiClient } from '@/lib/apiClient';
+import { AppTopBar } from '@/components/workbench/AppTopBar';
 
 vi.mock('@/lib/apiClient', () => ({
   apiClient: {
@@ -22,8 +23,8 @@ describe('Source Workspace', () => {
     vi.mocked(apiClient.getSamples).mockResolvedValue({
       ok: true,
       data: [
-        { programId: 'P1', title: 'Prog 1', description: 'D1', supportedInProductMode: true, w0Subset: true, oracleMode: false, knownLimitations: [] },
-        { programId: 'P2', title: 'Prog 2', description: 'D2', supportedInProductMode: false, w0Subset: true, oracleMode: false, knownLimitations: [] },
+        { programId: 'P1', title: 'Prog 1', description: 'D1', knownDivergenceAtW0: false, supportedInProductMode: true, w0Subset: ['CALL'], oracleMode: 'synthetic-fixture', knownLimitations: [] },
+        { programId: 'P2', title: 'Prog 2', description: 'D2', knownDivergenceAtW0: true, supportedInProductMode: false, w0Subset: [], oracleMode: null, knownLimitations: ['Uses unsupported EXEC CICS blocks.'] },
       ],
     });
 
@@ -36,6 +37,7 @@ describe('Source Workspace', () => {
     await waitFor(() => {
       expect(screen.getByText('Prog 1')).toBeInTheDocument();
       expect(screen.getByText('Prog 2')).toBeInTheDocument();
+      expect(screen.getByText(/Unavailable in product mode/i)).toBeInTheDocument();
     });
   });
 
@@ -43,7 +45,7 @@ describe('Source Workspace', () => {
     vi.mocked(apiClient.getSamples).mockResolvedValue({
       ok: true,
       data: [
-        { programId: 'P1', title: 'Prog 1', description: 'D1', supportedInProductMode: true, w0Subset: true, oracleMode: false, knownLimitations: [] },
+        { programId: 'P1', title: 'Prog 1', description: 'D1', knownDivergenceAtW0: false, supportedInProductMode: true, w0Subset: ['MOVE'], oracleMode: 'synthetic-fixture', knownLimitations: [] },
       ],
     });
 
@@ -51,9 +53,16 @@ describe('Source Workspace', () => {
       ok: true,
       data: {
         programId: 'P1',
+        title: 'Prog 1',
+        description: 'D1',
+        knownDivergenceAtW0: false,
+        supportedInProductMode: true,
+        w0Subset: ['MOVE'],
+        oracleMode: 'synthetic-fixture',
+        knownLimitations: [],
         cobolSource: '      * THIS IS COBOL',
         expectedOutput: '',
-        sourcePath: '/path/to/P1.cbl',
+        cobolSourcePath: '/path/to/P1.cbl',
         expectedOutputPath: '',
       },
     });
@@ -91,15 +100,86 @@ describe('Source Workspace', () => {
     fireEvent.change(textarea, { target: { value: '      * NEW TEXT' } });
 
     expect(screen.getByRole('textbox')).toHaveValue('      * NEW TEXT');
-    expect(screen.getByText(/Unsaved Buffer \*/)).toBeInTheDocument();
+    expect(screen.getByText(/pasted-source\.cbl \*/i)).toBeInTheDocument();
 
-    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r1', status: 'pending' } });
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r1', programId: 'SRC-1', status: 'pending' } });
     
     fireEvent.click(screen.getByText('Start Transformation'));
 
     await waitFor(() => {
       expect(apiClient.transform).toHaveBeenCalledWith({
         sourceText: '      * NEW TEXT',
+        programId: undefined,
+        sourceName: 'pasted-source.cbl',
+      });
+    });
+  });
+
+  it('drops the loaded reference programId once the editor buffer becomes dirty', async () => {
+    vi.mocked(apiClient.getSamples).mockResolvedValue({
+      ok: true,
+      data: [
+        { programId: 'P1', title: 'Prog 1', description: 'D1', knownDivergenceAtW0: false, supportedInProductMode: true, w0Subset: ['MOVE'], oracleMode: 'synthetic-fixture', knownLimitations: [] },
+      ],
+    });
+    vi.mocked(apiClient.getSampleDetail).mockResolvedValue({
+      ok: true,
+      data: {
+        programId: 'P1',
+        title: 'Prog 1',
+        description: 'D1',
+        knownDivergenceAtW0: false,
+        supportedInProductMode: true,
+        w0Subset: ['MOVE'],
+        oracleMode: 'synthetic-fixture',
+        knownLimitations: [],
+        cobolSource: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P1.\n',
+        cobolSourcePath: '/path/to/P1.cbl',
+        expectedOutput: '',
+        expectedOutputPath: '',
+      },
+    });
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r2', programId: 'P1A', status: 'pending' } });
+
+    render(
+      <SourceWorkspaceProvider>
+        <SourceWorkspaceTree />
+        <CobolEditorPane />
+      </SourceWorkspaceProvider>
+    );
+
+    fireEvent.click(await screen.findByText('Prog 1'));
+    const textbox = await screen.findByRole('textbox');
+    fireEvent.change(textbox, {
+      target: { value: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P1A.\n' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
+
+    await waitFor(() => {
+      expect(apiClient.transform).toHaveBeenCalledWith({
+        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P1A.\n',
+        programId: undefined,
+        sourceName: 'P1.cbl',
+      });
+    });
+  });
+
+  it('top bar start action submits the same current editor buffer', async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r3', programId: 'DEMO01', status: 'pending' } });
+
+    render(
+      <SourceWorkspaceProvider>
+        <AppTopBar apiState={{ health: { status: 'ok' }, mode: { orchestrator: 'live', evidence: 'live' }, error: null, errorKind: null, loading: false }} />
+        <CobolEditorPane />
+      </SourceWorkspaceProvider>
+    );
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    fireEvent.click(screen.getAllByRole('button', { name: /start transformation/i })[0]);
+
+    await waitFor(() => {
+      expect(apiClient.transform).toHaveBeenCalledWith({
+        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMO01.\n',
         programId: undefined,
         sourceName: 'pasted-source.cbl',
       });
@@ -124,5 +204,47 @@ describe('Source Workspace', () => {
 
     const btn = screen.getByRole('button', { name: /Start Transformation/i });
     expect(btn).toBeDisabled();
+  });
+
+  it('preserves the editor buffer and shows backend-unavailable errors', async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({
+      ok: false,
+      status: 503,
+      message: 'orchestrator unavailable',
+      details: { kind: 'http', body: { error: 'orchestrator unavailable' } },
+    });
+
+    render(
+      <SourceWorkspaceProvider>
+        <CobolEditorPane />
+      </SourceWorkspaceProvider>
+    );
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
+
+    expect(await screen.findByText('Backend unavailable. Try again shortly.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue(
+      '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMO01.\n',
+    );
+  });
+
+  it('does not load unsupported references from the BFF', async () => {
+    vi.mocked(apiClient.getSamples).mockResolvedValue({
+      ok: true,
+      data: [
+        { programId: 'P2', title: 'Prog 2', description: 'D2', knownDivergenceAtW0: true, supportedInProductMode: false, w0Subset: [], oracleMode: null, knownLimitations: ['Not supported in W0.'] },
+      ],
+    });
+
+    render(
+      <SourceWorkspaceProvider>
+        <SourceWorkspaceTree />
+      </SourceWorkspaceProvider>
+    );
+
+    fireEvent.click(await screen.findByText('Prog 2'));
+
+    expect(apiClient.getSampleDetail).not.toHaveBeenCalled();
   });
 });

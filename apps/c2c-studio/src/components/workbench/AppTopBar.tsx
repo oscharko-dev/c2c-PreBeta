@@ -3,6 +3,7 @@
 import { Play, Settings, Search, CheckCircle2, AlertCircle } from 'lucide-react';
 import { type StudioApiState } from '../../hooks/useC2cApi';
 import { getWorkbenchReadiness } from './workbenchReadiness';
+import { useSourceWorkspace } from '../../stores/sourceWorkspace';
 
 interface AppTopBarProps {
   apiState: StudioApiState;
@@ -11,6 +12,7 @@ interface AppTopBarProps {
 export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
+  const { canSubmitTransform, submitTransform } = useSourceWorkspace();
 
   return (
     <div className="flex min-h-12 w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-bg-1 px-4 py-2 shrink-0">
@@ -31,9 +33,12 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         </div>
         <button
           type="button"
-          disabled={!readiness.startEnabled || loading}
+          disabled={!readiness.startEnabled || loading || !canSubmitTransform}
           className="flex items-center justify-center rounded bg-teal hover:bg-teal-soft active:bg-teal disabled:opacity-50 disabled:cursor-not-allowed p-1.5"
           aria-label="Start Transformation"
+          onClick={() => {
+            void submitTransform();
+          }}
         >
           <Play className="h-4 w-4 text-bg-0 fill-current" />
         </button>

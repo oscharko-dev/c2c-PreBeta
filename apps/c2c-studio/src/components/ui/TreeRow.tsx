@@ -10,8 +10,10 @@ export interface TreeRowProps extends React.HTMLAttributes<HTMLDivElement> {
   depth?: number;
   isOpen?: boolean;
   onToggle?: () => void;
+  onActivate?: () => void;
   statusVariant?: StatusVariant;
   active?: boolean;
+  disabled?: boolean;
 }
 
 export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
@@ -23,8 +25,10 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
       depth = 0,
       isOpen,
       onToggle, 
+      onActivate,
       statusVariant,
       active,
+      disabled = false,
       onClick,
       onKeyDown,
       ...props
@@ -32,38 +36,49 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
     ref
   ) => {
     const isFolder = type === 'folder';
-
-    const activate = () => {
-      if (isFolder) {
-        onToggle?.();
-      }
-    };
+    const isInteractive = !disabled && (isFolder || typeof onActivate === 'function' || typeof onClick === 'function');
 
     return (
       <div
         ref={ref}
         role="treeitem"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         aria-expanded={isFolder ? isOpen : undefined}
         aria-selected={active ?? false}
+        aria-disabled={disabled}
         className={cn(
           "group flex items-center h-7 px-2 transition-colors text-sm outline-none focus-visible:ring-1 focus-visible:ring-accent",
           {
             'bg-bg-active text-text hover:bg-bg-active-strong': active,
             'text-text-dim hover:bg-bg-2 hover:text-text': !active,
-            'cursor-pointer': isFolder,
+            'cursor-pointer': isInteractive,
+            'cursor-not-allowed opacity-60': disabled,
           },
           className
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={(event) => {
-          activate();
+          if (disabled) {
+            event.preventDefault();
+            return;
+          }
+          if (isFolder) {
+            onToggle?.();
+          }
+          onActivate?.();
           onClick?.(event);
         }}
         onKeyDown={(event) => {
-          if (isFolder && (event.key === 'Enter' || event.key === ' ')) {
+          if (disabled) {
+            return;
+          }
+
+          if (isInteractive && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault();
-            activate();
+            if (isFolder) {
+              onToggle?.();
+            }
+            onActivate?.();
           }
 
           onKeyDown?.(event);
