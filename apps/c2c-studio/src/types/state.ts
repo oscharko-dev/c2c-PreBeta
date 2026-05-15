@@ -114,6 +114,17 @@ export function deriveProductState(runState: TransformationRunState): StateConte
     return { state: 'generated-pending' };
   }
 
+  if (runState.phase === 'incomplete') {
+    return {
+      state: 'generated-incomplete',
+      missingArtifacts: runState.generatedFiles?.missingArtifacts || generated?.missingArtifacts || [],
+      message:
+        runState.generatedFiles?.note ||
+        generated?.note ||
+        'Required generated artifacts are unavailable for this run.',
+    };
+  }
+
   const buildTest = runState.buildTest;
   if (buildTest) {
     if (buildTest.status === 'compile-failed' || buildTest.status === 'run-failed' || buildTest.classification === 'compile-error' || buildTest.classification === 'run-error') {

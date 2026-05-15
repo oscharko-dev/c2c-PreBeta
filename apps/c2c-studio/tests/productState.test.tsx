@@ -108,6 +108,24 @@ describe('Product State Derivation', () => {
     expect(result.missingArtifacts).toEqual(['src/Main.java']);
   });
 
+  it('Terminal incomplete runs without a generated files index stay incomplete', () => {
+    const state = makeState({
+      phase: 'incomplete',
+      generated: {
+        runId: '123',
+        programId: 'ABC',
+        mode: 'live',
+        productMode: 'live',
+        status: 'generated',
+        artifactRef: { uri: 'file:///runs/123/generated.json', sha256: 'a' },
+      },
+    });
+
+    const result = deriveProductState(state);
+    expect(result.state).toBe('generated-incomplete');
+    expect(result.message).toContain('Required generated artifacts are unavailable');
+  });
+
   it('Build/test classification is divergence-known W0 coverage gap', () => {
     const state = makeState({
       phase: 'completed',
