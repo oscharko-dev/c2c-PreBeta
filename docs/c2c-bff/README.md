@@ -30,6 +30,17 @@ flow, and records the open assumptions a reviewer should expect.
 
 ## Local validation run
 
+For the W0.1 product shell, prefer the repository-level launcher:
+
+```bash
+./scripts/start-c2c-local.sh
+```
+
+This starts the Nuxt Studio on `http://127.0.0.1:3000` and wires it to the BFF
+API on `http://127.0.0.1:18089`.
+
+For BFF-only validation of the legacy `c2c-ui` surface:
+
 ```bash
 # 1. Build the UI bundle.
 (cd apps/c2c-ui && npm install && npm run build)

@@ -123,8 +123,11 @@ Start the full local stack from the repository root with one command:
 ```
 
 The launcher builds the required artifacts, starts the local capability mesh,
-and serves `apps/c2c-ui/dist` through `c2c-bff`. It uses explicit
-non-conflicting defaults and writes all run state under `var/c2c-local/`:
+and brings up the Nuxt Studio at `http://127.0.0.1:3000` with the BFF API on
+`http://127.0.0.1:18089`. The BFF still builds the legacy `apps/c2c-ui/dist`
+bundle for the older reference-run surface, but the local product entrypoint
+for W0.1 is the Studio shell. The launcher uses explicit non-conflicting
+defaults and writes all run state under `var/c2c-local/`:
 
 - Logs: `var/c2c-local/logs/`
 - PIDs: `var/c2c-local/pids/`
@@ -137,7 +140,7 @@ URLs to the local services. When the stack is ready, the launcher prints
 exactly:
 
 ```text
-c2c local application ready: http://127.0.0.1:18089
+c2c local application ready: http://127.0.0.1:3000
 ```
 
 To stop the stack:
@@ -152,7 +155,8 @@ For CI or other automation, use:
 ./scripts/start-c2c-local.sh --ci
 ```
 
-Automation can wait on `var/c2c-local/ready`, then verify `GET /api/v0/health`
+Automation can wait on `var/c2c-local/ready`, then verify the Studio shell and
+`GET /api/v0/health`
 and `GET /api/v0/mode` on the BFF before shutting the stack down.
 
 Launcher overrides are documented in `.env.example`:

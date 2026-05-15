@@ -1,14 +1,31 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="bg-white shadow">
-      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <h1 class="text-3xl font-bold text-gray-900">c2c Transformation Studio</h1>
-        <div v-if="hasBffUrl" class="flex items-center space-x-4">
-          <span v-if="healthStatus === 'ok'" class="text-green-600 font-semibold">BFF: OK</span>
-          <span v-else class="text-red-600 font-semibold">BFF: Unavailable</span>
-          
-          <span v-if="modeStatus" class="text-gray-600">
-            Mode: {{ modeStatus.mode }} (Upstream: {{ modeStatus.upstream_reachable ? 'Reachable' : 'Unreachable' }})
+        <div v-if="hasBffUrl" class="flex flex-wrap items-center gap-3 text-sm">
+          <span
+            :class="healthStatus === 'ok' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+            class="rounded-full px-3 py-1 font-semibold"
+          >
+            BFF: {{ healthStatus === 'ok' ? 'OK' : 'Unavailable' }}
+          </span>
+          <span
+            v-if="modeStatus"
+            :class="modeStatus.orchestrator === 'live' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'"
+            class="rounded-full px-3 py-1 font-semibold"
+          >
+            Orchestrator: {{ modeStatus.orchestrator }}
+          </span>
+          <span
+            v-if="modeStatus"
+            :class="modeStatus.evidence === 'live' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'"
+            class="rounded-full px-3 py-1 font-semibold"
+          >
+            Evidence: {{ modeStatus.evidence }}
+          </span>
+          <span v-if="modeError" class="text-red-700">
+            {{ modeError }}
           </span>
         </div>
       </div>
@@ -43,8 +60,12 @@ const { getHealth, getMode } = useC2cApi();
 
 const healthStatus = ref<string | null>(null);
 const modeStatus = ref<ApiModeResponse | null>(null);
+const modeError = ref<string | null>(null);
 
-provide('bffAvailable', computed(() => healthStatus.value === 'ok'));
+provide(
+  'transformationEnabled',
+  computed(() => healthStatus.value === 'ok' && modeStatus.value?.orchestrator === 'live'),
+);
 
 onMounted(async () => {
   if (!hasBffUrl) return;
@@ -60,6 +81,9 @@ onMounted(async () => {
     const modeResult = await getMode();
     if (modeResult.success && modeResult.data) {
       modeStatus.value = modeResult.data;
+      modeError.value = null;
+    } else {
+      modeError.value = modeResult.error;
     }
   }
 });
