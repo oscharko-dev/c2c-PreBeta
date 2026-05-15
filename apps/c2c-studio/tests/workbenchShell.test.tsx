@@ -86,9 +86,11 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
 
     const runTab = screen.getByRole('tab', { name: /run/i });
     const evidenceTab = screen.getByRole('tab', { name: /evidence/i });
+    const artifactsTab = screen.getByRole('tab', { name: /artifacts/i });
 
     expect(runTab).toHaveAttribute('aria-selected', 'true');
     expect(evidenceTab).toHaveAttribute('aria-selected', 'false');
+    expect(artifactsTab).toHaveAttribute('aria-selected', 'false');
     
     // Initially Run panel content is visible
     expect(within(screen.getByRole('tabpanel')).getByText('No run active')).toBeInTheDocument();

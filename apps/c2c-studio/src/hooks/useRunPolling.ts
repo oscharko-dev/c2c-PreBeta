@@ -55,6 +55,7 @@ export async function hydrateRunArtifacts(
       evidence: ev.ok ? ev.data : null,
       events: evts.ok ? evts.data : null,
       artifacts: arts.ok ? arts.data : null,
+      artifactsError: arts.ok ? null : arts.message,
     };
 
     if (terminalStatus === 'failed' || prev.summary?.status === 'failed') {

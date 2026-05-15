@@ -1,9 +1,27 @@
 'use client';
 import { RunArtifactMetadata } from '../../types/artifacts';
 
-export function RunArtifactsPanel({ artifacts }: { artifacts: RunArtifactMetadata[] }) {
+export function RunArtifactsPanel({
+  artifacts,
+  errorMessage,
+  missingArtifacts,
+}: {
+  artifacts: RunArtifactMetadata[] | null | undefined;
+  errorMessage?: string | null;
+  missingArtifacts?: string[];
+}) {
   if (!artifacts || artifacts.length === 0) {
-    return <div className="p-4 text-text-dim text-sm">No run artifacts available.</div>;
+    return (
+      <div className="p-4 space-y-3 text-sm">
+        {errorMessage && (
+          <div className="rounded border border-line-2 bg-bg-1 p-3">
+            <p className="text-xs font-medium text-error">Artifacts fetch failed</p>
+            <p className="mt-1 text-xs text-text-dim">{errorMessage}</p>
+          </div>
+        )}
+        <div className="text-text-dim">No run artifacts available.</div>
+      </div>
+    );
   }
 
   return (
@@ -12,6 +30,22 @@ export function RunArtifactsPanel({ artifacts }: { artifacts: RunArtifactMetadat
         Run Artifacts
       </div>
       <div className="flex-1 overflow-auto p-4">
+        {errorMessage && (
+          <div className="mb-4 rounded border border-line-2 bg-bg-1 p-3">
+            <p className="text-xs font-medium text-error">Artifacts fetch failed</p>
+            <p className="mt-1 text-xs text-text-dim">{errorMessage}</p>
+          </div>
+        )}
+        {missingArtifacts && missingArtifacts.length > 0 && (
+          <div className="mb-4 rounded border border-line-2 bg-bg-1 p-3">
+            <p className="text-xs font-medium text-warn">Missing artifact records</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs font-mono text-text">
+              {missingArtifacts.map((artifact) => (
+                <li key={artifact}>{artifact}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <table className="w-full text-left text-xs font-mono text-text">
           <thead>
             <tr className="text-text-dim border-b border-line-2">

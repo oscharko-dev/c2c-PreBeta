@@ -4,25 +4,24 @@ import { EquivalencePanel } from './EquivalencePanel';
 import { RunArtifactsPanel } from './RunArtifactsPanel';
 import { StatusChip } from '../ui/StatusChip';
 import { cn } from '../../lib/utils';
-import { BuildTestView } from '../../types/build-test';
-import { RunPhase } from '../../types/run';
+import { StatusVariant } from '../../types/design';
+import { getPipelineStages } from './runPanelUtils';
 
 export function BuildTestPanel({ emptyState }: { emptyState: { title: string; message: string } }) {
   const { state } = useTransformationRun();
 
-  if (state.phase === 'idle' || state.phase === 'starting' || state.phase === 'running') {
-     if (state.phase === 'idle') {
-       return (
-         <div className="p-4 space-y-2 text-sm">
-           <p className="font-medium text-text">{emptyState.title}</p>
-           <p className="text-text-dim">{emptyState.message}</p>
-         </div>
-       );
-     }
+  if (state.phase === 'idle') {
+    return (
+      <div className="p-4 space-y-2 text-sm">
+        <p className="font-medium text-text">{emptyState.title}</p>
+        <p className="text-text-dim">{emptyState.message}</p>
+      </div>
+    );
   }
 
   const bt = state.buildTest;
   const isPending = !bt || state.phase === 'running' || state.phase === 'starting';
+  const stages = getPipelineStages(bt, isPending);
 
   return (
     <div className="flex flex-col h-full bg-bg-0 text-sm">
@@ -30,10 +29,9 @@ export function BuildTestPanel({ emptyState }: { emptyState: { title: string; me
         <div className="w-64 shrink-0 space-y-4">
            <h3 className="font-medium text-text mb-4">Pipeline Stages</h3>
            <div className="space-y-3">
-              <StageItem label="COBOL Oracle" status={bt?.status === 'missing-golden-master' ? 'error' : bt?.status === 'golden-master-reproduction-failed' ? 'error' : bt ? 'success' : 'pending'} />
-              <StageItem label="Java Compilation" status={bt?.status === 'compile-failed' ? 'error' : bt ? 'success' : 'pending'} />
-              <StageItem label="Java Execution" status={bt?.status === 'run-failed' ? 'error' : bt ? 'success' : 'pending'} />
-              <StageItem label="Equivalence Check" status={bt?.classification === 'match' ? 'success' : bt?.classification?.startsWith('divergence') ? 'warning' : bt ? 'error' : 'pending'} />
+              {stages.map((stage) => (
+                <StageItem key={stage.label} label={stage.label} status={stage.status} detail={stage.detail} />
+              ))}
            </div>
            
            {bt && bt.status !== 'ok' && bt.note && (
@@ -49,23 +47,44 @@ export function BuildTestPanel({ emptyState }: { emptyState: { title: string; me
       </div>
       {state.artifacts && (
         <div className="border-t border-line-2 h-48 shrink-0 bg-bg-1">
-          <RunArtifactsPanel artifacts={state.artifacts.artifacts} />
+          <RunArtifactsPanel
+            artifacts={state.artifacts.artifacts}
+            missingArtifacts={state.artifacts.missingArtifacts}
+            errorMessage={state.artifactsError}
+          />
+        </div>
+      )}
+      {!state.artifacts && state.artifactsError && (
+        <div className="border-t border-line-2 bg-bg-1 p-4">
+          <p className="text-xs font-medium text-error">Run artifacts unavailable</p>
+          <p className="mt-1 text-xs text-text-dim">{state.artifactsError}</p>
         </div>
       )}
     </div>
   );
 }
 
-function StageItem({ label, status }: { label: string, status: 'success' | 'error' | 'pending' | 'warning' }) {
+function StageItem({ label, status, detail }: { label: string; status: StatusVariant; detail: string }) {
   return (
-    <div className="flex items-center gap-3">
-      <StatusChip variant={status === 'success' ? 'success' : status === 'error' ? 'error' : status === 'warning' ? 'warning' : 'pending'} />
-      <span className={cn(
-        "text-sm font-medium",
-        status === 'success' ? 'text-text' : status === 'error' ? 'text-error' : status === 'warning' ? 'text-warn' : 'text-text-dim'
-      )}>
-        {label}
-      </span>
+    <div className="flex items-start gap-3">
+      <StatusChip variant={status} />
+      <div className="min-w-0">
+        <div className={cn(
+          "text-sm font-medium",
+          status === 'success'
+            ? 'text-text'
+            : status === 'error'
+              ? 'text-error'
+              : status === 'warning'
+                ? 'text-warn'
+                : status === 'blocked'
+                  ? 'text-orange'
+                  : 'text-text-dim'
+        )}>
+          {label}
+        </div>
+        <div className="mt-1 text-xs text-text-dim">{detail}</div>
+      </div>
     </div>
   );
 }

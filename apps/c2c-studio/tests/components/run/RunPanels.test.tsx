@@ -12,6 +12,7 @@ const mockState = {
   orchestratorRunId: null,
   programId: null,
   error: null,
+  artifactsError: null,
   summary: null,
   generated: null,
   generatedFiles: null,
@@ -69,7 +70,8 @@ describe('Run Panels', () => {
       });
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
       expect(screen.getByText('COBOL Oracle')).toBeDefined();
-      expect(screen.getByText('skipped-no-execution')).toBeDefined();
+      expect(screen.getByText('Golden master unavailable')).toBeDefined();
+      expect(screen.getByText('Blocked before compilation started')).toBeDefined();
     });
   });
 
@@ -85,8 +87,8 @@ describe('Run Panels', () => {
             productMode: 'live',
             status: 'ok',
             classification: 'divergence-unknown',
-            expectedOutput: 'Line 1\\nLine 2',
-            actualOutput: 'Line A\\nLine B',
+            expectedOutput: 'Line 1\nLine 2',
+            actualOutput: 'Line A\nLine B',
             generatedArtifactRef: null
           }} 
         />
@@ -105,10 +107,26 @@ describe('Run Panels', () => {
         state: {
           ...mockState,
           phase: 'completed',
+          generated: {
+            artifactRef: {
+              uri: 'air://generated',
+              sha256: 'abc123'
+            }
+          },
+          buildTest: {
+            generatedArtifactRef: {
+              uri: 'air://build-test',
+              sha256: 'abc123'
+            }
+          },
           evidence: {
             status: 'complete',
             packId: 'pack-123',
-            manifestUri: 'air://manifest'
+            manifestUri: 'air://manifest',
+            generatedArtifactRef: {
+              uri: 'air://evidence',
+              sha256: 'abc123'
+            }
           }
         }
       });
@@ -117,6 +135,7 @@ describe('Run Panels', () => {
       expect(screen.getByText('pack-123')).toBeDefined();
       expect(screen.getByText('air://manifest')).toBeDefined();
       expect(screen.getByText('All required artifacts are present.')).toBeDefined();
+      expect(screen.getByText('Displayed Java, build/test, and evidence all reference the same generated artifact.')).toBeDefined();
     });
 
     it('renders evidence incomplete with missing artifacts correctly', () => {
@@ -159,6 +178,12 @@ describe('Run Panels', () => {
       expect(screen.getByText('1234')).toBeDefined();
       expect(screen.getByText('hash123')).toBeDefined();
     });
+
+    it('renders artifact fetch errors separately from the artifact list', () => {
+      render(<RunArtifactsPanel artifacts={[]} errorMessage="artifacts endpoint returned 503" />);
+      expect(screen.getByText('Artifacts fetch failed')).toBeDefined();
+      expect(screen.getByText('artifacts endpoint returned 503')).toBeDefined();
+    });
   });
 
   describe('ProblemsPanel', () => {
@@ -169,24 +194,67 @@ describe('Run Panels', () => {
           phase: 'completed',
           generated: {
             unsupportedFeatures: ['GOTO', 'ALTER'],
-            missingArtifacts: ['GenMiss']
+            missingArtifacts: ['GenMiss'],
+            artifactRef: {
+              uri: 'air://generated',
+              sha256: 'aaa'
+            }
+          },
+          generatedFiles: {
+            missingArtifacts: ['FilesMiss']
           },
           buildTest: {
             status: 'compile-failed',
-            classification: 'compile-error'
+            classification: 'compile-error',
+            generatedArtifactRef: {
+              uri: 'air://build-test',
+              sha256: 'bbb'
+            }
           },
           evidence: {
-            status: 'incomplete'
-          }
+            status: 'incomplete',
+            generatedArtifactRef: {
+              uri: 'air://evidence',
+              sha256: 'ccc'
+            }
+          },
+          artifactsError: 'artifact endpoint failed'
         }
       });
       render(<ProblemsPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
       expect(screen.getByText('GOTO')).toBeDefined();
       expect(screen.getByText('ALTER')).toBeDefined();
       expect(screen.getByText('GenMiss')).toBeDefined();
+      expect(screen.getByText('FilesMiss')).toBeDefined();
       expect(screen.getByText('compile-failed')).toBeDefined();
-      expect(screen.getByText('compile-error')).toBeDefined();
       expect(screen.getByText('The evidence pack is missing required artifacts')).toBeDefined();
+      expect(screen.getByText('artifact endpoint failed')).toBeDefined();
+      expect(screen.getByText('Generated Java, build/test, and evidence do not reference the same artifact hash')).toBeDefined();
+    });
+  });
+
+  describe('RunLifecyclePanel', () => {
+    it('renders lifecycle events when available', async () => {
+      const { RunLifecyclePanel } = await import('../../../src/components/run/RunLifecyclePanel');
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          events: {
+            events: [
+              {
+                createdAt: '2026-05-15T12:00:00Z',
+                type: 'run.completed',
+                status: 'completed',
+                message: 'Transformation finished'
+              }
+            ]
+          }
+        }
+      });
+      render(<RunLifecyclePanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(screen.getByText('run.completed')).toBeDefined();
+      expect(screen.getByText('Transformation finished')).toBeDefined();
     });
   });
 });

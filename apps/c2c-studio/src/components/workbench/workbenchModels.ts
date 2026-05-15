@@ -1,4 +1,4 @@
-export type BottomWorkbenchTabId = 'run' | 'build-test' | 'evidence' | 'learning' | 'problems';
+export type BottomWorkbenchTabId = 'run' | 'build-test' | 'artifacts' | 'evidence' | 'learning' | 'problems';
 
 export interface BottomWorkbenchTabModel {
   id: BottomWorkbenchTabId;
@@ -34,6 +34,14 @@ export const bottomWorkbenchTabs: BottomWorkbenchTabModel[] = [
     emptyState: {
       title: 'No build results yet',
       message: 'Build and test results will appear here after a transformation completes.',
+    },
+  },
+  {
+    id: 'artifacts',
+    label: 'Artifacts',
+    emptyState: {
+      title: 'No artifacts available',
+      message: 'Run artifacts will appear here when the active run publishes them.',
     },
   },
   {

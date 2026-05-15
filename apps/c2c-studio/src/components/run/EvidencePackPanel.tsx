@@ -1,7 +1,7 @@
 'use client';
 import { useTransformationRun } from '../../stores/transformationRun';
 import { StatusChip } from '../ui/StatusChip';
-import { cn } from '../../lib/utils';
+import { buildArtifactAlignment } from './runPanelUtils';
 
 export function EvidencePackPanel({ emptyState }: { emptyState: { title: string; message: string } }) {
   const { state } = useTransformationRun();
@@ -27,12 +27,16 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
   }
 
   const isComplete = ev.status === 'complete';
+  const isInvalid = ev.status === 'invalid';
+  const alignment = buildArtifactAlignment(state);
   
   return (
     <div className="p-4 h-full flex flex-col text-sm bg-bg-0">
       <div className="flex items-center gap-4 mb-6">
-        <StatusChip variant={isComplete ? 'success' : 'error'} />
-        <h2 className="text-lg font-medium text-text">Evidence Pack {isComplete ? 'Complete' : 'Incomplete'}</h2>
+        <StatusChip variant={isComplete ? 'success' : isInvalid ? 'blocked' : 'error'} />
+        <h2 className="text-lg font-medium text-text">
+          Evidence Pack {isComplete ? 'Complete' : isInvalid ? 'Invalid' : 'Incomplete'}
+        </h2>
       </div>
       
       <div className="grid grid-cols-2 gap-8">
@@ -54,6 +58,24 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
               </div>
             </div>
           </div>
+
+          <div className="bg-bg-1 border border-line-2 rounded p-4">
+            <h3 className="font-medium text-text mb-3">Artifact Lineage</h3>
+            <div className={`mb-3 text-xs ${alignment.aligned ? 'text-success' : 'text-error'}`}>
+              {alignment.aligned
+                ? 'Displayed Java, build/test, and evidence all reference the same generated artifact.'
+                : 'Artifact references are not aligned across generated Java, build/test, and evidence.'}
+            </div>
+            <div className="space-y-3 font-mono text-xs">
+              {alignment.entries.map((entry) => (
+                <div key={entry.label} className="rounded border border-line-2 p-3">
+                  <div className="mb-1 font-sans text-text-dim">{entry.label}</div>
+                  <div className="break-all text-text">{entry.ref?.uri || 'N/A'}</div>
+                  <div className="mt-1 break-all text-text-faint">{entry.ref?.sha256 || 'No hash available'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -66,6 +88,11 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
             </ul>
           ) : (
             <div className="text-success text-sm">All required artifacts are present.</div>
+          )}
+          {ev.note && (
+            <div className="rounded border border-line-2 bg-bg-1 p-3 text-xs text-text-dim">
+              {ev.note}
+            </div>
           )}
         </div>
       </div>

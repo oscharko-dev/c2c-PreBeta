@@ -1,5 +1,6 @@
 'use client';
 
+import { useTransformationRun } from '../../stores/transformationRun';
 import { useWorkbench } from '../../stores/workbench';
 import { Tabs } from '../ui/Tabs';
 import { bottomWorkbenchTabs } from './workbenchModels';
@@ -7,9 +8,11 @@ import { RunLifecyclePanel } from '../run/RunLifecyclePanel';
 import { BuildTestPanel } from '../run/BuildTestPanel';
 import { EvidencePackPanel } from '../run/EvidencePackPanel';
 import { ProblemsPanel } from '../run/ProblemsPanel';
+import { RunArtifactsPanel } from '../run/RunArtifactsPanel';
 
 export function BottomWorkbench() {
   const { isBottomPanelOpen, activeBottomTab, setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
+  const { state } = useTransformationRun();
 
   if (!isBottomPanelOpen) return null;
   const activeTab = bottomWorkbenchTabs.find((tab) => tab.id === activeBottomTab) ?? bottomWorkbenchTabs[0];
@@ -41,6 +44,20 @@ export function BottomWorkbench() {
       >
         {activeTab.id === 'run' && <RunLifecyclePanel emptyState={activeTab.emptyState} />}
         {activeTab.id === 'build-test' && <BuildTestPanel emptyState={activeTab.emptyState} />}
+        {activeTab.id === 'artifacts' && (
+          state.phase === 'idle' ? (
+            <div className="p-4 space-y-2 text-sm">
+              <p className="font-medium text-text">{activeTab.emptyState.title}</p>
+              <p className="text-text-dim">{activeTab.emptyState.message}</p>
+            </div>
+          ) : (
+            <RunArtifactsPanel
+              artifacts={state.artifacts?.artifacts}
+              missingArtifacts={state.artifacts?.missingArtifacts}
+              errorMessage={state.artifactsError}
+            />
+          )
+        )}
         {activeTab.id === 'evidence' && <EvidencePackPanel emptyState={activeTab.emptyState} />}
         {activeTab.id === 'problems' && <ProblemsPanel emptyState={activeTab.emptyState} />}
         {activeTab.id === 'learning' && (
