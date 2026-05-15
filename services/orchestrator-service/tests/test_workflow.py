@@ -645,6 +645,9 @@ class WorkflowArtifactPersistenceTests(unittest.TestCase):
         summary = json.loads((run_dir / "run-summary.json").read_text("utf-8"))
         self.assertEqual(summary["status"], "failed")
         self.assertIn("generate-java", summary.get("failedStep", "") or "")
+        skipped = json.loads((run_dir / "model-policy-skipped.json").read_text("utf-8"))
+        self.assertEqual(skipped["status"], "skipped")
+        self.assertIn("deterministic W0 translation", skipped["reason"])
 
     def test_model_prompt_persists_invocation_ledger(self):
         gateway = StubGateway(W0WorkflowRunnerTests._base_capabilities(), W0WorkflowRunnerTests._base_responses())
@@ -663,7 +666,43 @@ class WorkflowArtifactPersistenceTests(unittest.TestCase):
         self.assertTrue((run_dir / "model-invocation-ledger.json").is_file())
         self.assertFalse((run_dir / "model-policy-skipped.json").exists())
         invocation = json.loads((run_dir / "model-invocation-ledger.json").read_text("utf-8"))
+        self.assertEqual(invocation["schemaVersion"], "v0")
         self.assertEqual(invocation["status"], "completed")
+        self.assertEqual(invocation["dataClass"], "model-gateway")
+        self.assertEqual(invocation["promptTemplateVersion"], "v1")
+        self.assertIn("requestRef", invocation)
+        self.assertIn("outputRef", invocation)
+        self.assertIn("createdAt", invocation)
+
+    def test_model_prompt_failure_before_invocation_persists_governance_artifact(self):
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = StubGateway(W0WorkflowRunnerTests._base_capabilities(), responses)
+
+        original_invoke = gateway.invoke_capability
+
+        def invoke_with_generator_failure(capability, payload):
+            if capability["id"] == "java.generator":
+                raise HarnessFailure(503, "generator backend unavailable")
+            return original_invoke(capability, payload)
+
+        gateway.invoke_capability = invoke_with_generator_failure
+        runner, _store, root = self._runner_with_store(gateway, max_retries=0)
+        context = W0RunContext(
+            run_id="run-Z4",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt="explain safe migration",
+        )
+
+        with self.assertRaises(StepExecutionError):
+            runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        run_dir = root / "run-Z4"
+        self.assertFalse((run_dir / "model-invocation-ledger.json").exists())
+        skipped = json.loads((run_dir / "model-policy-skipped.json").read_text("utf-8"))
+        self.assertEqual(skipped["status"], "skipped")
+        self.assertIn("failed before required model invocation", skipped["reason"])
 
 
 class DataReferenceTests(unittest.TestCase):

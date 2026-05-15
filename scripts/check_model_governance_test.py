@@ -9,6 +9,15 @@ SCRIPT = Path(__file__).with_name("check_model_governance.py")
 
 
 class CheckModelGovernanceTest(unittest.TestCase):
+    def _run_scan(self, repo: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "--worktree"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
     def test_flags_direct_provider_usage_and_forbidden_env_reads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -28,18 +37,107 @@ class CheckModelGovernanceTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result = subprocess.run(
-                [sys.executable, str(SCRIPT), "--worktree"],
-                cwd=repo,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            result = self._run_scan(repo)
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("direct-model-provider-usage", result.stdout)
             self.assertIn("forbidden-model-env-read", result.stdout)
             self.assertIn("forbidden-api-key-env-read", result.stdout)
+
+    def test_flags_direct_provider_imports_and_usages_in_go_java_and_apps_outside_gateway(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+
+            go_service = repo / "services" / "go" / "assistant-service"
+            go_service.mkdir(parents=True, exist_ok=True)
+            (go_service / "main.go").write_text(
+                "\n".join(
+                    [
+                        "package main",
+                        "",
+                        "import (",
+                        '\topenai "github.com/openai/openai-go"',
+                        "\t\"fmt\"",
+                        ")",
+                        "",
+                        "func main() {",
+                        '\tclient := openai.NewClient("token")',
+                        "\tfmt.Println(client)",
+                        "}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            java_service = repo / "services" / "java" / "assistant-service" / "src" / "main" / "java" / "com" / "c2c" / "w0" / "assistant"
+            java_service.mkdir(parents=True, exist_ok=True)
+            (java_service / "App.java").write_text(
+                "\n".join(
+                    [
+                        "package com.c2c.w0.assistant;",
+                        "",
+                        "import com.openai.client.OpenAIClient;",
+                        "",
+                        "public final class App {",
+                        "    public static void main(String[] args) {",
+                        "        OpenAIClient client = com.openai.client.OpenAIClient.builder().build();",
+                        "        System.out.println(client);",
+                        "    }",
+                        "}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            app = repo / "apps" / "c2c-ui" / "src"
+            app.mkdir(parents=True, exist_ok=True)
+            (app / "llm.ts").write_text(
+                "\n".join(
+                    [
+                        'import OpenAI from "openai";',
+                        "",
+                        "export const client = new OpenAI({ apiKey: 'token' });",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (app / "legacy-llm.js").write_text(
+                '\n'.join(
+                    [
+                        'const OpenAI = require("openai");',
+                        "module.exports = { client: new OpenAI({ apiKey: 'token' }) };",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "apps" / "c2c-ui" / "package.json").write_text(
+                '\n'.join(
+                    [
+                        "{",
+                        '  "name": "c2c-ui",',
+                        '  "dependencies": {',
+                        '    "@anthropic-ai/sdk": "^0.54.0"',
+                        "  }",
+                        "}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = self._run_scan(repo)
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("direct-model-provider-usage", result.stdout)
+            self.assertIn("services/go/assistant-service/main.go", result.stdout)
+            self.assertIn("services/java/assistant-service/src/main/java/com/c2c/w0/assistant/App.java", result.stdout)
+            self.assertIn("apps/c2c-ui/src/llm.ts", result.stdout)
+            self.assertIn("apps/c2c-ui/src/legacy-llm.js", result.stdout)
+            self.assertIn("apps/c2c-ui/package.json", result.stdout)
 
     def test_ignores_allowed_gateway_and_non_product_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -49,31 +147,56 @@ class CheckModelGovernanceTest(unittest.TestCase):
             gateway = repo / "services" / "go" / "model-gateway-service"
             gateway.mkdir(parents=True, exist_ok=True)
             (gateway / "server.go").write_text(
-                'package main\n\nfunc main() {\n\t_ = os.Getenv("OPENAI_API_KEY")\n}\n',
+                "\n".join(
+                    [
+                        "package main",
+                        "",
+                        "import \"github.com/openai/openai-go\"",
+                        "",
+                        "func main() {",
+                        '\t_ = openai.NewClient("token")',
+                        "}",
+                    ]
+                )
+                + "\n",
                 encoding="utf-8",
             )
 
-            docs = repo / "services" / "python" / "w0-service" / "docs"
-            docs.mkdir(parents=True, exist_ok=True)
-            (docs / "note.md").write_text(
-                "from openai import OpenAI\nOPENAI_API_KEY\nC2C_MODEL_PROVIDER\n",
+            go_docs = repo / "services" / "go" / "assistant-service" / "docs"
+            go_docs.mkdir(parents=True, exist_ok=True)
+            (go_docs / "client.go").write_text(
+                "\n".join(
+                    [
+                        "package docs",
+                        "",
+                        'import openai "github.com/openai/openai-go"',
+                        "",
+                        "var _ = openai.NewClient(\"token\")",
+                    ]
+                )
+                + "\n",
                 encoding="utf-8",
             )
 
-            tests_dir = repo / "services" / "python" / "w0-service" / "tests"
-            tests_dir.mkdir(parents=True, exist_ok=True)
-            (tests_dir / "test_service.py").write_text(
-                'provider = os.environ.get("C2C_MODEL_PROVIDER")\n',
+            java_tests = repo / "services" / "java" / "assistant-service" / "tests"
+            java_tests.mkdir(parents=True, exist_ok=True)
+            (java_tests / "AppTest.java").write_text(
+                "\n".join(
+                    [
+                        "package com.c2c.w0.assistant;",
+                        "",
+                        "import com.openai.client.OpenAIClient;",
+                        "",
+                        "public final class AppTest {",
+                        "    OpenAIClient client = com.openai.client.OpenAIClient.builder().build();",
+                        "}",
+                    ]
+                )
+                + "\n",
                 encoding="utf-8",
             )
 
-            result = subprocess.run(
-                [sys.executable, str(SCRIPT), "--worktree"],
-                cwd=repo,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            result = self._run_scan(repo)
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("No model governance violations found.", result.stdout)
