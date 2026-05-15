@@ -124,6 +124,21 @@ to remove or weaken any of the W0 acceptance bars below.
       [#63](https://github.com/oscharko-dev/c2c-PreBeta/issues/63) is fixed
       in the Epic #1 hardening branch.
 
+### 10. Browser acceptance coverage for c2c Studio
+
+- [x] The c2c Studio has a deterministic no-model browser acceptance suite that
+      starts the local product stack, loads a supported COBOL program through
+      the workbench, triggers `POST /api/v0/transform`, and verifies generated
+      Java plus Build/Test, Evidence Pack, and artifact views for the same run.
+      _Evidence_: [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts),
+      [`apps/c2c-studio/playwright.config.ts`](../../apps/c2c-studio/playwright.config.ts).
+- [x] CI runs the functional browser acceptance checks on every PR to `dev`.
+      _Evidence_: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
+- [x] The desktop visual-regression baseline is maintained as a release-gate
+      command from the primary local macOS environment to avoid cross-platform
+      screenshot churn in CI.
+      _Evidence_: `cd apps/c2c-studio && npm run test:e2e:update-snapshots`.
+
 ## What is *not* ready (and what must not be claimed)
 
 - **Production readiness.** W0 is a walking skeleton with synthetic corpus
@@ -163,6 +178,7 @@ A reviewer can re-derive every "ready" item by running:
 ./scripts/bootstrap.sh
 ./scripts/w0-reference-run.sh
 cat var/w0-reference-run/scorecard.md
+cd apps/c2c-studio && npm run test:e2e
 ```
 
 and comparing the produced scorecard and per-program manifests against the

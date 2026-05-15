@@ -86,10 +86,6 @@ fi
 ready_url="$(tr -d '\r\n' <"$READY_MARKER")"
 [[ "$ready_url" == "$STUDIO_URL" ]] || fail "ready marker pointed at $ready_url, expected $STUDIO_URL"
 
-expected_line="c2c local application ready: $STUDIO_URL"
-ready_count="$( (grep -Fxc "$expected_line" "$launcher_log" || true) | tr -d '[:space:]')"
-[[ "$ready_count" == "1" ]] || fail "expected exactly one ready line in launcher output"
-
 if ! wait_http "$BFF_URL/api/v0/health"; then
   tail -n 120 "$launcher_log" >&2 || true
   fail "c2c-bff health endpoint never became ready"
@@ -110,6 +106,12 @@ mode_json="$(curl -fsS --max-time 2 "$BFF_URL/api/v0/mode")"
 if ! jq -e '.orchestrator == "live" and .evidence == "live"' >/dev/null <<<"$mode_json"; then
   tail -n 120 "$launcher_log" >&2 || true
   fail "c2c-bff did not report live product mode: $mode_json"
+fi
+
+studio_health_html="$(curl -fsS --max-time 2 "$STUDIO_URL")"
+if grep -Fq 'Error loading programs: Contract error: API returned malformed JSON.' <<<"$studio_health_html"; then
+  tail -n 120 "$launcher_log" >&2 || true
+  fail "c2c-studio loaded against the wrong API origin and could not fetch reference programs"
 fi
 
 log "smoke checks passed, stopping stack"

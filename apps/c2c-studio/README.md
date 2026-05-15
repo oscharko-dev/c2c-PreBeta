@@ -41,4 +41,18 @@ npm start
 ```bash
 npm test
 npm run build
+npm run test:e2e
+```
+
+For CI and Linux runners, use the functional acceptance subset without the
+platform-pinned visual snapshot:
+
+```bash
+npm run test:e2e:ci
+```
+
+To refresh the desktop visual baseline from the primary macOS environment:
+
+```bash
+npm run test:e2e:update-snapshots
 ```

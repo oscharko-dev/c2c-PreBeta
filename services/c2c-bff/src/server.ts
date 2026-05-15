@@ -34,6 +34,8 @@ const STATIC_MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+const LOCAL_CORS_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
 export interface ServerDeps {
   config: BffConfig;
   samples?: SampleRegistry;
@@ -90,6 +92,28 @@ function notFound(res: http.ServerResponse, message = 'not found'): void {
 
 function badRequest(res: http.ServerResponse, message: string): void {
   jsonResponse(res, 400, { error: message });
+}
+
+function applyLocalApiCors(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const origin = req.headers.origin;
+  if (typeof origin !== 'string' || origin.length === 0) {
+    return;
+  }
+
+  try {
+    const parsed = new URL(origin);
+    if (!LOCAL_CORS_HOSTS.has(parsed.hostname)) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  res.setHeader('access-control-allow-origin', origin);
+  res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+  res.setHeader('access-control-allow-headers', 'Content-Type');
+  res.setHeader('access-control-max-age', '600');
+  res.setHeader('vary', 'Origin');
 }
 
 async function readJsonBody(req: http.IncomingMessage, maxBytes = 1_000_000): Promise<unknown> {
@@ -1216,6 +1240,15 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       const requestUrl = new URL(req.url ?? '/', 'http://localhost');
       const pathname = requestUrl.pathname;
       const method = (req.method ?? 'GET').toUpperCase();
+
+      if (pathname.startsWith('/api/')) {
+        applyLocalApiCors(req, res);
+        if (method === 'OPTIONS') {
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+      }
 
       if (pathname === '/api/v0/health' && method === 'GET') {
         jsonResponse(res, 200, { status: 'ok', service: config.serviceName });
