@@ -4,10 +4,11 @@ import { cn } from '@/lib/utils';
 export interface PanelProps extends React.HTMLAttributes<HTMLDivElement> {
   header?: React.ReactNode;
   footer?: React.ReactNode;
+  bodyClassName?: string;
 }
 
 export const Panel = React.forwardRef<HTMLDivElement, PanelProps>(
-  ({ className, header, footer, children, ...props }, ref) => {
+  ({ className, header, footer, bodyClassName, children, ...props }, ref) => {
     return (
       <div
         ref={ref}
@@ -22,7 +23,7 @@ export const Panel = React.forwardRef<HTMLDivElement, PanelProps>(
             {header}
           </div>
         )}
-        <div className="flex-1 overflow-auto bg-bg-0 p-3">
+        <div className={cn('flex-1 overflow-auto bg-bg-0 p-3', bodyClassName)}>
           {children}
         </div>
         {footer && (
