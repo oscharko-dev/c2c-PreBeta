@@ -156,6 +156,10 @@ function RunHarness() {
       <div data-testid="build-test-status">{state.buildTest?.status ?? 'none'}</div>
       <div data-testid="evidence-status">{state.evidence?.status ?? 'none'}</div>
       <div data-testid="artifacts-count">{state.artifacts?.artifacts.length ?? 0}</div>
+      <div data-testid="events-count">{state.events?.events.length ?? 0}</div>
+      <div data-testid="experience-summary">{state.experience?.summary ?? 'none'}</div>
+      <div data-testid="model-gateway-status">{state.modelGatewayHealth?.status ?? 'none'}</div>
+      <div data-testid="harness-status">{state.harnessReady?.status ?? 'none'}</div>
       <div data-testid="error">{state.error ?? 'none'}</div>
       <button onClick={() => void startTransform({ sourceText: '       IDENTIFICATION DIVISION.', programId: 'P-A', sourceName: 'a.cbl' })}>
         start-a
@@ -198,7 +202,9 @@ describe('transformation run state machine', () => {
       </TransformationRunProvider>
     );
 
-    fireEvent.click(screen.getByText('start-a'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('start-a'));
+    });
 
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('completed'));
     expect(screen.getByTestId('summary-status')).toHaveTextContent('completed');
@@ -355,6 +361,105 @@ describe('transformation run state machine', () => {
 
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('unavailable'));
     expect(screen.getByTestId('error')).toHaveTextContent('Backend unavailable');
+  });
+
+  it('hydrates live observability while a run is still active and preserves global service state on restart', async () => {
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.transform)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          runId: 'run-live-a',
+          orchestratorRunId: 'run-live-a-orch',
+          programId: 'P-A',
+          status: 'starting',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-15T10:00:00Z',
+          updatedAt: '2026-05-15T10:00:01Z',
+          links: {
+            self: '/runs/run-live-a',
+            generated: '/runs/run-live-a/generated',
+            generatedFiles: '/runs/run-live-a/generated/files',
+            buildTest: '/runs/run-live-a/build-test',
+            evidence: '/runs/run-live-a/evidence',
+            events: '/runs/run-live-a/events',
+            artifacts: '/runs/run-live-a/artifacts',
+          },
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          runId: 'run-live-b',
+          orchestratorRunId: 'run-live-b-orch',
+          programId: 'P-B',
+          status: 'starting',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-15T10:00:02Z',
+          updatedAt: '2026-05-15T10:00:03Z',
+          links: {
+            self: '/runs/run-live-b',
+            generated: '/runs/run-live-b/generated',
+            generatedFiles: '/runs/run-live-b/generated/files',
+            buildTest: '/runs/run-live-b/build-test',
+            evidence: '/runs/run-live-b/evidence',
+            events: '/runs/run-live-b/events',
+            artifacts: '/runs/run-live-b/artifacts',
+          },
+        },
+      } as any);
+    vi.mocked(apiClient.getRun).mockImplementation(async (runId: string) => ({
+      ok: true,
+      data: {
+        status: 'updating',
+        runId,
+        programId: runId === 'run-live-a' ? 'P-A' : 'P-B',
+      },
+    }) as any);
+    vi.mocked(apiClient.getRunEvents).mockImplementation(async (runId: string) => ({
+      ok: true,
+      data: {
+        runId,
+        programId: runId === 'run-live-a' ? 'P-A' : 'P-B',
+        mode: 'live',
+        productMode: 'live',
+        events: [{ type: 'run.accepted', status: 'ok', message: 'accepted', createdAt: '2026-05-15T10:00:04Z' }],
+      },
+    }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation(async (runId: string) => ({
+      ok: true,
+      data: {
+        runId,
+        programId: runId === 'run-live-a' ? 'P-A' : 'P-B',
+        mode: 'live',
+        productMode: 'live',
+        summary: '1 learning candidate observed',
+      },
+    }) as any);
+
+    render(
+      <TransformationRunProvider>
+        <RunHarness />
+      </TransformationRunProvider>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('model-gateway-status')).toHaveTextContent('ok'));
+    await waitFor(() => expect(screen.getByTestId('harness-status')).toHaveTextContent('ok'));
+
+    fireEvent.click(screen.getByText('start-a'));
+
+    await waitFor(() => expect(screen.getByTestId('events-count')).toHaveTextContent('1'));
+    expect(screen.getByTestId('experience-summary')).toHaveTextContent('1 learning candidate observed');
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('start-b'));
+    });
+
+    expect(screen.getByTestId('model-gateway-status')).toHaveTextContent('ok');
+    expect(screen.getByTestId('harness-status')).toHaveTextContent('ok');
   });
 
   it('ignores stale artifact hydration from an earlier run after a newer run starts', async () => {

@@ -2,15 +2,22 @@ import { useTransformationRun } from '../../stores/transformationRun';
 
 export function ModelGatewayPanel() {
   const { state } = useTransformationRun();
+  const deterministicNoModel = state.modelGatewayHealth?.error?.includes('deterministic W0 mode');
 
   if (!state.modelGatewayHealth || state.modelGatewayHealth.status === 'unavailable') {
     return (
       <div className="p-4 text-sm text-neutral-400">
         <p className="mb-2">Model Gateway governance summary unavailable.</p>
-        <p className="text-xs italic text-neutral-500">
-          Note: Deterministic W0 COBOL-to-Java runs do not require model invocations.
-          No Foundry or LLM participation was required or performed for this run.
-        </p>
+        {deterministicNoModel ? (
+          <p className="text-xs italic text-neutral-500">
+            Note: Deterministic W0 COBOL-to-Java runs do not require model invocations.
+            No Foundry or LLM participation was required or performed for this run.
+          </p>
+        ) : (
+          <p className="text-xs italic text-neutral-500">
+            The current Model Gateway state could not be verified from the BFF.
+          </p>
+        )}
       </div>
     );
   }

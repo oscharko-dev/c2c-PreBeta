@@ -74,6 +74,18 @@ describe('apiClient', () => {
     expect(result).toEqual({ ok: true, data: { status: 'ok' } });
   });
 
+  it('fetches harness readiness through the BFF-relative path', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ status: 'ok', summary: '2 capabilities registered' }),
+    } as Response);
+
+    const result = await apiClient.getHarnessReady();
+
+    expect(fetch).toHaveBeenCalledWith('/api/v0/harness/ready', undefined);
+    expect(result).toEqual({ ok: true, data: { status: 'ok', summary: '2 capabilities registered' } });
+  });
+
   it('fetches mode successfully and preserves explicit reachability fields', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

@@ -14,7 +14,7 @@ describe('Observability Surfaces', () => {
   it('renders events timeline from RunEventsView', () => {
     vi.mocked(transformationRun.useTransformationRun).mockReturnValue({
       state: {
-        harnessReady: { status: 'ok' },
+        harnessReady: { status: 'unavailable' },
         events: {
           runId: 'r1',
           programId: 'p1',
@@ -76,7 +76,7 @@ describe('Observability Surfaces', () => {
   it('renders Model Gateway governance summary and confirms no Foundry participation in deterministic W0', () => {
     vi.mocked(transformationRun.useTransformationRun).mockReturnValue({
       state: {
-        modelGatewayHealth: { status: 'unavailable' }
+        modelGatewayHealth: { status: 'unavailable', error: 'Model Gateway unavailable in deterministic W0 mode' }
       } as any,
       startTransform: vi.fn(),
       setState: vi.fn()
@@ -85,5 +85,29 @@ describe('Observability Surfaces', () => {
     render(<ModelGatewayPanel />);
     expect(screen.getByText(/Model Gateway governance summary unavailable/i)).toBeDefined();
     expect(screen.getByText(/No Foundry or LLM participation was required or performed for this run/i)).toBeDefined();
+  });
+
+  it('renders Model Gateway governance summary when the BFF returns normalized health data', () => {
+    vi.mocked(transformationRun.useTransformationRun).mockReturnValue({
+      state: {
+        modelGatewayHealth: {
+          status: 'ok',
+          providerMode: 'foundry-dev',
+          activeModelCount: 3,
+          dataPolicy: 'model-gateway',
+          ledgerEnabled: true,
+          eventEmission: true,
+        }
+      } as any,
+      startTransform: vi.fn(),
+      setState: vi.fn()
+    });
+
+    render(<ModelGatewayPanel />);
+    expect(screen.getByText('foundry-dev')).toBeDefined();
+    expect(screen.getByText('3')).toBeDefined();
+    expect(screen.getByText('model-gateway')).toBeDefined();
+    expect(screen.getAllByText('Enabled')).toHaveLength(2);
+    expect(screen.queryByText(/No Foundry or LLM participation/i)).toBeNull();
   });
 });

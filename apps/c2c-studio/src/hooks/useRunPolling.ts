@@ -5,6 +5,29 @@ import { BuildTestView, EvidenceView, GeneratedFilesIndex, GeneratedView } from 
 
 type SetTransformationRunState = React.Dispatch<React.SetStateAction<TransformationRunState>>;
 
+async function hydrateRunObservability(
+  runId: string,
+  setState: SetTransformationRunState,
+  isActive?: () => boolean
+) {
+  const [evts, exp] = await Promise.all([
+    apiClient.getRunEvents(runId),
+    apiClient.getRunExperience(runId),
+  ]);
+
+  if (isActive && !isActive()) return;
+
+  setState(prev => {
+    if (prev.runId !== runId) return prev;
+
+    return {
+      ...prev,
+      events: evts?.ok ? evts.data : prev.events,
+      experience: exp?.ok ? exp.data : prev.experience,
+    };
+  });
+}
+
 function isVerifiedArtifactState(
   generated: GeneratedView,
   generatedFiles: GeneratedFilesIndex,
@@ -126,6 +149,8 @@ export function useRunPolling(
           await hydrateRunArtifacts(runId, setState, summary.status, () => active);
           return; // done polling
         }
+
+        await hydrateRunObservability(runId, setState, () => active);
       }
 
       if (active) {
@@ -155,8 +180,8 @@ export function useGlobalObservabilityPolling(
       if (!active) return;
       setState(prev => ({
         ...prev,
-        modelGatewayHealth: mgHealth.ok ? mgHealth.data : null,
-        harnessReady: hReady.ok ? hReady.data : null,
+        modelGatewayHealth: mgHealth?.ok ? mgHealth.data : { status: 'unavailable', error: mgHealth?.message ?? 'Model Gateway unavailable' },
+        harnessReady: hReady?.ok ? hReady.data : { status: 'unavailable', error: hReady?.message ?? 'Harness unavailable' },
       }));
     };
     

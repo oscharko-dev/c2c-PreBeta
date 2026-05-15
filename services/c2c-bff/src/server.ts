@@ -336,6 +336,129 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function asStringRecord(value: unknown): Record<string, string> {
+  const record = asRecord(value);
+  if (!record) return {};
+
+  return Object.fromEntries(
+    Object.entries(record).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+}
+
+function parseBooleanString(value: string): boolean | undefined {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+function normalizeModelGatewayHealthView(payload: unknown): Record<string, unknown> {
+  const body = asRecord(payload) ?? {};
+  const configured = asStringRecord(body.configured);
+  const providerMode = configured.mode || configured.modelProvider || asString(body.status);
+  const activeModelCount = asNumber(body.activeModels) ?? asNumber(body.activeModelCount) ?? 0;
+  const dataPolicy = configured.dataPolicy;
+  const ledgerEnabled = parseBooleanString(configured.invocationLedgerEnabled ?? '')
+    ?? asBoolean(body.ledgerEnabled)
+    ?? false;
+  const eventEmission = parseBooleanString(configured.harnessEventEmissionEnabled ?? '')
+    ?? asBoolean(body.eventEmission)
+    ?? false;
+
+  return {
+    status: 'ok',
+    providerMode,
+    activeModelCount,
+    dataPolicy,
+    ledgerEnabled,
+    eventEmission,
+  };
+}
+
+function normalizeModelGatewayModelsView(payload: unknown): Record<string, unknown> {
+  const rawModels = Array.isArray(payload)
+    ? payload
+    : Array.isArray((asRecord(payload) ?? {}).models)
+      ? ((asRecord(payload) ?? {}).models as unknown[])
+      : [];
+
+  return {
+    models: rawModels.map((entry) => {
+      const model = asRecord(entry) ?? {};
+      return {
+        id: asString(model.id) || asString(model.ID),
+        name: asString(model.name) || asString(model.displayName) || asString(model.DisplayName),
+        provider: asString(model.provider) || asString(model.Provider),
+      };
+    }).filter((entry) => entry.id.length > 0 && entry.name.length > 0 && entry.provider.length > 0),
+  };
+}
+
+function normalizeHarnessReadyView(payload: unknown): Record<string, unknown> {
+  const body = asRecord(payload) ?? {};
+  const capabilities = asNumber(body.capabilities);
+  const runs = asNumber(body.runs);
+  const policyGateway = asString(body.policyGateway);
+  const summaryParts = [
+    capabilities !== undefined ? `${capabilities} capabilities registered` : '',
+    runs !== undefined ? `${runs} runs tracked` : '',
+    policyGateway ? `policy gateway ${policyGateway}` : '',
+  ].filter((part) => part.length > 0);
+
+  return {
+    ...body,
+    status: 'ok',
+    summary: summaryParts.join(' • '),
+  };
+}
+
+function normalizeExperienceViewFromSummary(
+  stored: StoredRun,
+  learningView: Record<string, unknown>,
+  summaryRaw: Record<string, unknown>,
+): Record<string, unknown> {
+  const candidateCount = asNumber(summaryRaw.candidateCount) ?? 0;
+  const sourceEventCount = asNumber(summaryRaw.sourceEventCount);
+  const sourceLedgerCount = asNumber(summaryRaw.sourceLedgerCount);
+  const observedPatterns = asStringArray(summaryRaw.observedPatterns);
+  const experienceEventIds = asStringArray(summaryRaw.experienceEventIds);
+  const candidateByPattern = asRecord(summaryRaw.candidateByPattern) ?? {};
+  const patternBreakdown = Object.entries(candidateByPattern)
+    .filter((entry): entry is [string, number] => typeof entry[0] === 'string' && typeof entry[1] === 'number')
+    .map(([pattern, count]) => `${pattern}: ${count}`);
+  const observationOnly = asBoolean(summaryRaw.observationOnly) ?? false;
+  const policyVersion = asString(summaryRaw.policyVersion);
+  const policyFingerprint = asString(summaryRaw.policyFingerprint);
+
+  const summaryParts = [
+    `${candidateCount} learning candidate${candidateCount === 1 ? '' : 's'} observed`,
+    sourceEventCount !== undefined ? `from ${sourceEventCount} source events` : '',
+    sourceLedgerCount !== undefined ? `${sourceLedgerCount} source ledgers considered` : '',
+    observationOnly ? 'observation-only mode' : '',
+  ].filter((part) => part.length > 0);
+
+  const observationPolicy = [policyVersion, policyFingerprint].filter((part) => part.length > 0).join(' / ');
+
+  return {
+    runId: stored.runId,
+    programId: stored.programId,
+    mode: learningView.mode,
+    productMode: learningView.productMode,
+    summary: summaryParts.join(' • '),
+    observationPolicy,
+    detectedPatterns: [...observedPatterns, ...patternBreakdown],
+    artifactRefs: experienceEventIds,
+  };
+}
+
 interface OutputRef {
   uri: string;
   sha256: string;
@@ -991,22 +1114,12 @@ async function liveExperienceView(
       runId: stored.runId,
       programId: stored.programId,
       mode: stored.mode,
-      productMode: 'unavailable',
+      productMode: productModeOf(stored),
     };
   }
   const summaryRaw = asRecord(learningView.summary) ?? {};
-  
-  // Extract fields mapping from the learning summary JSON to the RunExperienceView
-  return {
-    runId: stored.runId,
-    programId: stored.programId,
-    mode: learningView.mode,
-    productMode: learningView.productMode,
-    summary: asString(summaryRaw.summary) || asString(summaryRaw.message),
-    observationPolicy: asString(summaryRaw.observationPolicy) || asString(summaryRaw.policy),
-    detectedPatterns: Array.isArray(summaryRaw.detectedPatterns) ? summaryRaw.detectedPatterns : [],
-    artifactRefs: Array.isArray(summaryRaw.artifactRefs) ? summaryRaw.artifactRefs : [],
-  };
+
+  return normalizeExperienceViewFromSummary(stored, learningView, summaryRaw);
 }
 
 async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
@@ -1216,7 +1329,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         try {
           const upstream = await modelGateway.getHealth();
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
-            jsonResponse(res, upstream.status, upstream.body);
+            jsonResponse(res, upstream.status, normalizeModelGatewayHealthView(upstream.body));
             return;
           }
           jsonResponse(res, 503, { error: 'Model Gateway upstream unavailable' });
@@ -1234,7 +1347,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         try {
           const upstream = await modelGateway.getModels();
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
-            jsonResponse(res, upstream.status, upstream.body);
+            jsonResponse(res, upstream.status, normalizeModelGatewayModelsView(upstream.body));
             return;
           }
           jsonResponse(res, 503, { error: 'Model Gateway upstream unavailable' });
@@ -1252,8 +1365,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         try {
           const upstream = await harness.getReady();
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
-            const body = asRecord(upstream.body) ?? {};
-            jsonResponse(res, 200, { status: 'ok', ...body });
+            jsonResponse(res, 200, normalizeHarnessReadyView(upstream.body));
             return;
           }
           jsonResponse(res, 503, { error: 'Harness upstream unavailable' });
