@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
+@SuppressWarnings("UastIncorrectHttpHeaderInspection")
 public final class ServiceApp {
     private static final String SERVICE_NAME = "semantic-ir-service";
     private static final int DEFAULT_PORT = 8082;

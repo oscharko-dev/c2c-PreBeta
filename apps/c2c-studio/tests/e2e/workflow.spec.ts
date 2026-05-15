@@ -30,6 +30,14 @@ function topBarStartButton(page: Page) {
   return page.getByLabel('Workbench Top Bar').getByRole('button', { name: 'Start Transformation' });
 }
 
+async function enterProductPathCobol(page: Page) {
+  await page.getByRole('button', { name: 'Start Typing' }).click();
+
+  const editor = page.getByRole('textbox', { name: COBOL_EDITOR_LABEL });
+  await editor.fill(PRODUCT_PATH_COBOL);
+  await expect(editor).toHaveValue(/PROGRAM-ID\. BRNCH01\./);
+}
+
 async function waitForJsonResponse(
   page: Page,
   matcher: (response: Response) => boolean,
@@ -79,11 +87,7 @@ async function waitForRunProgress(page: Page, runId: string, expectedSteps: stri
 test.describe('c2c Studio browser acceptance', () => {
   test('completes the deterministic W0 product path through browser-visible artifacts', async ({ page }) => {
     await expectReadyWorkbench(page);
-    await page.getByRole('button', { name: 'Start Typing' }).click();
-
-    const editor = page.getByRole('textbox', { name: COBOL_EDITOR_LABEL });
-    await editor.fill(PRODUCT_PATH_COBOL);
-    await expect(editor).toHaveValue(/PROGRAM-ID\. BRNCH01\./);
+    await enterProductPathCobol(page);
 
     const transformResponsePromise = page.waitForResponse(
       response =>
@@ -667,7 +671,7 @@ test.describe('c2c Studio browser acceptance', () => {
     test.skip(process.platform !== 'darwin', 'Visual baseline is pinned from the primary local macOS environment.');
 
     await expectReadyWorkbench(page);
-    await loadFirstSupportedReferenceProgram(page);
+    await enterProductPathCobol(page);
     await page.waitForLoadState('networkidle');
 
     await expect(page).toHaveScreenshot('workbench-desktop.png', {

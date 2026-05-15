@@ -26,6 +26,7 @@ import java.util.UUID;
  * generation): {@code /health} probe, single capability endpoint, and best
  * effort fan-out of Harness/Experience events to the configured event sink.
  */
+@SuppressWarnings("UastIncorrectHttpHeaderInspection")
 public final class ServiceApp {
 
     private static final String SERVICE_NAME = BuildTestRunnerService.SERVICE_NAME;
