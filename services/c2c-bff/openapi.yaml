@@ -668,7 +668,7 @@ components:
         productMode: { type: string, enum: [live, unavailable] }
         status:
           type: string
-          enum: [complete, incomplete]
+          enum: [complete, incomplete, invalid]
         packId: { type: string }
         manifestUri: { type: string }
         missingArtifacts:

@@ -151,7 +151,7 @@ export interface EvidenceView {
   programId: string;
   mode: 'live' | 'diagnostic-fixture';
   productMode: 'live' | 'unavailable';
-  status: 'complete' | 'incomplete';
+  status: 'complete' | 'incomplete' | 'invalid';
   packId?: string;
   manifestUri?: string;
   missingArtifacts?: string[];

@@ -1,10 +1,10 @@
 'use client';
 
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { TransformationRunState, RunPhase } from '../types/run';
 import { apiClient } from '../lib/apiClient';
 import { TransformRequest } from '../types/reference-program';
-import { useRunPolling } from '../hooks/useRunPolling';
+import { hydrateRunArtifacts, useRunPolling } from '../hooks/useRunPolling';
 import { ApiResult, TransformResponse } from '../types/api';
 
 export interface TransformationRunContextValue {
@@ -16,6 +16,7 @@ export interface TransformationRunContextValue {
 const TransformationRunContext = createContext<TransformationRunContextValue | null>(null);
 
 export function TransformationRunProvider({ children }: { children: ReactNode }) {
+  const activeTransformRequestRef = useRef(0);
   const [state, setState] = useState<TransformationRunState>({
     phase: 'idle',
     runId: null,
@@ -34,6 +35,8 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
   useRunPolling(state, setState);
 
   const startTransform = async (request: TransformRequest): Promise<ApiResult<TransformResponse>> => {
+    const requestId = ++activeTransformRequestRef.current;
+
     setState({
       phase: 'starting',
       runId: null,
@@ -51,6 +54,10 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
 
     const result = await apiClient.transform(request);
 
+    if (requestId !== activeTransformRequestRef.current) {
+      return result;
+    }
+
     if (!result.ok) {
       setState(prev => ({
         ...prev,
@@ -67,7 +74,12 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
       orchestratorRunId: result.data.orchestratorRunId,
       programId: result.data.programId,
       error: null,
+      summary: result.data,
     }));
+
+    if (result.data.status === 'completed' || result.data.status === 'failed') {
+      void hydrateRunArtifacts(result.data.runId, setState, result.data.status);
+    }
 
     return result;
   };
