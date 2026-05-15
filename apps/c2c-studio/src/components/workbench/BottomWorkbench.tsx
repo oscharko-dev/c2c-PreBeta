@@ -3,6 +3,10 @@
 import { useWorkbench } from '../../stores/workbench';
 import { Tabs } from '../ui/Tabs';
 import { bottomWorkbenchTabs } from './workbenchModels';
+import { RunLifecyclePanel } from '../run/RunLifecyclePanel';
+import { BuildTestPanel } from '../run/BuildTestPanel';
+import { EvidencePackPanel } from '../run/EvidencePackPanel';
+import { ProblemsPanel } from '../run/ProblemsPanel';
 
 export function BottomWorkbench() {
   const { isBottomPanelOpen, activeBottomTab, setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
@@ -33,12 +37,18 @@ export function BottomWorkbench() {
         id={`bottom-workbench-panel-${activeTab.id}`}
         role="tabpanel"
         aria-labelledby={`bottom-workbench-tab-${activeTab.id}`}
-        className="flex-1 overflow-auto p-4"
+        className="flex-1 overflow-auto bg-bg-1"
       >
-        <div className="space-y-2 text-sm">
-          <p className="font-medium text-text">{activeTab.emptyState.title}</p>
-          <p className="text-text-dim">{activeTab.emptyState.message}</p>
-        </div>
+        {activeTab.id === 'run' && <RunLifecyclePanel emptyState={activeTab.emptyState} />}
+        {activeTab.id === 'build-test' && <BuildTestPanel emptyState={activeTab.emptyState} />}
+        {activeTab.id === 'evidence' && <EvidencePackPanel emptyState={activeTab.emptyState} />}
+        {activeTab.id === 'problems' && <ProblemsPanel emptyState={activeTab.emptyState} />}
+        {activeTab.id === 'learning' && (
+          <div className="p-4 space-y-2 text-sm">
+            <p className="font-medium text-text">{activeTab.emptyState.title}</p>
+            <p className="text-text-dim">{activeTab.emptyState.message}</p>
+          </div>
+        )}
       </div>
     </div>
   );
