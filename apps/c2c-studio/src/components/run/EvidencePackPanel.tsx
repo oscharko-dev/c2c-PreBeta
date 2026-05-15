@@ -29,13 +29,14 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
   const isComplete = ev.status === 'complete';
   const isInvalid = ev.status === 'invalid';
   const alignment = buildArtifactAlignment(state);
+  const hasAlignedEvidence = isComplete && alignment.aligned;
   
   return (
     <div className="p-4 h-full flex flex-col text-sm bg-bg-0">
       <div className="flex items-center gap-4 mb-6">
-        <StatusChip variant={isComplete ? 'success' : isInvalid ? 'blocked' : 'error'} />
+        <StatusChip variant={hasAlignedEvidence ? 'success' : isInvalid ? 'blocked' : 'error'} />
         <h2 className="text-lg font-medium text-text">
-          Evidence Pack {isComplete ? 'Complete' : isInvalid ? 'Invalid' : 'Incomplete'}
+          Evidence Pack {hasAlignedEvidence ? 'Complete' : isInvalid ? 'Invalid' : isComplete ? 'Mismatch Detected' : 'Incomplete'}
         </h2>
       </div>
       

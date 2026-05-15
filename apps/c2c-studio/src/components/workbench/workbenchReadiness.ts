@@ -31,8 +31,8 @@ export function getWorkbenchReadiness(apiState: StudioApiState): WorkbenchReadin
   if (mode.evidence !== 'live') {
     return {
       startEnabled: true,
-      topBarLabel: 'Ready · Evidence Mock',
-      statusBarLabel: 'Ready · Evidence Mock',
+      topBarLabel: 'Evidence Limited',
+      statusBarLabel: 'Evidence Limited',
       tone: 'warning',
     };
   }

@@ -5,6 +5,8 @@ import { useSourceWorkspace } from '../../stores/sourceWorkspace';
 import { Play } from 'lucide-react';
 import { DEFAULT_SOURCE_NAME, deriveDetectedProgramId, deriveDisplayedLineEnding, deriveSourceHash } from '../../lib/sourceAnalysis';
 import { useC2cApi } from '../../hooks/useC2cApi';
+import { useTransformationRun } from '../../stores/transformationRun';
+import { UnsupportedConstructsPanel } from '../state/UnsupportedConstructsPanel';
 import { getWorkbenchReadiness } from '../workbench/workbenchReadiness';
 
 export function CobolEditorPane() {
@@ -22,6 +24,7 @@ export function CobolEditorPane() {
   const [sourceHash, setSourceHash] = useState('00000000');
 
   const apiState = useC2cApi();
+  const { productState } = useTransformationRun();
   const readiness = getWorkbenchReadiness(apiState);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -102,6 +105,16 @@ export function CobolEditorPane() {
           {transformError}
         </div>
       )}
+
+      {productState.state === 'unsupported' ? (
+        <div className="border-b border-line bg-bg-1 px-4 py-3">
+          <div className="text-sm font-medium text-warn">Unsupported COBOL constructs block this run.</div>
+          <div className="mt-1 text-xs text-text-dim">
+            Review the unsupported features before attempting another transformation.
+          </div>
+          <UnsupportedConstructsPanel constructs={productState.unsupportedFeatures || []} />
+        </div>
+      ) : null}
 
       <div className="flex flex-1 min-h-0 overflow-hidden font-mono text-[12px]">
         <div 

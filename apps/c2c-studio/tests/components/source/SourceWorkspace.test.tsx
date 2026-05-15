@@ -3,10 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SourceWorkspaceTree } from '@/components/source/SourceWorkspaceTree';
 import { CobolEditorPane } from '@/components/source/CobolEditorPane';
 import { SourceWorkspaceProvider } from '@/stores/sourceWorkspace';
-import { TransformationRunProvider } from '@/stores/transformationRun';
+import { TransformationRunProvider, useTransformationRun } from '@/stores/transformationRun';
 import { apiClient } from '@/lib/apiClient';
 import { AppTopBar } from '@/components/workbench/AppTopBar';
 import { TransformResponse } from '@/types/api';
+import { useEffect } from 'react';
 
 vi.mock('@/lib/apiClient', () => ({
   apiClient: {
@@ -39,6 +40,29 @@ describe('Source Workspace', () => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getRun).mockResolvedValue({ ok: true, data: { status: 'running' } } as any);
   });
+
+  function SetUnsupportedRunState() {
+    const { setState } = useTransformationRun();
+
+    useEffect(() => {
+      setState((prev) => ({
+        ...prev,
+        phase: 'completed',
+        runId: 'run-unsupported',
+        generated: {
+          runId: 'run-unsupported',
+          programId: 'P-UNSUPPORTED',
+          mode: 'live',
+          productMode: 'live',
+          status: 'unsupported',
+          unsupportedFeatures: ['COPY REPLACING'],
+          artifactRef: null,
+        },
+      }));
+    }, [setState]);
+
+    return null;
+  }
 
   it('renders reference programs including supported and unsupported entries', async () => {
     vi.mocked(apiClient.getSamples).mockResolvedValue({
@@ -248,6 +272,43 @@ describe('Source Workspace', () => {
     expect(screen.getByRole('textbox')).toHaveValue(
       '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
     );
+  });
+
+  it('preserves the editor buffer and shows validation errors for 400 responses', async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({
+      ok: false,
+      status: 400,
+      message: 'Transformation validation failed',
+      details: { kind: 'http', body: { error: 'Transformation validation failed' } },
+    });
+
+    render(
+      <TransformationRunProvider><SourceWorkspaceProvider>
+        <CobolEditorPane />
+      </SourceWorkspaceProvider></TransformationRunProvider>
+    );
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
+
+    expect(await screen.findByText('Transformation validation failed')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue(
+      '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
+    );
+  });
+
+  it('shows unsupported constructs next to the source editor when the run is blocked by W0 scope', async () => {
+    render(
+      <TransformationRunProvider><SourceWorkspaceProvider>
+        <SetUnsupportedRunState />
+        <CobolEditorPane />
+      </SourceWorkspaceProvider></TransformationRunProvider>
+    );
+
+    fireEvent.click(screen.getByText('Start Typing'));
+
+    expect(await screen.findByText('Unsupported COBOL constructs block this run.')).toBeInTheDocument();
+    expect(screen.getByText('COPY REPLACING')).toBeInTheDocument();
   });
 
   it('does not load unsupported references from the BFF', async () => {

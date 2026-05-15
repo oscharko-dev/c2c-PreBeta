@@ -93,11 +93,13 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     if (state.phase === 'starting' || state.phase === 'running') return 'pending';
     if (!generated) return 'pending';
     if (generated.status === 'unsupported') return 'unsupported';
-    if (state.phase === 'incomplete' || state.phase === 'failed' || state.phase === 'unavailable') return 'incomplete';
-    if (state.phase === 'verification-blocked') return 'failed-verification';
     if (generated.status === 'incomplete') return 'incomplete';
     if (!generatedFiles) return 'pending';
     if (generatedFiles.status === 'incomplete') return 'incomplete';
+    if (state.phase === 'incomplete') return 'incomplete';
+    if (state.phase === 'failed' || state.phase === 'unavailable' || state.phase === 'verification-blocked') {
+      return 'failed-verification';
+    }
     
     if (buildTest && evidence) {
       if (buildTest.status === 'ok' && evidence.status === 'complete' && 

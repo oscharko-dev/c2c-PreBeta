@@ -99,6 +99,28 @@ describe('Run Panels', () => {
       expect(screen.getByText('Line A')).toBeDefined();
       expect(screen.getByText('Line B')).toBeDefined();
     });
+
+    it('distinguishes known W0 coverage gaps from unknown divergence', () => {
+      render(
+        <EquivalencePanel
+          isPending={false}
+          buildTest={{
+            runId: '123',
+            programId: '456',
+            mode: 'live',
+            productMode: 'live',
+            status: 'output-divergence',
+            classification: 'divergence-known-w0-coverage-gap',
+            expectedOutput: 'COBOL',
+            actualOutput: 'JAVA',
+            generatedArtifactRef: null
+          }}
+        />
+      );
+
+      expect(screen.getByText('Divergence (Known W0 Gap)')).toBeDefined();
+      expect(screen.queryByText('Divergence (Unknown)')).not.toBeInTheDocument();
+    });
   });
 
   describe('EvidencePackPanel', () => {
@@ -153,6 +175,38 @@ describe('Run Panels', () => {
       expect(screen.getByText('Evidence Pack Incomplete')).toBeDefined();
       expect(screen.getByText('Missing1')).toBeDefined();
       expect(screen.getByText('Missing2')).toBeDefined();
+    });
+
+    it('does not render a success headline when artifact references are mismatched', () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          generated: {
+            artifactRef: {
+              uri: 'air://generated',
+              sha256: 'abc123'
+            }
+          },
+          buildTest: {
+            generatedArtifactRef: {
+              uri: 'air://build-test',
+              sha256: 'def456'
+            }
+          },
+          evidence: {
+            status: 'complete',
+            generatedArtifactRef: {
+              uri: 'air://evidence',
+              sha256: 'abc123'
+            }
+          }
+        }
+      });
+
+      render(<EvidencePackPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(screen.getByText('Evidence Pack Mismatch Detected')).toBeDefined();
+      expect(screen.queryByText('Evidence Pack Complete')).not.toBeInTheDocument();
     });
   });
 

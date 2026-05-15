@@ -161,8 +161,22 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
 
     render(<WorkbenchShell />);
 
-    expect(within(screen.getByLabelText('Product readiness')).getByText('Ready · Evidence Mock')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Product readiness')).getByText('Evidence Limited')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start transformation/i })).toBeDisabled();
+  });
+
+  it('does not expose presentation-only evidence mode wording in product readiness surfaces', () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: { status: 'ok' },
+      mode: { orchestrator: 'live', evidence: 'mock' },
+      error: null,
+      errorKind: null,
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    expect(screen.queryByText(/mock/i)).not.toBeInTheDocument();
   });
 
   it('applies truncation and wrapping guards needed for narrow desktop layouts', () => {
