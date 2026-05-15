@@ -123,7 +123,7 @@ Start the full local stack from the repository root with one command:
 ```
 
 The launcher builds the required artifacts, starts the local capability mesh,
-and brings up the Nuxt Studio at `http://127.0.0.1:3000` with the BFF API on
+and brings up the Next.js Studio at `http://127.0.0.1:3000` with the BFF API on
 `http://127.0.0.1:18089`. The BFF still builds the legacy `apps/c2c-ui/dist`
 bundle for the older reference-run surface, but the local product entrypoint
 for W0.1 is the Studio shell. The launcher uses explicit non-conflicting
