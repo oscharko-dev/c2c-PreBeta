@@ -85,7 +85,7 @@ export function StudioShell() {
                 <button
                   type="button"
                   disabled={!canTransform}
-                  className="mt-3 inline-flex cursor-not-allowed items-center rounded-full bg-teal-400 px-5 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
+                  className="mt-3 inline-flex items-center rounded-full bg-teal-400 px-5 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Start Transformation
                 </button>

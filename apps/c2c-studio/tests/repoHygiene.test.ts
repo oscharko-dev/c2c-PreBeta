@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('repository hygiene', () => {
   it('contains no tracked Nuxt or Vue scaffold files in apps/c2c-studio', () => {
-    const repoRoot = resolve(__dirname, '..', '..');
+    const repoRoot = resolve(__dirname, '..', '..', '..');
     const trackedFiles = execFileSync('git', ['ls-files', 'apps/c2c-studio'], {
       cwd: repoRoot,
       encoding: 'utf8',

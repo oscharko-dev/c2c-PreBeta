@@ -11,7 +11,7 @@ export interface ApiErrorDetails {
 }
 
 export interface HealthResponse {
-  status: 'ok';
+  status: string;
   [key: string]: unknown;
 }
 
