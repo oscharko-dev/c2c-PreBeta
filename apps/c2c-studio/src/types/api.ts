@@ -138,10 +138,18 @@ export interface BuildTestView {
   mode: 'live' | 'diagnostic-fixture';
   productMode: 'live' | 'unavailable';
   status: 'ok' | 'compile-failed' | 'run-failed' | 'output-divergence' | 'golden-master-reproduction-failed' | 'missing-golden-master' | 'skipped' | 'incomplete';
-  classification: string;
+  classification:
+    | 'match'
+    | 'divergence-known-w0-coverage-gap'
+    | 'divergence-unknown'
+    | 'true-golden-master-reproduction-error'
+    | 'true-golden-master-mismatch'
+    | 'compile-error'
+    | 'run-error'
+    | 'skipped-no-execution';
   expectedOutput?: string;
   actualOutput?: string;
-  outputRef?: string;
+  outputRef?: OutputRef | null;
   generatedArtifactRef: OutputRef | null;
   note?: string;
 }
@@ -151,7 +159,7 @@ export interface EvidenceView {
   programId: string;
   mode: 'live' | 'diagnostic-fixture';
   productMode: 'live' | 'unavailable';
-  status: 'complete' | 'incomplete';
+  status: 'complete' | 'incomplete' | 'invalid';
   packId?: string;
   manifestUri?: string;
   missingArtifacts?: string[];

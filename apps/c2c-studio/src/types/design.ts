@@ -1,6 +1,6 @@
 export type RunStatus = 'starting' | 'updating' | 'completed' | 'failed';
 export type GeneratedStatus = 'generated' | 'unsupported' | 'skipped' | 'incomplete';
-export type EvidenceStatus = 'complete' | 'incomplete';
+export type EvidenceStatus = 'complete' | 'incomplete' | 'invalid';
 export type ProductMode = 'live' | 'unavailable';
 export type BuildTestStatus =
   | 'ok'
@@ -73,6 +73,8 @@ export const mapEvidenceStatusToVariant = (status: EvidenceStatus): StatusVarian
       return 'success';
     case 'incomplete':
       return 'incomplete';
+    case 'invalid':
+      return 'blocked';
     default:
       return 'neutral';
   }

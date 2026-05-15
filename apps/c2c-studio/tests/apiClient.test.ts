@@ -88,6 +88,197 @@ describe('apiClient', () => {
     });
   });
 
+  it('rejects malformed transform payloads that miss required links', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          orchestratorRunId: 'orch-1',
+          programId: 'P1',
+          status: 'starting',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-15T10:00:00Z',
+          updatedAt: '2026-05-15T10:00:01Z',
+        }),
+    } as Response);
+
+    const result = await apiClient.transform({
+      sourceText: '      IDENTIFICATION DIVISION.',
+      programId: 'P1',
+      sourceName: 'sample.cbl',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      details: { kind: 'contract' },
+    });
+  });
+
+  it('rejects malformed run payloads with invalid status values', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'P1',
+          status: 'running',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-15T10:00:00Z',
+          updatedAt: '2026-05-15T10:00:01Z',
+        }),
+    } as Response);
+
+    const result = await apiClient.getRun('run-1');
+
+    expect(result).toMatchObject({
+      ok: false,
+      details: { kind: 'contract' },
+    });
+  });
+
+  it('rejects malformed artifacts payloads with invalid artifact metadata', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'P1',
+          mode: 'live',
+          productMode: 'live',
+          artifacts: [
+            {
+              uri: 'file:///run/source.cbl',
+              sha256: 'a'.repeat(64),
+              byteSize: -1,
+              mimeType: 'text/plain',
+              kind: 'source',
+              createdBy: 'orchestrator',
+              createdAt: '2026-05-15T10:00:00Z',
+              runId: 'run-1',
+              workflowId: 'w0',
+              path: 'source.cbl',
+              name: 'source.cbl',
+            },
+          ],
+        }),
+    } as Response);
+
+    const result = await apiClient.getRunArtifacts('run-1');
+
+    expect(result).toMatchObject({
+      ok: false,
+      details: { kind: 'contract' },
+    });
+  });
+
+  it('accepts evidence payloads that report invalid validation state', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'P1',
+          mode: 'live',
+          productMode: 'live',
+          status: 'invalid',
+          generatedArtifactRef: { uri: 'file:///runs/run-1/generated.json', sha256: 'a'.repeat(64) },
+        }),
+    } as Response);
+
+    const result = await apiClient.getEvidence('run-1');
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        runId: 'run-1',
+        programId: 'P1',
+        mode: 'live',
+        productMode: 'live',
+        status: 'invalid',
+        generatedArtifactRef: { uri: 'file:///runs/run-1/generated.json', sha256: 'a'.repeat(64) },
+      },
+    });
+  });
+
+  it('accepts valid build-test payloads with object outputRef metadata', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'P1',
+          mode: 'live',
+          productMode: 'live',
+          status: 'ok',
+          classification: 'match',
+          outputRef: {
+            uri: 'file:///runs/run-1/build-test-result.json',
+            sha256: 'b'.repeat(64),
+            byteSize: 256,
+          },
+          generatedArtifactRef: {
+            uri: 'file:///runs/run-1/generated.json',
+            sha256: 'a'.repeat(64),
+            byteSize: 128,
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.getBuildTest('run-1');
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        runId: 'run-1',
+        programId: 'P1',
+        mode: 'live',
+        productMode: 'live',
+        status: 'ok',
+        classification: 'match',
+        outputRef: {
+          uri: 'file:///runs/run-1/build-test-result.json',
+          sha256: 'b'.repeat(64),
+          byteSize: 256,
+        },
+        generatedArtifactRef: {
+          uri: 'file:///runs/run-1/generated.json',
+          sha256: 'a'.repeat(64),
+          byteSize: 128,
+        },
+      },
+    });
+  });
+
+  it('rejects malformed build-test payloads with invalid classifications', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'P1',
+          mode: 'live',
+          productMode: 'live',
+          status: 'run-failed',
+          classification: 'definitely-not-a-valid-classification',
+          generatedArtifactRef: {
+            uri: 'file:///runs/run-1/generated.json',
+            sha256: 'a'.repeat(64),
+            byteSize: 128,
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.getBuildTest('run-1');
+
+    expect(result).toMatchObject({
+      ok: false,
+      details: { kind: 'contract' },
+    });
+  });
+
   it('fails on invalid runtime configuration instead of falling back to an internal service URL', async () => {
     vi.stubEnv('NEXT_PUBLIC_C2C_BFF_BASE_URL', 'https://internal.example.net');
 

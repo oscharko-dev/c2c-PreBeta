@@ -647,7 +647,10 @@ components:
             ]
         expectedOutput: { type: string }
         actualOutput: { type: string }
-        outputRef: { type: string }
+        outputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
         generatedArtifactRef:
           oneOf:
             - $ref: "#/components/schemas/OutputRef"
@@ -668,7 +671,7 @@ components:
         productMode: { type: string, enum: [live, unavailable] }
         status:
           type: string
-          enum: [complete, incomplete]
+          enum: [complete, incomplete, invalid]
         packId: { type: string }
         manifestUri: { type: string }
         missingArtifacts:
