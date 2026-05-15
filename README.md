@@ -9,6 +9,12 @@ that prepares and validates COBOL-to-code migrations. The implemented product
 path is intentionally constrained, deterministic, and reproducible; W0.2 is the
 next wave that introduces the first productive AI-agent transformation loop.
 
+The Harness is the long-term differentiation layer: shared infrastructure,
+governance, ledgers, and Experience Learning. It observes agent, tool, model,
+artifact, and verification outcomes, learns which patterns work, and exposes
+those signals to orchestrators and agents. The Orchestrator still controls each
+workflow; the Harness does not become a hidden workflow engine.
+
 Canonical concept and roadmap:
 
 - [c2c Fachkonzept](docs/concept/c2c-fachkonzept.md)
@@ -182,13 +188,14 @@ Launcher overrides are documented in `.env.example`:
 |------|--------|-----------------|
 | W0 | Done | Deterministic COBOL-to-Java enterprise kernel: parser, Semantic IR, Java generation, build/test, evidence, Harness, Experience Learning telemetry, and no required model call. |
 | W0.1 | Done | Next.js/Tailwind c2c Studio: editable COBOL, BFF-backed transformation run, generated Java artifact view, build/test, evidence, artifacts, and honest blocked states. |
-| W0.2 | Next | First productive AI transformation loop: Harness-governed agents, Model Gateway/Foundry calls, bounded repair, and deterministic verification/evidence gate. |
+| W0.2 | Next | First productive AI transformation loop: orchestrator-steered agents on the Experience Learning Harness, Model Gateway/Foundry calls, bounded repair, first learning signals, and deterministic verification/evidence gate. |
 
 The W0/W0.1 product can transform supported W0 COBOL programs and selected
 small custom sources that stay inside the implemented subset. It must not be
 described as a feature-complete COBOL translator. W0.2 is responsible for the
-first real model-backed agent workflow; W0.3 and later waves broaden custom
-COBOL coverage and Experience Learning maturity.
+first real model-backed agent workflow and the first read-only learning signals;
+W0.3 and later waves broaden custom COBOL coverage and Experience Learning
+maturity.
 
 ## CI and quality gates
 

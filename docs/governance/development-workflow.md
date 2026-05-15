@@ -26,7 +26,7 @@ Use this label taxonomy for Wave 0 and follow-on W0.x waves:
 - `wave: preflight|w0|w0.1|w0.2|w1` - Delivery wave classification.
 - `priority: p0|p1|p2` - Urgency for sequencing and triage.
 - `status: ready|blocked|in-progress` - Current execution state.
-- `area: governance|platform|security|orchestrator|experience-learning|harness|model-gateway|semantics|target-java|verification|evidence|frontend|bff|corpus|release` - Primary ownership domain.
+- `area: governance|platform|security|orchestrator|experience-learning|harness|model-gateway|semantics|target-java|verification|evidence|frontend|bff|corpus|release|architecture|agents` - Primary ownership domain.
 
 **Ownership Expectations**: Issues must have an assigned owner before work begins. The assignee is responsible for driving the issue to completion.
 
@@ -50,7 +50,8 @@ the same PR:
 - wave scope or sequencing;
 - product architecture;
 - microservice boundaries;
-- Harness/orchestrator responsibilities;
+- Harness/orchestrator responsibilities, including the Harness role as
+  Experience Learning system;
 - model provider, Model Gateway, Foundry, or customer endpoint policy;
 - agent workflow semantics;
 - success, blocked, unsupported, failed, or incomplete UI states;
@@ -76,7 +77,8 @@ An issue is considered done and ready for merge when:
 - **CI is green** (build passes).
 - **Tests** are written and passing (where applicable).
 - **SBOM/license posture** is valid (where applicable).
-- **Harness event visibility** is established (where applicable).
+- **Harness event, trajectory, and Experience Learning visibility** is
+  established (where applicable).
 - No TODOs or temporary workarounds remain unless explicitly tracked in a follow-up issue.
 - Any required Fachkonzept, ADR, release-gate, runbook, or workflow updates are
   included.
