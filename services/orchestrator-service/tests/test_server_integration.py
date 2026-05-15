@@ -786,6 +786,38 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(events["status"], "complete")
             self.assertIsInstance(events["events"], list)
 
+            # Issue #96: progress endpoint exposes step-level state.
+            status_code, progress = _fetch_json(f"/v0/runs/{run_id}/progress")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(progress["status"], "complete")
+            self.assertEqual(progress["runStatus"], "completed")
+            self.assertIsNone(progress.get("failedStep"))
+            step_names = {entry["name"] for entry in progress["steps"]}
+            for required in [
+                "accepted",
+                "parse-cobol",
+                "generate-ir",
+                "generate-java",
+                "compile-test-java",
+                "write-evidence",
+                "completed",
+            ]:
+                self.assertIn(required, step_names, msg=f"missing step {required}")
+            self.assertNotIn("failed", step_names)
+            for entry in progress["steps"]:
+                self.assertIn("stepId", entry)
+                self.assertIn("status", entry)
+                self.assertIn("capabilityId", entry)
+                self.assertIn("startedAt", entry)
+
+            # Issue #96: learning endpoint reports `unavailable` when EL is
+            # not configured, but the envelope still has the run identity.
+            status_code, learning = _fetch_json(f"/v0/runs/{run_id}/learning")
+            self.assertEqual(status_code, 200)
+            self.assertEqual(learning["source"], "unavailable")
+            self.assertIsNone(learning["summary"])
+            self.assertEqual(learning["missingArtifacts"], ["learning-summary"])
+
             # Unknown run returns 404
             status_code, missing = _fetch_json("/v0/runs/run-missing/artifacts")
             self.assertEqual(status_code, 404)

@@ -6,9 +6,11 @@ import {
   formatSourceMetadata,
   generatedSummary,
   isReferenceProgramRunnable,
+  learningSummaryView,
   limitationsSummary,
   pickEntryFile,
   pipelineLine,
+  pipelineProgressSummary,
   productReadiness,
   referenceLoaderOptions,
   runStatusChip,
@@ -19,7 +21,9 @@ import type {
   BuildTestView,
   EvidenceView,
   GeneratedView,
+  LearningView,
   ModeResponse,
+  PipelineProgressView,
   RunSummary,
   SampleSummary,
   TransformRequest,
@@ -37,9 +41,13 @@ interface UiState {
   generated?: GeneratedView;
   buildTest?: BuildTestView;
   evidence?: EvidenceView;
+  progress?: PipelineProgressView;
+  learning?: LearningView;
   generatedError?: string;
   buildTestError?: string;
   evidenceError?: string;
+  progressError?: string;
+  learningError?: string;
   busy: boolean;
   lastError?: string;
   lastTransform?: TransformResponse;
@@ -165,31 +173,136 @@ function renderReferenceLoader(state: UiState): void {
 
 function renderPipeline(state: UiState): void {
   const node = el<HTMLDivElement>('pipeline-status');
-  const line = pipelineLine(state.run);
-  node.dataset['state'] = line.state;
   clearChildren(node);
   if (state.runError) {
+    node.dataset['state'] = 'failed';
     const diag = document.createElement('div');
     diag.className = 'diagnostic';
     diag.textContent = `Failed to refresh run: ${state.runError}`;
     node.appendChild(diag);
     return;
   }
+  // Issue #96: prefer the structured progress envelope from the orchestrator
+  // when available so the user sees a per-step timeline. Fall back to the
+  // run-summary-only line when progress hasn't been fetched yet.
+  const summary = pipelineProgressSummary(state.progress, state.run, state.progressError);
+  if (state.progress) {
+    node.dataset['state'] = summary.state;
+    const headline = document.createElement('div');
+    headline.className = 'pipeline-headline';
+    headline.textContent = summary.headline;
+    node.appendChild(headline);
+    if (summary.detail) {
+      const detail = document.createElement('div');
+      detail.style.color = 'var(--text-muted)';
+      detail.style.marginTop = '4px';
+      detail.textContent = summary.detail;
+      node.appendChild(detail);
+    }
+    if (summary.diagnostic) {
+      const diag = document.createElement('div');
+      diag.className = 'diagnostic';
+      diag.textContent = summary.diagnostic;
+      node.appendChild(diag);
+    }
+    if (summary.hiddenFailedStep) {
+      // Issue #96: never collapse a failed step into a generic success panel.
+      const warn = document.createElement('div');
+      warn.className = 'diagnostic';
+      warn.style.marginTop = '4px';
+      warn.textContent =
+        `Run reported as completed but step ${summary.failedStepLabel} is marked failed; surface this as a failure.`;
+      node.appendChild(warn);
+    }
+    if (summary.steps.length > 0) {
+      const list = document.createElement('ol');
+      list.className = 'pipeline-steps';
+      for (const line of summary.steps) {
+        const item = document.createElement('li');
+        item.dataset['status'] = line.status;
+        const label = document.createElement('span');
+        label.className = 'pipeline-step-label';
+        label.textContent = line.label;
+        item.appendChild(label);
+        const status = document.createElement('span');
+        status.className = 'pipeline-step-status';
+        status.textContent = `· ${line.status}`;
+        item.appendChild(status);
+        if (line.detail) {
+          const detail = document.createElement('div');
+          detail.className = 'pipeline-step-detail';
+          detail.textContent = line.detail;
+          item.appendChild(detail);
+        }
+        if (line.diagnostic) {
+          const diag = document.createElement('div');
+          diag.className = 'diagnostic pipeline-step-diagnostic';
+          diag.textContent = line.diagnostic;
+          item.appendChild(diag);
+        }
+        list.appendChild(item);
+      }
+      node.appendChild(list);
+    }
+    return;
+  }
+  // Fallback path before progress arrives: render the run-summary line so the
+  // user sees something, but never claim success when the run failed.
+  const fallback = pipelineLine(state.run);
+  node.dataset['state'] = fallback.state;
   const headline = document.createElement('div');
-  headline.textContent = line.headline;
+  headline.textContent = fallback.headline;
   node.appendChild(headline);
-  if (line.detail) {
+  if (fallback.detail) {
     const detail = document.createElement('div');
     detail.style.color = 'var(--text-muted)';
     detail.style.marginTop = '4px';
-    detail.textContent = line.detail;
+    detail.textContent = fallback.detail;
     node.appendChild(detail);
   }
-  if (line.diagnostic) {
+  if (fallback.diagnostic) {
     const diag = document.createElement('div');
     diag.className = 'diagnostic';
-    diag.textContent = line.diagnostic;
+    diag.textContent = fallback.diagnostic;
     node.appendChild(diag);
+  }
+}
+
+function renderLearning(state: UiState): void {
+  const node = el<HTMLDivElement>('learning-summary');
+  const view = learningSummaryView(state.learning, state.run, state.learningError);
+  node.dataset['status'] = view.status;
+  clearChildren(node);
+  const headline = document.createElement('div');
+  headline.textContent = view.headline;
+  node.appendChild(headline);
+  if (view.detail) {
+    const detail = document.createElement('div');
+    detail.style.color = 'var(--text-muted)';
+    detail.style.marginTop = '4px';
+    detail.textContent = view.detail;
+    node.appendChild(detail);
+  }
+  if (view.patterns.length > 0) {
+    const label = document.createElement('div');
+    label.style.marginTop = '6px';
+    label.textContent = `Observed patterns (${view.patterns.length}):`;
+    node.appendChild(label);
+    const list = document.createElement('ul');
+    list.className = 'bare';
+    for (const pattern of view.patterns) {
+      const li = document.createElement('li');
+      li.textContent = pattern;
+      list.appendChild(li);
+    }
+    node.appendChild(list);
+  }
+  if (view.endpoint) {
+    const endpoint = document.createElement('div');
+    endpoint.style.marginTop = '6px';
+    endpoint.style.color = 'var(--text-muted)';
+    endpoint.textContent = `endpoint: ${view.endpoint}`;
+    node.appendChild(endpoint);
   }
 }
 
@@ -431,11 +544,12 @@ function renderAll(state: UiState): void {
   renderGenerated(state);
   renderBuildTest(state);
   renderEvidence(state);
+  renderLearning(state);
   renderLimitations(state);
 }
 
 async function refreshRunDetails(api: BffApi, state: UiState, runId: string): Promise<void> {
-  const [generated, buildTest, evidence] = await Promise.all([
+  const [generated, buildTest, evidence, progress, learning] = await Promise.all([
     api.getGenerated(runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
       value: undefined as GeneratedView | undefined,
       error: err instanceof Error ? err.message : 'unknown error',
@@ -448,6 +562,14 @@ async function refreshRunDetails(api: BffApi, state: UiState, runId: string): Pr
       value: undefined as EvidenceView | undefined,
       error: err instanceof Error ? err.message : 'unknown error',
     })),
+    api.getProgress(runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
+      value: undefined as PipelineProgressView | undefined,
+      error: err instanceof Error ? err.message : 'unknown error',
+    })),
+    api.getLearning(runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
+      value: undefined as LearningView | undefined,
+      error: err instanceof Error ? err.message : 'unknown error',
+    })),
   ]);
   state.generated = generated.value;
   state.generatedError = generated.error;
@@ -455,6 +577,10 @@ async function refreshRunDetails(api: BffApi, state: UiState, runId: string): Pr
   state.buildTestError = buildTest.error;
   state.evidence = evidence.value;
   state.evidenceError = evidence.error;
+  state.progress = progress.value;
+  state.progressError = progress.error;
+  state.learning = learning.value;
+  state.learningError = learning.error;
 }
 
 async function pollRunUntilTerminal(
@@ -470,6 +596,14 @@ async function pollRunUntilTerminal(
       const run = await api.getRun(runId);
       state.run = run;
       state.runError = undefined;
+      // Issue #96: refresh per-step progress on each tick so the UI shows
+      // the current step + completed step list while the run is in flight.
+      try {
+        state.progress = await api.getProgress(runId);
+        state.progressError = undefined;
+      } catch (err) {
+        state.progressError = err instanceof Error ? err.message : 'unknown error';
+      }
       renderRunStatusChip(state);
       renderPipeline(state);
       if (run.status === 'completed' || run.status === 'failed') return;
@@ -575,6 +709,10 @@ async function bootstrap(api: BffApi): Promise<void> {
     state.buildTestError = undefined;
     state.evidence = undefined;
     state.evidenceError = undefined;
+    state.progress = undefined;
+    state.progressError = undefined;
+    state.learning = undefined;
+    state.learningError = undefined;
     state.selectedGeneratedFile = undefined;
     state.lastTransform = undefined;
     state.lastSourceHashHex = undefined;
@@ -600,6 +738,8 @@ async function bootstrap(api: BffApi): Promise<void> {
       renderGenerated(state);
       renderBuildTest(state);
       renderEvidence(state);
+      renderPipeline(state);
+      renderLearning(state);
       renderLimitations(state);
       if (state.run && state.run.status !== 'completed' && state.run.status !== 'failed') {
         await pollRunUntilTerminal(api, state, transform.runId);

@@ -13,6 +13,7 @@ from .artifacts import DEFAULT_RUN_ARTIFACT_ROOT
 
 DEFAULT_LISTEN_ADDR = "0.0.0.0:8084"
 DEFAULT_HARNESS_BASE_URL = "http://127.0.0.1:8080"
+DEFAULT_EXPERIENCE_LEARNING_BASE_URL = ""
 DEFAULT_WORKFLOW_ID = "w0-migration-v0"
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_RETRY_DELAY_MS = 200
@@ -125,6 +126,7 @@ class OrchestratorConfig:
     service_name: str = "orchestrator-service"
     model_gateway_model_id: str = DEFAULT_MODEL_GATEWAY_MODEL_ID
     run_artifact_root: str = DEFAULT_RUN_ARTIFACT_ROOT
+    experience_learning_base_url: str = DEFAULT_EXPERIENCE_LEARNING_BASE_URL
 
 
 def _read_env_int(name: str, default: int) -> int:
@@ -180,6 +182,11 @@ def load_config() -> OrchestratorConfig:
         model_gateway_model_id = DEFAULT_MODEL_GATEWAY_MODEL_ID
     harness_token = os.environ.get("ORCHESTRATOR_HARNESS_TOKEN", "").strip()
 
+    experience_learning_base_url = os.environ.get(
+        "ORCHESTRATOR_EXPERIENCE_LEARNING_BASE_URL",
+        os.environ.get("C2C_EXPERIENCE_LEARNING_URL", DEFAULT_EXPERIENCE_LEARNING_BASE_URL),
+    ).strip()
+
     run_artifact_root_raw = os.environ.get(
         "C2C_RUN_ARTIFACT_ROOT",
         os.environ.get("ORCHESTRATOR_RUN_ARTIFACT_ROOT", DEFAULT_RUN_ARTIFACT_ROOT),
@@ -219,6 +226,7 @@ def load_config() -> OrchestratorConfig:
         harness_token=harness_token,
         model_gateway_model_id=model_gateway_model_id,
         run_artifact_root=run_artifact_root,
+        experience_learning_base_url=experience_learning_base_url,
     )
 
 

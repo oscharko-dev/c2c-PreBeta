@@ -4,7 +4,9 @@ import type {
   GeneratedFileContent,
   GeneratedFilesIndex,
   GeneratedView,
+  LearningView,
   ModeResponse,
+  PipelineProgressView,
   RunSummary,
   SampleDetail,
   SampleSummary,
@@ -41,6 +43,8 @@ export interface BffApi {
   getGeneratedFile(runId: string, filePath: string): Promise<GeneratedFileContent>;
   getBuildTest(runId: string): Promise<BuildTestView>;
   getEvidence(runId: string): Promise<EvidenceView>;
+  getProgress(runId: string): Promise<PipelineProgressView>;
+  getLearning(runId: string): Promise<LearningView>;
 }
 
 export function createBffApi(options: { baseUrl?: string; fetchImpl?: FetchLike } = {}): BffApi {
@@ -99,5 +103,7 @@ export function createBffApi(options: { baseUrl?: string; fetchImpl?: FetchLike 
     },
     getBuildTest: (runId) => request<BuildTestView>(`/api/v0/runs/${encodeURIComponent(runId)}/build-test`),
     getEvidence: (runId) => request<EvidenceView>(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`),
+    getProgress: (runId) => request<PipelineProgressView>(`/api/v0/runs/${encodeURIComponent(runId)}/progress`),
+    getLearning: (runId) => request<LearningView>(`/api/v0/runs/${encodeURIComponent(runId)}/learning`),
   };
 }

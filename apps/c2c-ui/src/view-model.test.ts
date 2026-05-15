@@ -566,3 +566,196 @@ test('isReferenceProgramRunnable returns false for missing or unsupported sample
   assert.equal(isReferenceProgramRunnable(unsupported), false);
   assert.equal(isReferenceProgramRunnable(makeSample()), true);
 });
+
+// Issue #96: pipeline progress + experience-learning view-model contracts.
+
+import { learningSummaryView, pipelineProgressSummary, pipelineStepLabel } from './view-model.js';
+import type { LearningView, PipelineProgressView, PipelineStep } from './types.js';
+
+function makeStep(overrides: Partial<PipelineStep> & { name: string }): PipelineStep {
+  return {
+    stepId: 1,
+    name: overrides.name,
+    capabilityId: overrides.capabilityId ?? 'cap-x',
+    service: overrides.service ?? 'orchestrator-service',
+    actor: overrides.actor ?? 'cap-x-owner',
+    status: overrides.status ?? 'ok',
+    ...(overrides.startedAt !== undefined ? { startedAt: overrides.startedAt } : {}),
+    ...(overrides.finishedAt !== undefined ? { finishedAt: overrides.finishedAt } : {}),
+    ...(overrides.diagnostic !== undefined ? { diagnostic: overrides.diagnostic } : {}),
+    ...(overrides.inputRef !== undefined ? { inputRef: overrides.inputRef } : {}),
+    ...(overrides.outputRef !== undefined ? { outputRef: overrides.outputRef } : {}),
+    ...(overrides.latencyMs !== undefined ? { latencyMs: overrides.latencyMs } : {}),
+  };
+}
+
+function makeProgress(overrides: Partial<PipelineProgressView> = {}): PipelineProgressView {
+  return {
+    runId: 'run-9',
+    programId: 'WB001',
+    mode: 'live',
+    productMode: 'live',
+    status: 'complete',
+    runStatus: 'completed',
+    currentStep: null,
+    failedStep: null,
+    completedSteps: [],
+    stepCount: 0,
+    steps: [],
+    missingArtifacts: [],
+    orchestratorRunId: 'orch-9',
+    ...overrides,
+  };
+}
+
+test('pipelineStepLabel maps known step names to friendly labels', () => {
+  assert.equal(pipelineStepLabel('parse-cobol'), 'Parse COBOL');
+  assert.equal(pipelineStepLabel('write-evidence'), 'Write evidence');
+  assert.equal(pipelineStepLabel('unknown-step'), 'unknown-step');
+});
+
+test('pipelineProgressSummary reports in-progress state with current step', () => {
+  const summary = pipelineProgressSummary(
+    makeProgress({
+      runStatus: 'updating',
+      currentStep: 'generate-java',
+      completedSteps: ['accepted', 'parse-cobol', 'generate-ir'],
+      stepCount: 5,
+      steps: [
+        makeStep({ stepId: 1, name: 'accepted' }),
+        makeStep({ stepId: 2, name: 'parse-cobol' }),
+        makeStep({ stepId: 3, name: 'generate-ir' }),
+        makeStep({ stepId: 4, name: 'generate-java', status: 'running' }),
+      ],
+    }),
+    makeRun({ status: 'updating' }),
+    undefined,
+  );
+  assert.equal(summary.state, 'in-progress');
+  assert.match(summary.headline, /Generate Java/);
+  assert.equal(summary.currentStepLabel, 'Generate Java');
+  assert.equal(summary.steps.length, 4);
+  assert.equal(summary.steps[3]?.status, 'running');
+  assert.equal(summary.hiddenFailedStep, false);
+});
+
+test('pipelineProgressSummary surfaces failed step diagnostic and never reports success', () => {
+  const summary = pipelineProgressSummary(
+    makeProgress({
+      runStatus: 'failed',
+      currentStep: null,
+      failedStep: 'generate-java',
+      completedSteps: ['accepted', 'parse-cobol', 'generate-ir'],
+      stepCount: 5,
+      steps: [
+        makeStep({ stepId: 1, name: 'accepted' }),
+        makeStep({ stepId: 2, name: 'parse-cobol' }),
+        makeStep({ stepId: 3, name: 'generate-ir' }),
+        makeStep({
+          stepId: 4,
+          name: 'generate-java',
+          status: 'failed',
+          diagnostic: 'generator backend unavailable',
+        }),
+      ],
+    }),
+    makeRun({ status: 'failed' }),
+    undefined,
+  );
+  assert.equal(summary.state, 'failed');
+  assert.match(summary.headline, /Failed at Generate Java/);
+  assert.equal(summary.failedStepLabel, 'Generate Java');
+  assert.equal(summary.diagnostic, 'generator backend unavailable');
+  assert.equal(summary.hiddenFailedStep, false);
+});
+
+test('pipelineProgressSummary flags hidden-failed-step when run reports completed but a step failed', () => {
+  const summary = pipelineProgressSummary(
+    makeProgress({
+      runStatus: 'completed',
+      failedStep: 'compile-test-java',
+      completedSteps: ['accepted', 'parse-cobol', 'generate-ir', 'generate-java'],
+      stepCount: 6,
+      steps: [
+        makeStep({ stepId: 1, name: 'accepted' }),
+        makeStep({ stepId: 2, name: 'parse-cobol' }),
+        makeStep({ stepId: 3, name: 'generate-ir' }),
+        makeStep({ stepId: 4, name: 'generate-java' }),
+        makeStep({ stepId: 5, name: 'compile-test-java', status: 'failed', diagnostic: 'tests failed' }),
+        makeStep({ stepId: 6, name: 'completed' }),
+      ],
+    }),
+    makeRun({ status: 'completed' }),
+    undefined,
+  );
+  assert.equal(summary.hiddenFailedStep, true);
+  assert.equal(summary.failedStepLabel, 'Compile & test Java');
+});
+
+test('pipelineProgressSummary returns idle headline when no progress is loaded', () => {
+  const summary = pipelineProgressSummary(undefined, undefined, undefined);
+  assert.equal(summary.state, 'idle');
+  assert.equal(summary.headline, 'No run started.');
+  assert.equal(summary.steps.length, 0);
+});
+
+test('pipelineProgressSummary surfaces error when fetch failed', () => {
+  const summary = pipelineProgressSummary(undefined, makeRun(), 'BFF unavailable');
+  assert.equal(summary.state, 'unavailable');
+  assert.match(summary.headline, /Failed to load pipeline progress: BFF unavailable/);
+});
+
+test('learningSummaryView renders patterns and endpoint when EL summary is live', () => {
+  const view: LearningView = {
+    runId: 'run-9',
+    programId: 'WB001',
+    mode: 'live',
+    productMode: 'live',
+    status: 'complete',
+    summary: {
+      runId: 'run-9',
+      sourceEventCount: 12,
+      sourceLedgerCount: 1,
+      candidateCount: 3,
+      candidateByPattern: { repeat_action: 2, accepted_pattern: 1 },
+      experienceEventIds: ['e1', 'e2', 'e3'],
+      observedPatterns: ['accepted_pattern', 'repeat_action'],
+      observationOnly: true,
+      policyVersion: 'v0',
+    },
+    endpoint: 'http://el.test/v0/runs/run-9/summary',
+    source: 'live',
+    missingArtifacts: [],
+    orchestratorRunId: 'orch-9',
+  };
+  const summary = learningSummaryView(view, makeRun({ status: 'completed' }), undefined);
+  assert.equal(summary.status, 'live');
+  assert.equal(summary.candidateCount, 3);
+  assert.deepEqual(summary.patterns, ['accepted_pattern', 'repeat_action']);
+  assert.equal(summary.endpoint, 'http://el.test/v0/runs/run-9/summary');
+  assert.equal(summary.observationOnly, true);
+  assert.equal(summary.policyVersion, 'v0');
+});
+
+test('learningSummaryView reports unavailable when EL is offline', () => {
+  const view: LearningView = {
+    runId: 'run-9',
+    programId: 'WB001',
+    mode: 'live',
+    productMode: 'live',
+    status: 'incomplete',
+    summary: null,
+    endpoint: '',
+    source: 'unavailable',
+    missingArtifacts: ['learning-summary'],
+  };
+  const summary = learningSummaryView(view, makeRun(), undefined);
+  assert.equal(summary.status, 'unavailable');
+  assert.match(summary.headline, /unavailable/i);
+});
+
+test('learningSummaryView is idle when no run started', () => {
+  const summary = learningSummaryView(undefined, undefined, undefined);
+  assert.equal(summary.status, 'idle');
+  assert.equal(summary.headline, 'No run started.');
+});

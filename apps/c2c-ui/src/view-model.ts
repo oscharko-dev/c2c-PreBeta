@@ -2,7 +2,11 @@ import type {
   BuildTestView,
   EvidenceView,
   GeneratedView,
+  LearningView,
   ModeResponse,
+  PipelineProgressView,
+  PipelineStep,
+  PipelineStepStatus,
   RunSummary,
   SampleSummary,
   TransformResponse,
@@ -577,4 +581,225 @@ function utf8ByteLength(text: string): number {
     return new TextEncoder().encode(text).length;
   }
   return Buffer.byteLength(text, 'utf8');
+}
+
+// Issue #96: pipeline-progress + experience-learning view-model helpers.
+
+const REQUIRED_RUN_STEP_NAMES: ReadonlyArray<string> = [
+  'parse-cobol',
+  'generate-ir',
+  'generate-java',
+  'compile-test-java',
+  'write-evidence',
+];
+
+const PIPELINE_STEP_LABELS: Readonly<Record<string, string>> = {
+  'accepted': 'Accepted',
+  'parse-cobol': 'Parse COBOL',
+  'generate-ir': 'Generate IR',
+  'generate-java': 'Generate Java',
+  'compile-test-java': 'Compile & test Java',
+  'write-evidence': 'Write evidence',
+  'model-guidance': 'Model guidance',
+  'model-policy-skipped': 'Model policy skipped',
+  'completed': 'Completed',
+  'failed': 'Failed',
+};
+
+export function pipelineStepLabel(name: string): string {
+  return PIPELINE_STEP_LABELS[name] ?? name;
+}
+
+export interface PipelineStepLine {
+  step: PipelineStep;
+  label: string;
+  status: PipelineStepStatus;
+  detail: string;
+  diagnostic?: string;
+}
+
+function formatStepDetail(step: PipelineStep): string {
+  const parts: string[] = [];
+  if (step.capabilityId) parts.push(`capability=${step.capabilityId}`);
+  if (step.actor && step.actor !== step.capabilityId) parts.push(`actor=${step.actor}`);
+  if (step.startedAt) parts.push(`started=${step.startedAt}`);
+  if (step.finishedAt) parts.push(`finished=${step.finishedAt}`);
+  if (typeof step.latencyMs === 'number') parts.push(`latency=${step.latencyMs}ms`);
+  return parts.join(' · ');
+}
+
+export function pipelineStepLines(progress: PipelineProgressView | undefined): PipelineStepLine[] {
+  if (!progress) return [];
+  return progress.steps.map((step) => {
+    const line: PipelineStepLine = {
+      step,
+      label: pipelineStepLabel(step.name),
+      status: step.status,
+      detail: formatStepDetail(step),
+    };
+    if (step.diagnostic) line.diagnostic = step.diagnostic;
+    return line;
+  });
+}
+
+export interface PipelineProgressSummary {
+  state: 'idle' | 'starting' | 'in-progress' | 'completed' | 'failed' | 'unavailable';
+  headline: string;
+  detail: string;
+  currentStepLabel: string;
+  failedStepLabel: string;
+  diagnostic?: string;
+  steps: PipelineStepLine[];
+  hiddenFailedStep: boolean;
+}
+
+export function pipelineProgressSummary(
+  progress: PipelineProgressView | undefined,
+  run: RunSummary | undefined,
+  error: string | undefined,
+): PipelineProgressSummary {
+  if (error) {
+    return {
+      state: 'unavailable',
+      headline: `Failed to load pipeline progress: ${error}`,
+      detail: '',
+      currentStepLabel: '',
+      failedStepLabel: '',
+      steps: [],
+      hiddenFailedStep: false,
+    };
+  }
+  if (!progress) {
+    return {
+      state: run?.status === 'failed' ? 'failed' : 'idle',
+      headline: run ? 'Pipeline progress pending…' : 'No run started.',
+      detail: '',
+      currentStepLabel: '',
+      failedStepLabel: '',
+      steps: [],
+      hiddenFailedStep: false,
+    };
+  }
+  const lines = pipelineStepLines(progress);
+  const currentStepLabel = progress.currentStep ? pipelineStepLabel(progress.currentStep) : '';
+  const failedStepLabel = progress.failedStep ? pipelineStepLabel(progress.failedStep) : '';
+  const failedLine = progress.failedStep
+    ? lines.find((entry) => entry.step.name === progress.failedStep)
+    : undefined;
+  let state: PipelineProgressSummary['state'];
+  let headline: string;
+  if (progress.failedStep) {
+    state = 'failed';
+    headline = `Failed at ${failedStepLabel || progress.failedStep}`;
+  } else if (progress.runStatus === 'completed') {
+    state = 'completed';
+    headline = 'Pipeline complete';
+  } else if (progress.runStatus === 'starting' || progress.completedSteps.length === 0) {
+    state = 'starting';
+    headline = currentStepLabel ? `Starting · ${currentStepLabel}` : 'Starting…';
+  } else {
+    state = 'in-progress';
+    headline = currentStepLabel ? `In progress · ${currentStepLabel}` : 'In progress';
+  }
+  const detailParts: string[] = [];
+  detailParts.push(`step ${progress.completedSteps.length}/${progress.stepCount || REQUIRED_RUN_STEP_NAMES.length}`);
+  if (progress.orchestratorRunId) detailParts.push(`orchestrator=${progress.orchestratorRunId}`);
+  // Issue #96: never collapse a failed step into a generic success panel.
+  // If the run is reported as completed but a failed step exists, surface it.
+  const hiddenFailedStep = progress.runStatus === 'completed' && Boolean(progress.failedStep);
+  return {
+    state,
+    headline,
+    detail: detailParts.join(' · '),
+    currentStepLabel,
+    failedStepLabel,
+    ...(failedLine?.diagnostic ? { diagnostic: failedLine.diagnostic } : {}),
+    steps: lines,
+    hiddenFailedStep,
+  };
+}
+
+export interface LearningSummaryView {
+  status: 'idle' | 'live' | 'cached' | 'unavailable';
+  headline: string;
+  detail: string;
+  endpoint: string;
+  patterns: string[];
+  candidateCount: number;
+  observationOnly?: boolean;
+  policyVersion?: string;
+}
+
+export function learningSummaryView(
+  view: LearningView | undefined,
+  run: RunSummary | undefined,
+  error: string | undefined,
+): LearningSummaryView {
+  if (error) {
+    return {
+      status: 'unavailable',
+      headline: `Failed to load learning summary: ${error}`,
+      detail: '',
+      endpoint: '',
+      patterns: [],
+      candidateCount: 0,
+    };
+  }
+  if (!view) {
+    if (!run) {
+      return {
+        status: 'idle',
+        headline: 'No run started.',
+        detail: '',
+        endpoint: '',
+        patterns: [],
+        candidateCount: 0,
+      };
+    }
+    return {
+      status: 'idle',
+      headline: 'Experience learning summary pending…',
+      detail: '',
+      endpoint: '',
+      patterns: [],
+      candidateCount: 0,
+    };
+  }
+  if (!view.summary) {
+    return {
+      status: view.source === 'unavailable' ? 'unavailable' : 'idle',
+      headline:
+        view.source === 'unavailable'
+          ? 'Experience learning unavailable for this run.'
+          : 'Experience learning summary pending…',
+      detail: view.note ?? '',
+      endpoint: view.endpoint,
+      patterns: [],
+      candidateCount: 0,
+    };
+  }
+  const summary = view.summary;
+  const headline =
+    view.source === 'live'
+      ? 'Experience learning summary'
+      : 'Experience learning summary (cached)';
+  const detailParts: string[] = [];
+  detailParts.push(`events=${summary.sourceEventCount ?? 0}`);
+  detailParts.push(`ledgers=${summary.sourceLedgerCount ?? 0}`);
+  if (summary.policyVersion) detailParts.push(`policy=${summary.policyVersion}`);
+  const result: LearningSummaryView = {
+    status: view.source,
+    headline,
+    detail: detailParts.join(' · '),
+    endpoint: view.endpoint,
+    patterns: summary.observedPatterns ?? [],
+    candidateCount: summary.candidateCount ?? 0,
+  };
+  if (typeof summary.observationOnly === 'boolean') {
+    result.observationOnly = summary.observationOnly;
+  }
+  if (summary.policyVersion) {
+    result.policyVersion = summary.policyVersion;
+  }
+  return result;
 }

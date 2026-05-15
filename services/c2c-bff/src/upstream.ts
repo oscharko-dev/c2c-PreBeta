@@ -103,11 +103,25 @@ export interface OrchestratorClient {
   getBuildTest(runId: string): Promise<UpstreamResponse | undefined>;
   getEvidence(runId: string): Promise<UpstreamResponse | undefined>;
   getEvents(runId: string): Promise<UpstreamResponse | undefined>;
+  // Issue #96: step-level pipeline progress for UI-started runs.
+  getProgress(runId: string): Promise<UpstreamResponse | undefined>;
+  // Issue #96: experience-learning summary view sourced via orchestrator.
+  getLearning(runId: string): Promise<UpstreamResponse | undefined>;
 }
 
 export interface EvidenceClient {
   enabled: boolean;
   getPack(packId: string): Promise<UpstreamResponse | undefined>;
+}
+
+// Issue #96: optional direct client for the experience-learning-service.
+// When configured (`C2C_EXPERIENCE_LEARNING_URL`), the BFF can fetch the
+// run summary straight from EL instead of going through the orchestrator's
+// cached copy.
+export interface ExperienceLearningClient {
+  enabled: boolean;
+  baseUrl: string;
+  getRunSummary(runId: string): Promise<UpstreamResponse | undefined>;
 }
 
 export function createOrchestratorClient(baseUrl: string, http: HttpClient, timeoutMs: number): OrchestratorClient {
@@ -142,6 +156,12 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
         return undefined;
       },
       async getEvents() {
+        return undefined;
+      },
+      async getProgress() {
+        return undefined;
+      },
+      async getLearning() {
         return undefined;
       },
     };
@@ -236,6 +256,40 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
     },
     async getEvents(runId: string) {
       return getRunScopedArtifact(runId, 'events');
+    },
+    async getProgress(runId: string) {
+      return getRunScopedArtifact(runId, 'progress');
+    },
+    async getLearning(runId: string) {
+      return getRunScopedArtifact(runId, 'learning');
+    },
+  };
+}
+
+export function createExperienceLearningClient(
+  baseUrl: string,
+  http: HttpClient,
+  timeoutMs: number,
+): ExperienceLearningClient {
+  if (!baseUrl) {
+    return {
+      enabled: false,
+      baseUrl: '',
+      async getRunSummary() {
+        return undefined;
+      },
+    };
+  }
+  const normalized = baseUrl.replace(/\/+$/, '');
+  return {
+    enabled: true,
+    baseUrl: normalized,
+    async getRunSummary(runId: string) {
+      const safe = encodeURIComponent(runId);
+      return http.request(`${normalized}/v0/runs/${safe}/summary`, {
+        method: 'GET',
+        timeoutMs,
+      });
     },
   };
 }
