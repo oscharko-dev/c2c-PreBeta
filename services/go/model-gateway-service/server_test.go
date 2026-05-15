@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -203,6 +205,9 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 	if response.PromptTemplateVersion != "v1" {
 		t.Fatalf("expected prompt template v1, got %s", response.PromptTemplateVersion)
 	}
+	if response.PolicyDecision != policyDecisionAllow {
+		t.Fatalf("expected policy decision %s, got %s", policyDecisionAllow, response.PolicyDecision)
+	}
 	ledgerJSON, err := json.Marshal(ledger.entries[0])
 	if err != nil {
 		t.Fatalf("failed to marshal ledger entry: %v", err)
@@ -220,6 +225,22 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 	if provider.calls != 1 {
 		t.Fatalf("expected provider call, got %d", provider.calls)
 	}
+}
+
+func TestModelInvocationLedgerSchemaPresence(t *testing.T) {
+	for _, candidate := range []string{
+		filepath.Join("..", "..", "..", "schemas", "model-invocation-ledger-v0.json"),
+	} {
+		body, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		if !strings.Contains(string(body), "model-invocation-ledger-v0.json") {
+			t.Fatalf("schema file present but missing canonical $id: %s", candidate)
+		}
+		return
+	}
+	t.Fatalf("schemas/model-invocation-ledger-v0.json not found relative to service module")
 }
 
 func TestModelGatewayService_InvokeWithAuditSinksDisabledSkipsLedgerAndEvent(t *testing.T) {

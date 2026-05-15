@@ -435,6 +435,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		ModelID:               request.ModelID,
 		Provider:              validated.model.Provider,
 		PromptTemplateVersion: request.PromptTemplateVersion,
+		PolicyDecision:        validated.policyDecision,
 		Status:                outputStatus,
 		LatencyMs:             latencyMs,
 		LedgerRef:             ledgerRef,

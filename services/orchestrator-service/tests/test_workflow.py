@@ -191,6 +191,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 "modelId": "gpt-oss-120b",
                 "provider": "foundry-development",
                 "promptTemplateVersion": "v1",
+                "policyDecision": "policy allow",
                 "status": "completed",
                 "ledgerRef": {
                     "uri": "urn:model-gateway/invocations/mg-run-1-1",
@@ -231,7 +232,9 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         evidence_call = next(entry for entry in gateway.calls if entry[0] == "invoke" and entry[1] == "evidence.writer")
         model_invocation = evidence_call[2]["artifacts"]["modelInvocations"][0]
         self.assertEqual(model_invocation["status"], "skipped")
-        self.assertEqual(model_invocation["provider"], "orchestrator")
+        self.assertEqual(model_invocation["provider"], "policy-skipped")
+        self.assertEqual(model_invocation["policyVersion"], "v0")
+        self.assertIn("reason", model_invocation)
 
     def test_build_test_invocation_forwards_cobol_runtime_oracle(self):
         # Issue #92: the orchestrator must attach the UI-provided COBOL source
@@ -288,6 +291,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         model_invocation = evidence_call[2]["artifacts"]["modelInvocations"][0]
         self.assertEqual(model_invocation["status"], "skipped")
         self.assertEqual(model_invocation["modelId"], "phi-4")
+        self.assertEqual(model_invocation["policyVersion"], "v0")
 
     def test_successful_run_with_optional_model_prompt(self):
         gateway = StubGateway(self._base_capabilities(), self._base_responses())
@@ -324,6 +328,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(model_invocation["status"], "completed")
         self.assertEqual(model_invocation["provider"], "foundry-development")
         self.assertEqual(model_invocation["promptTemplateVersion"], "v1")
+        self.assertEqual(model_invocation["policyDecision"], "policy allow")
         self.assertEqual(model_invocation["ledgerRef"]["sha256"], "b" * 64)
 
     def test_retry_happy_path_on_temporary_parse_failure(self):
@@ -449,6 +454,35 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         event_types = [event.get("eventType") for event in gateway.posted_events]
         self.assertIn("orchestrator.workflow.failed", event_types)
 
+    def test_model_prompt_requires_model_gateway_capability(self):
+        capabilities = self._base_capabilities()
+        del capabilities["model-gateway"]
+
+        class MissingCapabilityGateway(StubGateway):
+            def get_capability(self, capability_id):
+                self.calls.append(("get_capability", capability_id))
+                if capability_id == "model-gateway":
+                    raise RuntimeError("capability model-gateway not found")
+                return dict(self.capabilities[capability_id])
+
+        gateway = MissingCapabilityGateway(capabilities, self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt="explain safe migration",
+        )
+
+        with self.assertRaises(CapabilityMissingError) as ctx:
+            runner.run(context=context, input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."})
+
+        self.assertIn("model-gateway", str(ctx.exception))
+        self.assertEqual(gateway.updated_runs[-1][1], "failed")
+        diagnostic_message = gateway.updated_runs[-1][3]
+        self.assertIn("model-gateway", diagnostic_message)
+
     def test_evidence_step_failure_marks_run_failed_and_does_not_succeed(self):
         responses = self._base_responses()
         gateway = StubGateway(self._base_capabilities(), responses)
@@ -551,6 +585,26 @@ class WorkflowArtifactPersistenceTests(unittest.TestCase):
         self.assertEqual(summary["programId"], "CASE01")
         self.assertIn("write-evidence", summary["completedSteps"])
 
+        skipped = json.loads((run_dir / "model-policy-skipped.json").read_text("utf-8"))
+        self.assertEqual(skipped["status"], "skipped")
+        self.assertEqual(skipped["modelId"], "gpt-oss-120b")
+        self.assertEqual(skipped["policyVersion"], "v0")
+        self.assertIn("timestamp", skipped)
+        self.assertIn("deterministic W0 translation", skipped["reason"])
+
+        skipped_meta = store.find_metadata("run-Z1", "model-policy-skipped.json")
+        self.assertIsNotNone(skipped_meta)
+        evidence_call = next(
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == "evidence.writer"
+        )
+        evidence_model_ref = evidence_call[2]["artifacts"]["modelInvocations"][0]
+        self.assertEqual(evidence_model_ref["status"], "skipped")
+        self.assertEqual(evidence_model_ref["provider"], "policy-skipped")
+        self.assertEqual(evidence_model_ref["policyVersion"], "v0")
+        self.assertEqual(evidence_model_ref["ledgerRef"]["uri"], skipped_meta["uri"])
+        self.assertEqual(evidence_model_ref["ledgerRef"]["sha256"], skipped_meta["sha256"])
+
     def test_failed_run_persists_partial_artifacts_and_failure_summary(self):
         responses = W0WorkflowRunnerTests._base_responses()
         gateway = StubGateway(W0WorkflowRunnerTests._base_capabilities(), responses)
@@ -616,6 +670,21 @@ class DataReferenceTests(unittest.TestCase):
     def test_data_reference_type_is_available(self):
         reference = DataReference(uri="urn:test", sha256="a" * 64, byte_size=1)
         self.assertEqual(reference.uri, "urn:test")
+
+
+class GovernanceSchemaTests(unittest.TestCase):
+    def test_model_policy_skipped_schema_is_present(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        schema_path = repo_root / "schemas" / "model-policy-skipped-v0.json"
+        body = json.loads(schema_path.read_text("utf-8"))
+
+        self.assertEqual(
+            body["$id"],
+            "https://oscharko.dev/c2c/schemas/model-policy-skipped-v0.json",
+        )
+        self.assertEqual(body["properties"]["status"]["const"], "skipped")
+        for required in ("runId", "workflowId", "modelId", "reason", "policyVersion", "timestamp"):
+            self.assertIn(required, body["required"])
 
 
 if __name__ == "__main__":

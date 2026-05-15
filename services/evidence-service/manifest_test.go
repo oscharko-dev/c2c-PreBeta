@@ -80,6 +80,10 @@ func TestDataReferenceValidateRejectsMissingURI(t *testing.T) {
 
 func TestManifestRoundTripsJSON(t *testing.T) {
 	m := newCompleteManifest(t)
+	m.Artifacts.ModelInvocations[0].PolicyDecision = "policy allow"
+	m.Artifacts.ModelInvocations[0].PolicyVersion = "v0"
+	m.Artifacts.ModelInvocations[0].Reason = "deterministic workflow did not require model assistance"
+	m.Artifacts.ModelInvocations[0].Timestamp = "2026-05-15T12:00:00Z"
 	body, err := json.Marshal(m)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -90,6 +94,9 @@ func TestManifestRoundTripsJSON(t *testing.T) {
 	}
 	if decoded.PackID != m.PackID || decoded.Wave != WaveW0 {
 		t.Fatalf("round-trip lost fields: %+v", decoded)
+	}
+	if decoded.Artifacts.ModelInvocations[0].PolicyVersion != "v0" {
+		t.Fatalf("expected model policy version to round-trip, got %+v", decoded.Artifacts.ModelInvocations[0])
 	}
 }
 

@@ -104,7 +104,11 @@ type ModelInvocationRef struct {
 	ModelID               string        `json:"modelId"`
 	Provider              string        `json:"provider,omitempty"`
 	PromptTemplateVersion string        `json:"promptTemplateVersion,omitempty"`
+	PolicyDecision        string        `json:"policyDecision,omitempty"`
 	Status                string        `json:"status,omitempty"`
+	Reason                string        `json:"reason,omitempty"`
+	PolicyVersion         string        `json:"policyVersion,omitempty"`
+	Timestamp             string        `json:"timestamp,omitempty"`
 	LedgerRef             DataReference `json:"ledgerRef"`
 }
 
