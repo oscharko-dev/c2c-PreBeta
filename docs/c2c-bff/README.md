@@ -1,16 +1,33 @@
-# c2c-bff and c2c-ui
+# c2c-bff and c2c Studio
 
-W0 surface for the c2c walking skeleton. Two packages, one reference-run path:
+W0/W0.1 surface for the c2c product path. The current product browser
+entrypoint is the Next.js c2c Studio; the older `apps/c2c-ui` surface remains a
+legacy reference-run surface only.
 
 - [`services/c2c-bff`](../../services/c2c-bff) — TypeScript/Node 20 HTTP
   facade that brokers all UI calls to the W0 capability mesh.
-- [`apps/c2c-ui`](../../apps/c2c-ui) — TypeScript/vanilla-DOM static
-  bundle served by the BFF.
+- [`apps/c2c-studio`](../../apps/c2c-studio) — Next.js App Router, React,
+  TypeScript, and Tailwind product Studio served locally on port 3000 and
+  wired to the BFF.
+- [`apps/c2c-ui`](../../apps/c2c-ui) — legacy TypeScript/vanilla-DOM static
+  reference surface.
 
 This document is the entrypoint for reviewers, walks through the reference run
 flow, and records the open assumptions a reviewer should expect.
 
-## Reference Run flow
+## Product Studio flow
+
+1. Start the local stack with `./scripts/start-c2c-local.sh`.
+2. Open `http://127.0.0.1:3000`.
+3. Load or paste COBOL source in the left editor.
+4. Click **Start Transformation**. The Studio calls the BFF, the BFF calls the
+   orchestrator, and the orchestrator drives the capability mesh.
+5. The generated Java pane renders only active-run generated files retrieved
+   from `/api/v0/runs/{runId}/generated/files/{path}`.
+6. Build/test, Evidence Pack, artifacts, progress, Harness, Model Gateway, and
+   Experience Learning panels show state for the same run.
+
+## Legacy reference surface flow
 
 1. Open the UI. The header shows whether the BFF is in `mock` or `live`
    mode based on `C2C_ORCHESTRATOR_URL` and `C2C_EVIDENCE_URL`.
@@ -65,16 +82,14 @@ See [`services/c2c-bff/openapi.yaml`](../../services/c2c-bff/openapi.yaml)
 for the canonical schema. The UI consumes only `/api/v0/*` and is not
 allowed to bypass it.
 
-## What W0 deliberately does not do
+## What W0/W0.1 deliberately does not do
 
 - Customer-data upload paths.
-- Full application explorer / graph visualisations.
 - Multi-user authentication, RBAC, or audit dashboards.
-- A live aggregator that pulls generated-Java back through the BFF — at
-  W0 the BFF labels generated-Java as `skipped` when in live mode and
-  defers reviewers to `target-java-generation-service`. Mock mode shows
-  documented stubs for the three checked-in samples.
-- Bundler-based UI; the UI is vanilla TypeScript compiled with `tsc`.
+- Productive AI-agent transformation. W0/W0.1 are deterministic; W0.2 adds the
+  first Harness-governed model-backed agent workflow.
+- Browser access to internal services or model credentials. The Studio calls
+  only the BFF.
 
 ## ADR
 

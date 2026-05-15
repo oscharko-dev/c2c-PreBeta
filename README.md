@@ -4,8 +4,17 @@ Experience Learning Harness · Open Source · Open Weight · EU Sovereignty
 
 Think Big, Start Small.
 
-This repository is the W0 platform foundation for a polyglot service mesh that prepares and validates COBOL-to-code migrations.
-The initial walking skeleton is intentionally constrained, deterministic, and reproducible.
+This repository is the W0/W0.1 product foundation for a polyglot service mesh
+that prepares and validates COBOL-to-code migrations. The implemented product
+path is intentionally constrained, deterministic, and reproducible; W0.2 is the
+next wave that introduces the first productive AI-agent transformation loop.
+
+Canonical concept and roadmap:
+
+- [c2c Fachkonzept](docs/concept/c2c-fachkonzept.md)
+- [Development workflow governance](docs/governance/development-workflow.md)
+- [W0 release gate](docs/release/w0-release-gate.md)
+- [W0.1 Studio closure evidence](docs/release/w0-studio-epic-118.md)
 
 ## W0 Repository Architecture
 
@@ -167,6 +176,20 @@ Launcher overrides are documented in `.env.example`:
 - `C2C_LOCAL_HARNESS_TOKEN`
 - `C2C_LOCAL_MODEL_GATEWAY_ENABLED`
 
+## Wave status
+
+| Wave | Status | Product meaning |
+|------|--------|-----------------|
+| W0 | Done | Deterministic COBOL-to-Java enterprise kernel: parser, Semantic IR, Java generation, build/test, evidence, Harness, Experience Learning telemetry, and no required model call. |
+| W0.1 | Done | Next.js/Tailwind c2c Studio: editable COBOL, BFF-backed transformation run, generated Java artifact view, build/test, evidence, artifacts, and honest blocked states. |
+| W0.2 | Next | First productive AI transformation loop: Harness-governed agents, Model Gateway/Foundry calls, bounded repair, and deterministic verification/evidence gate. |
+
+The W0/W0.1 product can transform supported W0 COBOL programs and selected
+small custom sources that stay inside the implemented subset. It must not be
+described as a feature-complete COBOL translator. W0.2 is responsible for the
+first real model-backed agent workflow; W0.3 and later waves broaden custom
+COBOL coverage and Experience Learning maturity.
+
 ## CI and quality gates
 
 Pull request CI runs:
@@ -217,12 +240,13 @@ scripts/
   secret-scan.sh
   build-metadata.sh
 docs/
+  concept/
   corpus/
   governance/
   adr/
 ```
 
-## W0 safety constraints
+## Safety constraints
 
 See CONTRIBUTING.md for issue, branch, PR, and ADR workflow entrypoints.
 
@@ -230,3 +254,6 @@ See CONTRIBUTING.md for issue, branch, PR, and ADR workflow entrypoints.
 - No externally sourced data is required to run W0 services.
 - Public examples and templates used here are only those explicitly approved for W0.
 - Every change must be traceable to an issue and PR.
+- Any change to wave scope, architecture, model participation, agent workflow,
+  or release acceptance must update the [c2c Fachkonzept](docs/concept/c2c-fachkonzept.md)
+  and the development workflow where applicable.

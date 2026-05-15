@@ -114,5 +114,11 @@ Chromium environment:
 The #118 closure is a production-grade W0.1 Studio implementation, not a claim
 that c2c is ready for customer production workloads. The W0 release-gate
 limitations still apply: the COBOL subset is narrow, no customer source has
-been ingested, and Wave 1 remains responsible for broader COBOL coverage,
-customer deployment hardening, and default model-gateway exercise.
+been ingested, and W0.1 still uses the deterministic no-model transformation
+path as the success mechanism.
+
+Per the [c2c Fachkonzept](../concept/c2c-fachkonzept.md), W0.2 is the next
+wave. W0.2 is responsible for the first productive AI transformation loop:
+Harness-governed agents, Model Gateway / Microsoft Foundry calls, a bounded
+verification/repair loop, and the same deterministic build/test/evidence gate
+before the Studio may show a verified transformation.

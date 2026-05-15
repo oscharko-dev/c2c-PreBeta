@@ -9,7 +9,8 @@ here is reproducible from a clean checkout via `scripts/w0-reference-run.sh`.
 |----------|---------|
 | [w0-reference-runbook.md](w0-reference-runbook.md) | How to reproduce the end-to-end W0 reference run, both via the script and by hand. |
 | [w0-scorecard.md](w0-scorecard.md) | Captured metrics from a real reference run. The release gate refers to this. |
-| [w0-followups.md](w0-followups.md) | Work intentionally deferred to Wave 1. Each item is filed as its own GitHub issue. |
+| [w0-followups.md](w0-followups.md) | Work intentionally deferred to W0.2 or later. Each item is filed as its own GitHub issue. |
+| [../concept/c2c-fachkonzept.md](../concept/c2c-fachkonzept.md) | Canonical product concept and wave roadmap. |
 | [../release/w0-release-gate.md](../release/w0-release-gate.md) | Go/no-go checklist with evidence pointers. |
 | [../release/w0-corrective-epic-86.md](../release/w0-corrective-epic-86.md) | Closure evidence for the product-path corrective epic. |
 | [../release/w0-studio-epic-118.md](../release/w0-studio-epic-118.md) | Closure evidence for the W0.1 Next.js/Tailwind Studio epic. |
@@ -35,9 +36,10 @@ and experience-event summary without standing up the services.
 The W0 showcase is intentionally narrow:
 
 - Three synthetic COBOL programs, no customer source.
-- The reference run can exercise `model-gateway-service` for a bounded Foundry
-  development invocation; disabled or over-limit runs still record explicit
-  `status: "skipped"` model-invocation entries rather than hiding them.
+- The deterministic W0/W0.1 product path does not require model invocations.
+  Disabled model participation records explicit `status: "skipped"`
+  model-invocation entries rather than hiding that fact. W0.2 is responsible
+  for the first productive model-backed agent workflow.
 - Generated stdout matches the checked-in Golden Master fixtures for the
   selected W0 subset; the acceptance bar is `classification == match`.
 - BRNCH01 is reproduced through GnuCOBOL `cobcrun`; CTRLDEC01 and BATCH01
