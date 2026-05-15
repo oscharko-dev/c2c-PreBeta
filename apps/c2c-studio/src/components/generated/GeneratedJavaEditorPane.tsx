@@ -1,6 +1,11 @@
 import React from 'react';
 import { useGeneratedArtifacts } from '../../hooks/useGeneratedArtifacts';
 import { Loader2 } from 'lucide-react';
+import { UnsupportedConstructsPanel } from '../state/UnsupportedConstructsPanel';
+import { MissingArtifactsPanel } from '../state/MissingArtifactsPanel';
+import { BlockedState } from '../state/BlockedState';
+import { Badge } from '../ui/Badge';
+import { useTransformationRun } from '../../stores/transformationRun';
 
 export function GeneratedJavaEditorPane() {
   const { 
@@ -11,8 +16,10 @@ export function GeneratedJavaEditorPane() {
     fileFetchError,
     artifactDetails
   } = useGeneratedArtifacts();
+  
+  const { productState } = useTransformationRun();
 
-  if (artifactState === 'idle') {
+  if (productState.state === 'empty') {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-text-dim">
         <p>No active run. Start a transformation to see generated Java.</p>
@@ -20,7 +27,7 @@ export function GeneratedJavaEditorPane() {
     );
   }
 
-  if (artifactState === 'pending') {
+  if (productState.state === 'running' || productState.state === 'generated-pending') {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-text-dim flex-col gap-4">
         <Loader2 className="animate-spin text-accent" size={32} />
@@ -29,30 +36,20 @@ export function GeneratedJavaEditorPane() {
     );
   }
 
-  if (artifactState === 'unsupported') {
+  if (productState.state === 'unsupported') {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-warning flex-col gap-4">
-        <p className="font-medium text-lg">Unsupported Features</p>
-        <p className="max-w-md">The source program uses COBOL features not currently supported by the generator.</p>
-        {artifactDetails?.unsupportedFeatures && (
-          <ul className="text-left text-sm list-disc pl-4 mt-2">
-            {artifactDetails.unsupportedFeatures.map(f => <li key={f}>{f}</li>)}
-          </ul>
-        )}
+      <div className="flex flex-col h-full items-center justify-center p-6">
+         <BlockedState reason="Unsupported COBOL Constructs" details={productState.message} />
+         <UnsupportedConstructsPanel constructs={productState.unsupportedFeatures || []} />
       </div>
     );
   }
 
-  if (artifactState === 'incomplete') {
+  if (productState.state === 'generated-incomplete') {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-error flex-col gap-4">
-        <p className="font-medium text-lg">Incomplete Generation</p>
-        <p className="max-w-md">The generation process did not complete successfully or some artifacts are missing.</p>
-        {artifactDetails?.missingArtifacts && (
-          <ul className="text-left text-sm list-disc pl-4 mt-2">
-            {artifactDetails.missingArtifacts.map(f => <li key={f}>{f}</li>)}
-          </ul>
-        )}
+      <div className="flex flex-col h-full items-center justify-center p-6">
+        <BlockedState reason="Incomplete Generation" details={productState.message || 'Generation did not complete normally.'} />
+        <MissingArtifactsPanel artifacts={productState.missingArtifacts || []} />
       </div>
     );
   }
@@ -70,15 +67,20 @@ export function GeneratedJavaEditorPane() {
           )}
         </div>
         <div className="flex gap-2">
-          {artifactState === 'failed-verification' && (
-            <span className="rounded bg-error/20 text-error px-2 py-1 text-[11px] uppercase tracking-wider">
+          {productState.state === 'build-failed' && (
+            <Badge variant="error" icon={true}>
               Verification Failed
-            </span>
+            </Badge>
           )}
-          {artifactState === 'verified' && (
-            <span className="rounded bg-success/20 text-success px-2 py-1 text-[11px] uppercase tracking-wider">
+          {productState.state === 'equivalence-mismatch' && (
+             <Badge variant="error" icon={true}>
+              Equivalence Mismatch
+            </Badge>
+          )}
+          {productState.state === 'ready' && (
+            <Badge variant="success" icon={true}>
               Verified
-            </span>
+            </Badge>
           )}
         </div>
       </div>

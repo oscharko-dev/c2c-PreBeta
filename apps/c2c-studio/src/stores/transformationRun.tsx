@@ -1,7 +1,8 @@
 'use client';
 
-import { createContext, useContext, useRef, useState, ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, ReactNode, useMemo } from 'react';
 import { TransformationRunState, RunPhase } from '../types/run';
+import { deriveProductState, StateContext } from '../types/state';
 import { apiClient } from '../lib/apiClient';
 import { TransformRequest } from '../types/reference-program';
 import { hydrateRunArtifacts, useRunPolling, useGlobalObservabilityPolling } from '../hooks/useRunPolling';
@@ -9,6 +10,7 @@ import { ApiResult, TransformResponse } from '../types/api';
 
 export interface TransformationRunContextValue {
   state: TransformationRunState;
+  productState: StateContext;
   startTransform: (request: TransformRequest) => Promise<ApiResult<TransformResponse>>;
   setState: React.Dispatch<React.SetStateAction<TransformationRunState>>;
 }
@@ -35,6 +37,8 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
     modelGatewayHealth: null,
     harnessReady: null,
   });
+
+  const productState = useMemo(() => deriveProductState(state), [state]);
 
   useRunPolling(state, setState);
   useGlobalObservabilityPolling(setState);
@@ -94,7 +98,7 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
   };
 
   return (
-    <TransformationRunContext.Provider value={{ state, startTransform, setState }}>
+    <TransformationRunContext.Provider value={{ state, productState, startTransform, setState }}>
       {children}
     </TransformationRunContext.Provider>
   );
