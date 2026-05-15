@@ -31,6 +31,24 @@ python3 scripts/check_model_governance.py --worktree
 
 echo "Validated model governance scan."
 
+python3 -m unittest scripts/check_model_governance_test.py
+
+echo "Validated model governance scanner regression tests."
+
+(
+  cd services/orchestrator-service
+  PYTHONPATH=src python3 -m unittest tests.test_config tests.test_workflow tests.test_server_integration
+)
+
+echo "Validated orchestrator model governance behavior."
+
+(
+  cd services/evidence-service
+  go test ./...
+)
+
+echo "Validated evidence-service model governance behavior."
+
 for f in \
   services/go/w0-service/main.go \
   services/go/w0-service/main_test.go \

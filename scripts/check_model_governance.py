@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-SCAN_ROOTS = ("services",)
+SCAN_ROOTS = ("services", "apps")
 ALLOWED_PREFIX = Path("services/go/model-gateway-service")
 IGNORED_DIRS = {"docs", "fixtures", "tests", "__tests__"}
 TEST_FILE_SUFFIXES = (
@@ -69,6 +69,43 @@ DIRECT_PROVIDER_PATTERNS = (
     ),
     (
         re.compile(r"(?i)\bbedrock-runtime\b"),
+        "direct-model-provider-usage",
+    ),
+    (
+        re.compile(
+            r'(?i)["\'](?:github\.com/[^"\']*(?:openai|anthropic|cohere|mistral|ollama)|'
+            r'github\.com/aws/aws-sdk-go-v2/service/bedrockruntime|'
+            r'github\.com/google/generative-ai-go|'
+            r'cloud\.google\.com/go/vertexai|'
+            r'github\.com/Azure/azure-sdk-for-go/sdk/ai/azopenai)[^"\']*["\']'
+        ),
+        "direct-model-provider-usage",
+    ),
+    (
+        re.compile(
+            r"(?i)\bimport\s+(?:com\.openai|com\.azure\.ai\.(?:openai|inference)|"
+            r"software\.amazon\.awssdk\.services\.bedrockruntime|"
+            r"com\.google\.cloud\.vertexai|com\.google\.generativeai)\b"
+        ),
+        "direct-model-provider-usage",
+    ),
+)
+
+GO_DIRECT_PROVIDER_USAGE_PATTERNS = (
+    (
+        re.compile(
+            r"(?i)\b(?:azopenai|openai|anthropic|cohere|mistral|mistralai|litellm|ollama|genai|vertexai|bedrockruntime)\.[A-Za-z_]\w*"
+        ),
+        "direct-model-provider-usage",
+    ),
+)
+
+JAVA_DIRECT_PROVIDER_USAGE_PATTERNS = (
+    (
+        re.compile(
+            r"(?i)\b(?:new\s+)?(?:OpenAI|Anthropic|Cohere|Mistral|Mistralai|LiteLLM|Ollama|GenAI|GenerativeAI|VertexAI|Bedrock|AzureOpenAI|HuggingFace)\w*"
+            r"(?:\s*\(|\s+\w+\s*=|\s*\.\s*class\b|\s*\.)"
+        ),
         "direct-model-provider-usage",
     ),
 )
@@ -160,9 +197,15 @@ def scan_worktree() -> list[Finding]:
         if _is_binary(content):
             continue
 
+        patterns = DIRECT_PROVIDER_PATTERNS
+        if file_path.endswith(".go"):
+            patterns = patterns + GO_DIRECT_PROVIDER_USAGE_PATTERNS
+        elif file_path.endswith(".java"):
+            patterns = patterns + JAVA_DIRECT_PROVIDER_USAGE_PATTERNS
+
         for line_no, line in enumerate(content.splitlines(), start=1):
             findings.extend(_scan_line_for_env_reads(line, file_path, line_no))
-            for pattern, kind in DIRECT_PROVIDER_PATTERNS:
+            for pattern, kind in patterns:
                 if pattern.search(line):
                     findings.append(
                         Finding(
