@@ -2,14 +2,15 @@
 
 Concrete items discovered while assembling the W0 end-to-end validation
 ([issue #16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16)) that are
-**explicitly deferred** beyond the Epic #1 closure PR. Per the
+**explicitly deferred** beyond the W0/W0.1 closure PRs. Per the
 [development workflow](../governance/development-workflow.md) governance rule,
 scope expansion is not silently merged — every item below is filed as a
 separate issue so it can be planned, owned, and verified independently.
 
 Each entry includes the symptom seen during the W0 reference run, the contract /
-service involved, and the fix shape or current resolution. Wave 1 owners may
-take any open item without waiting for the others.
+service involved, and the fix shape or current resolution. W0.2 owns the first
+productive AI transformation loop; later W1 owners may take broader hardening
+items without waiting for W0.2 to absorb unrelated scope.
 
 ## F-W0-01 · `experience-learning-service` `/v0/harness-events` status enum mismatch · [#64](https://github.com/oscharko-dev/c2c-PreBeta/issues/64)
 
@@ -76,25 +77,32 @@ take any open item without waiting for the others.
 ## F-W0-04 · Model gateway invocation in W0 reference run · [#67](https://github.com/oscharko-dev/c2c-PreBeta/issues/67)
 
 - **Symptom**: `modelInvocations` in every Evidence Pack manifest carries an
-  observation-only `status: "skipped"` entry. No model call ever exercises
-  the gateway end-to-end. The W0 release gate explicitly accepts this; W1
-  acceptance requires real model traffic through the gateway with an
-  allowlist.
-- **Service(s)**: `model-gateway-service` (docs only at W0; service skeleton
-  is a Wave 1 task).
-- **Proposed fix**: stand up `services/model-gateway-service` (Java or Go)
-  implementing the W0 gateway README contract, plumb it into
-  `orchestrator-service`'s optional `model-guidance` step, and update the
-  reference run to record real Model Invocation Ledger entries.
+  observation-only `status: "skipped"` entry for the deterministic W0/W0.1
+  path. No productive transformation agent currently depends on a completed
+  model invocation. The W0/W0.1 release gate explicitly accepts this; W0.2
+  acceptance requires real model traffic through the gateway with an allowlist.
+- **Service(s)**: `model-gateway-service`, `orchestrator-service`,
+  `agentic-harness-core`, `c2c-bff`, `apps/c2c-studio`.
+- **Current guardrail**: W0/W0.1 remain valid with model gateway disabled.
+  When model participation is absent, evidence must keep recording explicit
+  `model-policy-skipped` artifacts.
+- **Proposed fix**: implement a W0.2 agentic workflow where the orchestrator,
+  as a Harness consumer, invokes the model gateway for at least one
+  Transformation Agent and one Verification/Repair Agent. The run must record
+  completed Model Invocation Ledger entries, agent trajectory records, bounded
+  repair-loop state, and deterministic build/test/evidence results.
 - **Owner**: model gateway.
-- **Acceptance**: a reference run produces ≥ 1 manifest where
+- **Acceptance**: a W0.2 reference run produces at least one manifest where
   `modelInvocations[].status == "completed"` and `ledgerRef.sha256` matches a
-  ledger entry on the gateway.
+  ledger entry on the gateway; the Studio shows agent/model progress; success
+  is still blocked unless generated Java compiles, runs, and passes the
+  configured equivalence/evidence gate.
 
 ## F-W0-05 · Generator coverage beyond the checked-in W0 subset · [#68](https://github.com/oscharko-dev/c2c-PreBeta/issues/68)
 
 - **Status**: fixed for `ARITH01`; broader COBOL forms should continue as
-  separate Wave 1 fixture issues.
+  separate W0.3 or later fixture issues, unless a specific W0.2 agentic
+  acceptance case needs a narrow parser/generator fix.
 - **Symptom**: the original checked-in W0 programs match their synthetic
   Golden Masters, but broader COBOL forms remain outside the implemented
   subset.
@@ -108,8 +116,10 @@ take any open item without waiting for the others.
 
 ## Filing on GitHub
 
-Each item is filed as a separate `type: task`, `wave: w1`, area-scoped
-issue, linked from this document. The W0 release gate's
+Each item is filed as a separate `type: task`, wave-scoped, area-scoped issue
+(`wave: w0.2` for the first productive AI loop, `wave: w1` for later
+hardening), linked from this document. The W0 release gate's
 "What is *not* ready" section already enumerates the same gaps; please link
-the gate document and this file from every Wave 1 follow-up issue so the
-W0 → W1 trail stays auditable.
+the gate document, the [c2c Fachkonzept](../concept/c2c-fachkonzept.md), and
+this file from every W0.2 / W1 follow-up issue so the W0 → W0.2 → W1 trail
+stays auditable.

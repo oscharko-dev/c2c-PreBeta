@@ -1,7 +1,7 @@
 # W0 Release Gate
 
-This document is the go / no-go checklist for closing Wave 0 and starting
-Wave 1 planning. Every item must be evidenced by a real artifact the reviewer
+This document is the go / no-go checklist for closing Wave 0 / W0.1 and
+starting W0.2 planning. Every item must be evidenced by a real artifact the reviewer
 can re-derive from the repository. Nothing on this gate may be marked done
 purely on a verbal claim or a screenshot.
 
@@ -12,6 +12,7 @@ purely on a verbal claim or a screenshot.
 > Companion: [W0 reference runbook](../showcase/w0-reference-runbook.md),
 > [W0 scorecard](../showcase/w0-scorecard.md),
 > [W0 follow-ups](../showcase/w0-followups.md),
+> [c2c Fachkonzept](../concept/c2c-fachkonzept.md),
 > [W0 corrective epic #86 closure evidence](w0-corrective-epic-86.md),
 > [W0.1 Studio epic #118 closure evidence](w0-studio-epic-118.md).
 
@@ -19,13 +20,13 @@ purely on a verbal claim or a screenshot.
 
 | Field | Value |
 |-------|-------|
-| Status | **GO for Wave 1 planning** as of the run tag below. |
+| Status | **GO for W0.2 planning** as of the run tag below. |
 | Recorded run tag | `20260514T104603Z` |
 | Evidence sources | [w0-scorecard.md](../showcase/w0-scorecard.md), [reference-evidence-pack/](../showcase/reference-evidence-pack/), [w0-corrective-epic-86.md](w0-corrective-epic-86.md), [w0-studio-epic-118.md](w0-studio-epic-118.md), CI on `dev` |
 | Sign-off | Issue [#16](https://github.com/oscharko-dev/c2c-PreBeta/issues/16) closing comment links to this document. |
 
-Wave 1 planning may proceed under the explicit constraints in
-[§ "What is *not* ready"](#what-is-not-ready). Wave 1 is **not** authorised
+W0.2 planning may proceed under the explicit constraints in
+[§ "What is *not* ready"](#what-is-not-ready). W0.2 is **not** authorised
 to remove or weaken any of the W0 acceptance bars below.
 
 ## What is ready
@@ -191,11 +192,13 @@ to remove or weaken any of the W0 acceptance bars below.
 - **Full true `cobcrun` coverage.** BRNCH01 is now a true Golden Master
   reproduced by GnuCOBOL `cobcrun`; CTRLDEC01 and BATCH01 remain documented
   synthetic fixtures until a later fixture-hardening pass promotes them.
-- **Model gateway.** Zero model calls in W0. Wave 1 will exercise
-  `model-gateway-service` end-to-end with a documented allowlist.
+- **Productive AI transformation.** Zero model calls are required in the W0/W0.1
+  success path. W0.2 is the first wave allowed and required to introduce
+  productive model-backed agent work through `model-gateway-service` and the
+  approved Foundry development configuration.
 - **Harness-driven orchestration semantics.** The W0 reference run registers every
   W0 capability in the Harness catalog and resolves service endpoints from
-  that catalog before invocation. The remaining Wave 1 gap is moving this
+  that catalog before invocation. The remaining W0.2 gap is moving this
   bootstrap and live payload adaptation into `orchestrator-service.main`
   itself; the direct reference-run driver stays only as the deterministic release-gate
   harness.
@@ -205,10 +208,24 @@ to remove or weaken any of the W0 acceptance bars below.
 - **In scope for W0**: parse → IR → Java generation → compile + run → Evidence
   Pack v0 + Harness ledger + Experience Learning analysis for three
   documented synthetic COBOL programs.
-- **Out of scope for W0**: Wave 1 feature implementation, customer pilot
+- **Out of scope for W0/W0.1**: W0.2 feature implementation, customer pilot
   onboarding, claims of production readiness, complete true `cobcrun`
-  coverage for every fixture, model-gateway exercise, multi-tenant
+  coverage for every fixture, productive AI-agent transformation, multi-tenant
   authentication.
+
+## W0.2 Entry Criteria
+
+W0.2 may start only if it preserves the W0/W0.1 gates above and adds a new
+agentic gate:
+
+- all model calls go through `model-gateway-service`;
+- development model access uses approved Microsoft Foundry configuration;
+- the orchestrator remains a Harness consumer;
+- the UI still talks only to the BFF;
+- the first agent workflow has a bounded repair loop and a hard iteration
+  limit;
+- a run can be marked verified only after generated Java, build/test, and
+  Evidence Pack artifacts agree.
 
 ## Re-evidencing this gate
 

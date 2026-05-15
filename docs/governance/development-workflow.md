@@ -3,7 +3,9 @@
 ## 1. Golden Rule: Issue First
 **There is absolutely no implementation work outside of GitHub issues in this repository.** Every branch, commit, pull request, and code change must be directly linked to an existing, approved issue.
 
-**W0 Contribution Rule:** Issue first, then branch, then PR.
+**Contribution Rule:** Issue first, then branch, then PR. This applies to
+code, tests, documentation, architecture records, release gates, and local
+automation.
 
 ## 2. Issue Lifecycle & Structure
 - **Epics**: Large scope items that represent significant milestones. Epics should be broken down into child issues.
@@ -18,13 +20,13 @@
 4. Link the ADR from the issue and PR that depend on it.
 5. Update ADR status as the decision matures (`Proposed`, `Accepted`, `Superseded`).
 
-## 3. Labels and Taxonomy (Wave 0)
-For Wave 0, we use this label taxonomy:
+## 3. Labels and Taxonomy
+Use this label taxonomy for Wave 0 and follow-on W0.x waves:
 - `type: epic|task|feature|bug|chore` - Work kind for planning and reporting.
-- `wave: preflight|w0` - Delivery wave classification.
+- `wave: preflight|w0|w0.1|w0.2|w1` - Delivery wave classification.
 - `priority: p0|p1|p2` - Urgency for sequencing and triage.
 - `status: ready|blocked|in-progress` - Current execution state.
-- `area: governance|platform|security|orchestrator|experience|corpus` - Primary ownership domain.
+- `area: governance|platform|security|orchestrator|experience-learning|harness|model-gateway|semantics|target-java|verification|evidence|frontend|bff|corpus|release` - Primary ownership domain.
 
 **Ownership Expectations**: Issues must have an assigned owner before work begins. The assignee is responsible for driving the issue to completion.
 
@@ -39,14 +41,35 @@ For Wave 0, we use this label taxonomy:
 - For a multi-owner project, at least one explicit approver is required.
 - PRs must focus exclusively on the linked issue. Scope creep will be rejected, and the author will be asked to create a follow-up issue.
 
-## 6. Definition of Ready (DoR) - Wave 0
+## 6. Concept and Workflow Synchronization
+The [c2c Fachkonzept](../concept/c2c-fachkonzept.md) is the canonical product
+and architecture concept. Any issue that changes one of the following must
+update the Fachkonzept and any affected release gate or workflow document in
+the same PR:
+
+- wave scope or sequencing;
+- product architecture;
+- microservice boundaries;
+- Harness/orchestrator responsibilities;
+- model provider, Model Gateway, Foundry, or customer endpoint policy;
+- agent workflow semantics;
+- success, blocked, unsupported, failed, or incomplete UI states;
+- Evidence Pack or equivalence semantics;
+- release acceptance gates.
+
+If the change is architectural, add or update an ADR under `docs/adr/`.
+
+## 7. Definition of Ready (DoR)
 An issue is ready to be worked on when:
 - It has a clear title and description.
 - Deliverables and Acceptance Criteria are defined.
 - It is linked to an epic (if applicable).
 - It is assigned to a developer.
+- It states whether concept, ADR, release-gate, or development-workflow
+  documentation must change.
+- It states whether the deterministic W0/W0.1 no-model gate must keep passing.
 
-## 7. Definition of Done (DoD) - Wave 0
+## 8. Definition of Done (DoD)
 An issue is considered done and ready for merge when:
 - All Acceptance Criteria are met.
 - The PR has been reviewed and approved.
@@ -55,3 +78,8 @@ An issue is considered done and ready for merge when:
 - **SBOM/license posture** is valid (where applicable).
 - **Harness event visibility** is established (where applicable).
 - No TODOs or temporary workarounds remain unless explicitly tracked in a follow-up issue.
+- Any required Fachkonzept, ADR, release-gate, runbook, or workflow updates are
+  included.
+- If the issue touches W0.2 or later AI behavior, model access is routed only
+  through model-gateway-service and deterministic verification/evidence gates
+  still decide success.

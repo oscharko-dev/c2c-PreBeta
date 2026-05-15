@@ -3,6 +3,12 @@
 **Date**: 2026-05-14
 **Status**: Accepted
 
+> Historical note: this ADR records the original W0 reference-run UI and BFF
+> decision. W0.1 later introduced the Next.js/Tailwind c2c Studio as the
+> current product browser surface. See
+> [W0.1 Studio closure evidence](../release/w0-studio-epic-118.md) and the
+> [c2c Fachkonzept](../concept/c2c-fachkonzept.md).
+
 ## Context
 
 Issue #15 requires a user-facing surface for the first end-to-end W0 workflow.
