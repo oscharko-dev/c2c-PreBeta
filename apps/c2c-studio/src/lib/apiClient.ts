@@ -619,6 +619,56 @@ function encodeGeneratedFilePath(filePath: string): string {
   return segments.map(encodeURIComponent).join('/');
 }
 
+
+import {
+  RunExperienceView,
+  ModelGatewayHealth,
+  ModelGatewayModels,
+  HarnessReady
+} from '../types/observability';
+
+function isRunExperienceViewPayload(payload: unknown): payload is RunExperienceView {
+  if (!isRecord(payload)) return false;
+  return isString(payload.runId) &&
+         isString(payload.programId) &&
+         isRunMode(payload.mode) &&
+         isRunProductMode(payload.productMode) &&
+         (payload.summary === undefined || isString(payload.summary)) &&
+         (payload.observationPolicy === undefined || isString(payload.observationPolicy)) &&
+         (payload.detectedPatterns === undefined || isStringArray(payload.detectedPatterns)) &&
+         (payload.artifactRefs === undefined || isStringArray(payload.artifactRefs));
+}
+
+function parseRunExperienceView(payload: unknown): ApiResult<RunExperienceView> {
+  if (!isRunExperienceViewPayload(payload)) {
+    return createFailure('Contract error: RunExperienceView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload };
+}
+
+function parseModelGatewayHealth(payload: unknown): ApiResult<ModelGatewayHealth> {
+  if (!isRecord(payload)) return createFailure('Contract error: ModelGatewayHealth must be an object.', { kind: 'contract', body: payload });
+  if (payload.status !== 'ok' && payload.status !== 'unavailable') {
+    return createFailure('Contract error: ModelGatewayHealth payload must contain status="ok" or "unavailable".', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as ModelGatewayHealth };
+}
+
+function parseModelGatewayModels(payload: unknown): ApiResult<ModelGatewayModels> {
+  if (!isRecord(payload) || !Array.isArray(payload.models)) {
+    return createFailure('Contract error: ModelGatewayModels must contain models array.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as ModelGatewayModels };
+}
+
+function parseHarnessReady(payload: unknown): ApiResult<HarnessReady> {
+  if (!isRecord(payload)) return createFailure('Contract error: HarnessReady must be an object.', { kind: 'contract', body: payload });
+  if (payload.status !== 'ok' && payload.status !== 'unavailable') {
+    return createFailure('Contract error: HarnessReady payload must contain status="ok" or "unavailable".', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload as unknown as HarnessReady };
+}
+
 export const apiClient = {
   getHealth: () => fetchJson('/api/v0/health', parseHealthResponse),
   getMode: () => fetchJson('/api/v0/mode', parseModeResponse),
@@ -644,4 +694,8 @@ export const apiClient = {
   getEvidence: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/evidence`, parseEvidenceView),
   getRunEvents: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/events`, parseRunEventsView),
   getRunArtifacts: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/artifacts`, parseRunArtifactsView),
+  getRunExperience: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/experience`, parseRunExperienceView),
+  getModelGatewayHealth: () => fetchJson(`/api/v0/model-gateway/health`, parseModelGatewayHealth),
+  getModelGatewayModels: () => fetchJson(`/api/v0/model-gateway/models`, parseModelGatewayModels),
+  getHarnessReady: () => fetchJson(`/api/v0/harness/ready`, parseHarnessReady),
 };

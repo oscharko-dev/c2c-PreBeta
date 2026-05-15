@@ -13,6 +13,7 @@ import { SplitEditorArea } from './SplitEditorArea';
 import { TargetJavaInspector } from '../generated/TargetJavaInspector';
 import { BottomWorkbench } from './BottomWorkbench';
 import { StatusBar } from './StatusBar';
+import { RightObservabilityStripe } from '../observability/RightObservabilityStripe';
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
@@ -35,6 +36,7 @@ export function WorkbenchShell() {
                   </div>
                   <BottomWorkbench />
                 </div>
+                <RightObservabilityStripe />
               </div>
               <StatusBar apiState={apiState} />
             </div>

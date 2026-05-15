@@ -9,6 +9,7 @@ import { BuildTestPanel } from '../run/BuildTestPanel';
 import { EvidencePackPanel } from '../run/EvidencePackPanel';
 import { ProblemsPanel } from '../run/ProblemsPanel';
 import { RunArtifactsPanel } from '../run/RunArtifactsPanel';
+import { ExperienceLearningPanel } from '../observability/ExperienceLearningPanel';
 
 export function BottomWorkbench() {
   const { isBottomPanelOpen, activeBottomTab, setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
@@ -61,10 +62,14 @@ export function BottomWorkbench() {
         {activeTab.id === 'evidence' && <EvidencePackPanel emptyState={activeTab.emptyState} />}
         {activeTab.id === 'problems' && <ProblemsPanel emptyState={activeTab.emptyState} />}
         {activeTab.id === 'learning' && (
-          <div className="p-4 space-y-2 text-sm">
-            <p className="font-medium text-text">{activeTab.emptyState.title}</p>
-            <p className="text-text-dim">{activeTab.emptyState.message}</p>
-          </div>
+          state.phase === 'idle' ? (
+            <div className="p-4 space-y-2 text-sm">
+              <p className="font-medium text-text">{activeTab.emptyState.title}</p>
+              <p className="text-text-dim">{activeTab.emptyState.message}</p>
+            </div>
+          ) : (
+            <ExperienceLearningPanel />
+          )
         )}
       </div>
     </div>

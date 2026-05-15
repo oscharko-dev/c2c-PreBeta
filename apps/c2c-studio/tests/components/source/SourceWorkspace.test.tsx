@@ -20,11 +20,18 @@ vi.mock('@/lib/apiClient', () => ({
     getEvidence: vi.fn(),
     getRunEvents: vi.fn(),
     getRunArtifacts: vi.fn(),
+    getRunExperience: vi.fn(),
+    getModelGatewayHealth: vi.fn(),
+    getModelGatewayModels: vi.fn(),
+    getHarnessReady: vi.fn(),
   },
 }));
 
 describe('Source Workspace', () => {
   beforeEach(() => {
+    vi.mocked(apiClient.getRunExperience).mockResolvedValue({ ok: true, data: { status: 'complete', summary: null } } as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
     vi.clearAllMocks();
     vi.mocked(apiClient.getRun).mockResolvedValue({ ok: true, data: { status: 'running' } } as any);
   });

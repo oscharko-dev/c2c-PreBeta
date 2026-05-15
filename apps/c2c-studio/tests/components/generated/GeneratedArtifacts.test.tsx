@@ -38,6 +38,11 @@ vi.mock('@/stores/workbench', async (importOriginal) => {
 
 describe('Generated Artifacts UI', () => {
   beforeEach(() => {
+    if ((apiClient as any).getModelGatewayHealth) {
+      vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
+      vi.mocked(apiClient.getHarnessReady).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
+      vi.mocked(apiClient.getRunExperience).mockResolvedValue({ ok: true, data: { status: 'complete', summary: null } } as any);
+    }
     vi.clearAllMocks();
     vi.mocked(apiClient.getGeneratedFile).mockReset();
     vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({

@@ -13,6 +13,10 @@ vi.mock('@/lib/apiClient', () => ({
     getEvidence: vi.fn(),
     getRunEvents: vi.fn(),
     getRunArtifacts: vi.fn(),
+    getRunExperience: vi.fn(),
+    getModelGatewayHealth: vi.fn(),
+    getModelGatewayModels: vi.fn(),
+    getHarnessReady: vi.fn(),
   },
 }));
 
@@ -180,6 +184,13 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence as any);
     vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events as any);
     vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts as any);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+
+    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
     render(
       <TransformationRunProvider>
@@ -206,6 +217,13 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence as any);
     vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events as any);
     vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts as any);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+
+    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
     render(
       <TransformationRunProvider>
@@ -235,6 +253,13 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).evidence as any);
     vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).events as any);
     vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).artifacts as any);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+
+    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
     render(
       <TransformationRunProvider>
@@ -266,6 +291,13 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence as any);
     vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events as any);
     vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts as any);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+
+    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
     render(
       <TransformationRunProvider>
@@ -308,6 +340,10 @@ describe('transformation run state machine', () => {
       message: 'orchestrator unavailable',
       details: { kind: 'http', body: { error: 'orchestrator unavailable' } },
     } as any);
+
+    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
     render(
       <TransformationRunProvider>
@@ -369,6 +405,10 @@ describe('transformation run state machine', () => {
         ? aArtifacts.artifacts.promise
         : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).artifacts as any)
     );
+
+    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
     render(
       <TransformationRunProvider>

@@ -314,3 +314,50 @@ export function createEvidenceClient(baseUrl: string, http: HttpClient, timeoutM
     },
   };
 }
+
+export interface ModelGatewayClient {
+  enabled: boolean;
+  getHealth(): Promise<UpstreamResponse | undefined>;
+  getModels(): Promise<UpstreamResponse | undefined>;
+}
+
+export interface HarnessClient {
+  enabled: boolean;
+  getReady(): Promise<UpstreamResponse | undefined>;
+}
+
+export function createModelGatewayClient(baseUrl: string, http: HttpClient, timeoutMs: number): ModelGatewayClient {
+  if (!baseUrl) {
+    return {
+      enabled: false,
+      async getHealth() { return undefined; },
+      async getModels() { return undefined; },
+    };
+  }
+  const normalized = baseUrl.replace(/\/+$/, '');
+  return {
+    enabled: true,
+    async getHealth() {
+      return http.request(`${normalized}/v0/health`, { method: 'GET', timeoutMs });
+    },
+    async getModels() {
+      return http.request(`${normalized}/v0/models`, { method: 'GET', timeoutMs });
+    },
+  };
+}
+
+export function createHarnessClient(baseUrl: string, http: HttpClient, timeoutMs: number): HarnessClient {
+  if (!baseUrl) {
+    return {
+      enabled: false,
+      async getReady() { return undefined; },
+    };
+  }
+  const normalized = baseUrl.replace(/\/+$/, '');
+  return {
+    enabled: true,
+    async getReady() {
+      return http.request(`${normalized}/v0/ready`, { method: 'GET', timeoutMs });
+    },
+  };
+}
