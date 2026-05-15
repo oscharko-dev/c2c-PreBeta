@@ -203,6 +203,82 @@ describe('apiClient', () => {
     });
   });
 
+  it('accepts valid build-test payloads with object outputRef metadata', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'P1',
+          mode: 'live',
+          productMode: 'live',
+          status: 'ok',
+          classification: 'match',
+          outputRef: {
+            uri: 'file:///runs/run-1/build-test-result.json',
+            sha256: 'b'.repeat(64),
+            byteSize: 256,
+          },
+          generatedArtifactRef: {
+            uri: 'file:///runs/run-1/generated.json',
+            sha256: 'a'.repeat(64),
+            byteSize: 128,
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.getBuildTest('run-1');
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        runId: 'run-1',
+        programId: 'P1',
+        mode: 'live',
+        productMode: 'live',
+        status: 'ok',
+        classification: 'match',
+        outputRef: {
+          uri: 'file:///runs/run-1/build-test-result.json',
+          sha256: 'b'.repeat(64),
+          byteSize: 256,
+        },
+        generatedArtifactRef: {
+          uri: 'file:///runs/run-1/generated.json',
+          sha256: 'a'.repeat(64),
+          byteSize: 128,
+        },
+      },
+    });
+  });
+
+  it('rejects malformed build-test payloads with invalid classifications', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: 'run-1',
+          programId: 'P1',
+          mode: 'live',
+          productMode: 'live',
+          status: 'run-failed',
+          classification: 'definitely-not-a-valid-classification',
+          generatedArtifactRef: {
+            uri: 'file:///runs/run-1/generated.json',
+            sha256: 'a'.repeat(64),
+            byteSize: 128,
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.getBuildTest('run-1');
+
+    expect(result).toMatchObject({
+      ok: false,
+      details: { kind: 'contract' },
+    });
+  });
+
   it('fails on invalid runtime configuration instead of falling back to an internal service URL', async () => {
     vi.stubEnv('NEXT_PUBLIC_C2C_BFF_BASE_URL', 'https://internal.example.net');
 

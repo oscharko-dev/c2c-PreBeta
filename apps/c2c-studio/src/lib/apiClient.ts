@@ -180,6 +180,19 @@ function isBuildTestStatus(value: unknown): value is BuildTestView['status'] {
   );
 }
 
+function isBuildTestClassification(value: unknown): value is BuildTestView['classification'] {
+  return (
+    value === 'match' ||
+    value === 'divergence-known-w0-coverage-gap' ||
+    value === 'divergence-unknown' ||
+    value === 'true-golden-master-reproduction-error' ||
+    value === 'true-golden-master-mismatch' ||
+    value === 'compile-error' ||
+    value === 'run-error' ||
+    value === 'skipped-no-execution'
+  );
+}
+
 function isEvidenceStatus(value: unknown): value is EvidenceView['status'] {
   return value === 'complete' || value === 'incomplete' || value === 'invalid';
 }
@@ -256,10 +269,10 @@ function isBuildTestViewPayload(payload: unknown): payload is BuildTestView {
     isRunMode(payload.mode) &&
     isRunProductMode(payload.productMode) &&
     isBuildTestStatus(payload.status) &&
-    isString(payload.classification) &&
+    isBuildTestClassification(payload.classification) &&
     (payload.expectedOutput === undefined || isString(payload.expectedOutput)) &&
     (payload.actualOutput === undefined || isString(payload.actualOutput)) &&
-    (payload.outputRef === undefined || isString(payload.outputRef)) &&
+    (payload.outputRef === undefined || payload.outputRef === null || isOutputRef(payload.outputRef)) &&
     (payload.generatedArtifactRef === null || isOutputRef(payload.generatedArtifactRef)) &&
     (payload.note === undefined || isString(payload.note))
   );

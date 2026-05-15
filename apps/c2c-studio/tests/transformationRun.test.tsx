@@ -89,7 +89,7 @@ function makeArtifactFixtures(
         mode: 'live',
         productMode: 'live',
         status: 'ok',
-        classification: 'ok',
+        classification: 'match',
         generatedArtifactRef: { uri: `file:///runs/${runId}/build-test.json`, sha256 },
       },
     },
