@@ -1,5 +1,5 @@
-import { StudioShell } from '../components/studio/StudioShell';
+import { WorkbenchShell } from '../components/workbench/WorkbenchShell';
 
 export default function Home() {
-  return <StudioShell />;
+  return <WorkbenchShell />;
 }
