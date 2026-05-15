@@ -8,7 +8,7 @@ export function SourceWorkspacePanel() {
   if (!isSourceWorkspaceOpen) return null;
 
   return (
-    <div className="flex w-64 flex-col border-r border-line bg-bg-2 shrink-0 h-full overflow-hidden" aria-label="Source Workspace">
+    <div className="hidden h-full w-64 shrink-0 flex-col overflow-hidden border-r border-line bg-bg-2 lg:flex" aria-label="Source Workspace">
       <div className="flex items-center px-4 h-10 border-b border-line-2 font-medium text-xs text-text uppercase tracking-wider">
         Source Workspace
       </div>

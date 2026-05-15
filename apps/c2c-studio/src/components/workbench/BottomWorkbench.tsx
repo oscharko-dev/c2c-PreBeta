@@ -1,41 +1,27 @@
 'use client';
 
 import { useWorkbench } from '../../stores/workbench';
+import { Tabs } from '../ui/Tabs';
+import { bottomWorkbenchTabs } from './workbenchModels';
 
 export function BottomWorkbench() {
   const { isBottomPanelOpen, activeBottomTab, setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
 
   if (!isBottomPanelOpen) return null;
-
-  const tabs = [
-    { id: 'run', label: 'Run' },
-    { id: 'build-test', label: 'Build & Test' },
-    { id: 'evidence', label: 'Evidence Pack' },
-    { id: 'learning', label: 'Experience Learning' },
-    { id: 'problems', label: 'Problems' },
-  ];
+  const activeTab = bottomWorkbenchTabs.find((tab) => tab.id === activeBottomTab) ?? bottomWorkbenchTabs[0];
 
   return (
     <div className="flex h-64 flex-col border-t border-line bg-bg-1 shrink-0 w-full" aria-label="Bottom Workbench">
-      <div className="flex h-10 items-center justify-between border-b border-line-2 px-2 shrink-0 bg-bg-2">
-        <div className="flex h-full" role="tablist">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={activeBottomTab === tab.id}
-              onClick={() => setActiveBottomTab(tab.id)}
-              className={`flex h-full items-center px-4 text-xs font-medium uppercase tracking-wider transition-colors ${
-                activeBottomTab === tab.id
-                  ? 'border-b-2 border-accent text-text'
-                  : 'text-text-dim hover:text-text'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex min-h-10 items-center justify-between gap-2 border-b border-line-2 px-2 py-1 shrink-0 bg-bg-2">
+        <Tabs
+          value={activeTab.id}
+          onValueChange={(value) => setActiveBottomTab(value)}
+          tabs={bottomWorkbenchTabs.map((tab) => ({ value: tab.id, label: tab.label }))}
+          idBase="bottom-workbench"
+          className="min-w-0 flex-1 overflow-x-auto border-0 bg-transparent p-0"
+        />
         <button
+          type="button"
           onClick={() => setBottomPanelOpen(false)}
           className="p-1.5 text-text-dim hover:text-text rounded hover:bg-bg-3"
           aria-label="Close Bottom Panel"
@@ -43,12 +29,16 @@ export function BottomWorkbench() {
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
       </div>
-      <div className="flex-1 overflow-auto p-4 text-sm text-text-dim">
-        {activeBottomTab === 'run' && <p>Run output logs will appear here.</p>}
-        {activeBottomTab === 'build-test' && <p>Build and test results will appear here.</p>}
-        {activeBottomTab === 'evidence' && <p>Evidence pack details.</p>}
-        {activeBottomTab === 'learning' && <p>Experience learning metrics.</p>}
-        {activeBottomTab === 'problems' && <p>No problems found.</p>}
+      <div
+        id={`bottom-workbench-panel-${activeTab.id}`}
+        role="tabpanel"
+        aria-labelledby={`bottom-workbench-tab-${activeTab.id}`}
+        className="flex-1 overflow-auto p-4"
+      >
+        <div className="space-y-2 text-sm">
+          <p className="font-medium text-text">{activeTab.emptyState.title}</p>
+          <p className="text-text-dim">{activeTab.emptyState.message}</p>
+        </div>
       </div>
     </div>
   );
