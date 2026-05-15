@@ -16,6 +16,7 @@ from .artifacts import (
     KIND_GENERATED_PROJECT_FILE,
     KIND_GENERATED_PROJECT_MANIFEST,
     KIND_GENERATION_RESPONSE,
+    KIND_LEARNING_SUMMARY,
     KIND_MODEL_INVOCATION_LEDGER,
     KIND_MODEL_POLICY_SKIPPED,
     KIND_TRAJECTORY_LEDGER,
@@ -26,6 +27,7 @@ from .artifacts import (
 from .client import JSONHTTPClient
 from .config import OrchestratorConfig, load_config
 from .client import HttpClientError
+from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import HarnessFailure, HarnessGateway
 from .workflow import W0RunContext, W0WorkflowRunner
 
@@ -238,6 +240,10 @@ class OrchestratorService:
             return 200, payload
         if action == "events":
             return 200, self._events_view(run_id, envelope_base)
+        if action == "progress":
+            return 200, self._progress_view(run_id, envelope_base)
+        if action == "learning":
+            return 200, self._learning_view(run_id, envelope_base)
         return 404, {"error": "not found"}
 
     def _artifact_payload(
@@ -463,6 +469,95 @@ class OrchestratorService:
             "kind": meta.get("kind"),
         }
 
+    def _progress_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+        """Issue #96: expose step-level progress for UI-started runs.
+
+        The view prefers the in-memory progress log (live, includes a
+        currently-running step) and falls back to the persisted
+        `run-progress.json` artifact for runs that completed before the
+        current process started, so refreshes after a restart still show
+        the timeline.
+        """
+        live_steps = self.runner.progress_payload(run_id)
+        persisted = self.artifact_store.read_json(run_id, "run-progress.json")
+        persisted_meta = self.artifact_store.find_metadata(run_id, "run-progress.json")
+        steps: List[Dict[str, Any]]
+        current_step: Optional[str] = None
+        run_status = str(envelope.get("runStatus") or "incomplete")
+        failed_step: Optional[str] = None
+        updated_at: Optional[str] = None
+        if live_steps:
+            steps = live_steps
+            for entry in steps:
+                if entry.get("status") == "running":
+                    current_step = entry.get("name")
+                if entry.get("status") == "failed" and failed_step is None:
+                    failed_step = entry.get("name")
+        elif isinstance(persisted, dict):
+            persisted_steps = persisted.get("steps")
+            steps = [entry for entry in persisted_steps if isinstance(entry, dict)] if isinstance(persisted_steps, list) else []
+            current_step = persisted.get("currentStep")
+            failed_step = persisted.get("failedStep")
+            run_status = str(persisted.get("runStatus") or run_status)
+            updated_at = str(persisted.get("updatedAt") or "") or None
+        else:
+            steps = []
+        completed_steps = [entry["name"] for entry in steps if entry.get("status") == "ok" and entry.get("name")]
+        missing = [] if steps else ["run-progress"]
+        return {
+            **envelope,
+            "status": "incomplete" if missing else "complete",
+            "missingArtifacts": missing,
+            "runStatus": run_status,
+            "currentStep": current_step,
+            "failedStep": failed_step,
+            "completedSteps": completed_steps,
+            "stepCount": len(steps),
+            "steps": steps,
+            "progressRef": persisted_meta,
+            "updatedAt": updated_at,
+        }
+
+    def _learning_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+        """Issue #96: expose the experience-learning summary for the run.
+
+        Pulls live data from the experience-learning-service when configured
+        and caches a copy under `learning-summary.json` so the artifact is
+        available for the Evidence Pack consumer even when EL is offline.
+        """
+        learning = getattr(self.runner, "experience_learning", None)
+        live_summary: Optional[Dict[str, Any]] = None
+        endpoint = ""
+        if isinstance(learning, ExperienceLearningGateway):
+            fetched = learning.get_run_summary(run_id)
+            if fetched is not None:
+                live_summary = dict(fetched)
+            endpoint = learning.summary_uri(run_id)
+        if live_summary is not None:
+            try:
+                self.artifact_store.write_json(
+                    run_id,
+                    str(envelope.get("workflowId") or self.config.workflow_id),
+                    "learning-summary.json",
+                    live_summary,
+                    kind=KIND_LEARNING_SUMMARY,
+                )
+            except Exception:  # pragma: no cover - persistence is best-effort
+                pass
+        cached = self.artifact_store.read_json(run_id, "learning-summary.json")
+        cached_meta = self.artifact_store.find_metadata(run_id, "learning-summary.json")
+        summary = live_summary if live_summary is not None else (cached if isinstance(cached, dict) else None)
+        missing = [] if summary is not None else ["learning-summary"]
+        return {
+            **envelope,
+            "status": "incomplete" if missing else "complete",
+            "missingArtifacts": missing,
+            "summary": summary,
+            "summaryRef": cached_meta,
+            "endpoint": endpoint,
+            "source": "live" if live_summary is not None else ("cached" if cached is not None else "unavailable"),
+        }
+
     def _events_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
         ledger = self.artifact_store.read_json(run_id, "trajectory-ledger.json")
         ledger_meta = self.artifact_store.find_metadata(run_id, "trajectory-ledger.json")
@@ -579,7 +674,20 @@ def create_configured_server(config: OrchestratorConfig) -> Tuple[HTTPServer, W0
     gateway = HarnessGateway(config.harness_base_url, http_client, harness_headers=harness_headers)
     _register_capabilities_with_harness(config=config, gateway=gateway)
     artifact_store = RunArtifactStore(config.run_artifact_root, created_by=config.service_name)
-    runner = W0WorkflowRunner(config=config, gateway=gateway, artifact_store=artifact_store)
+    experience_learning: Any
+    if config.experience_learning_base_url:
+        experience_learning = ExperienceLearningGateway(
+            config.experience_learning_base_url,
+            http_client,
+        )
+    else:
+        experience_learning = NullExperienceLearningGateway()
+    runner = W0WorkflowRunner(
+        config=config,
+        gateway=gateway,
+        artifact_store=artifact_store,
+        experience_learning=experience_learning,
+    )
     host, port = _split_listen_address(config.listen_addr)
     server = create_http_server(
         config=config,

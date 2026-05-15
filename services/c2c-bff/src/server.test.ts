@@ -85,6 +85,8 @@ interface ArtifactStubResponses {
   evidence?: UpstreamResponse;
   events?: UpstreamResponse;
   artifacts?: UpstreamResponse;
+  progress?: UpstreamResponse;
+  learning?: UpstreamResponse;
 }
 
 function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
@@ -106,6 +108,8 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getEvidence: number;
     getEvents: number;
     getArtifacts: number;
+    getProgress: number;
+    getLearning: number;
   };
 } {
   const calls = {
@@ -125,6 +129,8 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getEvidence: 0,
     getEvents: 0,
     getArtifacts: 0,
+    getProgress: 0,
+    getLearning: 0,
   };
   const client: OrchestratorClient = {
     enabled: true,
@@ -211,6 +217,14 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       calls.getEvents += 1;
       return artifactResponses.events;
     },
+    async getProgress() {
+      calls.getProgress += 1;
+      return artifactResponses.progress;
+    },
+    async getLearning() {
+      calls.getLearning += 1;
+      return artifactResponses.learning;
+    },
   };
   return { client, calls };
 }
@@ -248,6 +262,12 @@ function disabledOrchestrator(): OrchestratorClient {
     async getEvents() {
       return undefined;
     },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
+      return undefined;
+    },
   };
 }
 
@@ -276,6 +296,7 @@ const baseConfig: BffConfig = {
   staticRoot: '/tmp/c2c-test-static-does-not-exist',
   orchestratorUrl: '',
   evidenceUrl: '',
+  experienceLearningUrl: '',
   upstreamTimeoutMs: 1_000,
   transformSourceMaxBytes: 1_000_000,
   enableDiagnosticFixtures: false,
@@ -661,6 +682,12 @@ test('starting a run surfaces orchestrator failures instead of silently falling 
     async getEvents() {
       return undefined;
     },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
@@ -716,6 +743,12 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
       return undefined;
     },
     async getEvents() {
+      return undefined;
+    },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
       return undefined;
     },
   };
@@ -1433,6 +1466,8 @@ test('transform derives program id, calls orchestrator, and returns the full tra
       evidence: `/api/v0/runs/${body.runId}/evidence`,
       events: `/api/v0/runs/${body.runId}/events`,
       artifacts: `/api/v0/runs/${body.runId}/artifacts`,
+      progress: `/api/v0/runs/${body.runId}/progress`,
+      learning: `/api/v0/runs/${body.runId}/learning`,
     });
   } finally {
     await server.close();
@@ -1500,6 +1535,12 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
     async getEvents() {
       return undefined;
     },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
@@ -1553,6 +1594,12 @@ test('transform does not create a run when the orchestrator throws', async () =>
       return undefined;
     },
     async getEvents() {
+      return undefined;
+    },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
       return undefined;
     },
   };
@@ -1707,6 +1754,324 @@ test('returns 404 for unknown api paths and run ids', async () => {
     assert.equal(unknownRun.status, 404);
   } finally {
     await server.close();
+  }
+});
+
+// Issue #96: progress + learning route contracts.
+
+function disabledLearning(): { enabled: boolean; baseUrl: string; getRunSummary: () => Promise<undefined> } {
+  return {
+    enabled: false,
+    baseUrl: '',
+    async getRunSummary() {
+      return undefined;
+    },
+  };
+}
+
+test('progress route proxies orchestrator step timeline for live runs', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator({
+    progress: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        runStatus: 'updating',
+        currentStep: 'generate-java',
+        failedStep: null,
+        completedSteps: ['accepted', 'parse-cobol', 'generate-ir'],
+        stepCount: 4,
+        steps: [
+          {
+            stepId: 1,
+            name: 'accepted',
+            capabilityId: 'orchestrator-service',
+            service: 'orchestrator-service',
+            actor: 'orchestrator-service',
+            status: 'ok',
+            startedAt: '2026-05-15T00:00:00Z',
+            finishedAt: '2026-05-15T00:00:00Z',
+          },
+          {
+            stepId: 2,
+            name: 'parse-cobol',
+            capabilityId: 'cobol.parse',
+            service: 'orchestrator-service',
+            actor: 'parser-service',
+            status: 'ok',
+            startedAt: '2026-05-15T00:00:01Z',
+            finishedAt: '2026-05-15T00:00:02Z',
+            inputRef: { uri: 'urn:in', sha256: 'a'.repeat(64), byteSize: 12 },
+            outputRef: { uri: 'urn:out', sha256: 'b'.repeat(64), byteSize: 24 },
+          },
+          {
+            stepId: 3,
+            name: 'generate-ir',
+            capabilityId: 'cobol.ir',
+            service: 'orchestrator-service',
+            actor: 'ir-service',
+            status: 'ok',
+            startedAt: '2026-05-15T00:00:03Z',
+            finishedAt: '2026-05-15T00:00:04Z',
+          },
+          {
+            stepId: 4,
+            name: 'generate-java',
+            capabilityId: 'java.generator',
+            service: 'orchestrator-service',
+            actor: 'generator-service',
+            status: 'running',
+            startedAt: '2026-05-15T00:00:05Z',
+          },
+        ],
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    assert.equal(created.status, 201);
+    const runId = (created.body as { runId: string }).runId;
+
+    const progress = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/progress`);
+    assert.equal(progress.status, 200);
+    const body = progress.body as {
+      status: string;
+      runStatus: string;
+      currentStep: string | null;
+      failedStep: string | null;
+      stepCount: number;
+      steps: Array<{ name: string; status: string; capabilityId: string; stepId: number }>;
+    };
+    assert.equal(body.status, 'complete');
+    assert.equal(body.runStatus, 'updating');
+    assert.equal(body.currentStep, 'generate-java');
+    assert.equal(body.failedStep, null);
+    assert.equal(body.stepCount, 4);
+    assert.equal(body.steps[3]?.status, 'running');
+    assert.equal(body.steps[1]?.capabilityId, 'cobol.parse');
+    assert.equal(calls.getProgress, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test('progress route surfaces failed step diagnostic and never reports success', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch } = stubOrchestrator({
+    progress: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        runStatus: 'failed',
+        currentStep: null,
+        failedStep: 'generate-java',
+        completedSteps: ['accepted', 'parse-cobol', 'generate-ir'],
+        stepCount: 5,
+        steps: [
+          { stepId: 1, name: 'accepted', capabilityId: 'orch', service: 'orch', actor: 'orch', status: 'ok' },
+          { stepId: 2, name: 'parse-cobol', capabilityId: 'cobol.parse', service: 'orch', actor: 'parser', status: 'ok' },
+          { stepId: 3, name: 'generate-ir', capabilityId: 'cobol.ir', service: 'orch', actor: 'ir', status: 'ok' },
+          {
+            stepId: 4,
+            name: 'generate-java',
+            capabilityId: 'java.generator',
+            service: 'orch',
+            actor: 'generator',
+            status: 'failed',
+            diagnostic: 'generator backend unavailable',
+          },
+          {
+            stepId: 5,
+            name: 'failed',
+            capabilityId: 'orch',
+            service: 'orch',
+            actor: 'orch',
+            status: 'failed',
+            diagnostic: 'W0 migration workflow failed: step generate-java failed',
+          },
+        ],
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const runId = (created.body as { runId: string }).runId;
+    const progress = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/progress`);
+    const body = progress.body as {
+      runStatus: string;
+      failedStep: string | null;
+      steps: Array<{ name: string; status: string; diagnostic?: string }>;
+    };
+    assert.equal(body.runStatus, 'failed');
+    assert.equal(body.failedStep, 'generate-java');
+    const failedStep = body.steps.find((entry) => entry.name === 'generate-java');
+    assert.ok(failedStep, 'failed step must be present in payload');
+    assert.equal(failedStep?.status, 'failed');
+    assert.match(failedStep?.diagnostic ?? '', /generator/i);
+  } finally {
+    await server.close();
+  }
+});
+
+test('learning route prefers live experience-learning client when configured', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  let learningCalls = 0;
+  const liveLearning = {
+    enabled: true,
+    baseUrl: 'http://el.test',
+    async getRunSummary(runId: string) {
+      learningCalls += 1;
+      return {
+        status: 200,
+        body: {
+          runId,
+          runStatus: 'completed',
+          candidateCount: 2,
+          candidateByPattern: { accepted_pattern: 2 },
+          experienceEventIds: ['evt-1', 'evt-2'],
+          observedPatterns: ['accepted_pattern'],
+          observationOnly: true,
+          policyVersion: 'v0',
+        },
+      };
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    experienceLearning: liveLearning,
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const runId = (created.body as { runId: string }).runId;
+    const learning = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/learning`);
+    assert.equal(learning.status, 200);
+    const body = learning.body as { source: string; status: string; summary: { candidateCount: number; observedPatterns: string[] } | null; endpoint: string };
+    assert.equal(body.source, 'live');
+    assert.equal(body.status, 'complete');
+    assert.equal(body.summary?.candidateCount, 2);
+    assert.deepEqual(body.summary?.observedPatterns, ['accepted_pattern']);
+    assert.match(body.endpoint, /\/v0\/runs\//);
+    assert.equal(learningCalls, 1);
+    assert.equal(calls.getLearning, 0, 'orchestrator fallback must not be called when EL is live');
+  } finally {
+    await server.close();
+  }
+});
+
+test('learning route falls back to orchestrator-cached summary when EL is unavailable', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator({
+    learning: {
+      status: 200,
+      body: {
+        summary: { runId: 'live-run-1', candidateCount: 1, observedPatterns: ['repeat_action'] },
+        endpoint: 'http://el.test/v0/runs/live-run-1/summary',
+        source: 'cached',
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const runId = (created.body as { runId: string }).runId;
+    const learning = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/learning`);
+    const body = learning.body as { source: string; summary: { candidateCount: number } | null; endpoint: string };
+    assert.equal(body.source, 'cached');
+    assert.equal(body.summary?.candidateCount, 1);
+    assert.equal(calls.getLearning, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test('progress route is unavailable for diagnostic-fixture runs', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const handler = createApp({
+    config: { ...baseConfig, enableDiagnosticFixtures: true },
+    samples,
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const runId = (created.body as { runId: string }).runId;
+    const progress = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/progress`);
+    assert.equal(progress.status, 200);
+    const body = progress.body as { mode: string; productMode: string; status: string };
+    assert.equal(body.mode, 'diagnostic-fixture');
+    assert.equal(body.productMode, 'unavailable');
+    assert.equal(body.status, 'incomplete');
+  } finally {
+    await server.close();
+  }
+});
+
+test('upstream experienceLearning client encodes run id and proxies summary', async () => {
+  const { createNodeHttpClient, createExperienceLearningClient } = await import('./upstream');
+  const httpClient = createNodeHttpClient();
+  const observed: Array<{ url: string; method: string }> = [];
+  const target = http.createServer((req, res) => {
+    observed.push({ url: req.url ?? '', method: req.method ?? 'GET' });
+    const body = JSON.stringify({ runId: 'r-1', candidateCount: 7 });
+    res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+    res.end(body);
+  });
+  await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = target.address() as net.AddressInfo;
+    const client = createExperienceLearningClient(`http://127.0.0.1:${address.port}`, httpClient, 1_000);
+    assert.equal(client.enabled, true);
+    const result = await client.getRunSummary('run a/b');
+    assert.equal(result?.status, 200);
+    assert.equal(observed[0]?.url, '/v0/runs/run%20a%2Fb/summary');
+  } finally {
+    await new Promise<void>((resolve, reject) => target.close((err) => (err ? reject(err) : resolve())));
   }
 });
 

@@ -8,9 +8,11 @@ import type { BffConfig } from './config';
 import { loadSampleRegistry, type SampleRegistry, type SampleDetail } from './samples';
 import {
   createEvidenceClient,
+  createExperienceLearningClient,
   createNodeHttpClient,
   createOrchestratorClient,
   type EvidenceClient,
+  type ExperienceLearningClient,
   type HttpClient,
   type OrchestratorClient,
 } from './upstream';
@@ -33,6 +35,7 @@ export interface ServerDeps {
   samples?: SampleRegistry;
   orchestrator?: OrchestratorClient;
   evidence?: EvidenceClient;
+  experienceLearning?: ExperienceLearningClient;
   httpClient?: HttpClient;
   runStore?: RunStore;
   now?: () => Date;
@@ -43,6 +46,7 @@ interface ResolvedDeps {
   samples: SampleRegistry;
   orchestrator: OrchestratorClient;
   evidence: EvidenceClient;
+  experienceLearning: ExperienceLearningClient;
   runStore: RunStore;
 }
 
@@ -53,6 +57,9 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
     samples: deps.samples ?? loadSampleRegistry(deps.config.repoRoot),
     orchestrator: deps.orchestrator ?? createOrchestratorClient(deps.config.orchestratorUrl, httpClient, deps.config.upstreamTimeoutMs),
     evidence: deps.evidence ?? createEvidenceClient(deps.config.evidenceUrl, httpClient, deps.config.upstreamTimeoutMs),
+    experienceLearning:
+      deps.experienceLearning
+      ?? createExperienceLearningClient(deps.config.experienceLearningUrl, httpClient, deps.config.upstreamTimeoutMs),
     runStore: deps.runStore ?? createRunStore(deps.now),
   };
 }
@@ -187,6 +194,8 @@ function runLinks(runId: string): Record<string, string> {
     buildTest: `/api/v0/runs/${runId}/build-test`,
     evidence: `/api/v0/runs/${runId}/evidence`,
     artifacts: `/api/v0/runs/${runId}/artifacts`,
+    progress: `/api/v0/runs/${runId}/progress`,
+    learning: `/api/v0/runs/${runId}/learning`,
   };
 }
 
@@ -727,6 +736,239 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
   }
 }
 
+// Issue #96: pipeline progress envelope shown by the UI.
+type PipelineStepStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
+
+interface PipelineStep {
+  stepId: number;
+  name: string;
+  capabilityId: string;
+  service: string;
+  actor: string;
+  status: PipelineStepStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  diagnostic?: string;
+  inputRef?: { uri: string; sha256: string; byteSize?: number } | null;
+  outputRef?: { uri: string; sha256: string; byteSize?: number } | null;
+  latencyMs?: number;
+}
+
+const PIPELINE_STEP_STATUSES: ReadonlyArray<PipelineStepStatus> = [
+  'pending',
+  'running',
+  'ok',
+  'failed',
+  'skipped',
+];
+
+function asPipelineStepStatus(value: unknown): PipelineStepStatus {
+  if (typeof value === 'string') {
+    for (const candidate of PIPELINE_STEP_STATUSES) {
+      if (candidate === value) return candidate;
+    }
+  }
+  return 'pending';
+}
+
+function normalizePipelineStep(raw: unknown): PipelineStep | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const name = asString(record.name);
+  if (!name) return null;
+  const stepId = asNumber(record.stepId) ?? 0;
+  const inputRef = normalizeOutputRef(record.inputRef);
+  const outputRef = normalizeOutputRef(record.outputRef);
+  const step: PipelineStep = {
+    stepId,
+    name,
+    capabilityId: asString(record.capabilityId),
+    service: asString(record.service),
+    actor: asString(record.actor),
+    status: asPipelineStepStatus(record.status),
+  };
+  const startedAt = asString(record.startedAt);
+  if (startedAt) step.startedAt = startedAt;
+  const finishedAt = asString(record.finishedAt);
+  if (finishedAt) step.finishedAt = finishedAt;
+  const diagnostic = asString(record.diagnostic);
+  if (diagnostic) step.diagnostic = diagnostic;
+  if (inputRef) step.inputRef = inputRef;
+  if (outputRef) step.outputRef = outputRef;
+  const latency = asNumber(record.latencyMs);
+  if (latency !== undefined) step.latencyMs = latency;
+  return step;
+}
+
+async function liveProgressView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
+  const liveRunId = liveArtifactRunId(stored);
+  const baseEnvelope = {
+    runId: stored.runId,
+    programId: stored.programId,
+    mode: stored.mode,
+    productMode: productModeOf(stored),
+  };
+  if (!liveRunId || !orchestrator.enabled) {
+    return {
+      ...baseEnvelope,
+      status: 'incomplete',
+      runStatus: stored.status,
+      currentStep: null,
+      failedStep: null,
+      completedSteps: [],
+      stepCount: 0,
+      steps: [],
+      missingArtifacts: ['run-progress'],
+      note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
+    };
+  }
+  try {
+    const upstream = await orchestrator.getProgress(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return {
+        ...baseEnvelope,
+        status: 'incomplete',
+        runStatus: stored.status,
+        currentStep: null,
+        failedStep: null,
+        completedSteps: [],
+        stepCount: 0,
+        steps: [],
+        missingArtifacts: ['run-progress'],
+        orchestratorRunId: liveRunId,
+        note: 'Orchestrator did not return a progress timeline for this run.',
+      };
+    }
+    const envelope = asRecord(upstream.body) ?? {};
+    const rawSteps = Array.isArray(envelope.steps) ? envelope.steps : [];
+    const steps = rawSteps
+      .map((entry) => normalizePipelineStep(entry))
+      .filter((entry): entry is PipelineStep => entry !== null);
+    const failedStepRaw = envelope.failedStep;
+    const currentStepRaw = envelope.currentStep;
+    const completedRaw = Array.isArray(envelope.completedSteps) ? envelope.completedSteps : [];
+    const completed = completedRaw.filter((entry): entry is string => typeof entry === 'string');
+    const missing = Array.isArray(envelope.missingArtifacts)
+      ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    return {
+      ...baseEnvelope,
+      mode: 'live',
+      productMode: 'live',
+      status: missing.length === 0 ? 'complete' : 'incomplete',
+      runStatus: asString(envelope.runStatus) || stored.status,
+      currentStep: typeof currentStepRaw === 'string' ? currentStepRaw : null,
+      failedStep: typeof failedStepRaw === 'string' ? failedStepRaw : null,
+      completedSteps: completed,
+      stepCount: steps.length,
+      steps,
+      missingArtifacts: missing,
+      orchestratorRunId: liveRunId,
+    };
+  } catch (err) {
+    return {
+      ...baseEnvelope,
+      status: 'incomplete',
+      runStatus: stored.status,
+      currentStep: null,
+      failedStep: null,
+      completedSteps: [],
+      stepCount: 0,
+      steps: [],
+      missingArtifacts: ['run-progress'],
+      note: err instanceof Error ? err.message : 'orchestrator request failed',
+    };
+  }
+}
+
+async function liveLearningView(
+  stored: StoredRun,
+  orchestrator: OrchestratorClient,
+  experienceLearning: ExperienceLearningClient,
+): Promise<Record<string, unknown>> {
+  const liveRunId = liveArtifactRunId(stored);
+  const baseEnvelope = {
+    runId: stored.runId,
+    programId: stored.programId,
+    mode: stored.mode,
+    productMode: productModeOf(stored),
+  };
+  if (!liveRunId || !orchestrator.enabled) {
+    return {
+      ...baseEnvelope,
+      status: 'incomplete',
+      summary: null,
+      endpoint: experienceLearning.enabled ? `${experienceLearning.baseUrl}/v0/runs` : '',
+      source: 'unavailable',
+      missingArtifacts: ['learning-summary'],
+      note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
+    };
+  }
+  // Prefer the EL service when configured directly, fall back to the
+  // orchestrator's cached copy. This mirrors Issue #96's "or equivalent
+  // existing endpoint" wording: the BFF should expose whichever it can.
+  if (experienceLearning.enabled) {
+    try {
+      const upstream = await experienceLearning.getRunSummary(liveRunId);
+      if (upstream && upstream.status >= 200 && upstream.status < 300) {
+        return {
+          ...baseEnvelope,
+          mode: 'live',
+          productMode: 'live',
+          status: 'complete',
+          summary: asRecord(upstream.body) ?? null,
+          endpoint: `${experienceLearning.baseUrl}/v0/runs/${encodeURIComponent(liveRunId)}/summary`,
+          source: 'live',
+          missingArtifacts: [],
+          orchestratorRunId: liveRunId,
+        };
+      }
+    } catch {
+      // fall through to orchestrator-cached copy
+    }
+  }
+  try {
+    const upstream = await orchestrator.getLearning(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return {
+        ...baseEnvelope,
+        status: 'incomplete',
+        summary: null,
+        endpoint: experienceLearning.enabled ? `${experienceLearning.baseUrl}/v0/runs/${encodeURIComponent(liveRunId)}/summary` : '',
+        source: 'unavailable',
+        missingArtifacts: ['learning-summary'],
+        orchestratorRunId: liveRunId,
+        note: 'Orchestrator did not return a learning summary for this run.',
+      };
+    }
+    const envelope = asRecord(upstream.body) ?? {};
+    const missing = Array.isArray(envelope.missingArtifacts)
+      ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    return {
+      ...baseEnvelope,
+      mode: 'live',
+      productMode: 'live',
+      status: missing.length === 0 ? 'complete' : 'incomplete',
+      summary: asRecord(envelope.summary) ?? null,
+      endpoint: asString(envelope.endpoint),
+      source: asString(envelope.source) || 'cached',
+      missingArtifacts: missing,
+      orchestratorRunId: liveRunId,
+    };
+  } catch (err) {
+    return {
+      ...baseEnvelope,
+      status: 'incomplete',
+      summary: null,
+      endpoint: '',
+      source: 'unavailable',
+      missingArtifacts: ['learning-summary'],
+      note: err instanceof Error ? err.message : 'orchestrator request failed',
+    };
+  }
+}
+
 async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
   const liveRunId = liveArtifactRunId(stored);
   if (!liveRunId || !orchestrator.enabled) {
@@ -814,7 +1056,7 @@ function applyLiveRunPayload(stored: StoredRun, runStore: RunStore, payload: unk
 
 export function createApp(deps: ServerDeps): http.RequestListener {
   const resolved = resolveDeps(deps);
-  const { config, samples, orchestrator, evidence, runStore } = resolved;
+  const { config, samples, orchestrator, evidence, experienceLearning, runStore } = resolved;
 
   return async function handler(req, res) {
     try {
@@ -1229,6 +1471,63 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         jsonResponse(res, 200, await liveEvidenceView(stored, orchestrator));
+        return;
+      }
+
+      const progressMatch = /^\/api\/v0\/runs\/([^\/]+)\/progress$/.exec(pathname);
+      if (progressMatch && method === 'GET') {
+        const runId = decodeURIComponent(progressMatch[1] ?? '');
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === 'diagnostic-fixture') {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: stored.mode,
+            productMode: 'unavailable',
+            status: 'incomplete',
+            runStatus: stored.status,
+            currentStep: null,
+            failedStep: null,
+            completedSteps: [],
+            stepCount: 0,
+            steps: [],
+            missingArtifacts: ['run-progress'],
+            note: 'Diagnostic-fixture runs do not produce a pipeline progress timeline.',
+          });
+          return;
+        }
+        jsonResponse(res, 200, await liveProgressView(stored, orchestrator));
+        return;
+      }
+
+      const learningMatch = /^\/api\/v0\/runs\/([^\/]+)\/learning$/.exec(pathname);
+      if (learningMatch && method === 'GET') {
+        const runId = decodeURIComponent(learningMatch[1] ?? '');
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === 'diagnostic-fixture') {
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: stored.mode,
+            productMode: 'unavailable',
+            status: 'incomplete',
+            summary: null,
+            endpoint: '',
+            source: 'unavailable',
+            missingArtifacts: ['learning-summary'],
+            note: 'Diagnostic-fixture runs are never observed by experience-learning.',
+          });
+          return;
+        }
+        jsonResponse(res, 200, await liveLearningView(stored, orchestrator, experienceLearning));
         return;
       }
 

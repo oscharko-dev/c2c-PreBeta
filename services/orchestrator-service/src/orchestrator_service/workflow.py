@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 
 def _iso_now() -> str:
@@ -24,6 +24,7 @@ from .artifacts import (
     KIND_MODEL_INVOCATION_LEDGER,
     KIND_MODEL_POLICY_SKIPPED,
     KIND_PARSE_OUTPUT,
+    KIND_RUN_PROGRESS,
     KIND_SEMANTIC_IR,
     KIND_SEMANTIC_IR_OUTPUT,
     KIND_SOURCE,
@@ -34,6 +35,7 @@ from .artifacts import (
     RunArtifactStore,
 )
 from .config import OrchestratorConfig
+from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import DataReference, HarnessFailure, HarnessGateway
 
 
@@ -90,6 +92,159 @@ class WorkflowStepResult:
     status: str
     input_ref: DataReference
     output_ref: DataReference
+
+
+# Issue #96: required step ids for UI-started runs.
+STEP_ACCEPTED = "accepted"
+STEP_PARSE_COBOL = "parse-cobol"
+STEP_GENERATE_IR = "generate-ir"
+STEP_GENERATE_JAVA = "generate-java"
+STEP_COMPILE_TEST_JAVA = "compile-test-java"
+STEP_WRITE_EVIDENCE = "write-evidence"
+STEP_MODEL_GUIDANCE = "model-guidance"
+STEP_MODEL_POLICY_SKIPPED = "model-policy-skipped"
+STEP_COMPLETED = "completed"
+STEP_FAILED = "failed"
+
+REQUIRED_RUN_STEP_NAMES: tuple[str, ...] = (
+    STEP_PARSE_COBOL,
+    STEP_GENERATE_IR,
+    STEP_GENERATE_JAVA,
+    STEP_COMPILE_TEST_JAVA,
+    STEP_WRITE_EVIDENCE,
+)
+
+STEP_STATUS_PENDING = "pending"
+STEP_STATUS_RUNNING = "running"
+STEP_STATUS_OK = "ok"
+STEP_STATUS_FAILED = "failed"
+STEP_STATUS_SKIPPED = "skipped"
+
+
+# noinspection PyClassHasNoInitInspection
+@dataclass
+class StepRecord:
+    """Per-step progress entry exposed by the orchestrator under /v0/runs/:id/progress.
+
+    Issue #96 contract: each step must expose stepId, stepName, capabilityId,
+    service/actor, status, started/finished timestamps where available,
+    inputRef/outputRef, and a diagnostic message on failure.
+    """
+
+    step_id: int
+    name: str
+    capability_id: str
+    service: str
+    actor: str
+    status: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    input_ref: Optional[Dict[str, Any]] = None
+    output_ref: Optional[Dict[str, Any]] = None
+    diagnostic: Optional[str] = None
+    latency_ms: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "stepId": self.step_id,
+            "name": self.name,
+            "capabilityId": self.capability_id,
+            "service": self.service,
+            "actor": self.actor,
+            "status": self.status,
+        }
+        if self.started_at is not None:
+            payload["startedAt"] = self.started_at
+        if self.finished_at is not None:
+            payload["finishedAt"] = self.finished_at
+        if self.input_ref is not None:
+            payload["inputRef"] = self.input_ref
+        if self.output_ref is not None:
+            payload["outputRef"] = self.output_ref
+        if self.diagnostic is not None:
+            payload["diagnostic"] = self.diagnostic
+        if self.latency_ms is not None:
+            payload["latencyMs"] = self.latency_ms
+        return payload
+
+
+class RunProgressLog:
+    """Mutable, ordered list of StepRecord entries for a single run.
+
+    The log preserves first-write step ordering so the UI can render a stable
+    pipeline timeline. Repeated calls to :meth:`update` keyed on the step name
+    mutate the existing record in place rather than appending a duplicate.
+    """
+
+    def __init__(self) -> None:
+        self._steps: list[StepRecord] = []
+        self._index: Dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def upsert(
+        self,
+        name: str,
+        *,
+        capability_id: str,
+        service: str,
+        actor: str,
+        status: str,
+        started_at: Optional[str] = None,
+        finished_at: Optional[str] = None,
+        input_ref: Optional[Mapping[str, Any]] = None,
+        output_ref: Optional[Mapping[str, Any]] = None,
+        diagnostic: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+    ) -> StepRecord:
+        with self._lock:
+            existing_index = self._index.get(name)
+            if existing_index is None:
+                record = StepRecord(
+                    step_id=len(self._steps) + 1,
+                    name=name,
+                    capability_id=capability_id,
+                    service=service,
+                    actor=actor,
+                    status=status,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    input_ref=dict(input_ref) if input_ref is not None else None,
+                    output_ref=dict(output_ref) if output_ref is not None else None,
+                    diagnostic=diagnostic,
+                    latency_ms=latency_ms,
+                )
+                self._steps.append(record)
+                self._index[name] = len(self._steps) - 1
+                return record
+            record = self._steps[existing_index]
+            # Preserve original step_id to keep the stable ordering visible to
+            # consumers; only refine timing/status/diagnostic on subsequent
+            # updates.
+            record.capability_id = capability_id or record.capability_id
+            record.service = service or record.service
+            record.actor = actor or record.actor
+            record.status = status
+            if started_at is not None and record.started_at is None:
+                record.started_at = started_at
+            if finished_at is not None:
+                record.finished_at = finished_at
+            if input_ref is not None:
+                record.input_ref = dict(input_ref)
+            if output_ref is not None:
+                record.output_ref = dict(output_ref)
+            if diagnostic is not None:
+                record.diagnostic = diagnostic
+            if latency_ms is not None:
+                record.latency_ms = latency_ms
+            return record
+
+    def has(self, name: str) -> bool:
+        with self._lock:
+            return name in self._index
+
+    def to_payload(self) -> list[Dict[str, Any]]:
+        with self._lock:
+            return [record.to_dict() for record in self._steps]
 
 
 def _text(value: Any) -> Optional[str]:
@@ -317,13 +472,22 @@ class W0WorkflowRunner:
         config: OrchestratorConfig,
         gateway: HarnessGateway,
         artifact_store: Optional[RunArtifactStore] = None,
+        experience_learning: Optional[Any] = None,
     ):
         self.config = config
         self.gateway = gateway
         self.artifact_store = artifact_store if artifact_store is not None else NullArtifactStore()
+        # Issue #96: experience_learning is duck-typed against the
+        # ExperienceLearningGateway protocol so a NullExperienceLearningGateway
+        # can no-op when the service is unconfigured.
+        self.experience_learning = experience_learning if experience_learning is not None else NullExperienceLearningGateway()
         self._step_lock = threading.Lock()
         self._step_id_by_run: Dict[str, int] = {}
         self._capability_cache: Dict[str, Dict[str, Any]] = {}
+        self._progress_lock = threading.Lock()
+        self._progress_by_run: Dict[str, RunProgressLog] = {}
+        self._event_buffer_lock = threading.Lock()
+        self._event_buffer_by_run: Dict[str, list[Dict[str, Any]]] = {}
 
     def run(self, context: W0RunContext, input_ref: Mapping[str, Any]) -> Dict[str, Any]:
         input_reference = _normalize_input_ref(input_ref, context.run_id)
@@ -393,6 +557,12 @@ class W0WorkflowRunner:
                 )
             )
             _write_summary("starting", message="orchestrator workflow accepted")
+            self._record_marker_step(
+                context,
+                name=STEP_ACCEPTED,
+                status=STEP_STATUS_OK,
+                run_status="starting",
+            )
             self._emit_workflow_decision_event(
                 context,
                 "orchestrator.workflow.accepted",
@@ -680,6 +850,16 @@ class W0WorkflowRunner:
                         kind=KIND_MODEL_POLICY_SKIPPED,
                     )
                 )
+                # Issue #96: surface the policy skip as a discrete step so the
+                # UI/EL timeline can distinguish it from `model-guidance`
+                # actually running.
+                self._record_marker_step(
+                    context,
+                    name=STEP_MODEL_POLICY_SKIPPED,
+                    status=STEP_STATUS_SKIPPED,
+                    run_status="updating",
+                    diagnostic="no modelPrompt provided by requester",
+                )
 
             trajectory_payload = self._fetch_trajectory_ledger(context.run_id)
             trajectory_ref = _coerce_output_ref(trajectory_payload, f"urn:orchestrator/{context.run_id}/trajectory", {})
@@ -733,6 +913,12 @@ class W0WorkflowRunner:
             )
             completed_steps.append("write-evidence")
 
+            self._record_marker_step(
+                context,
+                name=STEP_COMPLETED,
+                status=STEP_STATUS_OK,
+                run_status="completed",
+            )
             self._emit_workflow_decision_event(
                 context,
                 "orchestrator.workflow.completed",
@@ -747,6 +933,11 @@ class W0WorkflowRunner:
                 policy_decision=POLICY_ALLOW,
             )
             _write_summary("completed", message="W0 migration workflow completed")
+            # Issue #96: forward Harness events + trajectory ledger to the
+            # experience-learning-service so the EL system can analyze runs
+            # started from the UI. Best-effort; failures must not break the
+            # successful run reported above.
+            self._flush_to_experience_learning(context.run_id, trajectory_payload)
             return {
                 "runId": context.run_id,
                 "workflowId": context.workflow_id,
@@ -768,6 +959,17 @@ class W0WorkflowRunner:
                 else _failed_step_from_exception(exc)
             )
             try:
+                self._record_marker_step(
+                    context,
+                    name=STEP_FAILED,
+                    status=STEP_STATUS_FAILED,
+                    run_status="failed",
+                    diagnostic=failure_message,
+                    failed_step=failed_step,
+                )
+            except Exception:
+                pass
+            try:
                 self.gateway.update_run(
                     context.run_id,
                     "failed",
@@ -780,6 +982,13 @@ class W0WorkflowRunner:
                 pass
             try:
                 _write_summary("failed", message=failure_message, failed_step=failed_step)
+            except Exception:
+                pass
+            # Issue #96: even on failure, surface what we observed to EL so
+            # pattern detection sees the failure trail. Trajectory ledger may
+            # be unavailable if the failure happened before we fetched it.
+            try:
+                self._flush_to_experience_learning(context.run_id, None)
             except Exception:
                 pass
             if isinstance(exc, StepExecutionError):
@@ -829,6 +1038,21 @@ class W0WorkflowRunner:
             "modelInvocations": [model_invocation],
             "trajectoryLedger": _as_reference_payload(trajectory_ref),
         }
+        # Issue #96: when experience-learning is configured, reference its
+        # run summary endpoint so the Evidence Pack carries a verifiable
+        # pointer back to the EL system that observed the run.
+        learning_uri = ""
+        if isinstance(self.experience_learning, ExperienceLearningGateway):
+            learning_uri = self.experience_learning.summary_uri(context.run_id)
+        if learning_uri:
+            learning_ref = _build_reference(
+                learning_uri,
+                {"runId": context.run_id, "endpoint": "experience-learning.summary"},
+            )
+            artifacts["experienceLearningSummary"] = {
+                **_as_reference_payload(learning_ref),
+                "endpoint": learning_uri,
+            }
 
         return {
             "runId": context.run_id,
@@ -960,6 +1184,16 @@ class W0WorkflowRunner:
 
         event_input_payload = self._event_input_payload(data_class, payload)
 
+        # Issue #96: record the step as `running` before the upstream call so
+        # /v0/runs/{runId}/progress can show in-flight state to the UI.
+        self._record_step_start(
+            context,
+            name=step_name,
+            capability_id=capability_id,
+            actor=actor,
+            input_ref=input_ref,
+        )
+
         for attempt in range(0, self.config.max_retries + 1):
             attempt_number = attempt + 1
             try:
@@ -982,6 +1216,16 @@ class W0WorkflowRunner:
                     output_ref=output_ref,
                     latency_ms=latency_ms,
                     policy_decision=POLICY_ALLOW,
+                )
+                self._record_step_finish(
+                    context,
+                    name=step_name,
+                    capability_id=capability_id,
+                    actor=actor,
+                    status=STEP_STATUS_OK,
+                    input_ref=input_ref,
+                    output_ref=output_ref,
+                    latency_ms=latency_ms,
                 )
                 return WorkflowStepResult(
                     capability_id=capability_id,
@@ -1013,6 +1257,10 @@ class W0WorkflowRunner:
                     time.sleep(self.config.retry_delay_ms / 1000)
                     continue
 
+                failure_ref = _build_reference(
+                    f"urn:orchestrator/{context.run_id}/step/{step_name}/failure",
+                    {"error": str(exc), "attempts": attempt_number},
+                )
                 self._post_event(
                     context.run_id,
                     event_type=f"{step_name}.failed",
@@ -1024,14 +1272,27 @@ class W0WorkflowRunner:
                     input_payload=event_input_payload,
                     output_payload={"error": str(exc), "attempts": attempt_number},
                     input_ref=input_ref,
-                    output_ref=_build_reference(
-                        f"urn:orchestrator/{context.run_id}/step/{step_name}/failure",
-                        {"error": str(exc), "attempts": attempt_number},
-                    ),
+                    output_ref=failure_ref,
                     policy_decision=POLICY_ALLOW,
+                )
+                self._record_step_finish(
+                    context,
+                    name=step_name,
+                    capability_id=capability_id,
+                    actor=actor,
+                    status=STEP_STATUS_FAILED,
+                    input_ref=input_ref,
+                    output_ref=failure_ref,
+                    diagnostic=str(exc),
+                    run_status="failed",
+                    failed_step=step_name,
                 )
                 raise StepExecutionError(f"step {step_name} failed: {exc}") from exc
             except Exception as exc:
+                failure_ref = _build_reference(
+                    f"urn:orchestrator/{context.run_id}/step/{step_name}/failure",
+                    {"error": str(exc), "attempts": attempt_number},
+                )
                 self._post_event(
                     context.run_id,
                     event_type=f"{step_name}.failed",
@@ -1043,11 +1304,20 @@ class W0WorkflowRunner:
                     input_payload=event_input_payload,
                     output_payload={"error": str(exc), "attempts": attempt_number},
                     input_ref=input_ref,
-                    output_ref=_build_reference(
-                        f"urn:orchestrator/{context.run_id}/step/{step_name}/failure",
-                        {"error": str(exc), "attempts": attempt_number},
-                    ),
+                    output_ref=failure_ref,
                     policy_decision=POLICY_ALLOW,
+                )
+                self._record_step_finish(
+                    context,
+                    name=step_name,
+                    capability_id=capability_id,
+                    actor=actor,
+                    status=STEP_STATUS_FAILED,
+                    input_ref=input_ref,
+                    output_ref=failure_ref,
+                    diagnostic=str(exc),
+                    run_status="failed",
+                    failed_step=step_name,
                 )
                 raise StepExecutionError(f"step {step_name} failed: {exc}") from exc
 
@@ -1140,6 +1410,7 @@ class W0WorkflowRunner:
             "service": self.config.service_name,
             "runId": run_id,
             "stepId": step_id,
+            "eventId": f"orch-{run_id}-{step_id}",
             "actor": actor,
             "capability": capability,
             "dataClass": data_class,
@@ -1147,6 +1418,7 @@ class W0WorkflowRunner:
             "policyDecision": policy_decision,
             "status": status,
             "stateTransition": state_transition,
+            "createdAt": _iso_now(),
             "inputRef": _as_reference_payload(input_ref),
             "outputRef": _as_reference_payload(output_ref),
             "payload": {
@@ -1156,17 +1428,186 @@ class W0WorkflowRunner:
         }
         if latency_ms is not None:
             event["latencyMs"] = latency_ms
+        # Buffer for the experience-learning-service flush (Issue #96).
+        self._buffer_event_for_learning(run_id, event)
         try:
             self.gateway.post_event(event)
         except Exception:
             # Eventing is best-effort and must not break control-plane execution.
             return
 
+    def _buffer_event_for_learning(self, run_id: str, event: Mapping[str, Any]) -> None:
+        with self._event_buffer_lock:
+            buffer = self._event_buffer_by_run.setdefault(run_id, [])
+            buffer.append(dict(event))
+
+    def _drain_event_buffer(self, run_id: str) -> list[Dict[str, Any]]:
+        with self._event_buffer_lock:
+            buffer = self._event_buffer_by_run.pop(run_id, [])
+        return buffer
+
+    def _flush_to_experience_learning(
+        self,
+        run_id: str,
+        trajectory_payload: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Forward buffered Harness events and the trajectory ledger to EL.
+
+        Best-effort: failures are swallowed by the gateway implementation.
+        Issue #96 requires UI-started runs to feed Experience Learning so the
+        Harness/EL system can observe and learn from each pipeline run.
+        """
+        events = self._drain_event_buffer(run_id)
+        if events:
+            self.experience_learning.post_harness_events(events)
+        if trajectory_payload:
+            self.experience_learning.post_trajectory_ledger(trajectory_payload)
+
     def _next_step_id(self, run_id: str) -> int:
         with self._step_lock:
             current = self._step_id_by_run.get(run_id, 0) + 1
             self._step_id_by_run[run_id] = current
         return current
+
+    def _progress_for(self, run_id: str) -> RunProgressLog:
+        with self._progress_lock:
+            log = self._progress_by_run.get(run_id)
+            if log is None:
+                log = RunProgressLog()
+                self._progress_by_run[run_id] = log
+            return log
+
+    def progress_payload(self, run_id: str) -> list[Dict[str, Any]]:
+        """Return the in-memory step list for `run_id`, empty if unknown."""
+        with self._progress_lock:
+            log = self._progress_by_run.get(run_id)
+        if log is None:
+            return []
+        return log.to_payload()
+
+    def _persist_progress(
+        self,
+        context: W0RunContext,
+        log: RunProgressLog,
+        *,
+        current_step: Optional[str],
+        run_status: str,
+        failed_step: Optional[str] = None,
+    ) -> None:
+        steps = log.to_payload()
+        completed = [step["name"] for step in steps if step.get("status") == STEP_STATUS_OK]
+        payload = {
+            "schemaVersion": "v0",
+            "runId": context.run_id,
+            "workflowId": context.workflow_id,
+            "requester": context.requester,
+            "runStatus": run_status,
+            "currentStep": current_step,
+            "failedStep": failed_step,
+            "completedSteps": completed,
+            "stepCount": len(steps),
+            "steps": steps,
+            "updatedAt": _iso_now(),
+        }
+        try:
+            self.artifact_store.write_json(
+                context.run_id,
+                context.workflow_id,
+                "run-progress.json",
+                payload,
+                kind=KIND_RUN_PROGRESS,
+            )
+        except Exception:  # pragma: no cover - persistence is best-effort
+            return
+
+    def _record_step_start(
+        self,
+        context: W0RunContext,
+        *,
+        name: str,
+        capability_id: str,
+        actor: str,
+        input_ref: Optional[DataReference],
+    ) -> StepRecord:
+        log = self._progress_for(context.run_id)
+        record = log.upsert(
+            name=name,
+            capability_id=capability_id,
+            service=self.config.service_name,
+            actor=actor,
+            status=STEP_STATUS_RUNNING,
+            started_at=_iso_now(),
+            input_ref=_as_reference_payload(input_ref) if input_ref is not None else None,
+        )
+        self._persist_progress(context, log, current_step=name, run_status="updating")
+        return record
+
+    def _record_step_finish(
+        self,
+        context: W0RunContext,
+        *,
+        name: str,
+        capability_id: str,
+        actor: str,
+        status: str,
+        input_ref: Optional[DataReference] = None,
+        output_ref: Optional[DataReference] = None,
+        diagnostic: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+        run_status: str = "updating",
+        failed_step: Optional[str] = None,
+    ) -> None:
+        log = self._progress_for(context.run_id)
+        log.upsert(
+            name=name,
+            capability_id=capability_id,
+            service=self.config.service_name,
+            actor=actor,
+            status=status,
+            finished_at=_iso_now(),
+            input_ref=_as_reference_payload(input_ref) if input_ref is not None else None,
+            output_ref=_as_reference_payload(output_ref) if output_ref is not None else None,
+            diagnostic=diagnostic,
+            latency_ms=latency_ms,
+        )
+        current = name if status == STEP_STATUS_RUNNING else None
+        self._persist_progress(
+            context,
+            log,
+            current_step=current,
+            run_status=run_status,
+            failed_step=failed_step,
+        )
+
+    def _record_marker_step(
+        self,
+        context: W0RunContext,
+        *,
+        name: str,
+        status: str,
+        run_status: str,
+        diagnostic: Optional[str] = None,
+        failed_step: Optional[str] = None,
+    ) -> None:
+        log = self._progress_for(context.run_id)
+        timestamp = _iso_now()
+        log.upsert(
+            name=name,
+            capability_id=self.config.service_name,
+            service=self.config.service_name,
+            actor=self.config.service_name,
+            status=status,
+            started_at=timestamp,
+            finished_at=timestamp if status != STEP_STATUS_RUNNING else None,
+            diagnostic=diagnostic,
+        )
+        self._persist_progress(
+            context,
+            log,
+            current_step=name if status == STEP_STATUS_RUNNING else None,
+            run_status=run_status,
+            failed_step=failed_step,
+        )
 
     @staticmethod
     def _build_summary(

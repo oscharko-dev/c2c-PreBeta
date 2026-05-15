@@ -25,7 +25,7 @@ class JSONHTTPClient:
         self.timeout_seconds = timeout_seconds
         self.default_headers = dict(default_headers or {})
 
-    def post_json(self, url: str, payload: Mapping[str, Any], headers: Optional[Mapping[str, str]] = None) -> HttpResponse:
+    def post_json(self, url: str, payload: Any, headers: Optional[Mapping[str, str]] = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,

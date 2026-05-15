@@ -40,6 +40,8 @@ KIND_TRAJECTORY_LEDGER = "trajectory-ledger"
 KIND_MODEL_INVOCATION_LEDGER = "model-invocation-ledger"
 KIND_MODEL_POLICY_SKIPPED = "model-policy-skipped"
 KIND_RUN_SUMMARY = "run-summary"
+KIND_RUN_PROGRESS = "run-progress"
+KIND_LEARNING_SUMMARY = "learning-summary"
 
 MIME_JSON = "application/json"
 MIME_COBOL = "text/x-cobol"

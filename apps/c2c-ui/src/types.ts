@@ -202,3 +202,72 @@ export interface EvidenceView {
   validationStatus?: ValidationStatus;
   exportRef?: OutputRef | null;
 }
+
+// Issue #96: pipeline progress contract for UI-started runs.
+export type PipelineStepStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
+
+export interface PipelineStep {
+  stepId: number;
+  name: string;
+  capabilityId: string;
+  service: string;
+  actor: string;
+  status: PipelineStepStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  diagnostic?: string;
+  inputRef?: OutputRef | null;
+  outputRef?: OutputRef | null;
+  latencyMs?: number;
+}
+
+export type PipelineProgressStatus = 'complete' | 'incomplete';
+
+export interface PipelineProgressView {
+  runId: string;
+  programId: string;
+  mode: RunMode;
+  productMode?: ProductMode;
+  status: PipelineProgressStatus;
+  runStatus: RunStatus | string;
+  currentStep: string | null;
+  failedStep: string | null;
+  completedSteps: string[];
+  stepCount: number;
+  steps: PipelineStep[];
+  missingArtifacts: string[];
+  orchestratorRunId?: string;
+  note?: string;
+}
+
+export interface LearningSummary {
+  runId: string;
+  runStatus?: string;
+  observedAt?: string;
+  sourceEventCount?: number;
+  sourceLedgerCount?: number;
+  candidateCount?: number;
+  candidateByPattern?: Record<string, number>;
+  experienceEventIds?: string[];
+  observedPatterns?: string[];
+  observationOnly?: boolean;
+  policyVersion?: string;
+  policyFingerprint?: string;
+}
+
+export type LearningSource = 'live' | 'cached' | 'unavailable';
+export type LearningStatus = 'complete' | 'incomplete';
+
+export interface LearningView {
+  runId: string;
+  programId: string;
+  mode: RunMode;
+  productMode?: ProductMode;
+  status: LearningStatus;
+  summary: LearningSummary | null;
+  endpoint: string;
+  source: LearningSource;
+  missingArtifacts: string[];
+  orchestratorRunId?: string;
+  note?: string;
+}
