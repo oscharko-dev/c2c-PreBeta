@@ -1,4 +1,5 @@
 import { ApiErrorDetails, ApiResult, HealthResponse, ModeResponse } from '../types/api';
+import { Sample, SampleDetail, TransformRequest, TransformResponse } from '../types/reference-program';
 
 const LOCAL_OVERRIDE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
@@ -132,7 +133,47 @@ async function fetchJson<T>(
   }
 }
 
+function parseSamplesResponse(payload: unknown): ApiResult<Sample[]> {
+  if (!Array.isArray(payload)) {
+    return createFailure('Contract error: samples payload must be an array.', {
+      kind: 'contract',
+      body: payload,
+    });
+  }
+  return { ok: true, data: payload as Sample[] };
+}
+
+function parseSampleDetailResponse(payload: unknown): ApiResult<SampleDetail> {
+  if (!isRecord(payload)) {
+    return createFailure('Contract error: sample detail payload must be a JSON object.', {
+      kind: 'contract',
+      body: payload,
+    });
+  }
+  return { ok: true, data: payload as unknown as SampleDetail };
+}
+
+function parseTransformResponse(payload: unknown): ApiResult<TransformResponse> {
+  if (!isRecord(payload)) {
+    return createFailure('Contract error: transform payload must be a JSON object.', {
+      kind: 'contract',
+      body: payload,
+    });
+  }
+  return { ok: true, data: payload as unknown as TransformResponse };
+}
+
 export const apiClient = {
   getHealth: () => fetchJson('/api/v0/health', parseHealthResponse),
   getMode: () => fetchJson('/api/v0/mode', parseModeResponse),
+  getSamples: () => fetchJson('/api/v0/samples', parseSamplesResponse),
+  getSampleDetail: (programId: string) => fetchJson(`/api/v0/samples/${encodeURIComponent(programId)}`, parseSampleDetailResponse),
+  transform: (request: TransformRequest) => 
+    fetchJson('/api/v0/transform', parseTransformResponse, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    }),
 };

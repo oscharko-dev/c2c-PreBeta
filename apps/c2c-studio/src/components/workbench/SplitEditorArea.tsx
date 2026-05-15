@@ -1,6 +1,7 @@
 'use client';
 
 import { editorPanes } from './workbenchModels';
+import { CobolEditorPane } from '../source/CobolEditorPane';
 
 export function SplitEditorArea() {
   return (
@@ -19,18 +20,24 @@ export function SplitEditorArea() {
       <div className="grid flex-1 gap-px overflow-auto bg-line-2 lg:grid-cols-2">
         {editorPanes.map((pane) => (
           <section key={pane.id} className="flex min-h-0 flex-col bg-bg-0" aria-label={pane.label}>
-            <div className="flex items-center justify-between border-b border-line px-4 py-2">
-              <h2 className="text-sm font-medium text-text">{pane.label}</h2>
-              <span className="rounded bg-bg-2 px-2 py-1 text-[11px] uppercase tracking-wider text-text-dim">
-                {pane.badge}
-              </span>
-            </div>
-            <div className="flex flex-1 items-center justify-center p-6 text-center">
-              <div className="max-w-sm space-y-2">
-                <p className="text-sm font-medium text-text">{pane.emptyState.title}</p>
-                <p className="text-sm text-text-dim">{pane.emptyState.message}</p>
-              </div>
-            </div>
+            {pane.id === 'source' ? (
+              <CobolEditorPane />
+            ) : (
+              <>
+                <div className="flex items-center justify-between border-b border-line px-4 py-2">
+                  <h2 className="text-sm font-medium text-text">{pane.label}</h2>
+                  <span className="rounded bg-bg-2 px-2 py-1 text-[11px] uppercase tracking-wider text-text-dim">
+                    {pane.badge}
+                  </span>
+                </div>
+                <div className="flex flex-1 items-center justify-center p-6 text-center">
+                  <div className="max-w-sm space-y-2">
+                    <p className="text-sm font-medium text-text">{pane.emptyState.title}</p>
+                    <p className="text-sm text-text-dim">{pane.emptyState.message}</p>
+                  </div>
+                </div>
+              </>
+            )}
           </section>
         ))}
       </div>
