@@ -2,17 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #f8fafc;
-  --foreground: #020617;
-}
+@layer base {
+  :root {
+    --bg-0: #0b0d10;
+    --bg-1: #101216;
+    --bg-2: #14171c;
+    --bg-3: #1a1e25;
+    --bg-4: #232831;
+    --bg-hover: #1d2128;
+    --bg-active: rgba(90, 122, 245, 0.14);
+    --bg-active-strong: rgba(90, 122, 245, 0.22);
+    --line: #23272f;
+    --line-2: #2c313b;
+    --line-3: #393f4b;
+    --text: #d6d9e0;
+    --text-dim: #8a90a0;
+    --text-faint: #5b6173;
+    --text-bright: #eef0f4;
+    --accent: #5a7af5;
+    --accent-dim: #4761c9;
+    --accent-soft: rgba(90, 122, 245, 0.18);
+    --success: #4ea674;
+    --success-soft: rgba(78, 166, 116, 0.16);
+    --warn: #d4a25b;
+    --warn-soft: rgba(212, 162, 91, 0.16);
+    --error: #d96168;
+    --error-soft: rgba(217, 97, 104, 0.16);
+    --teal: #3fb8ad;
+    --teal-soft: rgba(63, 184, 173, 0.14);
+    --violet: #b58af0;
+    --violet-soft: rgba(181, 138, 240, 0.14);
+    --orange: #e08e58;
+    --orange-soft: rgba(224, 142, 88, 0.14);
 
-html {
-  background: var(--background);
-}
+    --font-ui: "Inter", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
 
-body {
-  min-height: 100vh;
-  color: var(--foreground);
-  background: var(--background);
+  html, body {
+    @apply bg-[var(--bg-0)] text-[var(--text)] font-ui;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
 }
