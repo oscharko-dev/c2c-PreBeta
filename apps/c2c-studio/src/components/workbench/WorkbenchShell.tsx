@@ -23,7 +23,7 @@ export function WorkbenchShell() {
       <TransformationRunProvider>
         <SourceWorkspaceProvider>
           <GeneratedArtifactsProvider>
-            <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg-0 text-text font-ui">
+            <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg-0 text-text font-ui" role="application" aria-label="c2c Studio Workbench">
               <AppTopBar apiState={apiState} />
               <div className="flex flex-1 overflow-hidden">
                 <ActivityBar />

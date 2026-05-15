@@ -10,16 +10,47 @@ import { EvidencePackPanel } from '../run/EvidencePackPanel';
 import { ProblemsPanel } from '../run/ProblemsPanel';
 import { RunArtifactsPanel } from '../run/RunArtifactsPanel';
 import { ExperienceLearningPanel } from '../observability/ExperienceLearningPanel';
+import { useResizablePane } from '../../hooks/useResizablePane';
+import { cn } from '@/lib/utils';
 
 export function BottomWorkbench() {
   const { isBottomPanelOpen, activeBottomTab, setActiveBottomTab, setBottomPanelOpen } = useWorkbench();
   const { state } = useTransformationRun();
 
+  const { size, isResizing, startResize } = useResizablePane({
+    id: 'bottom-workbench',
+    initialSize: 256, // h-64 is 256px
+    minSize: 100,
+    maxSize: 600,
+    direction: 'vertical',
+    reverse: true,
+  });
+
   if (!isBottomPanelOpen) return null;
   const activeTab = bottomWorkbenchTabs.find((tab) => tab.id === activeBottomTab) ?? bottomWorkbenchTabs[0];
 
   return (
-    <div className="flex h-64 flex-col border-t border-line bg-bg-1 shrink-0 w-full" aria-label="Bottom Workbench">
+    <div 
+      className="flex flex-col border-t border-line bg-bg-1 shrink-0 w-full relative group" 
+      aria-label="Bottom Workbench"
+      style={{ height: size }}
+    >
+      {/* Resize Handle */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize Bottom Workbench"
+        tabIndex={0}
+        onMouseDown={startResize}
+        onTouchStart={startResize}
+        onKeyDown={startResize}
+        className={cn(
+          "absolute left-0 right-0 top-0 h-1 cursor-row-resize hover:bg-accent hover:h-1 focus-visible:h-1 focus-visible:bg-accent outline-none z-10 transition-colors delay-100",
+          isResizing ? "bg-accent h-1" : "bg-line"
+        )}
+        style={{ marginTop: '-1px' }} // pull it slightly over the border-t
+      />
+
       <div className="flex min-h-10 items-center justify-between gap-2 border-b border-line-2 px-2 py-1 shrink-0 bg-bg-2">
         <Tabs
           value={activeTab.id}
@@ -75,3 +106,4 @@ export function BottomWorkbench() {
     </div>
   );
 }
+

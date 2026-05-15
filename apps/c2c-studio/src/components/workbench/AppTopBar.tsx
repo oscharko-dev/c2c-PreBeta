@@ -4,6 +4,7 @@ import { Play, Settings, Search, CheckCircle2, AlertCircle } from 'lucide-react'
 import { type StudioApiState } from '../../hooks/useC2cApi';
 import { getWorkbenchReadiness } from './workbenchReadiness';
 import { useSourceWorkspace } from '../../stores/sourceWorkspace';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 
 interface AppTopBarProps {
   apiState: StudioApiState;
@@ -13,6 +14,14 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
   const { canSubmitTransform, submitTransform } = useSourceWorkspace();
+  const canStart = readiness.startEnabled && !loading && canSubmitTransform;
+
+  useKeyboardShortcuts({
+    onStartTransform: () => {
+      void submitTransform();
+    },
+    canStartTransform: canStart,
+  });
 
   return (
     <div className="flex min-h-12 w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-bg-1 px-4 py-2 shrink-0">
@@ -33,9 +42,10 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         </div>
         <button
           type="button"
-          disabled={!readiness.startEnabled || loading || !canSubmitTransform}
-          className="flex items-center justify-center rounded bg-teal hover:bg-teal-soft active:bg-teal disabled:opacity-50 disabled:cursor-not-allowed p-1.5"
+          disabled={!canStart}
+          className="flex items-center justify-center rounded bg-teal hover:bg-teal-soft active:bg-teal disabled:opacity-50 disabled:cursor-not-allowed p-1.5 focus-visible:ring-1 focus-visible:ring-accent outline-none"
           aria-label="Start Transformation"
+          title="Start Transformation (Cmd/Ctrl + Enter)"
           onClick={() => {
             void submitTransform();
           }}
@@ -66,10 +76,10 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           )}
         </div>
         <div className="h-4 w-px bg-line-2"></div>
-        <button type="button" className="p-1 text-text-dim hover:text-text" aria-label="Search workspace">
+        <button type="button" className="p-1 text-text-dim hover:text-text focus-visible:ring-1 focus-visible:ring-accent outline-none rounded" aria-label="Search workspace">
           <Search className="h-4 w-4" />
         </button>
-        <button type="button" className="p-1 text-text-dim hover:text-text" aria-label="Open studio settings">
+        <button type="button" className="p-1 text-text-dim hover:text-text focus-visible:ring-1 focus-visible:ring-accent outline-none rounded" aria-label="Open studio settings">
           <Settings className="h-4 w-4" />
         </button>
       </div>
