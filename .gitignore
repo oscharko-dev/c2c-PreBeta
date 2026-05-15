@@ -226,6 +226,8 @@ vendor/
 # -------------------------------
 .claude/
 .codex/
+.air/
+.only-for-internal-use/
 .tmp/
 .env.local
 .DS_Store?

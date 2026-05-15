@@ -320,7 +320,6 @@ def _as_reference_payload(ref: DataReference) -> Mapping[str, Any]:
         "uri": ref.uri,
         "sha256": ref.sha256,
         "byteSize": ref.byte_size,
-        "byte_size": ref.byte_size,
     }
 
 
@@ -1061,10 +1060,9 @@ class W0WorkflowRunner:
                 learning_uri,
                 {"runId": context.run_id, "endpoint": "experience-learning.summary"},
             )
-            artifacts["experienceLearningSummary"] = {
-                **_as_reference_payload(learning_ref),
-                "endpoint": learning_uri,
-            }
+            artifacts["experienceEvents"] = [
+                _as_reference_payload(learning_ref)
+            ]
 
         return {
             "runId": context.run_id,
@@ -1653,8 +1651,8 @@ class W0WorkflowRunner:
         ir_output: WorkflowStepResult,
         generator_output: WorkflowStepResult,
         build_output: WorkflowStepResult,
-    ) -> Mapping[str, Any]:
-        return {
+    ) -> str:
+        return json.dumps({
             "runId": context.run_id,
             "workflowId": context.workflow_id,
             "requester": context.requester,
@@ -1663,4 +1661,4 @@ class W0WorkflowRunner:
             "irRef": ir_output.output_ref.uri,
             "javaRef": generator_output.output_ref.uri,
             "buildRef": build_output.output_ref.uri,
-        }
+        })
