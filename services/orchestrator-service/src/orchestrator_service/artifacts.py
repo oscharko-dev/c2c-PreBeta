@@ -22,7 +22,12 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, TypeAlias
+
+JsonPrimitive: TypeAlias = str | int | float | bool | None
+# JsonValue is recursive: JSON scalars, arrays, or objects
+JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 
 DEFAULT_RUN_ARTIFACT_ROOT = "var/c2c-local/runs"
@@ -85,7 +90,7 @@ class ArtifactMetadata:
     path: str
     name: str
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         return asdict(self)
 
 
@@ -189,7 +194,7 @@ class RunArtifactStore:
         run_id: str,
         workflow_id: str,
         relpath: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
         *,
         kind: str,
     ) -> ArtifactMetadata:
@@ -225,7 +230,7 @@ class RunArtifactStore:
         self,
         run_id: str,
         workflow_id: str,
-        payload: Mapping[str, Any],
+        payload: JsonObject,
     ) -> ArtifactMetadata:
         """Persist run-summary.json. The summary is overwritten on every update."""
         return self.write_json(
@@ -239,7 +244,7 @@ class RunArtifactStore:
     def has_run(self, run_id: str) -> bool:
         return (self._run_dir(run_id) / INDEX_FILE).is_file()
 
-    def read_index(self, run_id: str) -> dict[str, Any] | None:
+    def read_index(self, run_id: str) -> JsonObject | None:
         index_path = self._run_dir(run_id) / INDEX_FILE
         if not index_path.is_file():
             return None
@@ -248,7 +253,7 @@ class RunArtifactStore:
         except json.JSONDecodeError:
             return None
 
-    def list_artifacts(self, run_id: str) -> list[dict[str, Any]] | None:
+    def list_artifacts(self, run_id: str) -> list[JsonObject] | None:
         index = self.read_index(run_id)
         if index is None:
             return None
@@ -257,7 +262,7 @@ class RunArtifactStore:
             return []
         return list(artifacts)
 
-    def read_summary(self, run_id: str) -> dict[str, Any] | None:
+    def read_summary(self, run_id: str) -> JsonObject | None:
         return self.read_json(run_id, SUMMARY_FILE)
 
     def read_bytes(self, run_id: str, relpath: str) -> bytes | None:
@@ -266,7 +271,7 @@ class RunArtifactStore:
             return None
         return target.read_bytes()
 
-    def read_json(self, run_id: str, relpath: str) -> dict[str, Any] | None:
+    def read_json(self, run_id: str, relpath: str) -> JsonObject | None:
         raw = self.read_bytes(run_id, relpath)
         if raw is None:
             return None
@@ -276,14 +281,14 @@ class RunArtifactStore:
         except json.JSONDecodeError:
             return None
 
-    def find_metadata(self, run_id: str, relpath: str) -> dict[str, Any] | None:
+    def find_metadata(self, run_id: str, relpath: str) -> JsonObject | None:
         artifacts = self.list_artifacts(run_id) or []
         for entry in artifacts:
             if entry.get("path") == relpath:
                 return entry
         return None
 
-    def find_by_kind(self, run_id: str, kind: str) -> list[dict[str, Any]]:
+    def find_by_kind(self, run_id: str, kind: str) -> list[JsonObject]:
         artifacts = self.list_artifacts(run_id) or []
         return [entry for entry in artifacts if entry.get("kind") == kind]
 
@@ -370,7 +375,7 @@ class NullArtifactStore:
         return None
 
     @staticmethod
-    def write_json(_run_id: str, _workflow_id: str, _relpath: str, _payload: dict[str, Any], *, kind: str) -> ArtifactMetadata | None:
+    def write_json(_run_id: str, _workflow_id: str, _relpath: str, _payload: JsonObject, *, kind: str) -> ArtifactMetadata | None:
         return None
 
     @staticmethod
@@ -378,7 +383,7 @@ class NullArtifactStore:
         return None
 
     @staticmethod
-    def update_summary(_run_id: str, _workflow_id: str, _payload: Mapping[str, Any]) -> ArtifactMetadata | None:
+    def update_summary(_run_id: str, _workflow_id: str, _payload: JsonObject) -> ArtifactMetadata | None:
         return None
 
     @staticmethod
@@ -386,15 +391,15 @@ class NullArtifactStore:
         return False
 
     @staticmethod
-    def read_index(_run_id: str) -> dict[str, Any] | None:
+    def read_index(_run_id: str) -> JsonObject | None:
         return None
 
     @staticmethod
-    def list_artifacts(_run_id: str) -> list[dict[str, Any]] | None:
+    def list_artifacts(_run_id: str) -> list[JsonObject] | None:
         return None
 
     @staticmethod
-    def read_summary(_run_id: str) -> dict[str, Any] | None:
+    def read_summary(_run_id: str) -> JsonObject | None:
         return None
 
     @staticmethod
@@ -402,13 +407,13 @@ class NullArtifactStore:
         return None
 
     @staticmethod
-    def read_json(_run_id: str, _relpath: str) -> dict[str, Any] | None:
+    def read_json(_run_id: str, _relpath: str) -> JsonObject | None:
         return None
 
     @staticmethod
-    def find_metadata(_run_id: str, _relpath: str) -> dict[str, Any] | None:
+    def find_metadata(_run_id: str, _relpath: str) -> JsonObject | None:
         return None
 
     @staticmethod
-    def find_by_kind(_run_id: str, _kind: str) -> list[dict[str, Any]]:
+    def find_by_kind(_run_id: str, _kind: str) -> list[JsonObject]:
         return []
