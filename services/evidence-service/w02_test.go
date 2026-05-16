@@ -232,6 +232,19 @@ func TestEvaluateValidationW02FailsClosedWhenRepairAttemptMissingModelInvocation
 	}
 }
 
+func TestEvaluateValidationW02FailsClosedWhenRepairAttemptReferencesWrongAgentRole(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.RepairAttempts[0].ModelInvocationRef = &a.ModelInvocations[0]
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when repair attempt references transformation invocation")
+	}
+	if !containsString(v.MissingArtifacts, "repairAttempts[0].modelInvocationRef.agentRole") {
+		t.Fatalf("missingArtifacts must call out repair attempt model invocation role; got %v", v.MissingArtifacts)
+	}
+}
+
 func TestEvaluateValidationW02FailsClosedOnMissingAgentTrajectories(t *testing.T) {
 	a := completeW02Artifacts(t)
 	a.AgentTrajectories = nil

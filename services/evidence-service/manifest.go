@@ -819,6 +819,8 @@ func validateW02ReferentialIntegrity(a *Artifacts) []string {
 		}
 		if attempt.ModelInvocationRef == nil {
 			missing = append(missing, fmt.Sprintf("repairAttempts[%d].modelInvocationRef", i))
+		} else if attempt.ModelInvocationRef.AgentRole != AgentRoleVerificationRepair {
+			missing = append(missing, fmt.Sprintf("repairAttempts[%d].modelInvocationRef.agentRole", i))
 		} else if _, ok := modelInvocationRefs[modelInvocationKey(*attempt.ModelInvocationRef)]; !ok {
 			missing = append(missing, fmt.Sprintf("repairAttempts[%d].modelInvocationRef", i))
 		}
