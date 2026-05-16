@@ -149,6 +149,12 @@ env*/
 htmlcov/
 .eggs/
 .eggs-info/
+*.egg-info/
+# Developer-local uv lockfile. orchestrator-service is canonically a
+# setuptools, stdlib-only project (see pyproject.toml — no [tool.uv]
+# section, no dependencies). Committing uv.lock would imply uv is the
+# project's package manager, which it is not.
+/services/orchestrator-service/uv.lock
 
 # -------------------------------
 # Java / Kotlin / Gradle
@@ -172,6 +178,12 @@ log/
 # -------------------------------
 bin/
 .go-version
+# Service binaries built in-place by `go build` (no extension on Unix,
+# named after the containing directory). Listed explicitly because a
+# wildcard pattern would risk matching real source paths.
+/services/agentic-harness-core/agentic-harness-core
+/services/evidence-service/evidence-service
+/services/go/model-gateway-service/model-gateway-service
 
 # -------------------------------
 # .NET
