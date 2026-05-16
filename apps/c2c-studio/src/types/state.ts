@@ -156,6 +156,19 @@ export function deriveProductState(runState: TransformationRunState): StateConte
     return { state: 'cancelled', message: failureMessage ?? 'Run was cancelled.' };
   }
 
+  // Issue #173: BFF-classified blocked verdict (e.g. model_policy_denied,
+  // model_gateway_unavailable) is authoritative even when generated/
+  // build-test/evidence views look incomplete — they are downstream of
+  // the block, not the cause. We surface the closed-set failure code so
+  // the StatusBar chip and ErrorNotice can render the actionable label.
+  if (finalClassification === 'blocked' && failureCode) {
+    return {
+      state: failureCodeToState(failureCode),
+      message: failureMessage ?? runState.summary?.message ?? undefined,
+      failureCode,
+    };
+  }
+
   if (runState.phase === 'starting' || runState.phase === 'running') {
     // Issue #173: when workflow contract is available, refine the running
     // phase into awaiting-agent / repairing / verifying based on the active
