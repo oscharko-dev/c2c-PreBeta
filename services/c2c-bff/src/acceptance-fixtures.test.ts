@@ -69,9 +69,17 @@ function writeRepo(inputs: FixtureInput[], overrides?: Record<string, unknown>):
       unsupportedConstructs: input.unsupportedConstructs ?? [],
       targetLanguage: input.targetLanguage ?? 'java',
       expectedFinalClassification: input.expectedFinalClassification,
-      modes: input.modes ?? ['file-backed', 'paste-mode'],
       rationale: input.rationale,
     };
+    // Only emit modes when explicitly provided; this lets tests assert
+    // "modes is required" by passing modes: undefined (the loader rule).
+    if (Object.prototype.hasOwnProperty.call(input, 'modes')) {
+      if (input.modes !== undefined) {
+        entry.modes = input.modes;
+      }
+    } else {
+      entry.modes = ['file-backed', 'paste-mode'];
+    }
     if (input.description !== undefined) entry.description = input.description;
     if (expectedRef) entry.expectedOutputArtifactRef = expectedRef;
     if (input.oracleGenerationMode) entry.oracleGenerationMode = input.oracleGenerationMode;
@@ -138,6 +146,7 @@ test('loadAcceptanceFixtureRegistry exposes summaries and details for positive +
     assert.equal(positive.expectedFailureCode, null);
     assert.equal(positive.unsupportedConstructsCount, 0);
     assert.deepEqual(positive.modes, ['file-backed', 'paste-mode']);
+    assert.equal(positive.description, 'Smallest success-path acceptance.');
 
     const blocked = list.find((entry) => entry.fixtureId === 'BLOCKED');
     assert.ok(blocked, 'negative summary present');
@@ -156,6 +165,11 @@ test('loadAcceptanceFixtureRegistry exposes summaries and details for positive +
     assert.equal(blockedDetail.expectedOutput, null);
     assert.equal(blockedDetail.unsupportedConstructs.length, 1);
     assert.equal(blockedDetail.unsupportedConstructs[0]?.code, 'unsupported-feature');
+    // Detail response normalises optional fields to null so the OpenAPI
+    // schema contract holds: missing fields are JSON null, not omitted.
+    assert.equal(blockedDetail.expectedOutputArtifactRef, null);
+    assert.equal(blockedDetail.oracleGenerationMode, null);
+    assert.equal(blockedDetail.description, null);
 
     assert.equal(registry.get('UNKNOWN'), undefined);
   } finally {
@@ -245,6 +259,71 @@ test('rejects unknown supportedSubset construct', () => {
   const root = writeRepo([{ ...POSITIVE_FIXTURE, supportedSubset: ['NOT-A-VERB'] }]);
   try {
     assert.throws(() => loadAcceptanceFixtureRegistry(root), /supportedSubset/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects fixture missing modes', () => {
+  const root = writeRepo([{ ...POSITIVE_FIXTURE, modes: undefined as unknown as string[] }]);
+  try {
+    assert.throws(() => loadAcceptanceFixtureRegistry(root), /modes is required/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects shipping fixture missing paste-mode', () => {
+  const root = writeRepo([{ ...POSITIVE_FIXTURE, modes: ['file-backed'] }]);
+  try {
+    assert.throws(() => loadAcceptanceFixtureRegistry(root), /both "file-backed" and "paste-mode"/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects shipping fixture missing file-backed', () => {
+  const root = writeRepo([{ ...POSITIVE_FIXTURE, modes: ['paste-mode'] }]);
+  try {
+    assert.throws(() => loadAcceptanceFixtureRegistry(root), /both "file-backed" and "paste-mode"/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects sourceCobolArtifactRef.path with .. traversal segment', () => {
+  const root = writeRepo([POSITIVE_FIXTURE]);
+  try {
+    const indexPath = path.join(root, 'fixtures', 'acceptance', 'index.json');
+    const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf-8')) as {
+      fixtures: Array<Record<string, unknown>>;
+    };
+    const firstFixture = parsed.fixtures[0];
+    assert.ok(firstFixture, 'expected at least one fixture in the test index');
+    const sourceRef = firstFixture.sourceCobolArtifactRef as Record<string, unknown>;
+    sourceRef.path = '../escaped.cbl';
+    fs.writeFileSync(indexPath, JSON.stringify(parsed));
+    // The path may be rejected either by the schema-aligned syntactic
+    // check or by the runtime containment check; both protect repo root.
+    assert.throws(() => loadAcceptanceFixtureRegistry(root), /repo-relative|outside the repository root|\.\./);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects sourceCobolArtifactRef.path that is absolute', () => {
+  const root = writeRepo([POSITIVE_FIXTURE]);
+  try {
+    const indexPath = path.join(root, 'fixtures', 'acceptance', 'index.json');
+    const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf-8')) as {
+      fixtures: Array<Record<string, unknown>>;
+    };
+    const firstFixture = parsed.fixtures[0];
+    assert.ok(firstFixture, 'expected at least one fixture in the test index');
+    const sourceRef = firstFixture.sourceCobolArtifactRef as Record<string, unknown>;
+    sourceRef.path = '/etc/passwd';
+    fs.writeFileSync(indexPath, JSON.stringify(parsed));
+    assert.throws(() => loadAcceptanceFixtureRegistry(root), /absolute path|repo-relative/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

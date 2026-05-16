@@ -86,12 +86,31 @@ interface ResolvedDeps {
 
 function resolveDeps(deps: ServerDeps): ResolvedDeps {
   const httpClient = deps.httpClient ?? createNodeHttpClient();
-  let acceptanceFixturesCache: AcceptanceFixtureRegistry | undefined = deps.acceptanceFixtures;
+  // Lazy-load the acceptance-fixture registry so the BFF can boot without
+  // a populated fixtures/acceptance/index.json (kept out of unit-test
+  // synthetic repos). Both success and failure are cached so a misconfigured
+  // deployment doesn't re-hash the full corpus on every request.
+  let acceptanceFixturesResult:
+    | { ok: true; value: AcceptanceFixtureRegistry }
+    | { ok: false; error: Error }
+    | undefined = deps.acceptanceFixtures
+    ? { ok: true, value: deps.acceptanceFixtures }
+    : undefined;
   const acceptanceFixturesAccessor = (): AcceptanceFixtureRegistry => {
-    if (!acceptanceFixturesCache) {
-      acceptanceFixturesCache = loadAcceptanceFixtureRegistry(deps.config.repoRoot);
+    if (!acceptanceFixturesResult) {
+      try {
+        acceptanceFixturesResult = { ok: true, value: loadAcceptanceFixtureRegistry(deps.config.repoRoot) };
+      } catch (err) {
+        acceptanceFixturesResult = {
+          ok: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
     }
-    return acceptanceFixturesCache;
+    if (!acceptanceFixturesResult.ok) {
+      throw acceptanceFixturesResult.error;
+    }
+    return acceptanceFixturesResult.value;
   };
   return {
     config: deps.config,

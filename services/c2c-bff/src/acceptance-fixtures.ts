@@ -91,7 +91,7 @@ export interface AcceptanceFixture {
 export interface AcceptanceFixtureSummary {
   fixtureId: string;
   title: string;
-  description?: string;
+  description: string | null;
   oracleGenerationMode: OracleGenerationMode | null;
   supportedSubset: W02CobolConstruct[];
   unsupportedConstructsCount: number;
@@ -101,7 +101,11 @@ export interface AcceptanceFixtureSummary {
   modes: AcceptanceMode[];
 }
 
-export interface AcceptanceFixtureDetail extends AcceptanceFixture {
+export interface AcceptanceFixtureDetail extends AcceptanceFixtureSummary {
+  sourceCobolArtifactRef: ArtifactReference;
+  expectedOutputArtifactRef: ArtifactReference | null;
+  unsupportedConstructs: UnsupportedConstruct[];
+  rationale: string;
   cobolSource: string;
   expectedOutput: string | null;
 }
@@ -282,22 +286,24 @@ function parseFixture(value: unknown, idx: number): AcceptanceFixture {
         return code as AcceptanceFailureCode;
       })();
   const modesRaw = value.modes;
-  let modes: AcceptanceMode[];
-  if (modesRaw === undefined) {
-    modes = ['file-backed'];
-  } else {
-    if (!Array.isArray(modesRaw) || modesRaw.length === 0) {
-      throw new Error(`acceptance fixture ${fixtureId}: modes must be a non-empty array when provided`);
+  if (!Array.isArray(modesRaw) || modesRaw.length === 0) {
+    throw new Error(`acceptance fixture ${fixtureId}: modes is required and must be a non-empty array`);
+  }
+  const modes: AcceptanceMode[] = modesRaw.map((m) => {
+    if (typeof m !== 'string' || !ACCEPTANCE_MODES.has(m as AcceptanceMode)) {
+      throw new Error(`acceptance fixture ${fixtureId}: modes contains unknown value ${JSON.stringify(m)}`);
     }
-    modes = modesRaw.map((m) => {
-      if (typeof m !== 'string' || !ACCEPTANCE_MODES.has(m as AcceptanceMode)) {
-        throw new Error(`acceptance fixture ${fixtureId}: modes contains unknown value ${JSON.stringify(m)}`);
-      }
-      return m as AcceptanceMode;
-    });
-    if (new Set(modes).size !== modes.length) {
-      throw new Error(`acceptance fixture ${fixtureId}: modes must not contain duplicates`);
-    }
+    return m as AcceptanceMode;
+  });
+  if (new Set(modes).size !== modes.length) {
+    throw new Error(`acceptance fixture ${fixtureId}: modes must not contain duplicates`);
+  }
+  // Shipping fixtures must work through both submission surfaces so the
+  // BFF paste-mode and the test harness file-backed loaders stay in sync.
+  if (!modes.includes('file-backed') || !modes.includes('paste-mode')) {
+    throw new Error(
+      `acceptance fixture ${fixtureId}: shipping fixtures must declare both "file-backed" and "paste-mode" so the test surface and the UI surface stay aligned`,
+    );
   }
   const rationale = requireString(value.rationale, 'rationale', fixtureId);
 
@@ -344,7 +350,19 @@ function verifyArtifactOnDisk(
   field: string,
   fixtureId: string,
 ): Buffer {
-  const abs = path.resolve(repoRoot, ref.path);
+  // Path traversal containment. The schema's pattern rejects absolute
+  // paths and ".." segments syntactically; this is the defence-in-depth
+  // runtime check so a future externally-supplied registry cannot escape
+  // the repository root via symlinks or other path tricks.
+  if (path.isAbsolute(ref.path)) {
+    throw new Error(`acceptance fixture ${fixtureId}: ${field}.path must be repo-relative, got absolute path`);
+  }
+  const repoRootAbs = path.resolve(repoRoot);
+  const abs = path.resolve(repoRootAbs, ref.path);
+  const relative = path.relative(repoRootAbs, abs);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`acceptance fixture ${fixtureId}: ${field}.path resolves outside the repository root`);
+  }
   let buffer: Buffer;
   try {
     buffer = fs.readFileSync(abs);
@@ -371,7 +389,7 @@ function summarise(fixture: AcceptanceFixture): AcceptanceFixtureSummary {
   return {
     fixtureId: fixture.fixtureId,
     title: fixture.title,
-    description: fixture.description,
+    description: fixture.description ?? null,
     oracleGenerationMode: fixture.oracleGenerationMode ?? null,
     supportedSubset: fixture.supportedSubset,
     unsupportedConstructsCount: fixture.unsupportedConstructs.length,
@@ -443,7 +461,18 @@ export function loadAcceptanceFixtureRegistry(repoRoot: string): AcceptanceFixtu
       const cobolSource = sourceBuffers.get(fixtureId)?.toString('utf-8') ?? '';
       const expectedBuffer = expectedBuffers.get(fixtureId);
       const expectedOutput = expectedBuffer ? expectedBuffer.toString('utf-8') : null;
-      return { ...fixture, cobolSource, expectedOutput };
+      // Wrap the summary so detail responses validate against the OpenAPI
+      // schema: optional/absent fields are normalised to `null`, matching
+      // the published nullable contract.
+      return {
+        ...summarise(fixture),
+        sourceCobolArtifactRef: fixture.sourceCobolArtifactRef,
+        expectedOutputArtifactRef: fixture.expectedOutputArtifactRef ?? null,
+        unsupportedConstructs: fixture.unsupportedConstructs,
+        rationale: fixture.rationale,
+        cobolSource,
+        expectedOutput,
+      };
     },
     fixtures(): AcceptanceFixture[] {
       return fixtures.slice();

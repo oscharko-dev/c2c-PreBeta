@@ -25,6 +25,7 @@
       "oracleGenerationMode": "cobol-runtime",
       "supportedSubset": [
         "WORKING-STORAGE",
+        "PERFORM",
         "PERFORM-VARYING",
         "DISPLAY",
         "ADD",

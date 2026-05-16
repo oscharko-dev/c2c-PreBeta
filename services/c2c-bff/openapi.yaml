@@ -671,11 +671,15 @@ components:
     AcceptanceFixtureSummary:
       description: |
         W0.2 acceptance fixture summary (Issue #174). Lightweight view used
-        by Studio to render the fixture catalog.
+        by Studio to render the fixture catalog. Nullable fields
+        (`description`, `oracleGenerationMode`, `expectedFailureCode`) are
+        always serialised as JSON `null` rather than omitted, so clients
+        can safely treat them as discriminators.
       type: object
       required:
         - fixtureId
         - title
+        - description
         - oracleGenerationMode
         - supportedSubset
         - unsupportedConstructsCount
@@ -686,7 +690,10 @@ components:
       properties:
         fixtureId: { type: string }
         title: { type: string }
-        description: { type: string }
+        description:
+          oneOf:
+            - type: string
+            - type: "null"
         oracleGenerationMode:
           oneOf:
             - type: string
@@ -725,18 +732,29 @@ components:
             enum: [file-backed, paste-mode]
 
     AcceptanceFixtureDetail:
+      description: |
+        Full acceptance-fixture payload returned by
+        `GET /api/v0/acceptance-fixtures/{fixtureId}`. Contains every
+        summary field plus the artifact references, the structured
+        unsupported-construct list, the rationale, and the resolved
+        on-disk content. Optional artifact references are serialised as
+        JSON `null` rather than omitted.
       allOf:
         - $ref: "#/components/schemas/AcceptanceFixtureSummary"
         - type: object
           required:
             - sourceCobolArtifactRef
+            - expectedOutputArtifactRef
             - unsupportedConstructs
             - rationale
             - cobolSource
             - expectedOutput
           properties:
             sourceCobolArtifactRef: { $ref: "#/components/schemas/AcceptanceArtifactReference" }
-            expectedOutputArtifactRef: { $ref: "#/components/schemas/AcceptanceArtifactReference" }
+            expectedOutputArtifactRef:
+              oneOf:
+                - $ref: "#/components/schemas/AcceptanceArtifactReference"
+                - type: "null"
             unsupportedConstructs:
               type: array
               items: { $ref: "#/components/schemas/AcceptanceUnsupportedConstruct" }

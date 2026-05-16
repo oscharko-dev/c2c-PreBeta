@@ -32,6 +32,7 @@
         "unsupportedConstructs",
         "targetLanguage",
         "expectedFinalClassification",
+        "modes",
         "rationale"
       ],
       "additionalProperties": false,
@@ -103,7 +104,7 @@
           },
           "uniqueItems": true,
           "minItems": 1,
-          "description": "Which submission surfaces this fixture is exercised through in tests. Both modes share the same contract."
+          "description": "Which submission surfaces this fixture is exercised through in tests. Both modes share the same contract. Required: every shipping fixture must declare at least one submission mode; the TS loader and orchestrator contract test additionally require shipping fixtures to declare both modes so the test surface and the UI surface stay aligned."
         },
         "rationale": {
           "type": "string",
@@ -191,7 +192,7 @@
     },
     "artifactReference": {
       "type": "object",
-      "required": ["uri", "sha256", "byteSize"],
+      "required": ["uri", "path", "sha256", "byteSize"],
       "additionalProperties": false,
       "properties": {
         "uri": {
@@ -202,7 +203,8 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative file path. MUST resolve to a file that produces the declared sha256 and byteSize."
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$",
+          "description": "Repo-relative file path. MUST NOT be absolute, MUST NOT contain '..' segments, and MUST resolve to a file that produces the declared sha256 and byteSize."
         },
         "sha256": {
           "type": "string",
