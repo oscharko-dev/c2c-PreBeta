@@ -15,27 +15,33 @@ swallowed.
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from .client import JSONHTTPClient
 
 
+# noinspection PyClassHasNoInitInspection
 class NullExperienceLearningGateway:
     """No-op gateway used when experience-learning is not configured."""
 
     enabled: bool = False
     base_url: str = ""
 
-    def post_harness_events(self, events: Sequence[Mapping[str, Any]]) -> None:  # noqa: ARG002
+    @staticmethod
+    def post_harness_events(_events: Sequence[Mapping[str, Any]]) -> None:
         return None
 
-    def post_trajectory_ledger(self, ledger: Mapping[str, Any]) -> None:  # noqa: ARG002
+    @staticmethod
+    def post_trajectory_ledger(_ledger: Mapping[str, Any]) -> None:
         return None
 
-    def get_run_summary(self, run_id: str) -> Optional[Mapping[str, Any]]:  # noqa: ARG002
+    @staticmethod
+    def get_run_summary(_run_id: str) -> Mapping[str, Any] | None:
         return None
 
-    def summary_uri(self, run_id: str) -> str:  # noqa: ARG002
+    @staticmethod
+    def summary_uri(_run_id: str) -> str:
         return ""
 
 
@@ -51,7 +57,7 @@ class ExperienceLearningGateway:
 
     enabled: bool = True
 
-    def __init__(self, base_url: str, http: JSONHTTPClient, *, headers: Optional[Mapping[str, str]] = None):
+    def __init__(self, base_url: str, http: JSONHTTPClient, *, headers: Mapping[str, str] | None = None):
         if not base_url:
             raise ValueError("experience-learning base URL is required")
         self.base_url = base_url.rstrip("/")
@@ -92,7 +98,7 @@ class ExperienceLearningGateway:
                 exc,
             )
 
-    def get_run_summary(self, run_id: str) -> Optional[Mapping[str, Any]]:
+    def get_run_summary(self, run_id: str) -> Mapping[str, Any] | None:
         if not run_id:
             return None
         try:

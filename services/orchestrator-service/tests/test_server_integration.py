@@ -10,7 +10,6 @@ import unittest
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 from orchestrator_service.config import OrchestratorConfig
@@ -371,7 +370,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
     def test_run_is_executed_and_status_becomes_completed(self):
         mock_server, mock_port, mock_thread = _start_server(MockHarnessHandler)
-        orchestrator_server: Optional[HTTPServer] = None
+        orchestrator_server: HTTPServer | None = None
         run_state: dict = {}
         try:
             host = "127.0.0.1"
@@ -462,7 +461,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
     def test_deterministic_run_skips_model_gateway_and_persists_policy_artifact(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
-        orchestrator_server: Optional[HTTPServer] = None
+        orchestrator_server: HTTPServer | None = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -537,7 +536,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
     def test_startup_tolerates_existing_capability_registrations(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
-        orchestrator_server: Optional[HTTPServer] = None
+        orchestrator_server: HTTPServer | None = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -587,7 +586,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
     def test_run_status_is_visible_while_workflow_is_in_flight(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
-        orchestrator_server: Optional[HTTPServer] = None
+        orchestrator_server: HTTPServer | None = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -636,7 +635,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
     def test_status_endpoints_return_503_when_harness_is_unavailable(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
-        orchestrator_server: Optional[HTTPServer] = None
+        orchestrator_server: HTTPServer | None = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
@@ -670,7 +669,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
     def test_artifact_endpoints_serve_persisted_run_outputs(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
-        orchestrator_server: Optional[HTTPServer] = None
+        orchestrator_server: HTTPServer | None = None
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)

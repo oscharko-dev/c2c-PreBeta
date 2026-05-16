@@ -18,10 +18,11 @@ import datetime
 import json
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Mapping
 
 
 DEFAULT_RUN_ARTIFACT_ROOT = "var/c2c-local/runs"
@@ -84,7 +85,7 @@ class ArtifactMetadata:
     path: str
     name: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -118,15 +119,15 @@ class RunArtifactStore:
 
     def __init__(
         self,
-        root: str | os.PathLike[str],
+        root: str | Path,
         *,
         created_by: str = "orchestrator-service",
-        clock: Optional[Callable[[], datetime.datetime]] = None,
+        clock: Callable[[], datetime.datetime] | None = None,
     ) -> None:
         self.root = Path(root)
         self.created_by = created_by
         self._clock = clock or (lambda: datetime.datetime.now(tz=datetime.timezone.utc))
-        self._locks: Dict[str, threading.Lock] = {}
+        self._locks: dict[str, threading.Lock] = {}
         self._lock_table_mutex = threading.Lock()
 
     # ----- public API ------------------------------------------------------
@@ -146,6 +147,7 @@ class RunArtifactStore:
                     "artifacts": [],
                 }
                 self._atomic_write_bytes(index_path, _index_bytes(state))
+        return None
 
     def write_bytes(
         self,
@@ -155,7 +157,7 @@ class RunArtifactStore:
         data: bytes,
         *,
         kind: str,
-        mime_type: Optional[str] = None,
+        mime_type: str | None = None,
     ) -> ArtifactMetadata:
         """Persist raw bytes and record their metadata in the run index."""
         if not isinstance(data, (bytes, bytearray)):
@@ -187,7 +189,7 @@ class RunArtifactStore:
         run_id: str,
         workflow_id: str,
         relpath: str,
-        payload: Any,
+        payload: dict[str, Any],
         *,
         kind: str,
     ) -> ArtifactMetadata:
@@ -208,7 +210,7 @@ class RunArtifactStore:
         text: str,
         *,
         kind: str,
-        mime_type: Optional[str] = None,
+        mime_type: str | None = None,
     ) -> ArtifactMetadata:
         return self.write_bytes(
             run_id,
@@ -237,7 +239,7 @@ class RunArtifactStore:
     def has_run(self, run_id: str) -> bool:
         return (self._run_dir(run_id) / INDEX_FILE).is_file()
 
-    def read_index(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def read_index(self, run_id: str) -> dict[str, Any] | None:
         index_path = self._run_dir(run_id) / INDEX_FILE
         if not index_path.is_file():
             return None
@@ -246,7 +248,7 @@ class RunArtifactStore:
         except json.JSONDecodeError:
             return None
 
-    def list_artifacts(self, run_id: str) -> Optional[List[Dict[str, Any]]]:
+    def list_artifacts(self, run_id: str) -> list[dict[str, Any]] | None:
         index = self.read_index(run_id)
         if index is None:
             return None
@@ -255,32 +257,33 @@ class RunArtifactStore:
             return []
         return list(artifacts)
 
-    def read_summary(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def read_summary(self, run_id: str) -> dict[str, Any] | None:
         return self.read_json(run_id, SUMMARY_FILE)
 
-    def read_bytes(self, run_id: str, relpath: str) -> Optional[bytes]:
+    def read_bytes(self, run_id: str, relpath: str) -> bytes | None:
         target = self._run_dir(run_id) / relpath
         if not target.is_file():
             return None
         return target.read_bytes()
 
-    def read_json(self, run_id: str, relpath: str) -> Optional[Any]:
+    def read_json(self, run_id: str, relpath: str) -> dict[str, Any] | None:
         raw = self.read_bytes(run_id, relpath)
         if raw is None:
             return None
         try:
-            return json.loads(raw.decode("utf-8"))
+            result = json.loads(raw.decode("utf-8"))
+            return result if isinstance(result, dict) else None
         except json.JSONDecodeError:
             return None
 
-    def find_metadata(self, run_id: str, relpath: str) -> Optional[Dict[str, Any]]:
+    def find_metadata(self, run_id: str, relpath: str) -> dict[str, Any] | None:
         artifacts = self.list_artifacts(run_id) or []
         for entry in artifacts:
             if entry.get("path") == relpath:
                 return entry
         return None
 
-    def find_by_kind(self, run_id: str, kind: str) -> List[Dict[str, Any]]:
+    def find_by_kind(self, run_id: str, kind: str) -> list[dict[str, Any]]:
         artifacts = self.list_artifacts(run_id) or []
         return [entry for entry in artifacts if entry.get("kind") == kind]
 
@@ -311,7 +314,8 @@ class RunArtifactStore:
             now = now.replace(tzinfo=datetime.timezone.utc)
         return now.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
-    def _atomic_write_bytes(self, path: Path, data: bytes) -> None:
+    @staticmethod
+    def _atomic_write_bytes(path: Path, data: bytes) -> None:
         tmp_path = path.with_name(f".{path.name}.tmp")
         with open(tmp_path, "wb") as handle:
             handle.write(data)
@@ -322,7 +326,7 @@ class RunArtifactStore:
     def _record(self, run_id: str, meta: ArtifactMetadata) -> None:
         index_path = self._run_dir(run_id) / INDEX_FILE
         if not index_path.exists():
-            state: Dict[str, Any] = {
+            state: dict[str, Any] = {
                 "runId": run_id,
                 "workflowId": meta.workflowId,
                 "requester": "",
@@ -351,46 +355,60 @@ def _index_bytes(state: Mapping[str, Any]) -> bytes:
     return json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8")
 
 
+# noinspection PyClassHasNoInitInspection
 class NullArtifactStore:
     """No-op store used when persistence is intentionally disabled."""
 
     root = Path()
 
-    def init_run(self, run_id: str, workflow_id: str, *, requester: str = "") -> None:  # noqa: D401, ARG002
+    @staticmethod
+    def init_run(_run_id: str, _workflow_id: str, *, requester: str = "") -> None:  # noqa: D401
         return None
 
-    def write_bytes(self, run_id: str, workflow_id: str, relpath: str, data: bytes, *, kind: str, mime_type: Optional[str] = None) -> Optional[ArtifactMetadata]:  # noqa: ARG002
+    @staticmethod
+    def write_bytes(_run_id: str, _workflow_id: str, _relpath: str, _data: bytes, *, kind: str, mime_type: str | None = None) -> ArtifactMetadata | None:
         return None
 
-    def write_json(self, run_id: str, workflow_id: str, relpath: str, payload: Any, *, kind: str) -> Optional[ArtifactMetadata]:  # noqa: ARG002
+    @staticmethod
+    def write_json(_run_id: str, _workflow_id: str, _relpath: str, _payload: dict[str, Any], *, kind: str) -> ArtifactMetadata | None:
         return None
 
-    def write_text(self, run_id: str, workflow_id: str, relpath: str, text: str, *, kind: str, mime_type: Optional[str] = None) -> Optional[ArtifactMetadata]:  # noqa: ARG002
+    @staticmethod
+    def write_text(_run_id: str, _workflow_id: str, _relpath: str, _text: str, *, kind: str, mime_type: str | None = None) -> ArtifactMetadata | None:
         return None
 
-    def update_summary(self, run_id: str, workflow_id: str, payload: Mapping[str, Any]) -> Optional[ArtifactMetadata]:  # noqa: ARG002
+    @staticmethod
+    def update_summary(_run_id: str, _workflow_id: str, _payload: Mapping[str, Any]) -> ArtifactMetadata | None:
         return None
 
-    def has_run(self, run_id: str) -> bool:  # noqa: ARG002
+    @staticmethod
+    def has_run(_run_id: str) -> bool:
         return False
 
-    def read_index(self, run_id: str) -> Optional[Dict[str, Any]]:  # noqa: ARG002
+    @staticmethod
+    def read_index(_run_id: str) -> dict[str, Any] | None:
         return None
 
-    def list_artifacts(self, run_id: str) -> Optional[List[Dict[str, Any]]]:  # noqa: ARG002
+    @staticmethod
+    def list_artifacts(_run_id: str) -> list[dict[str, Any]] | None:
         return None
 
-    def read_summary(self, run_id: str) -> Optional[Dict[str, Any]]:  # noqa: ARG002
+    @staticmethod
+    def read_summary(_run_id: str) -> dict[str, Any] | None:
         return None
 
-    def read_bytes(self, run_id: str, relpath: str) -> Optional[bytes]:  # noqa: ARG002
+    @staticmethod
+    def read_bytes(_run_id: str, _relpath: str) -> bytes | None:
         return None
 
-    def read_json(self, run_id: str, relpath: str) -> Optional[Any]:  # noqa: ARG002
+    @staticmethod
+    def read_json(_run_id: str, _relpath: str) -> dict[str, Any] | None:
         return None
 
-    def find_metadata(self, run_id: str, relpath: str) -> Optional[Dict[str, Any]]:  # noqa: ARG002
+    @staticmethod
+    def find_metadata(_run_id: str, _relpath: str) -> dict[str, Any] | None:
         return None
 
-    def find_by_kind(self, run_id: str, kind: str) -> List[Dict[str, Any]]:  # noqa: ARG002
+    @staticmethod
+    def find_by_kind(_run_id: str, _kind: str) -> list[dict[str, Any]]:
         return []

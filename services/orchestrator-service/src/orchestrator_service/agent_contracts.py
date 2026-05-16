@@ -41,7 +41,8 @@ import datetime
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +62,7 @@ class AgentContractInvalidError(AgentContractError):
 
     def __init__(self, schema_id: str, errors: Sequence[str]) -> None:
         self.schema_id = schema_id
-        self.errors: List[str] = list(errors)
+        self.errors: list[str] = list(errors)
         super().__init__(f"{schema_id}: {'; '.join(self.errors)}")
 
 
@@ -81,7 +82,7 @@ class UnsupportedSchemaFeatureError(AgentContractError):
 MAX_PAYLOAD_BYTES = 256 * 1024
 
 
-_SCHEMA_FILES: Dict[str, str] = {
+_SCHEMA_FILES: dict[str, str] = {
     "agent-invocation-request-v0": "agent-invocation-request-v0.json",
     "agent-invocation-response-v0": "agent-invocation-response-v0.json",
     "agent-repair-input-v0": "agent-repair-input-v0.json",
@@ -97,9 +98,9 @@ def _schemas_dir() -> Path:
     return here.parents[4] / "schemas"
 
 
-def _load_all_schemas() -> Dict[str, Mapping[str, Any]]:
+def _load_all_schemas() -> dict[str, Mapping[str, Any]]:
     base = _schemas_dir()
-    loaded: Dict[str, Mapping[str, Any]] = {}
+    loaded: dict[str, Mapping[str, Any]] = {}
     for name, filename in _SCHEMA_FILES.items():
         path = base / filename
         try:
@@ -112,7 +113,7 @@ def _load_all_schemas() -> Dict[str, Mapping[str, Any]]:
     return loaded
 
 
-_SCHEMAS: Dict[str, Mapping[str, Any]] = _load_all_schemas()
+_SCHEMAS: dict[str, Mapping[str, Any]] = _load_all_schemas()
 
 
 def schema(name: str) -> Mapping[str, Any]:
@@ -210,7 +211,7 @@ def _validate_node(
     node: Mapping[str, Any],
     schema_doc: Mapping[str, Any],
     path: str,
-    errors: List[str],
+    errors: list[str],
 ) -> None:
     if "$ref" in node:
         resolved = _resolve_ref(node["$ref"], schema_doc)
@@ -221,7 +222,7 @@ def _validate_node(
 
     type_value = node.get("type")
     if type_value is not None:
-        expected_types: Tuple[type, ...]
+        expected_types: tuple[type, ...]
         if isinstance(type_value, str):
             expected_types = _SUPPORTED_TYPES.get(type_value, ())
         else:
@@ -327,7 +328,7 @@ def _validate_node(
             _apply_conditional(payload, sub, schema_doc, path, errors)
 
     if "not" in node:
-        not_errors: List[str] = []
+        not_errors: list[str] = []
         _validate_node(payload, node["not"], schema_doc, path, not_errors)
         if not not_errors:
             errors.append(
@@ -336,9 +337,9 @@ def _validate_node(
 
     if "anyOf" in node:
         any_matched = False
-        collected: List[List[str]] = []
+        collected: list[list[str]] = []
         for sub in node["anyOf"]:
-            sub_errors: List[str] = []
+            sub_errors: list[str] = []
             _validate_node(payload, sub, schema_doc, path, sub_errors)
             if not sub_errors:
                 any_matched = True
@@ -354,7 +355,7 @@ def _apply_conditional(
     node: Mapping[str, Any],
     schema_doc: Mapping[str, Any],
     path: str,
-    errors: List[str],
+    errors: list[str],
 ) -> None:
     """Apply an ``if``/``then``/``else`` branch from an ``allOf`` entry.
 
@@ -364,7 +365,7 @@ def _apply_conditional(
         _validate_node(payload, node, schema_doc, path, errors)
         return
 
-    if_errors: List[str] = []
+    if_errors: list[str] = []
     _validate_node(payload, node["if"], schema_doc, path, if_errors)
     branch = node.get("then") if not if_errors else node.get("else")
     if branch is not None:
@@ -425,7 +426,7 @@ def validate_payload(schema_name: str, payload: Any) -> None:
             [f"$: payload size {len(encoded)} bytes exceeds limit {MAX_PAYLOAD_BYTES} bytes"],
         )
 
-    errors: List[str] = []
+    errors: list[str] = []
     _validate_node(payload, doc, doc, "", errors)
     if errors:
         raise AgentContractInvalidError(schema_id, errors)
@@ -483,7 +484,7 @@ def assert_no_secret_leak(payload: Any, *, path: str = "") -> None:
 
     Raises :class:`AgentContractInvalidError` if such a key is found.
     """
-    findings: List[str] = []
+    findings: list[str] = []
     _walk_for_secrets(payload, path, findings)
     if findings:
         raise AgentContractInvalidError(
@@ -492,7 +493,7 @@ def assert_no_secret_leak(payload: Any, *, path: str = "") -> None:
         )
 
 
-def _walk_for_secrets(payload: Any, path: str, findings: List[str]) -> None:
+def _walk_for_secrets(payload: Any, path: str, findings: list[str]) -> None:
     if isinstance(payload, dict):
         for key, value in payload.items():
             sub_path = f"{path}.{key}" if path else key

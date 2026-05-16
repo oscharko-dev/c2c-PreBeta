@@ -119,6 +119,7 @@ JAVA_DIRECT_PROVIDER_USAGE_PATTERNS = (
 )
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class Finding:
     path: str
@@ -233,6 +234,7 @@ def _format_findings(findings: list[Finding]) -> str:
     return "\n".join(lines)
 
 
+# noinspection PyTypeHintsInspection
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scan product code for direct model-provider usage outside services/go/model-gateway-service."
@@ -242,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Scan tracked and untracked product files in the current worktree (default).",
     )
-    args = parser.parse_args(argv)
+    _args = parser.parse_args(argv)
 
     findings = scan_worktree()
 

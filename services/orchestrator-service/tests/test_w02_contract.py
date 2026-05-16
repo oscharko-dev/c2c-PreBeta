@@ -61,6 +61,7 @@ from orchestrator_service.workflow import W0RunContext, W0WorkflowRunner
 from tests.test_workflow import StubGateway
 
 
+# noinspection PyClassHasNoInitInspection
 class _BaseFixture:
     """Static fixture factory equivalent to ``W0WorkflowRunnerTests`` helpers.
 
@@ -71,16 +72,19 @@ class _BaseFixture:
     @staticmethod
     def _base_config():
         from tests.test_workflow import W0WorkflowRunnerTests
+        # noinspection PyProtectedMemberInspection
         return W0WorkflowRunnerTests._base_config()
 
     @staticmethod
     def _base_capabilities():
         from tests.test_workflow import W0WorkflowRunnerTests
+        # noinspection PyProtectedMemberInspection
         return W0WorkflowRunnerTests._base_capabilities()
 
     @staticmethod
     def _base_responses():
         from tests.test_workflow import W0WorkflowRunnerTests
+        # noinspection PyProtectedMemberInspection
         return W0WorkflowRunnerTests._base_responses()
 
 
@@ -219,7 +223,8 @@ class RepairBudgetTests(unittest.TestCase):
 
 
 class W02RunContractShapeTests(unittest.TestCase):
-    def _build(self) -> W02RunContract:
+    @staticmethod
+    def _build() -> W02RunContract:
         return new_run_contract(
             run_id="run-42",
             workflow_id="w0-migration-v0",
@@ -536,7 +541,9 @@ class _StubRepairAgentInvoker:
 
 
 class W02WorkflowIntegrationTests(unittest.TestCase):
-    def _config(self, repair_budget_max: int = DEFAULT_REPAIR_BUDGET) -> OrchestratorConfig:
+    @staticmethod
+    def _config(repair_budget_max: int = DEFAULT_REPAIR_BUDGET) -> OrchestratorConfig:
+        # noinspection PyProtectedMemberInspection
         base = _BaseFixture._base_config()
         # ``OrchestratorConfig`` is frozen — round-trip through ``dict`` so we
         # can override the repair budget without rebuilding the whole fixture.
@@ -559,7 +566,8 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
             repair_agent_invoker=repair_agent_invoker or _StubRepairAgentInvoker([]),
         )
 
-    def _context(self) -> W0RunContext:
+    @staticmethod
+    def _context() -> W0RunContext:
         return W0RunContext(
             run_id="run-1",
             workflow_id="w0-migration-v0",
@@ -568,7 +576,8 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
             model_prompt=None,
         )
 
-    def _input_ref(self):
+    @staticmethod
+    def _input_ref():
         return {"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."}
 
     def test_success_run_drives_state_machine_to_final_classification(self):

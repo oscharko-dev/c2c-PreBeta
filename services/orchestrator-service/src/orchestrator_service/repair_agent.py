@@ -49,9 +49,10 @@ from __future__ import annotations
 import datetime
 import json
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any
 
 from .agent_contracts import (
     AgentContractInvalidError,
@@ -69,6 +70,7 @@ from .artifacts import (
 )
 from .config import OrchestratorConfig
 from .harness import HarnessFailure
+# noinspection PyProtectedMemberInspection
 from .transformation_agent import (
     AgentContractInvalidAgentError,
     GeneratedJavaCandidate,
@@ -97,7 +99,7 @@ class RepairAgentError(Exception):
 
     failure_code: str = "java_generation_failed"
 
-    def __init__(self, message: str, *, failure_code: Optional[str] = None) -> None:
+    def __init__(self, message: str, *, failure_code: str | None = None) -> None:
         super().__init__(message)
         if failure_code is not None:
             self.failure_code = failure_code
@@ -141,20 +143,20 @@ DATA_CLASS_MODEL_GATEWAY = "model-gateway"
 MODEL_GATEWAY_AGENT_ROLE = "verification-repair"
 REPAIR_AGENT_DIR = "repair-agent"
 
-VALID_FAILURE_CATEGORIES: Tuple[str, ...] = (
+VALID_FAILURE_CATEGORIES: tuple[str, ...] = (
     "java_compile_failed",
     "java_runtime_failed",
     "oracle_mismatch",
 )
 
-VALID_REFUSAL_CODES: Tuple[str, ...] = (
+VALID_REFUSAL_CODES: tuple[str, ...] = (
     "no_safe_repair",
     "unsupported_construct",
     "policy_denied",
     "insufficient_context",
 )
 
-VALID_ESCALATION_CODES: Tuple[str, ...] = (
+VALID_ESCALATION_CODES: tuple[str, ...] = (
     "needs_human_review",
     "needs_capability_expansion",
     "out_of_scope_for_w0_2",
@@ -167,7 +169,7 @@ DECISION_NO_CHANGE = "no_change"
 
 # Mapping from refusal codes to the canonical W0.2 failure code the
 # Orchestrator should record on the run contract when the agent refuses.
-REFUSAL_TO_FAILURE_CODE: Dict[str, str] = {
+REFUSAL_TO_FAILURE_CODE: dict[str, str] = {
     "no_safe_repair": "java_generation_failed",
     "unsupported_construct": "unsupported_cobol",
     "policy_denied": "model_policy_denied",
@@ -180,6 +182,7 @@ REFUSAL_TO_FAILURE_CODE: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class RepairAgentRequest:
     """Structured input to :meth:`RepairAgent.invoke`.
@@ -205,16 +208,16 @@ class RepairAgentRequest:
     model_id: str
     policy_version: str
     repair_budget_remaining: int
-    compile_error_ref: Optional[Mapping[str, Any]] = None
-    runtime_error_ref: Optional[Mapping[str, Any]] = None
-    oracle_diff_ref: Optional[Mapping[str, Any]] = None
-    source_cobol_ref: Optional[Mapping[str, Any]] = None
-    source_text: Optional[str] = None
-    semantic_ir_ref: Optional[Mapping[str, Any]] = None
-    semantic_ir: Optional[Mapping[str, Any]] = None
-    previous_repair_decision_refs: Tuple[Mapping[str, Any], ...] = ()
+    compile_error_ref: Mapping[str, Any] | None = None
+    runtime_error_ref: Mapping[str, Any] | None = None
+    oracle_diff_ref: Mapping[str, Any] | None = None
+    source_cobol_ref: Mapping[str, Any] | None = None
+    source_text: str | None = None
+    semantic_ir_ref: Mapping[str, Any] | None = None
+    semantic_ir: Mapping[str, Any] | None = None
+    previous_repair_decision_refs: tuple[Mapping[str, Any], ...] = ()
     deadline_ms: int = 30000
-    trace_ref: Optional[str] = None
+    trace_ref: str | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id:
@@ -244,6 +247,7 @@ class RepairAgentRequest:
             raise ValueError("repair_budget_remaining must be non-negative")
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class RepairedJavaCandidate:
     """Decoded Java candidate the agent proposes as a repair.
@@ -252,15 +256,15 @@ class RepairedJavaCandidate:
     Kept as a separate class so callers can identify the source by type.
     """
 
-    files: Dict[str, str]
+    files: dict[str, str]
     entry_class: str
     entry_package: str
     entry_file_path: str
-    unsupported_constructs: Tuple[str, ...]
+    unsupported_constructs: tuple[str, ...]
     explanation: str
 
-    def to_manifest(self) -> Dict[str, Any]:
-        manifest_files: List[Dict[str, Any]] = []
+    def to_manifest(self) -> dict[str, Any]:
+        manifest_files: list[dict[str, Any]] = []
         for path, content in sorted(self.files.items()):
             encoded = content.encode("utf-8")
             manifest_files.append(
@@ -281,6 +285,7 @@ class RepairedJavaCandidate:
         }
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class RepairAgentResult:
     """Outcome the Orchestrator consumes after a repair-agent invocation.
@@ -294,21 +299,21 @@ class RepairAgentResult:
     """
 
     decision: str
-    candidate: Optional[RepairedJavaCandidate]
-    refusal_code: Optional[str]
-    escalation_code: Optional[str]
+    candidate: RepairedJavaCandidate | None
+    refusal_code: str | None
+    escalation_code: str | None
     rationale: str
-    confidence: Optional[float]
-    failure_code: Optional[str]
-    failure_message: Optional[str]
-    model_invocation_ref: Dict[str, Any]
-    new_java_candidate_ref: Optional[Dict[str, Any]]
-    diff_from_previous_ref: Optional[Dict[str, Any]]
-    repair_input_payload: Dict[str, Any]
-    repair_decision_payload: Dict[str, Any]
-    repair_input_artifact_ref: Dict[str, Any]
-    repair_decision_artifact_ref: Dict[str, Any]
-    persisted_artifacts: List[Dict[str, Any]] = field(default_factory=list)
+    confidence: float | None
+    failure_code: str | None
+    failure_message: str | None
+    model_invocation_ref: dict[str, Any]
+    new_java_candidate_ref: dict[str, Any] | None
+    diff_from_previous_ref: dict[str, Any] | None
+    repair_input_payload: dict[str, Any]
+    repair_decision_payload: dict[str, Any]
+    repair_input_artifact_ref: dict[str, Any]
+    repair_decision_artifact_ref: dict[str, Any]
+    persisted_artifacts: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def proposed_candidate(self) -> bool:
@@ -332,7 +337,7 @@ class RepairAgentResult:
 # ---------------------------------------------------------------------------
 
 
-def _meta_to_ref(meta: ArtifactMetadata) -> Dict[str, Any]:
+def _meta_to_ref(meta: ArtifactMetadata) -> dict[str, Any]:
     return {
         "uri": meta.uri,
         "sha256": meta.sha256,
@@ -428,7 +433,7 @@ def _validate_escalation_code(value: Any) -> str:
     return value
 
 
-def _coerce_confidence(value: Any) -> Optional[float]:
+def _coerce_confidence(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -464,8 +469,8 @@ class RepairAgent:
         config: OrchestratorConfig,
         artifact_store: RunArtifactStore,
         model_invoker: ModelGatewayInvoker,
-        harness_events: Optional[HarnessEventSink] = None,
-        clock: Optional[Callable[[], datetime.datetime]] = None,
+        harness_events: HarnessEventSink | None = None,
+        clock: Callable[[], datetime.datetime] | None = None,
     ) -> None:
         self._config = config
         self._artifact_store = artifact_store
@@ -528,7 +533,7 @@ class RepairAgent:
             self._persist_failure_decision(
                 request,
                 attempt_dir=attempt_dir,
-                started_at=started_at,
+                _started_at=started_at,
                 exc=exc,
                 request_artifact_ref=request_artifact_ref,
             )
@@ -548,9 +553,9 @@ class RepairAgent:
                 )
             confidence = _coerce_confidence(inner_envelope.get("confidence"))
 
-            candidate: Optional[RepairedJavaCandidate] = None
-            refusal_code: Optional[str] = None
-            escalation_code: Optional[str] = None
+            candidate: RepairedJavaCandidate | None = None
+            refusal_code: str | None = None
+            escalation_code: str | None = None
 
             if decision == DECISION_PROPOSE:
                 candidate = self._decode_repair_candidate(inner_envelope)
@@ -564,7 +569,7 @@ class RepairAgent:
             self._persist_failure_decision(
                 request,
                 attempt_dir=attempt_dir,
-                started_at=started_at,
+                _started_at=started_at,
                 exc=exc,
                 request_artifact_ref=request_artifact_ref,
                 latency_ms=latency_ms,
@@ -574,8 +579,8 @@ class RepairAgent:
         # 4. When the agent proposes a candidate, persist the Java files +
         # generated-project manifest. The persisted manifest is the source
         # of truth for newJavaCandidateRef.
-        persisted_artifacts: List[Dict[str, Any]] = []
-        new_java_candidate_ref: Optional[Dict[str, Any]] = None
+        persisted_artifacts: list[dict[str, Any]] = []
+        new_java_candidate_ref: dict[str, Any] | None = None
         is_no_change = False
         if candidate is not None:
             for relpath, content in sorted(candidate.files.items()):
@@ -639,7 +644,7 @@ class RepairAgent:
             self._persist_failure_decision(
                 request,
                 attempt_dir=attempt_dir,
-                started_at=started_at,
+                _started_at=started_at,
                 exc=wrapped,
                 request_artifact_ref=request_artifact_ref,
                 latency_ms=latency_ms,
@@ -681,8 +686,8 @@ class RepairAgent:
         # 7. Map the agent-driven outcome to a canonical W0.2 failure code
         # for non-success decisions. The Orchestrator uses this to finalise
         # the run when the loop terminates.
-        failure_code: Optional[str] = None
-        failure_message: Optional[str] = None
+        failure_code: str | None = None
+        failure_message: str | None = None
         if effective_decision == DECISION_REFUSE and refusal_code is not None:
             failure_code = REFUSAL_TO_FAILURE_CODE.get(refusal_code, "java_generation_failed")
             failure_message = f"repair refused: {refusal_code}; {rationale}"
@@ -704,7 +709,7 @@ class RepairAgent:
         provider = str(gateway_response.get("provider") or "foundry-development")
         if provider not in {"foundry-development", "customer-internal-mock"}:
             provider = "foundry-development"
-        model_invocation_ref: Dict[str, Any] = {
+        model_invocation_ref: dict[str, Any] = {
             "invocationId": invocation_id,
             "modelId": model_id,
             "provider": provider,
@@ -766,13 +771,13 @@ class RepairAgent:
             explanation=decoded.explanation,
         )
 
+    @staticmethod
     def _build_repair_input_payload(
-        self,
         request: RepairAgentRequest,
         created_at: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Materialise the ``agent-repair-input-v0`` payload."""
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -796,7 +801,7 @@ class RepairAgent:
         if request.oracle_diff_ref and _looks_like_artifact_ref(request.oracle_diff_ref):
             payload["oracleDiffRef"] = _coerce_artifact_ref(request.oracle_diff_ref)
         if request.previous_repair_decision_refs:
-            previous_refs: List[Dict[str, Any]] = []
+            previous_refs: list[dict[str, Any]] = []
             for ref in request.previous_repair_decision_refs:
                 if _looks_like_artifact_ref(ref):
                     previous_refs.append(_coerce_artifact_ref(ref))
@@ -804,23 +809,23 @@ class RepairAgent:
                 payload["previousRepairDecisionRefs"] = previous_refs
         return payload
 
+    @staticmethod
     def _build_repair_decision_payload(
-        self,
         request: RepairAgentRequest,
         *,
         decision: str,
         rationale: str,
-        refusal_code: Optional[str],
-        escalation_code: Optional[str],
-        new_java_candidate_ref: Optional[Mapping[str, Any]],
-        confidence: Optional[float],
+        refusal_code: str | None,
+        escalation_code: str | None,
+        new_java_candidate_ref: Mapping[str, Any] | None,
+        confidence: float | None,
         ended_at: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Materialise the ``agent-repair-decision-v0`` payload."""
         truncated_rationale = rationale.strip()
         if len(truncated_rationale) > 4000:
             truncated_rationale = truncated_rationale[:4000]
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -839,13 +844,13 @@ class RepairAgent:
             payload["escalationCode"] = escalation_code
         return payload
 
+    @staticmethod
     def _build_manifest_payload(
-        self,
         request: RepairAgentRequest,
         candidate: RepairedJavaCandidate,
         gateway_response: Mapping[str, Any],
-    ) -> Dict[str, Any]:
-        manifest_payload: Dict[str, Any] = {
+    ) -> dict[str, Any]:
+        manifest_payload: dict[str, Any] = {
             "runId": request.run_id,
             "workflowId": request.workflow_id,
             "attemptNumber": request.attempt_number,
@@ -865,14 +870,14 @@ class RepairAgent:
             manifest_payload["sourceProgramRef"] = _coerce_artifact_ref(request.source_cobol_ref)
         return manifest_payload
 
+    @staticmethod
     def _build_failure_decision_payload(
-        self,
         request: RepairAgentRequest,
         *,
         failure_code: str,
         failure_message: str,
         ended_at: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build a contract-shaped synthetic decision used when the gateway
         fails or returns invalid output. The synthetic decision is always
         ``refuse`` with a reason that maps cleanly to ``no_safe_repair`` so
@@ -899,7 +904,7 @@ class RepairAgent:
         request: RepairAgentRequest,
         *,
         attempt_dir: str,
-        started_at: str,
+        _started_at: str,
         exc: RepairAgentError,
         request_artifact_ref: Mapping[str, Any],
         latency_ms: int = 0,
@@ -961,7 +966,7 @@ class RepairAgent:
 
     def _call_model_gateway(
         self, request: RepairAgentRequest
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build the Model Gateway request and call the configured invoker.
 
         The agent never embeds direct provider HTTP calls. The invoker is
@@ -970,7 +975,7 @@ class RepairAgent:
         not at the agent boundary.
         """
         prompt_payload = self._build_model_prompt(request)
-        invoke_payload: Dict[str, Any] = {
+        invoke_payload: dict[str, Any] = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -1059,7 +1064,7 @@ class RepairAgent:
         template by id so the registry author and the gateway agree on
         what is being asked.
         """
-        envelope: Dict[str, Any] = {
+        envelope: dict[str, Any] = {
             "promptTemplateId": self._config.repair_agent_prompt_template_id,
             "promptTemplateVersion": self._config.repair_agent_prompt_template_version,
             "task": "java-verification-repair",
@@ -1109,7 +1114,7 @@ class RepairAgent:
         status: str,
         input_payload: Mapping[str, Any],
         output_payload: Mapping[str, Any],
-        latency_ms: Optional[int] = None,
+        latency_ms: int | None = None,
     ) -> None:
         """Best-effort Harness event emission. Failures must not break the
         agent invocation; the Harness is observational, not controlling."""
@@ -1122,7 +1127,7 @@ class RepairAgent:
         output_clean = {k: v for k, v in output_payload.items() if v is not None}
         input_canonical = _canonical_json_bytes(dict(input_payload))
         output_canonical = _canonical_json_bytes(output_clean)
-        event: Dict[str, Any] = {
+        event: dict[str, Any] = {
             "eventType": event_type,
             "schemaVersion": "v0",
             "service": "orchestrator-service",
@@ -1168,7 +1173,7 @@ _REPAIR_INNER_OUTPUT_SCHEMA_ID = (
 )
 
 
-_REPAIR_INNER_OUTPUT_SCHEMA: Dict[str, Any] = {
+_REPAIR_INNER_OUTPUT_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": _REPAIR_INNER_OUTPUT_SCHEMA_ID,
     "title": "Verification/Repair Agent Inner Output v0",

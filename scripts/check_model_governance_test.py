@@ -9,7 +9,8 @@ SCRIPT = Path(__file__).with_name("check_model_governance.py")
 
 
 class CheckModelGovernanceTest(unittest.TestCase):
-    def _run_scan(self, repo: Path) -> subprocess.CompletedProcess[str]:
+    @staticmethod
+    def _run_scan(repo: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SCRIPT), "--worktree"],
             cwd=repo,

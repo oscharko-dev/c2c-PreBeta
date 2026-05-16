@@ -19,6 +19,7 @@ from orchestrator_service.run_contract import (
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
 )
+# noinspection PyProtectedMemberInspection
 from orchestrator_service.workflow import (
     ModelPolicyDeniedStepError,
     StepExecutionError,
@@ -99,7 +100,9 @@ class ModelPolicyDeniedRunFinalisationTests(unittest.TestCase):
     `failed` and the failure code resolver must distinguish the two cases.
     """
 
-    def _build_runner(self, *, policy_denied: bool):
+    @staticmethod
+    # noinspection PyProtectedMemberInspection
+    def _build_runner(*, policy_denied: bool):
         capabilities = W0WorkflowRunnerTests._base_capabilities()
         responses = W0WorkflowRunnerTests._base_responses()
         gateway = StubGateway(capabilities, responses)

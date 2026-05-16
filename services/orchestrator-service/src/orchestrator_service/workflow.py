@@ -9,7 +9,8 @@ import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 
 def _iso_now() -> str:
@@ -61,7 +62,6 @@ from .transformation_agent import (
     ModelGatewayUnavailableError,
     ModelPolicyDeniedAgentError,
     TransformationAgent,
-    TransformationAgentError,
     TransformationAgentRequest,
     TransformationAgentResult,
 )
@@ -69,6 +69,7 @@ from . import run_contract as w02
 from .run_contract import (
     CLASSIFICATION_BLOCKED,
     CLASSIFICATION_FAILED,
+    CLASSIFICATION_INCOMPLETE,
     CLASSIFICATION_SUCCESS,
     FAILURE_AGENT_CONTRACT_INVALID,
     FAILURE_AGENT_TIMEOUT,
@@ -169,7 +170,7 @@ class W0RunContext:
     workflow_id: str
     requester: str
     evidence_refs: Sequence[str]
-    model_prompt: Optional[str] = None
+    model_prompt: str | None = None
     # Issue #169: when ``True``, the orchestrator invokes the productive
     # Transformation Agent after the deterministic baseline succeeds, uses
     # the agent's Java candidate as the artifact fed into build/test, and
@@ -233,15 +234,15 @@ class StepRecord:
     service: str
     actor: str
     status: str
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
-    input_ref: Optional[Dict[str, Any]] = None
-    output_ref: Optional[Dict[str, Any]] = None
-    diagnostic: Optional[str] = None
-    latency_ms: Optional[int] = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    input_ref: dict[str, Any] | None = None
+    output_ref: dict[str, Any] | None = None
+    diagnostic: str | None = None
+    latency_ms: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "stepId": self.step_id,
             "name": self.name,
             "capabilityId": self.capability_id,
@@ -274,7 +275,7 @@ class RunProgressLog:
 
     def __init__(self) -> None:
         self._steps: list[StepRecord] = []
-        self._index: Dict[str, int] = {}
+        self._index: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def upsert(
@@ -285,12 +286,12 @@ class RunProgressLog:
         service: str,
         actor: str,
         status: str,
-        started_at: Optional[str] = None,
-        finished_at: Optional[str] = None,
-        input_ref: Optional[Mapping[str, Any]] = None,
-        output_ref: Optional[Mapping[str, Any]] = None,
-        diagnostic: Optional[str] = None,
-        latency_ms: Optional[int] = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        input_ref: Mapping[str, Any] | None = None,
+        output_ref: Mapping[str, Any] | None = None,
+        diagnostic: str | None = None,
+        latency_ms: int | None = None,
     ) -> StepRecord:
         with self._lock:
             existing_index = self._index.get(name)
@@ -311,46 +312,48 @@ class RunProgressLog:
                 )
                 self._steps.append(record)
                 self._index[name] = len(self._steps) - 1
-                return record
-            record = self._steps[existing_index]
-            # Preserve original step_id to keep the stable ordering visible to
-            # consumers; only refine timing/status/diagnostic on subsequent
-            # updates.
-            record.capability_id = capability_id or record.capability_id
-            record.service = service or record.service
-            record.actor = actor or record.actor
-            record.status = status
-            if started_at is not None and record.started_at is None:
-                record.started_at = started_at
-            if finished_at is not None:
-                record.finished_at = finished_at
-            if input_ref is not None:
-                record.input_ref = dict(input_ref)
-            if output_ref is not None:
-                record.output_ref = dict(output_ref)
-            if diagnostic is not None:
-                record.diagnostic = diagnostic
-            if latency_ms is not None:
-                record.latency_ms = latency_ms
-            return record
+            else:
+                record = self._steps[existing_index]
+                # Preserve original step_id to keep the stable ordering visible to
+                # consumers; only refine timing/status/diagnostic on subsequent
+                # updates.
+                record.capability_id = capability_id or record.capability_id
+                record.service = service or record.service
+                record.actor = actor or record.actor
+                record.status = status
+                if started_at is not None and record.started_at is None:
+                    record.started_at = started_at
+                if finished_at is not None:
+                    record.finished_at = finished_at
+                if input_ref is not None:
+                    record.input_ref = dict(input_ref)
+                if output_ref is not None:
+                    record.output_ref = dict(output_ref)
+                if diagnostic is not None:
+                    record.diagnostic = diagnostic
+                if latency_ms is not None:
+                    record.latency_ms = latency_ms
+        return record
 
     def has(self, name: str) -> bool:
         with self._lock:
-            return name in self._index
+            result = name in self._index
+        return result
 
-    def to_payload(self) -> list[Dict[str, Any]]:
+    def to_payload(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [record.to_dict() for record in self._steps]
+            result = [record.to_dict() for record in self._steps]
+        return result
 
 
-def _text(value: Any) -> Optional[str]:
+def _text(value: Any) -> str | None:
     if value is None:
         return None
     text_value = str(value).strip()
     return text_value or None
 
 
-def _first_non_empty_text(*values: Any) -> Optional[str]:
+def _first_non_empty_text(*values: Any) -> str | None:
     for value in values:
         text_value = _text(value)
         if text_value:
@@ -393,7 +396,7 @@ def _extract_source(raw: Mapping[str, Any]) -> str:
     return source
 
 
-def _raw_source(raw: Mapping[str, Any]) -> Optional[str]:
+def _raw_source(raw: Mapping[str, Any]) -> str | None:
     """Return the source text exactly as supplied, preserving whitespace.
 
     Used for the COBOL oracle payload (Issue #92), where fixed-format COBOL
@@ -419,7 +422,7 @@ def _as_reference_payload(ref: DataReference) -> Mapping[str, Any]:
     }
 
 
-def _data_reference_from_mapping(raw: Any) -> Optional[DataReference]:
+def _data_reference_from_mapping(raw: Any) -> DataReference | None:
     if not isinstance(raw, Mapping):
         return None
     uri = _text(raw.get("uri"))
@@ -433,7 +436,7 @@ def _data_reference_from_mapping(raw: Any) -> Optional[DataReference]:
     )
 
 
-def _first_non_empty_mapping(value: Any) -> Dict[str, Any]:
+def _first_non_empty_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping) and value:
         return dict(value)
     return {}
@@ -449,10 +452,10 @@ def _build_generated_project_manifest(
     workflow_id: str,
     generated_project: Mapping[str, Any],
     persisted_files: Sequence[Mapping[str, Any]],
-    program_id: Optional[str],
-    ir_id: Optional[str],
-    source_sha256: Optional[str],
-) -> Dict[str, Any]:
+    program_id: str | None,
+    ir_id: str | None,
+    source_sha256: str | None,
+) -> dict[str, Any]:
     """Build the deterministic manifest describing the persisted Java project.
 
     The manifest pairs every persisted file with its on-disk sha256 and byte
@@ -462,7 +465,7 @@ def _build_generated_project_manifest(
     which is how Issue #97 guarantees those three consumers point at byte-for-
     byte identical generated Java.
     """
-    files: list[Dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
     prefix = f"{GENERATED_PROJECT_DIR}/"
     for entry in persisted_files:
         path = str(entry.get("path") or "")
@@ -510,7 +513,7 @@ def _iter_generated_files(generated_project: Mapping[str, Any]):
             yield path, str(raw_content)
 
 
-def _failed_step_from_exception(exc: BaseException) -> Optional[str]:
+def _failed_step_from_exception(exc: BaseException) -> str | None:
     text = str(exc).lower()
     for marker in (
         ("parse-cobol", "parse-cobol"),
@@ -532,7 +535,7 @@ def _failed_step_from_exception(exc: BaseException) -> Optional[str]:
 # grounds (Issue #168). The gateway returns these in the JSON response body
 # alongside HTTP 403; the HarnessFailure exception thrown by the gateway
 # client stringifies the body into ``details``.
-_MODEL_POLICY_DENY_MARKERS: Tuple[str, ...] = (
+_MODEL_POLICY_DENY_MARKERS: tuple[str, ...] = (
     "model_policy_denied",
     "forbidden_model",
     "forbidden_role",
@@ -561,13 +564,13 @@ def _is_model_policy_denial(exc: BaseException) -> bool:
 
 
 def _build_cobol_oracle_payload(
-    source_text: Optional[str],
+    source_text: str | None,
     input_reference: DataReference,
     timeout_ms: int,
     *,
-    expected_output: Optional[str] = None,
-    oracle_input: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
+    expected_output: str | None = None,
+    oracle_input: str | None = None,
+) -> dict[str, Any] | None:
     """Construct the executable COBOL oracle payload for build-test-runner.
 
     The oracle lets the runner execute the UI-provided COBOL source with
@@ -584,7 +587,7 @@ def _build_cobol_oracle_payload(
     if not source_text or not source_text.strip():
         return None
     safe_timeout = timeout_ms if isinstance(timeout_ms, int) and timeout_ms > 0 else DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "mode": ORACLE_MODE_COBOL_RUNTIME,
         "sourceText": source_text,
         "sourceRef": _as_reference_payload(input_reference),
@@ -597,15 +600,15 @@ def _build_cobol_oracle_payload(
     return payload
 
 
-def _extract_oracle_metadata(raw: Mapping[str, Any]) -> Dict[str, Optional[str]]:
+def _extract_oracle_metadata(raw: Mapping[str, Any]) -> dict[str, str | None]:
     """Extract Issue #172 oracle metadata from a BFF-forwarded inputRef.
 
     The BFF places ``expectedOutput`` and ``oracleInput`` on the inputRef
     when the UI submits them via /api/v0/transform. Returning ``None`` for
     missing/empty values keeps the W0/W0.1 deterministic path untouched.
     """
-    expected: Optional[str] = None
-    oracle_input: Optional[str] = None
+    expected: str | None = None
+    oracle_input: str | None = None
     expected_value = raw.get("expectedOutput")
     if isinstance(expected_value, str) and expected_value:
         expected = expected_value
@@ -633,12 +636,12 @@ class W0WorkflowRunner:
         self,
         config: OrchestratorConfig,
         gateway: HarnessGateway,
-        artifact_store: Optional[RunArtifactStore] = None,
-        experience_learning: Optional[Any] = None,
-        transformation_agent: Optional[TransformationAgent] = None,
-        transformation_agent_invoker: Optional[ModelGatewayInvoker] = None,
-        repair_agent: Optional[RepairAgent] = None,
-        repair_agent_invoker: Optional[ModelGatewayInvoker] = None,
+        artifact_store: RunArtifactStore | None = None,
+        experience_learning: Any | None = None,
+        transformation_agent: TransformationAgent | None = None,
+        transformation_agent_invoker: ModelGatewayInvoker | None = None,
+        repair_agent: RepairAgent | None = None,
+        repair_agent_invoker: ModelGatewayInvoker | None = None,
     ):
         self.config = config
         self.gateway = gateway
@@ -651,37 +654,38 @@ class W0WorkflowRunner:
         # neither an instance nor a model invoker is supplied, the runner
         # builds an invoker on-demand from the Harness gateway capability
         # the first time a run requests ``use_transformation_agent=True``.
-        self._transformation_agent: Optional[TransformationAgent] = transformation_agent
-        self._transformation_agent_invoker: Optional[ModelGatewayInvoker] = transformation_agent_invoker
+        self._transformation_agent: TransformationAgent | None = transformation_agent
+        self._transformation_agent_invoker: ModelGatewayInvoker | None = transformation_agent_invoker
         # Issue #170: the productive Verification/Repair Agent is invoked
         # whenever the build/test runner reports failure and the repair
         # budget still has remaining attempts. Lazy construction lets tests
         # inject a stub agent through the constructor while production
         # falls back to the Harness-backed Model Gateway invoker (shared
         # with the transformation agent so both go through the same proxy).
-        self._repair_agent: Optional[RepairAgent] = repair_agent
-        self._repair_agent_invoker: Optional[ModelGatewayInvoker] = repair_agent_invoker
+        self._repair_agent: RepairAgent | None = repair_agent
+        self._repair_agent_invoker: ModelGatewayInvoker | None = repair_agent_invoker
         self._step_lock = threading.Lock()
-        self._step_id_by_run: Dict[str, int] = {}
-        self._capability_cache: Dict[str, Dict[str, Any]] = {}
+        self._step_id_by_run: dict[str, int] = {}
+        self._capability_cache: dict[str, dict[str, Any]] = {}
         self._progress_lock = threading.Lock()
-        self._progress_by_run: Dict[str, RunProgressLog] = {}
+        self._progress_by_run: dict[str, RunProgressLog] = {}
         self._event_buffer_lock = threading.Lock()
-        self._event_buffer_by_run: Dict[str, list[Dict[str, Any]]] = {}
+        self._event_buffer_by_run: dict[str, list[dict[str, Any]]] = {}
         # Issue #166: per-run W0.2 contract snapshots, fetched by
         # ``GET /v0/runs/{runId}/workflow``.
         self._contract_lock = threading.Lock()
-        self._contracts_by_run: Dict[str, W02RunContract] = {}
+        self._contracts_by_run: dict[str, W02RunContract] = {}
 
     # ------------------------------------------------------------------
     # Issue #166: W0.2 workflow contract helpers
     # ------------------------------------------------------------------
 
-    def workflow_contract(self, run_id: str) -> Optional[W02RunContract]:
+    def workflow_contract(self, run_id: str) -> W02RunContract | None:
         with self._contract_lock:
-            return self._contracts_by_run.get(run_id)
+            result = self._contracts_by_run.get(run_id)
+        return result
 
-    def workflow_contract_payload(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def workflow_contract_payload(self, run_id: str) -> dict[str, Any] | None:
         contract = self.workflow_contract(run_id)
         if contract is None:
             return None
@@ -717,9 +721,9 @@ class W0WorkflowRunner:
         contract: W02RunContract,
         target: str,
         *,
-        active_step: Optional[str] = None,
+        active_step: str | None = None,
         message: str = "",
-        failure_code: Optional[str] = None,
+        failure_code: str | None = None,
     ) -> None:
         """Advance the W0.2 state machine and emit a Harness event.
 
@@ -754,9 +758,9 @@ class W0WorkflowRunner:
         state: str,
         *,
         message: str = "",
-        failure_code: Optional[str] = None,
+        failure_code: str | None = None,
     ) -> None:
-        output_payload: Dict[str, Any] = {"state": state}
+        output_payload: dict[str, Any] = {"state": state}
         if message:
             output_payload["message"] = message
         if failure_code:
@@ -830,11 +834,11 @@ class W0WorkflowRunner:
         *,
         source_text: str,
         source_reference: DataReference,
-        ir_document: Optional[Mapping[str, Any]],
-        ir_output_ref: Optional[DataReference],
-        baseline_artifact_ref: Optional[Mapping[str, Any]],
-        baseline_files: Optional[Mapping[str, str]],
-        oracle_reference: Optional[DataReference],
+        ir_document: Mapping[str, Any] | None,
+        ir_output_ref: DataReference | None,
+        baseline_artifact_ref: Mapping[str, Any] | None,
+        baseline_files: Mapping[str, str] | None,
+        oracle_reference: DataReference | None,
     ) -> TransformationAgentResult:
         """Run one Transformation Agent attempt and return its structured
         result. Raises :class:`TransformationAgentError` on terminal
@@ -851,11 +855,11 @@ class W0WorkflowRunner:
         capability_resolved_at = _iso_now()
         attempt_number = contract.record_agent_attempt()
 
-        ir_ref_payload: Optional[Mapping[str, Any]] = None
+        ir_ref_payload: Mapping[str, Any] | None = None
         if ir_output_ref is not None:
             ir_ref_payload = _as_reference_payload(ir_output_ref)
 
-        oracle_ref_payload: Optional[Mapping[str, Any]] = None
+        oracle_ref_payload: Mapping[str, Any] | None = None
         if oracle_reference is not None:
             oracle_ref_payload = _as_reference_payload(oracle_reference)
 
@@ -926,7 +930,7 @@ class W0WorkflowRunner:
     def _invoke_repair_agent(
         self,
         context: W0RunContext,
-        contract: W02RunContract,
+        _contract: W02RunContract,
         *,
         attempt_number: int,
         previous_java_candidate_ref: Mapping[str, Any],
@@ -934,10 +938,10 @@ class W0WorkflowRunner:
         build_test_result_ref: Mapping[str, Any],
         build_test_payload: Mapping[str, Any],
         failure_category: str,
-        source_text: Optional[str],
-        source_cobol_ref: Optional[Mapping[str, Any]],
-        semantic_ir: Optional[Mapping[str, Any]],
-        semantic_ir_ref: Optional[Mapping[str, Any]],
+        source_text: str | None,
+        source_cobol_ref: Mapping[str, Any] | None,
+        semantic_ir: Mapping[str, Any] | None,
+        semantic_ir_ref: Mapping[str, Any] | None,
         previous_repair_decision_refs: Sequence[Mapping[str, Any]],
         repair_budget_remaining: int,
     ) -> RepairAgentResult:
@@ -1020,10 +1024,10 @@ class W0WorkflowRunner:
             return FAILURE_MODEL_GATEWAY_UNAVAILABLE
         return FAILURE_JAVA_GENERATION_FAILED
 
+    @staticmethod
     def _guard_agent_invocation_payload(
-        self,
         payload: Any,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Validate an agent invocation response if the payload claims that
         shape. Returns an error description string on failure, otherwise
         ``None``.
@@ -1052,8 +1056,8 @@ class W0WorkflowRunner:
         contract: W02RunContract,
         classification: str,
         *,
-        failure_code: Optional[str] = None,
-        failure_message: Optional[str] = None,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
     ) -> None:
         try:
             contract.finalize(
@@ -1079,7 +1083,7 @@ class W0WorkflowRunner:
         )
 
     @staticmethod
-    def _failure_code_from_exception(exc: BaseException) -> Optional[str]:
+    def _failure_code_from_exception(exc: BaseException) -> str | None:
         if isinstance(exc, ModelPolicyDeniedStepError):
             return FAILURE_MODEL_POLICY_DENIED
         if isinstance(exc, AgentContractInvalidStepError):
@@ -1094,7 +1098,7 @@ class W0WorkflowRunner:
             return None
         return STEP_TO_FAILURE_CODE.get(failed_step)
 
-    def run(self, context: W0RunContext, input_ref: Mapping[str, Any]) -> Dict[str, Any]:
+    def run(self, context: W0RunContext, input_ref: Mapping[str, Any]) -> dict[str, Any]:
         input_reference = _normalize_input_ref(input_ref, context.run_id)
         source_text = _extract_source(input_ref)
         raw_source_text = _raw_source(input_ref) or source_text
@@ -1106,12 +1110,14 @@ class W0WorkflowRunner:
         evidence_refs: list[str] = list(context.evidence_refs)
         step_results: list[WorkflowStepResult] = []
         model_output = None
-        model_policy_skipped_meta: Optional[ArtifactMetadata] = None
-        model_invocation_input_ref: Optional[DataReference] = None
-        model_invocation_request: Optional[Dict[str, Any]] = None
-        program_id: Optional[str] = None
+        model_policy_skipped_meta: ArtifactMetadata | None = None
+        # noinspection PyUnusedLocal
+        model_invocation_input_ref: DataReference | None = None
+        # noinspection PyUnusedLocal
+        model_invocation_request: dict[str, Any] | None = None
+        program_id: str | None = None
         completed_steps: list[str] = []
-        artifact_refs: list[Dict[str, Any]] = []
+        artifact_refs: list[dict[str, Any]] = []
         # Issue #166: build the W0.2 run contract before any side-effects.
         # ``_init_w02_contract`` only depends on the input reference; it does
         # not run capability calls or persist source artifacts. The runner
@@ -1119,9 +1125,10 @@ class W0WorkflowRunner:
         # contract reflects the live workflow.
         w02_contract = self._init_w02_contract(context, input_reference)
         w02_blocked = False
-        w02_failure_code: Optional[str] = None
-        w02_failure_message: Optional[str] = None
+        w02_failure_code: str | None = None
+        w02_failure_message: str | None = None
 
+        # noinspection PyShadowingNames
         def _record_artifact(meta: Any) -> None:
             if meta is None:
                 return
@@ -1131,7 +1138,8 @@ class W0WorkflowRunner:
                 return
             artifact_refs.append(payload)
 
-        def _write_summary(status: str, *, message: str, failed_step: Optional[str] = None) -> None:
+        # noinspection PyShadowingNames
+        def _write_summary(status: str, *, message: str, failed_step: str | None = None) -> None:
             summary = {
                 "runId": context.run_id,
                 "workflowId": context.workflow_id,
@@ -1482,7 +1490,7 @@ class W0WorkflowRunner:
                 kind=KIND_GENERATED_PROJECT_MANIFEST,
             )
             _record_artifact(manifest_meta)
-            generated_artifact_ref: Optional[Dict[str, Any]] = None
+            generated_artifact_ref: dict[str, Any] | None = None
             if manifest_meta is not None:
                 generated_artifact_ref = {
                     "uri": manifest_meta.uri,
@@ -1493,9 +1501,9 @@ class W0WorkflowRunner:
                 }
             completed_steps.append("generate-java")
             _write_summary("updating", message="generate-java completed")
-            baseline_artifact_ref: Optional[Dict[str, Any]] = generated_artifact_ref
-            baseline_generated_project: Optional[Mapping[str, Any]] = generated_project
-            agent_result: Optional[TransformationAgentResult] = None
+            baseline_artifact_ref: dict[str, Any] | None = generated_artifact_ref
+            baseline_generated_project: Mapping[str, Any] | None = generated_project
+            agent_result: TransformationAgentResult | None = None
 
             # Issue #169: when the requester opted into the productive
             # Transformation Agent, invoke it after the deterministic
@@ -1531,7 +1539,7 @@ class W0WorkflowRunner:
                     expected_output=oracle_metadata["expectedOutput"],
                     oracle_input=oracle_metadata["oracleInput"],
                 )
-                oracle_reference_for_agent: Optional[DataReference] = None
+                oracle_reference_for_agent: DataReference | None = None
                 if oracle_payload_for_agent is not None:
                     oracle_reference_for_agent = _build_reference(
                         f"urn:orchestrator/{context.run_id}/oracle",
@@ -1700,9 +1708,10 @@ class W0WorkflowRunner:
             # When the productive Transformation Agent blocked the run we
             # skip build/test entirely so the deterministic gatekeeper does
             # not pass an unverified baseline behind the agent's back.
-            build_test_output: Optional[WorkflowStepResult] = None
+            build_test_output: WorkflowStepResult | None = None
             success = False
-            build_failure_code: Optional[str] = w02_failure_code
+            build_failure_code: str | None = w02_failure_code
+            build_test_input: dict[str, Any] = {}
             if w02_blocked:
                 pass
             else:
@@ -1765,7 +1774,7 @@ class W0WorkflowRunner:
             # the productive Transformation Agent already blocked the run
             # before build/test ran, there is no outcome to classify and
             # the loop is skipped entirely.
-            previous_repair_decision_refs: list[Dict[str, Any]] = []
+            previous_repair_decision_refs: list[dict[str, Any]] = []
             repair_attempt_counter = 0
             if build_test_output is not None:
                 success, build_failure_code = build_test_outcome(build_test_output.payload)
@@ -1791,7 +1800,7 @@ class W0WorkflowRunner:
                 # a complete failure context. The deterministic baseline
                 # files (or the prior agent's files) are the input for
                 # no-change detection.
-                previous_candidate_files: Dict[str, str] = {
+                previous_candidate_files: dict[str, str] = {
                     path: content
                     for path, content in _iter_generated_files(generated_project)
                 }
@@ -1813,7 +1822,7 @@ class W0WorkflowRunner:
                         failure_code=build_failure_code,
                     )
                     break
-                previous_candidate_ref: Dict[str, Any]
+                previous_candidate_ref: dict[str, Any]
                 if generated_artifact_ref is not None:
                     previous_candidate_ref = dict(generated_artifact_ref)
                 else:
@@ -2531,15 +2540,15 @@ class W0WorkflowRunner:
         parse_output: WorkflowStepResult,
         ir_output: WorkflowStepResult,
         generator_output: WorkflowStepResult,
-        build_test_output: Optional[WorkflowStepResult],
-        model_output: Optional[Mapping[str, Any]],
-        model_policy_skipped_meta: Optional[ArtifactMetadata],
+        build_test_output: WorkflowStepResult | None,
+        model_output: Mapping[str, Any] | None,
+        model_policy_skipped_meta: ArtifactMetadata | None,
         trajectory_payload: Mapping[str, Any],
-        generated_artifact_ref: Optional[Mapping[str, Any]] = None,
-        w02_contract: Optional[Any] = None,
+        generated_artifact_ref: Mapping[str, Any] | None = None,
+        w02_contract: Any | None = None,
         w02_blocked: bool = False,
-        baseline_generated_artifact_ref: Optional[Mapping[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        baseline_generated_artifact_ref: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         trajectory_ref = _build_reference(
             f"urn:orchestrator/{context.run_id}/trajectory",
             trajectory_payload,
@@ -2558,10 +2567,10 @@ class W0WorkflowRunner:
             }
         else:
             generated_java_payload = _as_reference_payload(generator_output.output_ref)
-        build_test_refs: list[Dict[str, Any]] = []
+        build_test_refs: list[dict[str, Any]] = []
         if build_test_output is not None:
             build_test_refs.append(_as_reference_payload(build_test_output.output_ref))
-        artifacts: Dict[str, Any] = {
+        artifacts: dict[str, Any] = {
             "sourceCobol": [_as_reference_payload(input_ref)],
             "semanticIr": _as_reference_payload(_coerce_output_ref(ir_output.payload, generator_output.output_ref.uri, ir_output.payload)),
             "generatedJava": generated_java_payload,
@@ -2629,7 +2638,7 @@ class W0WorkflowRunner:
             if oracle is not None:
                 artifacts["oracleComparison"] = oracle
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "runId": context.run_id,
             "workflowId": context.workflow_id,
             "wave": wave,
@@ -2651,18 +2660,18 @@ class W0WorkflowRunner:
     @staticmethod
     def _java_candidate_ref(
         *,
-        ref: Optional[Mapping[str, Any]],
+        ref: Mapping[str, Any] | None,
         origin: str,
         attempt_number: int,
         selected: bool = False,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         if not ref:
             return None
         uri = str(ref.get("uri") or "").strip()
         sha = str(ref.get("sha256") or "").strip()
         if not uri or not sha:
             return None
-        candidate: Dict[str, Any] = {
+        candidate: dict[str, Any] = {
             "uri": uri,
             "sha256": sha,
             "byteSize": int(ref.get("byteSize") or 0),
@@ -2682,12 +2691,12 @@ class W0WorkflowRunner:
     def _build_w02_java_history(
         self,
         *,
-        w02_contract: Optional[Any],
-        baseline_artifact_ref: Optional[Mapping[str, Any]],
-        final_artifact_ref: Optional[Mapping[str, Any]],
+        w02_contract: Any | None,
+        baseline_artifact_ref: Mapping[str, Any] | None,
+        final_artifact_ref: Mapping[str, Any] | None,
         generator_output: WorkflowStepResult,
         blocked: bool,
-    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, list[dict[str, Any]]]:
         """Assemble the Java candidate history and repair-attempt envelope
         for the W0.2 evidence pack.
 
@@ -2699,8 +2708,8 @@ class W0WorkflowRunner:
         successful run, or — when the run is blocked — the last propose
         candidate emitted before the loop terminated.
         """
-        history: List[Dict[str, Any]] = []
-        repair_attempts: List[Dict[str, Any]] = []
+        history: list[dict[str, Any]] = []
+        repair_attempts: list[dict[str, Any]] = []
 
         # Attempt 0 is the deterministic baseline OR the productive
         # transformation agent's candidate. If we have an explicit baseline
@@ -2737,7 +2746,7 @@ class W0WorkflowRunner:
                 refusal = entry.get("refusalCode") or entry.get("escalationCode")
 
                 # Build the candidate ref for this attempt, if propose
-                candidate_entry: Optional[Dict[str, Any]] = None
+                candidate_entry: dict[str, Any] | None = None
                 if candidate_ref:
                     candidate_entry = self._java_candidate_ref(
                         ref=candidate_ref,
@@ -2778,7 +2787,7 @@ class W0WorkflowRunner:
                         "byteSize": int((btr or {}).get("byteSize") or 0),
                     }
 
-                attempt_payload: Dict[str, Any] = {
+                attempt_payload: dict[str, Any] = {
                     "attemptNumber": attempt_number,
                     "decision": decision,
                     "buildTestResultRef": btr_payload,
@@ -2798,7 +2807,7 @@ class W0WorkflowRunner:
                 repair_attempts.append(attempt_payload)
 
         # Mark the selected candidate inside history (if it matches).
-        selected_entry: Optional[Dict[str, Any]] = None
+        selected_entry: dict[str, Any] | None = None
         if final_uri and final_sha:
             for entry in history:
                 if entry.get("uri") == final_uri and entry.get("sha256") == final_sha:
@@ -2837,13 +2846,13 @@ class W0WorkflowRunner:
 
         return history, selected_entry, repair_attempts
 
+    @staticmethod
     def _build_agent_trajectory_refs(
-        self,
         *,
         context: W0RunContext,
         trajectory_ref: DataReference,
-        w02_contract: Optional[Any],
-    ) -> List[Dict[str, Any]]:
+        w02_contract: Any | None,
+    ) -> list[dict[str, Any]]:
         """Build the agentTrajectories[] array for the W0.2 evidence pack.
 
         The orchestrator's full trajectory ledger is always referenced under
@@ -2856,7 +2865,7 @@ class W0WorkflowRunner:
         Experience Learning extensions); the agentRole disambiguates them
         so downstream consumers can route the records correctly.
         """
-        entries: List[Dict[str, Any]] = [
+        entries: list[dict[str, Any]] = [
             {
                 "agentRole": "orchestrator",
                 "ledgerRef": _as_reference_payload(trajectory_ref),
@@ -2874,11 +2883,11 @@ class W0WorkflowRunner:
             })
         return entries
 
+    @staticmethod
     def _build_oracle_comparison(
-        self,
         *,
-        build_test_output: Optional[WorkflowStepResult],
-    ) -> Optional[Dict[str, Any]]:
+        build_test_output: WorkflowStepResult | None,
+    ) -> dict[str, Any] | None:
         """Project build-test-runner output into the evidence-pack oracle-
         comparison envelope (Issue #171).
 
@@ -2925,7 +2934,7 @@ class W0WorkflowRunner:
         else:
             oracle_kind = "synthetic"
 
-        envelope: Dict[str, Any] = {
+        envelope: dict[str, Any] = {
             "matched": bool(matched),
             "oracleKind": oracle_kind,
             "buildTestResultRef": _as_reference_payload(build_test_output.output_ref),
@@ -2944,10 +2953,10 @@ class W0WorkflowRunner:
     def _build_model_invocation_ref(
         self,
         context: W0RunContext,
-        model_output: Optional[Mapping[str, Any]],
+        model_output: Mapping[str, Any] | None,
         *,
-        model_policy_skipped_meta: Optional[ArtifactMetadata] = None,
-    ) -> Dict[str, Any]:
+        model_policy_skipped_meta: ArtifactMetadata | None = None,
+    ) -> dict[str, Any]:
         configured_model_id = _text(getattr(self.config, "model_gateway_model_id", None)) or DEFAULT_MODEL_ID
         if model_output is None:
             payload = {
@@ -3065,7 +3074,7 @@ class W0WorkflowRunner:
         self,
         context: W0RunContext,
         step_name: str,
-        capability: Dict[str, Any],
+        capability: dict[str, Any],
         data_class: str,
         payload: Mapping[str, Any],
         input_ref: DataReference,
@@ -3228,7 +3237,7 @@ class W0WorkflowRunner:
         raise StepExecutionError(f"step {step_name} retry loop exited without resolution")
 
     @staticmethod
-    def _event_input_payload(data_class: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    def _event_input_payload(data_class: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         event_payload = dict(payload)
         if data_class != DATA_CLASS_MODEL:
             return event_payload
@@ -3254,7 +3263,7 @@ class W0WorkflowRunner:
             return _build_reference(f"urn:orchestrator/{run_id}/step/{step_name}/failed", message)
         return _build_reference(f"urn:orchestrator/{run_id}/step/{step_name}", output_payload)
 
-    def _require_capability(self, run_id: str, capability_id: str) -> Dict[str, Any]:
+    def _require_capability(self, run_id: str, capability_id: str) -> dict[str, Any]:
         if not capability_id:
             raise CapabilityMissingError("capability id is required")
         cached = self._capability_cache.get(capability_id)
@@ -3305,10 +3314,10 @@ class W0WorkflowRunner:
         input_ref: DataReference,
         output_ref: DataReference,
         policy_decision: str = POLICY_ALLOW,
-        latency_ms: Optional[int] = None,
+        latency_ms: int | None = None,
     ) -> None:
         step_id = self._next_step_id(run_id)
-        event: Dict[str, Any] = {
+        event: dict[str, Any] = {
             "eventType": event_type,
             "schemaVersion": "v0",
             "service": self.config.service_name,
@@ -3345,7 +3354,7 @@ class W0WorkflowRunner:
             buffer = self._event_buffer_by_run.setdefault(run_id, [])
             buffer.append(dict(event))
 
-    def _drain_event_buffer(self, run_id: str) -> list[Dict[str, Any]]:
+    def _drain_event_buffer(self, run_id: str) -> list[dict[str, Any]]:
         with self._event_buffer_lock:
             buffer = self._event_buffer_by_run.pop(run_id, [])
         return buffer
@@ -3353,7 +3362,7 @@ class W0WorkflowRunner:
     def _flush_to_experience_learning(
         self,
         run_id: str,
-        trajectory_payload: Optional[Mapping[str, Any]] = None,
+        trajectory_payload: Mapping[str, Any] | None = None,
     ) -> None:
         """Forward buffered Harness events and the trajectory ledger to EL.
 
@@ -3379,9 +3388,9 @@ class W0WorkflowRunner:
             if log is None:
                 log = RunProgressLog()
                 self._progress_by_run[run_id] = log
-            return log
+        return log
 
-    def progress_payload(self, run_id: str) -> list[Dict[str, Any]]:
+    def progress_payload(self, run_id: str) -> list[dict[str, Any]]:
         """Return the in-memory step list for `run_id`, empty if unknown."""
         with self._progress_lock:
             log = self._progress_by_run.get(run_id)
@@ -3394,9 +3403,9 @@ class W0WorkflowRunner:
         context: W0RunContext,
         log: RunProgressLog,
         *,
-        current_step: Optional[str],
+        current_step: str | None,
         run_status: str,
-        failed_step: Optional[str] = None,
+        failed_step: str | None = None,
     ) -> None:
         steps = log.to_payload()
         completed = [step["name"] for step in steps if step.get("status") == STEP_STATUS_OK]
@@ -3431,7 +3440,7 @@ class W0WorkflowRunner:
         name: str,
         capability_id: str,
         actor: str,
-        input_ref: Optional[DataReference],
+        input_ref: DataReference | None,
     ) -> StepRecord:
         log = self._progress_for(context.run_id)
         record = log.upsert(
@@ -3454,12 +3463,12 @@ class W0WorkflowRunner:
         capability_id: str,
         actor: str,
         status: str,
-        input_ref: Optional[DataReference] = None,
-        output_ref: Optional[DataReference] = None,
-        diagnostic: Optional[str] = None,
-        latency_ms: Optional[int] = None,
+        input_ref: DataReference | None = None,
+        output_ref: DataReference | None = None,
+        diagnostic: str | None = None,
+        latency_ms: int | None = None,
         run_status: str = "updating",
-        failed_step: Optional[str] = None,
+        failed_step: str | None = None,
     ) -> None:
         log = self._progress_for(context.run_id)
         log.upsert(
@@ -3490,8 +3499,8 @@ class W0WorkflowRunner:
         name: str,
         status: str,
         run_status: str,
-        diagnostic: Optional[str] = None,
-        failed_step: Optional[str] = None,
+        diagnostic: str | None = None,
+        failed_step: str | None = None,
     ) -> None:
         log = self._progress_for(context.run_id)
         timestamp = _iso_now()
@@ -3519,7 +3528,7 @@ class W0WorkflowRunner:
         parse_output: WorkflowStepResult,
         ir_output: WorkflowStepResult,
         generator_output: WorkflowStepResult,
-        build_output: Optional[WorkflowStepResult],
+        build_output: WorkflowStepResult | None,
     ) -> str:
         return json.dumps({
             "runId": context.run_id,

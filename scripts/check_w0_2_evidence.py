@@ -59,7 +59,8 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
+from collections.abc import Mapping
+from typing import Any, Iterable, Sequence
 
 
 # Closed set of W0.2 failure codes the orchestrator may surface.
@@ -86,7 +87,7 @@ W02_FAILURE_CODES = frozenset(
 # bearer tokens, and the verbatim env-var names the launcher accepts. The
 # launcher reads these from the environment but they MUST NOT be written to
 # any evidence artifact.
-SECRET_PATTERNS: Tuple[re.Pattern[str], ...] = (
+SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"AZURE_FOUNDRY_API_KEY\s*[:=]\s*[A-Za-z0-9_\-]{8,}"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9_\-]{16,}"),
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
@@ -98,7 +99,7 @@ class CheckFailed(Exception):
     """Raised when a single check fails. Collected by the validator."""
 
 
-def _emit_failure(failures: List[str], message: str) -> None:
+def _emit_failure(failures: list[str], message: str) -> None:
     failures.append(message)
 
 
@@ -110,13 +111,13 @@ def _is_seq(value: Any) -> bool:
     return isinstance(value, (list, tuple)) and not isinstance(value, (str, bytes))
 
 
-def _require(condition: bool, message: str, failures: List[str]) -> bool:
+def _require(condition: bool, message: str, failures: list[str]) -> bool:
     if not condition:
         _emit_failure(failures, message)
     return condition
 
 
-def _resolve_uri_to_path(uri: str, root: Path) -> Optional[Path]:
+def _resolve_uri_to_path(uri: str, root: Path) -> Path | None:
     """Map a manifest URI/path to a local filesystem path under ``root``.
 
     The W0.2 manifest emits ``file://...``, run-scoped relative paths, or
@@ -124,7 +125,7 @@ def _resolve_uri_to_path(uri: str, root: Path) -> Optional[Path]:
     non-local and skipped.
     """
 
-    candidate: Optional[Path]
+    candidate: Path | None
     if uri.startswith("file://"):
         candidate = Path(uri[len("file://") :])
     elif uri.startswith(("http://", "https://", "s3://", "gs://", "fixture://")):
@@ -147,7 +148,7 @@ def _resolve_uri_to_path(uri: str, root: Path) -> Optional[Path]:
     return candidate
 
 
-def _check_artifact_for_secrets(path: Path, failures: List[str]) -> None:
+def _check_artifact_for_secrets(path: Path, failures: list[str]) -> None:
     try:
         with path.open("rb") as handle:
             head = handle.read(1 * 1024 * 1024)  # 1 MiB cap is enough for ledgers
@@ -182,7 +183,7 @@ def _load_manifest(path: Path) -> Mapping[str, Any]:
     return data
 
 
-def _check_top_level(manifest: Mapping[str, Any], failures: List[str]) -> None:
+def _check_top_level(manifest: Mapping[str, Any], failures: list[str]) -> None:
     _require(
         manifest.get("schemaVersion") == "v0",
         f"schemaVersion must be 'v0', got {manifest.get('schemaVersion')!r}",
@@ -211,7 +212,7 @@ def _check_top_level(manifest: Mapping[str, Any], failures: List[str]) -> None:
     )
 
 
-def _check_validation_block(manifest: Mapping[str, Any], expect_ok: bool, failures: List[str]) -> None:
+def _check_validation_block(manifest: Mapping[str, Any], expect_ok: bool, failures: list[str]) -> None:
     validation = manifest.get("validation")
     if not _require(_is_mapping(validation), "validation block missing", failures):
         return
@@ -238,7 +239,7 @@ def _check_validation_block(manifest: Mapping[str, Any], expect_ok: bool, failur
     )
 
 
-def _model_invocation_status(entry: Mapping[str, Any]) -> Optional[str]:
+def _model_invocation_status(entry: Mapping[str, Any]) -> str | None:
     status = entry.get("status")
     return status if isinstance(status, str) else None
 
@@ -249,7 +250,7 @@ def _check_model_invocations(
     expect_foundry: bool,
     expect_skipped: bool,
     allow_skipped: bool,
-    failures: List[str],
+    failures: list[str],
 ) -> None:
     _require(
         len(invocations) >= 1,
@@ -302,7 +303,7 @@ def _check_model_invocations(
 
 def _check_agent_trajectories(
     trajectories: Sequence[Mapping[str, Any]],
-    failures: List[str],
+    failures: list[str],
 ) -> None:
     _require(
         len(trajectories) >= 1,
@@ -347,8 +348,8 @@ def _check_agent_trajectories(
 
 def _check_java_candidates(
     candidates: Sequence[Mapping[str, Any]],
-    final_java: Optional[Mapping[str, Any]],
-    failures: List[str],
+    final_java: Mapping[str, Any] | None,
+    failures: list[str],
 ) -> None:
     _require(
         len(candidates) >= 1,
@@ -398,7 +399,7 @@ def _check_java_candidates(
         )
 
 
-def _check_oracle(oracle: Mapping[str, Any], failures: List[str]) -> None:
+def _check_oracle(oracle: Mapping[str, Any], failures: list[str]) -> None:
     _require(
         oracle.get("matched") is True,
         f"oracleComparison.matched must be true for a success run, got {oracle.get('matched')!r}",
@@ -426,7 +427,7 @@ def _check_success_artifacts(
     expect_foundry: bool,
     expect_skipped: bool,
     allow_skipped: bool,
-    failures: List[str],
+    failures: list[str],
 ) -> None:
     completeness = manifest.get("completenessStatus")
     _require(
@@ -516,7 +517,7 @@ def _check_success_artifacts(
         _emit_failure(failures, "artifacts.oracleComparison must be set for a W0.2 success run")
 
 
-def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: List[str]) -> None:
+def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -> None:
     completeness = manifest.get("completenessStatus")
     classification = manifest.get("classification")
     accepted_completeness = {"blocked", "evidence_incomplete"}
@@ -552,7 +553,7 @@ def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: List[str]) -
 def _scan_referenced_artifacts(
     manifest: Mapping[str, Any],
     root: Path,
-    failures: List[str],
+    failures: list[str],
 ) -> None:
     artifacts = manifest.get("artifacts") or {}
     if not _is_mapping(artifacts):
@@ -587,10 +588,10 @@ def validate(
     expect_foundry: bool,
     expect_skipped: bool,
     allow_skipped: bool,
-    root: Optional[Path],
-) -> List[str]:
+    root: Path | None,
+) -> list[str]:
     manifest = _load_manifest(manifest_path)
-    failures: List[str] = []
+    failures: list[str] = []
     resolved_root = (root or manifest_path.parent).resolve()
 
     _check_top_level(manifest, failures)

@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# noinspection PyProtectedMemberInspection
 from orchestrator_service.agent_contracts import (
     AgentContractInvalidError,
     MAX_PAYLOAD_BYTES,
@@ -179,25 +180,32 @@ def _valid_repair_decision_propose() -> dict:
 
 
 class SchemaPositiveTests(unittest.TestCase):
-    def test_valid_transformation_invocation_request(self) -> None:
+    @staticmethod
+    def test_valid_transformation_invocation_request() -> None:
         validate_invocation_request(_valid_invocation_request())
 
-    def test_valid_verification_repair_invocation_request_attempt_two(self) -> None:
+    @staticmethod
+    def test_valid_verification_repair_invocation_request_attempt_two() -> None:
         validate_invocation_request(_valid_invocation_request("verification-repair-agent", attempt=2))
 
-    def test_valid_transformation_invocation_response(self) -> None:
+    @staticmethod
+    def test_valid_transformation_invocation_response() -> None:
         validate_invocation_response(_valid_invocation_response())
 
-    def test_valid_verification_repair_invocation_response(self) -> None:
+    @staticmethod
+    def test_valid_verification_repair_invocation_response() -> None:
         validate_invocation_response(_valid_invocation_response("verification-repair-agent"))
 
-    def test_valid_repair_input(self) -> None:
+    @staticmethod
+    def test_valid_repair_input() -> None:
         validate_repair_input(_valid_repair_input())
 
-    def test_valid_repair_decision_propose(self) -> None:
+    @staticmethod
+    def test_valid_repair_decision_propose() -> None:
         validate_repair_decision(_valid_repair_decision_propose())
 
-    def test_valid_repair_decision_refuse(self) -> None:
+    @staticmethod
+    def test_valid_repair_decision_refuse() -> None:
         payload = {
             "schemaVersion": "v0",
             "runId": "run-1",
@@ -209,7 +217,8 @@ class SchemaPositiveTests(unittest.TestCase):
         }
         validate_repair_decision(payload)
 
-    def test_valid_repair_decision_escalate(self) -> None:
+    @staticmethod
+    def test_valid_repair_decision_escalate() -> None:
         payload = {
             "schemaVersion": "v0",
             "runId": "run-1",
@@ -420,7 +429,8 @@ class RepairDecisionNegativeTests(unittest.TestCase):
 
 
 class SecretLeakGuardTests(unittest.TestCase):
-    def test_no_secret_in_clean_payload(self) -> None:
+    @staticmethod
+    def test_no_secret_in_clean_payload() -> None:
         assert_no_secret_leak(_valid_invocation_response())
 
     def test_apikey_field_rejected(self) -> None:
@@ -490,14 +500,17 @@ class _AgentReturningGenerator(StubGateway):
 
 
 class OrchestratorGuardIntegrationTests(unittest.TestCase):
-    def _runner(self, gateway):
+    @staticmethod
+    def _runner(gateway):
+        # noinspection PyProtectedMemberInspection
         runner = W0WorkflowRunner(
             config=W0WorkflowRunnerTests._base_config(),
             gateway=gateway,
         )
         return runner
 
-    def _context(self):
+    @staticmethod
+    def _context():
         return W0RunContext(
             run_id="run-1",
             workflow_id="w0-migration-v0",
@@ -590,7 +603,8 @@ class TrajectoryComposabilityTests(unittest.TestCase):
         )
         self.assertEqual(step_data_class_enum, response_data_class_enum)
 
-    def test_full_guard_passes_clean_payload(self) -> None:
+    @staticmethod
+    def test_full_guard_passes_clean_payload() -> None:
         guard_agent_response(_valid_invocation_response())
         guard_agent_response(_valid_invocation_response("verification-repair-agent"))
         guard_repair_decision(_valid_repair_decision_propose())

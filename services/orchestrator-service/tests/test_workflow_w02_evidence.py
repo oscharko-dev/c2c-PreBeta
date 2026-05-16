@@ -14,7 +14,8 @@ from __future__ import annotations
 import datetime
 import tempfile
 import unittest
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from orchestrator_service.artifacts import RunArtifactStore
 from orchestrator_service.run_contract import new_run_contract
@@ -45,7 +46,9 @@ def _step(name: str, *, payload: Mapping[str, Any] | None = None, output_uri: st
     )
 
 
+# noinspection PyAttributeOutsideInitInspection
 class _BaseEvidenceFixture(unittest.TestCase):
+    # noinspection PyPep8Naming,PyProtectedMemberInspection
     def setUp(self) -> None:
         tmp = tempfile.mkdtemp()
         self._artifact_store = RunArtifactStore(tmp, created_by="orchestrator-service")
@@ -122,7 +125,8 @@ class W0DeterministicEvidenceTests(_BaseEvidenceFixture):
 class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
     """W0.2 runs must emit every W0.2 contract field with the right shape."""
 
-    def _w02_contract(self):
+    @staticmethod
+    def _w02_contract():
         return new_run_contract(
             run_id="run-evidence",
             workflow_id="w0-migration-v0",
@@ -275,7 +279,7 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         # When the run is blocked we MUST NOT auto-mark a candidate as
         # selected unless the orchestrator handed us one explicitly.
         history = artifacts.get("generatedJavaArtifacts") or []
-        selected = [e for e in history if e.get("selected")]
+        _selected = [e for e in history if e.get("selected")]
         # The baseline matched the final_artifact_ref so it shows up selected;
         # the repair attempt did not propose so no extra candidate exists.
         # But the contract on blocked runs is "do not claim success" — the

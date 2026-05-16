@@ -8,18 +8,13 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .artifacts import (
     KIND_BUILD_TEST_RESULT,
     KIND_EVIDENCE_PACK_MANIFEST,
     KIND_GENERATED_PROJECT_FILE,
-    KIND_GENERATED_PROJECT_MANIFEST,
-    KIND_GENERATION_RESPONSE,
     KIND_LEARNING_SUMMARY,
-    KIND_MODEL_INVOCATION_LEDGER,
-    KIND_MODEL_POLICY_SKIPPED,
-    KIND_TRAJECTORY_LEDGER,
     MIME_JAVA,
     MIME_PLAIN,
     RunArtifactStore,
@@ -71,7 +66,7 @@ class OrchestratorService:
         self,
         config: OrchestratorConfig,
         runner: W0WorkflowRunner,
-        artifact_store: Optional[RunArtifactStore] = None,
+        artifact_store: RunArtifactStore | None = None,
     ):
         self.config = config
         self.runner = runner
@@ -86,7 +81,7 @@ class OrchestratorService:
             server_version = "orchestrator-service/0.1"
             error_content_type = "application/json"
 
-            def _route_parts(self) -> List[str]:
+            def _route_parts(self) -> list[str]:
                 path = urllib.parse.urlparse(self.path).path
                 return [segment for segment in path.split("/") if segment]
 
@@ -193,7 +188,7 @@ class OrchestratorService:
 
         return RequestHandler
 
-    def _artifact_endpoint(self, run_id: str, action: str) -> Tuple[int, Dict[str, Any]]:
+    def _artifact_endpoint(self, run_id: str, action: str) -> tuple[int, dict[str, Any]]:
         if not self.artifact_store.has_run(run_id):
             return 404, {"error": "run not found", "runId": run_id}
         summary = self.artifact_store.read_summary(run_id) or {}
@@ -251,12 +246,12 @@ class OrchestratorService:
     def _artifact_payload(
         self,
         run_id: str,
-        envelope: Dict[str, Any],
+        envelope: dict[str, Any],
         *,
         relpath: str,
         kind: str,
         missing_label: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         data = self.artifact_store.read_json(run_id, relpath)
         meta = self.artifact_store.find_metadata(run_id, relpath)
         if data is None:
@@ -276,7 +271,7 @@ class OrchestratorService:
             "kind": kind,
         }
 
-    def _generated_artifact_ref(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def _generated_artifact_ref(self, run_id: str) -> dict[str, Any] | None:
         manifest_meta = self.artifact_store.find_metadata(run_id, "generated-project-manifest.json")
         if manifest_meta is None:
             return None
@@ -288,14 +283,14 @@ class OrchestratorService:
             "kind": manifest_meta.get("kind"),
         }
 
-    def _generated_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+    def _generated_view(self, run_id: str, envelope: dict[str, Any]) -> dict[str, Any]:
         response = self.artifact_store.read_json(run_id, "generation-response.json")
         response_meta = self.artifact_store.find_metadata(run_id, "generation-response.json")
         manifest = self.artifact_store.read_json(run_id, "generated-project-manifest.json")
         manifest_meta = self.artifact_store.find_metadata(run_id, "generated-project-manifest.json")
         file_metas = self.artifact_store.find_by_kind(run_id, KIND_GENERATED_PROJECT_FILE)
-        files: Dict[str, str] = {}
-        file_refs: List[Dict[str, Any]] = []
+        files: dict[str, str] = {}
+        file_refs: list[dict[str, Any]] = []
         prefix = "generated-project/"
         for entry in file_metas:
             relpath = str(entry.get("path") or "")
@@ -317,24 +312,24 @@ class OrchestratorService:
                 }
             )
         file_refs.sort(key=lambda item: str(item.get("path") or ""))
-        missing: List[str] = []
+        missing: list[str] = []
         if response is None:
             missing.append("generation-response")
         if not files:
             missing.append("generated-project")
         if manifest is None and files:
             missing.append("generated-project-manifest")
-        generated_project: Dict[str, Any] = {}
+        generated_project: dict[str, Any] = {}
         if isinstance(response, dict):
             project = response.get("generatedProject")
             if isinstance(project, dict):
                 generated_project = project
-        manifest_traceability: Dict[str, Any] = {}
+        manifest_traceability: dict[str, Any] = {}
         if isinstance(manifest, dict):
             traceability = manifest.get("traceability")
             if isinstance(traceability, dict):
                 manifest_traceability = traceability
-        artifact_ref: Optional[Dict[str, Any]] = None
+        artifact_ref: dict[str, Any] | None = None
         if manifest_meta is not None:
             artifact_ref = {
                 "uri": manifest_meta.get("uri"),
@@ -367,7 +362,7 @@ class OrchestratorService:
         }
 
     @staticmethod
-    def _safe_generated_relpath(raw: str) -> Optional[str]:
+    def _safe_generated_relpath(raw: str) -> str | None:
         if not raw:
             return None
         if "\x00" in raw:
@@ -382,7 +377,7 @@ class OrchestratorService:
                 return None
         return "/".join(parts)
 
-    def _generated_files_index(self, run_id: str) -> Tuple[int, Dict[str, Any]]:
+    def _generated_files_index(self, run_id: str) -> tuple[int, dict[str, Any]]:
         if not self.artifact_store.has_run(run_id):
             return 404, {"error": "run not found", "runId": run_id}
         summary = self.artifact_store.read_summary(run_id) or {}
@@ -396,7 +391,7 @@ class OrchestratorService:
         manifest_meta = self.artifact_store.find_metadata(run_id, "generated-project-manifest.json")
         file_metas = self.artifact_store.find_by_kind(run_id, KIND_GENERATED_PROJECT_FILE)
         prefix = "generated-project/"
-        file_refs: List[Dict[str, Any]] = []
+        file_refs: list[dict[str, Any]] = []
         for entry in file_metas:
             relpath = str(entry.get("path") or "")
             if not relpath.startswith(prefix):
@@ -413,12 +408,12 @@ class OrchestratorService:
                 }
             )
         file_refs.sort(key=lambda item: str(item.get("path") or ""))
-        missing: List[str] = []
+        missing: list[str] = []
         if not file_refs:
             missing.append("generated-project")
         if manifest is None and file_refs:
             missing.append("generated-project-manifest")
-        artifact_ref: Optional[Dict[str, Any]] = None
+        artifact_ref: dict[str, Any] | None = None
         if manifest_meta is not None:
             artifact_ref = {
                 "uri": manifest_meta.get("uri"),
@@ -442,7 +437,7 @@ class OrchestratorService:
             "manifestRef": manifest_meta,
         }
 
-    def _generated_file_content(self, run_id: str, raw_path: str) -> Tuple[int, Dict[str, Any]]:
+    def _generated_file_content(self, run_id: str, raw_path: str) -> tuple[int, dict[str, Any]]:
         if not self.artifact_store.has_run(run_id):
             return 404, {"error": "run not found", "runId": run_id}
         safe = self._safe_generated_relpath(raw_path)
@@ -471,7 +466,7 @@ class OrchestratorService:
             "kind": meta.get("kind"),
         }
 
-    def _progress_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+    def _progress_view(self, run_id: str, envelope: dict[str, Any]) -> dict[str, Any]:
         """Issue #96: expose step-level progress for UI-started runs.
 
         The view prefers the in-memory progress log (live, includes a
@@ -483,11 +478,11 @@ class OrchestratorService:
         live_steps = self.runner.progress_payload(run_id)
         persisted = self.artifact_store.read_json(run_id, "run-progress.json")
         persisted_meta = self.artifact_store.find_metadata(run_id, "run-progress.json")
-        steps: List[Dict[str, Any]]
-        current_step: Optional[str] = None
+        steps: list[dict[str, Any]]
+        current_step: str | None = None
         run_status = str(envelope.get("runStatus") or "incomplete")
-        failed_step: Optional[str] = None
-        updated_at: Optional[str] = None
+        failed_step: str | None = None
+        updated_at: str | None = None
         if live_steps:
             steps = live_steps
             for entry in steps:
@@ -520,7 +515,7 @@ class OrchestratorService:
             "updatedAt": updated_at,
         }
 
-    def _learning_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+    def _learning_view(self, run_id: str, envelope: dict[str, Any]) -> dict[str, Any]:
         """Issue #96: expose the experience-learning summary for the run.
 
         Pulls live data from the experience-learning-service when configured
@@ -528,7 +523,7 @@ class OrchestratorService:
         available for the Evidence Pack consumer even when EL is offline.
         """
         learning = getattr(self.runner, "experience_learning", None)
-        live_summary: Optional[Dict[str, Any]] = None
+        live_summary: dict[str, Any] | None = None
         endpoint = ""
         if isinstance(learning, ExperienceLearningGateway):
             fetched = learning.get_run_summary(run_id)
@@ -560,7 +555,7 @@ class OrchestratorService:
             "source": "live" if live_summary is not None else ("cached" if cached is not None else "unavailable"),
         }
 
-    def _workflow_contract_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+    def _workflow_contract_view(self, run_id: str, envelope: dict[str, Any]) -> dict[str, Any]:
         """Issue #166: expose the W0.2 run contract for BFF/UI/agent consumers.
 
         Prefers the in-memory snapshot held by the runner (always up-to-date
@@ -572,7 +567,7 @@ class OrchestratorService:
         cached = self.artifact_store.read_json(run_id, "w02-run-contract.json")
         cached_meta = self.artifact_store.find_metadata(run_id, "w02-run-contract.json")
         contract = live if live is not None else (cached if isinstance(cached, dict) else None)
-        missing: List[str] = [] if contract is not None else ["w02-run-contract"]
+        missing: list[str] = [] if contract is not None else ["w02-run-contract"]
         return {
             **envelope,
             "status": "incomplete" if missing else "complete",
@@ -582,10 +577,10 @@ class OrchestratorService:
             "source": "live" if live is not None else ("cached" if cached is not None else "unavailable"),
         }
 
-    def _events_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+    def _events_view(self, run_id: str, envelope: dict[str, Any]) -> dict[str, Any]:
         ledger = self.artifact_store.read_json(run_id, "trajectory-ledger.json")
         ledger_meta = self.artifact_store.find_metadata(run_id, "trajectory-ledger.json")
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         if isinstance(ledger, dict):
             raw_events = ledger.get("events")
             if isinstance(raw_events, list):
@@ -599,7 +594,7 @@ class OrchestratorService:
             "trajectoryRef": ledger_meta,
         }
 
-    def _run_state(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def _run_state(self, run_id: str) -> dict[str, Any] | None:
         try:
             return self.runner.gateway.get_run(run_id)
         except Exception as exc:
@@ -607,7 +602,7 @@ class OrchestratorService:
                 return None
             raise UpstreamServiceError("harness run status unavailable") from exc
 
-    def _runs_list(self) -> List[Dict[str, Any]]:
+    def _runs_list(self) -> list[dict[str, Any]]:
         try:
             list_response = self.runner.gateway.http.get_json(f"{self.runner.gateway.base_url}/v0/runs")
             if isinstance(list_response.payload, list):
@@ -616,7 +611,7 @@ class OrchestratorService:
             raise UpstreamServiceError("harness run list unavailable") from exc
         return []
 
-    def _start_run(self, payload: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    def _start_run(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         input_ref = payload.get("inputRef")
         if not isinstance(input_ref, dict):
             raise ValueError("inputRef is required and must be an object")
@@ -684,7 +679,7 @@ class OrchestratorService:
             "message": "orchestrator run started",
         }
 
-    def _execute_run(self, context: W0RunContext, input_ref: Dict[str, Any]) -> None:
+    def _execute_run(self, context: W0RunContext, input_ref: dict[str, Any]) -> None:
         try:
             self.runner.run(context=context, input_ref=input_ref)
         except Exception as exc:  # pragma: no cover - asynchronous runtime error path
@@ -697,14 +692,14 @@ def create_http_server(
     *,
     host: str = "0.0.0.0",
     port: int = 8084,
-    artifact_store: Optional[RunArtifactStore] = None,
+    artifact_store: RunArtifactStore | None = None,
 ) -> HTTPServer:
     service = OrchestratorService(config, runner, artifact_store=artifact_store)
     server = HTTPServer((host, port), service.handler_factory())
     return server
 
 
-def create_configured_server(config: OrchestratorConfig) -> Tuple[HTTPServer, W0WorkflowRunner]:
+def create_configured_server(config: OrchestratorConfig) -> tuple[HTTPServer, W0WorkflowRunner]:
     harness_headers = {}
     if config.harness_token:
         harness_headers = {
@@ -716,7 +711,7 @@ def create_configured_server(config: OrchestratorConfig) -> Tuple[HTTPServer, W0
     gateway = HarnessGateway(config.harness_base_url, http_client, harness_headers=harness_headers)
     _register_capabilities_with_harness(config=config, gateway=gateway)
     artifact_store = RunArtifactStore(config.run_artifact_root, created_by=config.service_name)
-    experience_learning: Any
+    experience_learning: ExperienceLearningGateway | NullExperienceLearningGateway
     if config.experience_learning_base_url:
         experience_learning = ExperienceLearningGateway(
             config.experience_learning_base_url,
@@ -741,7 +736,7 @@ def create_configured_server(config: OrchestratorConfig) -> Tuple[HTTPServer, W0
     return server, runner
 
 
-def _split_listen_address(listen_addr: str) -> Tuple[str, int]:
+def _split_listen_address(listen_addr: str) -> tuple[str, int]:
     if ":" not in listen_addr:
         raise ValueError("listen address must include host and port")
     host, port_text = listen_addr.rsplit(":", 1)

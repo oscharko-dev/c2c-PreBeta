@@ -28,7 +28,7 @@ import hashlib
 import json
 import unittest
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from orchestrator_service.run_contract import (
     CLASSIFICATION_BLOCKED,
@@ -53,9 +53,10 @@ _DIAGNOSTIC_CODES = {
 }
 
 
-def _load_index() -> Dict[str, Any]:
+def _load_index() -> dict[str, Any]:
     with ACCEPTANCE_INDEX_PATH.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+        data = json.load(fh)
+    return data
 
 
 def _sha256(path: Path) -> str:
@@ -66,14 +67,16 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# noinspection PyAttributeOutsideInitInspection
 class AcceptanceFixtureContractTests(unittest.TestCase):
+    # noinspection PyPep8Naming
     def setUp(self) -> None:
         self.assertTrue(
             ACCEPTANCE_INDEX_PATH.is_file(),
             f"missing acceptance fixture index at {ACCEPTANCE_INDEX_PATH}",
         )
         self.index = _load_index()
-        self.fixtures: List[Dict[str, Any]] = self.index["fixtures"]
+        self.fixtures: list[dict[str, Any]] = self.index["fixtures"]
 
     def test_schema_version_is_v0(self) -> None:
         self.assertEqual(self.index.get("schemaVersion"), "v0")
