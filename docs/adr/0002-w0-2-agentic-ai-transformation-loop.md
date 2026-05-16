@@ -1,8 +1,9 @@
 # ADR 0002: W0.2 Agentic AI Transformation Loop
 
-**Date**: 2026-05-15
+**Date**: 2026-05-16
 **Status**: Proposed
 **Issue**: [#164](https://github.com/oscharko-dev/c2c-PreBeta/issues/164)
+**Related issues**: [#165](https://github.com/oscharko-dev/c2c-PreBeta/issues/165)
 
 ## Context
 
@@ -55,9 +56,53 @@ Experience Learning Harness:
 
 W0.2 does not deliver broad COBOL coverage, customer production readiness,
 autonomous test-generation maturity, full Experience Learning feedback loops,
-autonomous workflow optimization, or enterprise multi-agent optimization. Those
-remain later-wave concerns. W0.2 must still create the structured experience
-records and first read-only learning signals that later waves will build on.
+autonomous workflow optimization, or enterprise multi-agent optimization. W0.2
+also does not deliver multiple agent teams or multiple orchestrators in
+production, and does not add target languages beyond Java. The platform
+architecture must keep those futures open, but the W0.2 release ships exactly
+one Orchestrator, one agent team, and the COBOL-to-Java path. Those remain
+later-wave concerns. W0.2 must still create the structured experience records
+and first read-only learning signals that later waves will build on.
+
+## Failure States
+
+Product-mode W0.2 runs must surface real failure states instead of inventing
+successful outputs. The implementation must represent and distinguish:
+
+- parse failure;
+- unsupported COBOL (parseable but outside the W0/W0.2 subset);
+- model gateway unavailable;
+- model policy denial;
+- agent timeout;
+- compile failure;
+- runtime failure;
+- oracle mismatch against the Golden Master;
+- incomplete evidence;
+- cancellation by user, policy, or hard repair-loop limit.
+
+Each state must be visible in the Studio, recorded in run artifacts and
+Evidence Pack, and distinguishable from a verified-success run.
+
+## Named Contracts
+
+W0.2 implementation issues will design and version the following contracts.
+This ADR names them so that future ADRs and issues can reference a stable
+vocabulary:
+
+- **Orchestrator run contract**: BFF↔Orchestrator run lifecycle, observation,
+  cancellation, and final classification.
+- **Agent input/output contract**: per-role schema for agent inputs, prior
+  outputs, and verification feedback.
+- **Model Gateway invocation contract**: prompt template id, model selection
+  inputs, policy decision outputs, latency, and audit fields.
+- **Harness event contract**: canonical event envelope written to the Harness
+  event ledger.
+- **Evidence Pack v0 extension**: agent trajectory, model invocation summary,
+  repair-loop history, and Harness experience signal sections.
+
+These contracts must be designed so that future Harness capabilities (RAG,
+graph, domain database, additional MCP surfaces) can be added without
+rewriting agents or the Orchestrator.
 
 ## Consequences
 
