@@ -60,6 +60,32 @@ func TestManifestValidateRejectsBadHash(t *testing.T) {
 	}
 }
 
+func TestManifestValidateRequiresCompletenessContract(t *testing.T) {
+	m := newCompleteManifest(t)
+	m.CompletenessStatus = ""
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "completenessStatus") {
+		t.Fatalf("expected completenessStatus validation error, got %v", err)
+	}
+
+	m = newCompleteManifest(t)
+	m.Classification = ""
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "classification") {
+		t.Fatalf("expected classification validation error, got %v", err)
+	}
+
+	m = newCompleteManifest(t)
+	m.Validation.CompletenessStatus = ""
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "validation.completenessStatus") {
+		t.Fatalf("expected validation.completenessStatus validation error, got %v", err)
+	}
+
+	m = newCompleteManifest(t)
+	m.Validation.CompletenessStatus = CompletenessStatusEvidenceIncomplete
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "must match") {
+		t.Fatalf("expected validation.completenessStatus mismatch error, got %v", err)
+	}
+}
+
 func TestDataReferenceValidateAcceptsValid(t *testing.T) {
 	ref := DataReference{
 		URI:      "urn:test/abc",
@@ -166,6 +192,60 @@ func TestSchemaPresence(t *testing.T) {
 		return
 	}
 	t.Fatalf("schemas/evidence-pack-manifest-v0.json not found relative to service module")
+}
+
+func TestManifestSchemaRequiresCompletenessContract(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "schemas", "evidence-pack-manifest-v0.json"))
+	if err != nil {
+		t.Fatalf("read manifest schema: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("parse manifest schema: %v", err)
+	}
+	requireSchemaField(t, doc["required"], "completenessStatus")
+	requireSchemaField(t, doc["required"], "classification")
+
+	properties, ok := doc["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema properties missing or invalid")
+	}
+	validation, ok := properties["validation"].(map[string]any)
+	if !ok {
+		t.Fatalf("validation schema missing or invalid")
+	}
+	requireSchemaField(t, validation["required"], "completenessStatus")
+}
+
+func TestOpenAPIRequiresCompletenessContract(t *testing.T) {
+	body, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatalf("read openapi.yaml: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"required: [ok, requiredArtifacts, missingArtifacts, completenessStatus]",
+		"- completenessStatus",
+		"- classification",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("openapi.yaml missing %q", want)
+		}
+	}
+}
+
+func requireSchemaField(t *testing.T, required any, field string) {
+	t.Helper()
+	fields, ok := required.([]any)
+	if !ok {
+		t.Fatalf("schema required list missing or invalid")
+	}
+	for _, value := range fields {
+		if value == field {
+			return
+		}
+	}
+	t.Fatalf("schema required list missing %q: %v", field, fields)
 }
 
 func newCompleteManifest(t *testing.T) *EvidencePackManifest {

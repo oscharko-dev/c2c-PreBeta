@@ -174,7 +174,7 @@
     },
     "modelInvocationReference": {
       "type": "object",
-      "required": ["invocationId", "modelId"],
+      "required": ["invocationId", "modelId", "provider", "ledgerRef"],
       "properties": {
         "invocationId": { "type": "string", "minLength": 1 },
         "modelId": { "type": "string", "minLength": 1 },

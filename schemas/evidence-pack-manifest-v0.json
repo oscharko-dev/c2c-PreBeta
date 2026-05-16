@@ -12,6 +12,8 @@
     "runId",
     "status",
     "wave",
+    "completenessStatus",
+    "classification",
     "createdAt",
     "artifacts",
     "validation"
@@ -185,7 +187,7 @@
     },
     "validation": {
       "type": "object",
-      "required": ["requiredArtifacts", "missingArtifacts", "ok"],
+      "required": ["requiredArtifacts", "missingArtifacts", "ok", "completenessStatus"],
       "properties": {
         "ok": { "type": "boolean" },
         "requiredArtifacts": {

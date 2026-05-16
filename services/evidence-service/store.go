@@ -77,6 +77,7 @@ func (s *PackStore) Create(input CreateInput) (*EvidencePackManifest, error) {
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, input.Blocked)
 	manifest.Classification = deriveClassification(manifest.Validation, input.Blocked)
+	manifest.Validation.CompletenessStatus = manifest.CompletenessStatus
 	if input.Blocked && wave == WaveW02 {
 		if err := validateBlockedW02Artifacts(manifest.Artifacts); err != nil {
 			return nil, err
@@ -133,6 +134,7 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, blocked)
 	manifest.Classification = deriveClassification(manifest.Validation, blocked)
+	manifest.Validation.CompletenessStatus = manifest.CompletenessStatus
 	if blocked && manifest.Wave == WaveW02 {
 		if err := validateBlockedW02Artifacts(manifest.Artifacts); err != nil {
 			return nil, err

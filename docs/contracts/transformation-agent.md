@@ -58,7 +58,7 @@ existing callers are unaffected.
 | `promptTemplateId`, `promptTemplateVersion` | yes | configured via `ORCHESTRATOR_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_*` |
 | `inputArtifactRefs` | yes (≥1) | content-addressed refs to source COBOL, Semantic IR, deterministic baseline manifest, oracle |
 | `policyDecisionRef` | yes | `policy allow` decision stamped at request time |
-| `modelInvocationRef` | yes | provisional invocation id the gateway can reuse |
+| `modelInvocationRef` | yes | Provisional invocation id the gateway can reuse. `ledgerRef` is intentionally omitted here because the gateway creates the invocation ledger during the model call; the persisted response must include it. |
 | `deadlineMs` | yes | configured per agent (default 30 s) |
 | `traceRef` | optional | `trace-{runId}` for Experience Learning correlation |
 

@@ -60,7 +60,10 @@
       "items": { "$ref": "#/$defs/toolReference" }
     },
     "policyDecisionRef": { "$ref": "#/$defs/policyDecisionReference" },
-    "modelInvocationRef": { "$ref": "#/$defs/modelInvocationReference" },
+    "modelInvocationRef": {
+      "$ref": "#/$defs/modelInvocationReference",
+      "description": "Provisional model invocation reference stamped before the gateway call. The request requires invocationId/modelId/provider; ledgerRef is populated on the gateway-backed response after the model invocation ledger exists."
+    },
     "repairContextRef": {
       "$ref": "#/$defs/artifactReference",
       "description": "Reference to an Agent Repair Input artifact (agent-repair-input-v0). Required when agentRole == verification-repair-agent and attemptNumber > 1."
@@ -141,7 +144,7 @@
     },
     "modelInvocationReference": {
       "type": "object",
-      "required": ["invocationId", "modelId"],
+      "required": ["invocationId", "modelId", "provider"],
       "properties": {
         "invocationId": { "type": "string", "minLength": 1 },
         "modelId": { "type": "string", "minLength": 1 },
@@ -160,7 +163,10 @@
         "errorCode": { "type": "string", "minLength": 1 },
         "errorClass": { "type": "string", "minLength": 1 },
         "timestamp": { "type": "string", "format": "date-time" },
-        "ledgerRef": { "$ref": "#/$defs/artifactReference" }
+        "ledgerRef": {
+          "$ref": "#/$defs/artifactReference",
+          "description": "Optional on invocation requests because the model gateway creates the ledger during the call; required on invocation responses."
+        }
       },
       "additionalProperties": false
     }

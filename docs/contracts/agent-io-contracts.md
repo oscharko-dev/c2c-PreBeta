@@ -58,7 +58,10 @@ Three reference-style records are reused across contracts and exist as
 - `policyDecisionReference` — the policy decision that allowed (or denied)
   this step (`policyVersion`, `decision`, `ledgerRef`).
 - `modelInvocationReference` — the governed model call from the Model
-  Gateway (`invocationId`, `modelId`, `provider`, `ledgerRef`).
+  Gateway (`invocationId`, `modelId`, `provider`). Invocation responses
+  require `ledgerRef`; invocation requests carry only the provisional
+  identifier because the gateway ledger does not exist until the model call
+  completes.
 
 The single trajectory record embedded in an `AgentInvocationResponse`
 (`$defs/agentTrajectoryRecord`) is shape-compatible with the steps array in

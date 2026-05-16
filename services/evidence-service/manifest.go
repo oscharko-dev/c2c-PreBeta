@@ -459,7 +459,7 @@ type ValidationResult struct {
 	RequiredArtifacts  []string `json:"requiredArtifacts"`
 	MissingArtifacts   []string `json:"missingArtifacts"`
 	Messages           []string `json:"messages,omitempty"`
-	CompletenessStatus string   `json:"completenessStatus,omitempty"`
+	CompletenessStatus string   `json:"completenessStatus"`
 }
 
 type ExportRecord struct {
@@ -482,8 +482,8 @@ type EvidencePackManifest struct {
 	WorkflowID          string               `json:"workflowId,omitempty"`
 	Wave                string               `json:"wave"`
 	Status              string               `json:"status"`
-	CompletenessStatus  string               `json:"completenessStatus,omitempty"`
-	Classification      string               `json:"classification,omitempty"`
+	CompletenessStatus  string               `json:"completenessStatus"`
+	Classification      string               `json:"classification"`
 	Summary             string               `json:"summary,omitempty"`
 	CreatedAt           time.Time            `json:"createdAt"`
 	CreatedBy           string               `json:"createdBy,omitempty"`
@@ -538,24 +538,38 @@ func (m *EvidencePackManifest) Validate() error {
 	default:
 		return fieldError("status", "status must be complete|incomplete|invalid")
 	}
-	if m.CompletenessStatus != "" {
-		switch m.CompletenessStatus {
-		case CompletenessStatusComplete,
-			CompletenessStatusEvidenceIncomplete,
-			CompletenessStatusBlocked:
-		default:
-			return fieldError("completenessStatus", "completenessStatus must be complete|evidence_incomplete|blocked")
-		}
+	if m.CompletenessStatus == "" {
+		return fieldError("completenessStatus", "completenessStatus is required")
 	}
-	if m.Classification != "" {
-		switch m.Classification {
-		case ClassificationSuccess,
-			ClassificationEvidenceIncomplete,
-			ClassificationBlocked,
-			ClassificationFailed:
-		default:
-			return fieldError("classification", "classification must be success|evidence_incomplete|blocked|failed")
-		}
+	switch m.CompletenessStatus {
+	case CompletenessStatusComplete,
+		CompletenessStatusEvidenceIncomplete,
+		CompletenessStatusBlocked:
+	default:
+		return fieldError("completenessStatus", "completenessStatus must be complete|evidence_incomplete|blocked")
+	}
+	if m.Classification == "" {
+		return fieldError("classification", "classification is required")
+	}
+	switch m.Classification {
+	case ClassificationSuccess,
+		ClassificationEvidenceIncomplete,
+		ClassificationBlocked,
+		ClassificationFailed:
+	default:
+		return fieldError("classification", "classification must be success|evidence_incomplete|blocked|failed")
+	}
+	if m.Validation.CompletenessStatus == "" {
+		return fieldError("validation.completenessStatus", "completenessStatus is required")
+	}
+	if m.Validation.CompletenessStatus != m.CompletenessStatus {
+		return fieldError("validation.completenessStatus", "must match top-level completenessStatus")
+	}
+	if m.Classification == ClassificationSuccess && m.CompletenessStatus != CompletenessStatusComplete {
+		return fieldError("classification", "success requires completenessStatus=complete")
+	}
+	if m.CompletenessStatus == CompletenessStatusBlocked && m.Classification != ClassificationBlocked {
+		return fieldError("classification", "blocked completenessStatus requires classification=blocked")
 	}
 	if m.CreatedAt.IsZero() {
 		return fieldError("createdAt", "createdAt is required")

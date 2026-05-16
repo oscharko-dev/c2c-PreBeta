@@ -29,8 +29,8 @@ present alongside any pack.
 | `workflowId` | optional | Filled in when the orchestrator created the run with one. |
 | `wave` | yes | `"w0"` for the deterministic baseline; `"w0.2"` when productive agents ran. The wave enum controls which completeness rule the service applies. |
 | `status` | yes | `complete` only when every required artifact is populated. |
-| `completenessStatus` | yes (W0.2) | `complete` / `evidence_incomplete` / `blocked`. Independent of `status` so the orchestrator can distinguish *missing required evidence* from *upstream failure blocked the run*. |
-| `classification` | yes (W0.2) | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed). |
+| `completenessStatus` | yes | `complete` / `evidence_incomplete` / `blocked`. Independent of `status` so the orchestrator can distinguish *missing required evidence* from *upstream failure blocked the run*. |
+| `classification` | yes | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed). |
 | `createdAt` | yes | UTC RFC 3339 timestamp. |
 | `artifacts.sourceCobol` | **yes** | One or more references to ingested COBOL source files. |
 | `artifacts.sourceMetadata` | **yes (W0.2)** | Normalized source metadata captured after input intake. W0.2 packs must reference the persisted `source-ref.json` artifact; the orchestrator does not synthesize this reference if persistence failed. |
