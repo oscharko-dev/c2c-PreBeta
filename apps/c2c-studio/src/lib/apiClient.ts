@@ -520,16 +520,21 @@ function isWorkflowArtifactRefPayload(payload: unknown): payload is WorkflowArti
   return isString(payload.sha256) && isNonNegativeInteger(payload.byteSize) && isString(payload.kind);
 }
 
-// W0.2 contract fields are *required* on every BFF response — they may be
-// null/zero but must be present. This catches BFF regressions early.
+// W0.2 contract fields validate as ``undefined`` | ``null`` | a typed value.
+// The production BFF always emits explicit ``null``/``0`` (see runSummary in
+// services/c2c-bff/src/server.ts) — but legacy mocks/fixtures can omit the
+// fields entirely. We accept ``undefined`` so the Studio keeps rendering when
+// the BFF response predates Issue #172, but we still reject wrong *types*
+// (e.g. ``failureCode: 'not_a_real_code'``) so a real BFF regression fails
+// contract validation loudly rather than silently mis-rendering.
 function hasW02ContractFields(payload: Record<string, unknown>): boolean {
   return (
-    (payload.activeStep === null || isString(payload.activeStep)) &&
-    isNonNegativeInteger(payload.agentAttemptCount) &&
-    (payload.repairBudget === null || isRepairBudgetPayload(payload.repairBudget)) &&
-    (payload.finalClassification === null || isRunFinalClassification(payload.finalClassification)) &&
-    (payload.failureCode === null || isW02UiErrorCode(payload.failureCode)) &&
-    (payload.failureMessage === null || isString(payload.failureMessage))
+    (payload.activeStep === undefined || payload.activeStep === null || isString(payload.activeStep)) &&
+    (payload.agentAttemptCount === undefined || isNonNegativeInteger(payload.agentAttemptCount)) &&
+    (payload.repairBudget === undefined || payload.repairBudget === null || isRepairBudgetPayload(payload.repairBudget)) &&
+    (payload.finalClassification === undefined || payload.finalClassification === null || isRunFinalClassification(payload.finalClassification)) &&
+    (payload.failureCode === undefined || payload.failureCode === null || isW02UiErrorCode(payload.failureCode)) &&
+    (payload.failureMessage === undefined || payload.failureMessage === null || isString(payload.failureMessage))
   );
 }
 
