@@ -28,8 +28,7 @@ import hashlib
 import json
 import unittest
 from pathlib import Path
-from typing import Any
-
+from orchestrator_service.artifacts import JsonObject
 from orchestrator_service.run_contract import (
     CLASSIFICATION_BLOCKED,
     CLASSIFICATION_SUCCESS,
@@ -53,7 +52,7 @@ _DIAGNOSTIC_CODES = {
 }
 
 
-def _load_index() -> dict[str, Any]:
+def _load_index() -> JsonObject:
     with ACCEPTANCE_INDEX_PATH.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
     return data
@@ -76,7 +75,7 @@ class AcceptanceFixtureContractTests(unittest.TestCase):
             f"missing acceptance fixture index at {ACCEPTANCE_INDEX_PATH}",
         )
         self.index = _load_index()
-        self.fixtures: list[dict[str, Any]] = self.index["fixtures"]
+        self.fixtures: list[JsonObject] = self.index["fixtures"]
 
     def test_schema_version_is_v0(self) -> None:
         self.assertEqual(self.index.get("schemaVersion"), "v0")

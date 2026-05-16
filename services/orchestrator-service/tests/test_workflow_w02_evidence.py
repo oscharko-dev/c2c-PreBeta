@@ -15,9 +15,7 @@ import datetime
 import tempfile
 import unittest
 from collections.abc import Mapping
-from typing import Any
-
-from orchestrator_service.artifacts import RunArtifactStore
+from orchestrator_service.artifacts import JsonValue, RunArtifactStore
 from orchestrator_service.run_contract import new_run_contract
 from orchestrator_service.workflow import (
     DataReference,
@@ -34,7 +32,7 @@ def _ref(uri: str, sha: str = "a" * 64, byte_size: int = 4) -> DataReference:
     return DataReference(uri=uri, sha256=sha, byte_size=byte_size)
 
 
-def _step(name: str, *, payload: Mapping[str, Any] | None = None, output_uri: str = "urn:x/out") -> WorkflowStepResult:
+def _step(name: str, *, payload: Mapping[str, JsonValue] | None = None, output_uri: str = "urn:x/out") -> WorkflowStepResult:
     output_ref = _ref(output_uri)
     return WorkflowStepResult(
         capability_id=f"cap.{name}",

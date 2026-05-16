@@ -29,9 +29,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Any
-
-from orchestrator_service.artifacts import RunArtifactStore
+from orchestrator_service.artifacts import JsonObject, JsonValue, RunArtifactStore
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.harness import HarnessFailure
 from orchestrator_service.repair_agent import (
@@ -71,7 +69,7 @@ SAMPLE_REPAIRED_JAVA = (
 )
 
 
-def _propose_envelope(*, marker: str = "v1") -> dict[str, Any]:
+def _propose_envelope(*, marker: str = "v1") -> JsonObject:
     return {
         "decision": DECISION_PROPOSE,
         "rationale": f"repaired java ({marker})",
@@ -89,7 +87,7 @@ def _propose_envelope(*, marker: str = "v1") -> dict[str, Any]:
     }
 
 
-def _identical_envelope_to_previous(files: Mapping[str, str]) -> dict[str, Any]:
+def _identical_envelope_to_previous(files: Mapping[str, str]) -> JsonObject:
     """Return a propose envelope whose files exactly match ``files`` so
     the orchestrator-side no-change detector classifies the attempt as
     no_change. ``files`` MUST contain a properly packaged Java entry file
@@ -106,7 +104,7 @@ def _identical_envelope_to_previous(files: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
-def _refuse_envelope(refusal_code: str) -> dict[str, Any]:
+def _refuse_envelope(refusal_code: str) -> JsonObject:
     return {
         "decision": DECISION_REFUSE,
         "rationale": f"cannot repair: {refusal_code}",
@@ -115,7 +113,7 @@ def _refuse_envelope(refusal_code: str) -> dict[str, Any]:
     }
 
 
-def _escalate_envelope(escalation_code: str) -> dict[str, Any]:
+def _escalate_envelope(escalation_code: str) -> JsonObject:
     return {
         "decision": DECISION_ESCALATE,
         "rationale": f"escalating: {escalation_code}",
@@ -131,14 +129,14 @@ class _StubRepairAgentInvoker:
     the loop runs further than expected.
     """
 
-    def __init__(self, envelopes: list[Mapping[str, Any]] | Mapping[str, Any]):
+    def __init__(self, envelopes: list[Mapping[str, JsonValue]] | Mapping[str, JsonValue]):
         if isinstance(envelopes, Mapping):
             self._envelopes = [dict(envelopes)]
         else:
             self._envelopes = [dict(env) for env in envelopes]
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[JsonObject] = []
 
-    def invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         self.calls.append(dict(payload))
         if not self._envelopes:
             raise RuntimeError("repair agent invoker exhausted")
@@ -167,9 +165,9 @@ class _ExceptionRepairAgentInvoker:
 
     def __init__(self, exc: Exception):
         self._exc = exc
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[JsonObject] = []
 
-    def invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         self.calls.append(dict(payload))
         raise self._exc
 
@@ -193,7 +191,7 @@ class _StubGatewayWithBuildOutcomes(StubGateway):
         return super().invoke_capability(capability, payload)
 
 
-def _build_failed(reason: str, *, attempt_uri: str) -> dict[str, Any]:
+def _build_failed(reason: str, *, attempt_uri: str) -> JsonObject:
     return {
         "schemaVersion": "v0",
         "status": "failed",
@@ -204,7 +202,7 @@ def _build_failed(reason: str, *, attempt_uri: str) -> dict[str, Any]:
     }
 
 
-def _build_ok(attempt_uri: str) -> dict[str, Any]:
+def _build_ok(attempt_uri: str) -> JsonObject:
     return {
         "schemaVersion": "v0",
         "status": "ok",
@@ -254,7 +252,7 @@ class _BaseRepairLoopFixture(unittest.TestCase):
         )
 
     @staticmethod
-    def _input_ref() -> dict[str, Any]:
+    def _input_ref() -> JsonObject:
         return {"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."}
 
 
@@ -461,7 +459,7 @@ class RepairLoopMalformedResponseTests(_BaseRepairLoopFixture):
         # ``output`` will be a non-object.
         # noinspection PyClassHasNoInitInspection
         class _BadInvoker:
-            calls: list[dict[str, Any]] = []
+            calls: list[JsonObject] = []
 
             def invoke(self, payload):
                 self.calls.append(dict(payload))

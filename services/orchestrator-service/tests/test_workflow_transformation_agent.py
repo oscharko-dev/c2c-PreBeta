@@ -23,7 +23,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
-from orchestrator_service.artifacts import RunArtifactStore
+from orchestrator_service.artifacts import JsonObject, JsonValue, RunArtifactStore
 from orchestrator_service.harness import HarnessFailure
 from orchestrator_service.run_contract import (
     CLASSIFICATION_BLOCKED,
@@ -59,8 +59,8 @@ SAMPLE_JAVA = (
 )
 
 
-def _ok_model_response(*, files: Mapping[str, str] | None = None, status: str = "success") -> dict[str, Any]:
-    output: dict[str, Any] = {"status": status}
+def _ok_model_response(*, files: Mapping[str, str] | None = None, status: str = "success") -> JsonObject:
+    output: JsonObject = {"status": status}
     if status == "success":
         output["files"] = dict(files) if files else {
             "src/main/java/com/c2c/generated/Hello.java": SAMPLE_JAVA,
@@ -92,11 +92,11 @@ def _ok_model_response(*, files: Mapping[str, str] | None = None, status: str = 
 
 
 class _StubAgentInvoker:
-    def __init__(self, response: Mapping[str, Any] | Exception) -> None:
+    def __init__(self, response: Mapping[str, JsonValue] | Exception) -> None:
         self._response = response
-        self.calls: list[Mapping[str, Any]] = []
+        self.calls: list[Mapping[str, JsonValue]] = []
 
-    def invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         self.calls.append(dict(payload))
         if isinstance(self._response, Exception):
             raise self._response
