@@ -1,6 +1,13 @@
 # Agentic Harness Core
 
-The `agentic-harness-core` service is the Wave 0 control-plane for tool capability registration, workflow run-state tracking, MCP server inventory, policy hooks, and Harness event emission.
+The `agentic-harness-core` service is the Wave 0 Harness infrastructure layer
+for tool capability registration, run metadata and state tracking, MCP server
+inventory, policy hooks, and Harness event emission.
+
+In W0.2, the Orchestrator controls workflow state, step order, retries,
+cancellation, and final classification. The Harness stores shared run context,
+events, and ledgers for those orchestrator-driven workflows; it does not
+control workflow progression or decide what the agent team does next.
 
 ## Run locally
 
