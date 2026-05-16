@@ -30,6 +30,7 @@ from .artifacts import (
     KIND_SOURCE,
     KIND_SOURCE_REF,
     KIND_TRAJECTORY_LEDGER,
+    KIND_W02_RUN_CONTRACT,
     ArtifactMetadata,
     NullArtifactStore,
     RunArtifactStore,
@@ -37,6 +38,42 @@ from .artifacts import (
 from .config import OrchestratorConfig
 from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import DataReference, HarnessFailure, HarnessGateway
+from . import run_contract as w02
+from .run_contract import (
+    CLASSIFICATION_BLOCKED,
+    CLASSIFICATION_FAILED,
+    CLASSIFICATION_SUCCESS,
+    FAILURE_EVIDENCE_INCOMPLETE,
+    FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+    FAILURE_MODEL_POLICY_DENIED,
+    IllegalTransitionError,
+    RepairBudgetExhaustedError,
+    STEP_COMPILE_TEST_JAVA as W02_STEP_COMPILE_TEST_JAVA,
+    STEP_FINALIZE as W02_STEP_FINALIZE,
+    STEP_GENERATE_IR as W02_STEP_GENERATE_IR,
+    STEP_GENERATE_JAVA as W02_STEP_GENERATE_JAVA,
+    STEP_NORMALIZE_SOURCE as W02_STEP_NORMALIZE_SOURCE,
+    STEP_PARSE_COBOL as W02_STEP_PARSE_COBOL,
+    STEP_TRANSFORMATION_AGENT as W02_STEP_TRANSFORMATION_AGENT,
+    STEP_VERIFICATION_REPAIR_AGENT as W02_STEP_VERIFICATION_REPAIR_AGENT,
+    STEP_WRITE_EVIDENCE as W02_STEP_WRITE_EVIDENCE,
+    STATE_BASELINE_GENERATION_ATTEMPTED,
+    STATE_BUILD_TEST_RUNNING,
+    STATE_COBOL_PARSE_ATTEMPTED,
+    STATE_EVIDENCE_INCOMPLETE,
+    STATE_EVIDENCE_MATERIALIZED,
+    STATE_FINAL_JAVA_SELECTED,
+    STATE_JAVA_CANDIDATE_PERSISTED,
+    STATE_RUN_BLOCKED,
+    STATE_SEMANTIC_IR_READY,
+    STATE_SOURCE_NORMALIZED,
+    STATE_TRANSFORMATION_AGENT_INVOKED,
+    STATE_VERIFICATION_REPAIR_INVOKED,
+    STEP_TO_FAILURE_CODE,
+    W02RunContract,
+    build_test_outcome,
+    new_run_contract,
+)
 
 
 class OrchestratorError(Exception):
@@ -487,6 +524,172 @@ class W0WorkflowRunner:
         self._progress_by_run: Dict[str, RunProgressLog] = {}
         self._event_buffer_lock = threading.Lock()
         self._event_buffer_by_run: Dict[str, list[Dict[str, Any]]] = {}
+        # Issue #166: per-run W0.2 contract snapshots, fetched by
+        # ``GET /v0/runs/{runId}/workflow``.
+        self._contract_lock = threading.Lock()
+        self._contracts_by_run: Dict[str, W02RunContract] = {}
+
+    # ------------------------------------------------------------------
+    # Issue #166: W0.2 workflow contract helpers
+    # ------------------------------------------------------------------
+
+    def workflow_contract(self, run_id: str) -> Optional[W02RunContract]:
+        with self._contract_lock:
+            return self._contracts_by_run.get(run_id)
+
+    def workflow_contract_payload(self, run_id: str) -> Optional[Dict[str, Any]]:
+        contract = self.workflow_contract(run_id)
+        if contract is None:
+            return None
+        return contract.to_dict()
+
+    def _store_contract(self, contract: W02RunContract) -> None:
+        with self._contract_lock:
+            self._contracts_by_run[contract.run_id] = contract
+
+    def _init_w02_contract(
+        self,
+        context: W0RunContext,
+        input_reference: DataReference,
+    ) -> W02RunContract:
+        contract = new_run_contract(
+            run_id=context.run_id,
+            workflow_id=context.workflow_id,
+            requester=context.requester,
+            source_ref=_as_reference_payload(input_reference),
+            repair_budget_limit=getattr(
+                self.config,
+                "repair_budget_max",
+                w02.DEFAULT_REPAIR_BUDGET,
+            ),
+        )
+        self._store_contract(contract)
+        self._persist_w02_contract(context, contract)
+        return contract
+
+    def _advance_w02(
+        self,
+        context: W0RunContext,
+        contract: W02RunContract,
+        target: str,
+        *,
+        active_step: Optional[str] = None,
+        message: str = "",
+        failure_code: Optional[str] = None,
+    ) -> None:
+        """Advance the W0.2 state machine and emit a Harness event.
+
+        ``active_step`` is the user-visible step label for ``activeStep`` on the
+        run contract. ``failure_code`` is recorded on the transition only when
+        the runner already knows the canonical W0.2 reason (e.g.
+        ``oracle_mismatch``); otherwise it stays ``None`` and is set by
+        :meth:`_finalize_w02` at the end of the run.
+        """
+        try:
+            transition = contract.state_machine.advance(
+                target,
+                message=message,
+                failure_code=failure_code,
+            )
+        except IllegalTransitionError:
+            # Surfacing the illegal transition is more useful for tests than
+            # silently swallowing it; the runner only ever calls _advance_w02
+            # with valid transitions, so this indicates a programmer error.
+            raise
+        if active_step is not None:
+            contract.set_active_step(active_step)
+        contract.touch()
+        self._persist_w02_contract(context, contract)
+        # Emit a Harness event for every major state change so the Harness
+        # event ledger records the W0.2 workflow trace (Issue #166).
+        self._emit_w02_state_event(context, transition.state, message=message, failure_code=failure_code)
+
+    def _emit_w02_state_event(
+        self,
+        context: W0RunContext,
+        state: str,
+        *,
+        message: str = "",
+        failure_code: Optional[str] = None,
+    ) -> None:
+        output_payload: Dict[str, Any] = {"state": state}
+        if message:
+            output_payload["message"] = message
+        if failure_code:
+            output_payload["failureCode"] = failure_code
+        self._post_event(
+            context.run_id,
+            event_type=f"orchestrator.workflow.state.{state}",
+            capability=self.config.service_name,
+            actor=self.config.service_name,
+            data_class=DATA_CLASS_CONTROL,
+            status="updating",
+            state_transition=STATE_TRANSITION_FLOW,
+            input_payload={"runId": context.run_id, "workflowId": context.workflow_id},
+            output_payload=output_payload,
+            input_ref=_build_reference(
+                f"urn:orchestrator/{context.run_id}/w02/{state}/in",
+                {"runId": context.run_id, "state": state},
+            ),
+            output_ref=_build_reference(
+                f"urn:orchestrator/{context.run_id}/w02/{state}/out",
+                output_payload,
+            ),
+            policy_decision=POLICY_ALLOW,
+        )
+
+    def _persist_w02_contract(self, context: W0RunContext, contract: W02RunContract) -> ArtifactMetadata:
+        return self.artifact_store.write_json(
+            context.run_id,
+            context.workflow_id,
+            "w02-run-contract.json",
+            contract.to_dict(),
+            kind=KIND_W02_RUN_CONTRACT,
+        )
+
+    def _finalize_w02(
+        self,
+        context: W0RunContext,
+        contract: W02RunContract,
+        classification: str,
+        *,
+        failure_code: Optional[str] = None,
+        failure_message: Optional[str] = None,
+    ) -> None:
+        try:
+            contract.finalize(
+                classification,
+                failure_code=failure_code,
+                failure_message=failure_message,
+            )
+        except IllegalTransitionError:
+            # If the run ended without going through evidence/blocked first
+            # (extremely defensive), force the contract into a terminal
+            # snapshot by recording the failure context and leaving the
+            # underlying state machine alone.
+            contract.final_classification = classification
+            contract.failure_code = failure_code
+            contract.failure_message = failure_message
+            contract.touch()
+        self._persist_w02_contract(context, contract)
+        self._emit_w02_state_event(
+            context,
+            w02.STATE_FINAL_CLASSIFICATION,
+            message=failure_message or f"run finalised as {classification}",
+            failure_code=failure_code,
+        )
+
+    @staticmethod
+    def _failure_code_from_exception(exc: BaseException) -> Optional[str]:
+        if isinstance(exc, CapabilityMissingError):
+            text = str(exc).lower()
+            if "model" in text:
+                return FAILURE_MODEL_GATEWAY_UNAVAILABLE
+            return None
+        failed_step = _failed_step_from_exception(exc)
+        if failed_step is None:
+            return None
+        return STEP_TO_FAILURE_CODE.get(failed_step)
 
     def run(self, context: W0RunContext, input_ref: Mapping[str, Any]) -> Dict[str, Any]:
         input_reference = _normalize_input_ref(input_ref, context.run_id)
@@ -501,6 +704,15 @@ class W0WorkflowRunner:
         program_id: Optional[str] = None
         completed_steps: list[str] = []
         artifact_refs: list[Dict[str, Any]] = []
+        # Issue #166: build the W0.2 run contract before any side-effects.
+        # ``_init_w02_contract`` only depends on the input reference; it does
+        # not run capability calls or persist source artifacts. The runner
+        # advances the state machine at each subsequent boundary so the
+        # contract reflects the live workflow.
+        w02_contract = self._init_w02_contract(context, input_reference)
+        w02_blocked = False
+        w02_failure_code: Optional[str] = None
+        w02_failure_message: Optional[str] = None
 
         def _record_artifact(meta: Any) -> None:
             if meta is None:
@@ -633,6 +845,17 @@ class W0WorkflowRunner:
                 "orchestrator.workflow.accepted",
                 "workflow started",
             )
+            # Issue #166: source has been persisted to the artifact store
+            # (source.cbl and source-ref.json above). Advance the W0.2 state
+            # machine to ``source_normalized`` so consumers can see the run
+            # has cleared input intake.
+            self._advance_w02(
+                context,
+                w02_contract,
+                STATE_SOURCE_NORMALIZED,
+                active_step=W02_STEP_NORMALIZE_SOURCE,
+                message="source persisted to artifact store",
+            )
             self.gateway.update_run(
                 context.run_id,
                 "updating",
@@ -655,6 +878,7 @@ class W0WorkflowRunner:
                 self.config.build_test_capability_id,
             )
             evidence_capability = self._require_capability(context.run_id, self.config.evidence_capability_id)
+            w02_contract.set_active_step(W02_STEP_PARSE_COBOL)
 
             parse_output = self._invoke_step(
                 context,
@@ -689,6 +913,13 @@ class W0WorkflowRunner:
             program_id = self._resolve_program_id(parse_output.payload) or program_id
             completed_steps.append("parse-cobol")
             _write_summary("updating", message="parse-cobol completed")
+            self._advance_w02(
+                context,
+                w02_contract,
+                STATE_COBOL_PARSE_ATTEMPTED,
+                active_step=W02_STEP_GENERATE_IR,
+                message="cobol parser returned ok",
+            )
 
             ir_output = self._invoke_step(
                 context,
@@ -736,6 +967,20 @@ class W0WorkflowRunner:
             program_id = self._resolve_program_id(parse_output.payload, ir_output.payload) or program_id
             completed_steps.append("generate-ir")
             _write_summary("updating", message="generate-ir completed")
+            self._advance_w02(
+                context,
+                w02_contract,
+                STATE_SEMANTIC_IR_READY,
+                active_step=W02_STEP_GENERATE_JAVA,
+                message="semantic IR produced",
+            )
+            self._advance_w02(
+                context,
+                w02_contract,
+                STATE_BASELINE_GENERATION_ATTEMPTED,
+                active_step=W02_STEP_GENERATE_JAVA,
+                message="deterministic java generator invoked",
+            )
 
             generator_output = self._invoke_step(
                 context,
@@ -809,6 +1054,22 @@ class W0WorkflowRunner:
                 }
             completed_steps.append("generate-java")
             _write_summary("updating", message="generate-java completed")
+            if generated_artifact_ref is not None:
+                w02_contract.set_generated_java_ref(generated_artifact_ref)
+            self._advance_w02(
+                context,
+                w02_contract,
+                STATE_JAVA_CANDIDATE_PERSISTED,
+                active_step=W02_STEP_COMPILE_TEST_JAVA,
+                message="java candidate persisted to artifact store",
+            )
+            self._advance_w02(
+                context,
+                w02_contract,
+                STATE_BUILD_TEST_RUNNING,
+                active_step=W02_STEP_COMPILE_TEST_JAVA,
+                message="build-test runner invoked",
+            )
 
             build_test_input = {
                 "schemaVersion": "v0",
@@ -850,8 +1111,123 @@ class W0WorkflowRunner:
             )
             completed_steps.append("compile-test-java")
             _write_summary("updating", message="compile-test-java completed")
+            w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
 
-            if context.model_prompt:
+            # Issue #166: W0.2 verification/repair loop. The build-test
+            # runner is the deterministic gate; on a failed outcome we
+            # invoke the verification/repair agent role and re-attempt
+            # generation up to the configured budget. The repair loop is
+            # bounded — once the budget is exhausted the run is finalised
+            # as ``blocked`` with the canonical failure code.
+            success, build_failure_code = build_test_outcome(build_test_output.payload)
+            while not success:
+                if w02_contract.repair_budget.exhausted:
+                    w02_blocked = True
+                    w02_failure_code = build_failure_code
+                    w02_failure_message = (
+                        f"build-test verification failed; repair budget "
+                        f"({w02_contract.repair_budget.limit}) exhausted"
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=build_failure_code,
+                    )
+                    break
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_VERIFICATION_REPAIR_INVOKED,
+                    active_step=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    message="verification/repair agent invoked",
+                    failure_code=build_failure_code,
+                )
+                try:
+                    w02_contract.repair_budget.consume()
+                except RepairBudgetExhaustedError:
+                    # Defensive: the ``exhausted`` check above should make this
+                    # unreachable, but a concurrent caller could in principle
+                    # advance the counter. Treat it as the same blocked path.
+                    w02_blocked = True
+                    w02_failure_code = build_failure_code
+                    w02_failure_message = (
+                        f"build-test verification failed; repair budget "
+                        f"({w02_contract.repair_budget.limit}) exhausted"
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=build_failure_code,
+                    )
+                    break
+                attempt = w02_contract.record_agent_attempt()
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_TRANSFORMATION_AGENT_INVOKED,
+                    active_step=W02_STEP_TRANSFORMATION_AGENT,
+                    message=f"repair attempt {attempt}/{w02_contract.repair_budget.limit}",
+                )
+                generator_output = self._invoke_step(
+                    context,
+                    "generate-java",
+                    generator_capability,
+                    DATA_CLASS_GENERATOR,
+                    {
+                        "schemaVersion": "v0",
+                        "runId": context.run_id,
+                        "workflowId": context.workflow_id,
+                        "sourceRef": source_ref_from_ir,
+                        "ir": ir_document,
+                        "repairAttempt": attempt,
+                        "previousBuildTestRef": _as_reference_payload(build_test_output.output_ref),
+                    },
+                    ir_output.output_ref,
+                )
+                step_results.append(generator_output)
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_JAVA_CANDIDATE_PERSISTED,
+                    active_step=W02_STEP_COMPILE_TEST_JAVA,
+                    message=f"repair attempt {attempt} produced candidate java",
+                )
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_BUILD_TEST_RUNNING,
+                    active_step=W02_STEP_COMPILE_TEST_JAVA,
+                    message=f"repair attempt {attempt} build-test invoked",
+                )
+                build_test_output = self._invoke_step(
+                    context,
+                    "compile-test-java",
+                    build_test_capability,
+                    DATA_CLASS_BUILD_TEST,
+                    {**build_test_input, "repairAttempt": attempt},
+                    generator_output.output_ref,
+                )
+                step_results.append(build_test_output)
+                evidence_refs.append(build_test_output.output_ref.uri)
+                w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
+                success, build_failure_code = build_test_outcome(build_test_output.payload)
+
+            if success:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_FINAL_JAVA_SELECTED,
+                    active_step=W02_STEP_WRITE_EVIDENCE,
+                    message="build-test verified java candidate",
+                )
+
+            if context.model_prompt and not w02_blocked:
                 model_capability = self._require_capability(
                     context.run_id,
                     self.config.model_gateway_capability_id,
@@ -901,9 +1277,15 @@ class W0WorkflowRunner:
                 completed_steps.append("model-guidance")
                 _write_summary("updating", message="model-guidance completed")
             else:
-                _persist_model_policy_skipped(
-                    "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance"
+                # Issue #166: when the run is blocked we skip model-guidance
+                # entirely so a degraded model gateway cannot mask a blocked
+                # build-test outcome.
+                skip_reason = (
+                    "run blocked before model invocation; deterministic verification failed"
+                    if w02_blocked
+                    else "no modelPrompt provided by requester; deterministic W0 translation completed without model assistance"
                 )
+                _persist_model_policy_skipped(skip_reason)
                 # Issue #96: surface the policy skip as a discrete step so the
                 # UI/EL timeline can distinguish it from `model-guidance`
                 # actually running.
@@ -912,7 +1294,7 @@ class W0WorkflowRunner:
                     name=STEP_MODEL_POLICY_SKIPPED,
                     status=STEP_STATUS_SKIPPED,
                     run_status="updating",
-                    diagnostic="no modelPrompt provided by requester",
+                    diagnostic=skip_reason,
                 )
 
             trajectory_payload = self._fetch_trajectory_ledger(context.run_id)
@@ -968,6 +1350,100 @@ class W0WorkflowRunner:
             )
             completed_steps.append("write-evidence")
 
+            # Issue #166: classify evidence outcome for the W0.2 contract.
+            # ``evidence_output.payload`` may carry a ``missingArtifacts``
+            # list or a ``status`` of "incomplete" — both indicate the
+            # evidence pack could not be fully materialised.
+            evidence_status_text = _text(evidence_output.payload.get("status")) or ""
+            evidence_missing = evidence_output.payload.get("missingArtifacts") or []
+            evidence_materialized = (
+                evidence_status_text.lower() in {"", "ok", "complete", "completed", "passed"}
+                and not evidence_missing
+            )
+            evidence_ref_payload = _as_reference_payload(evidence_output.output_ref)
+            w02_contract.set_evidence_pack_ref(evidence_ref_payload)
+            if w02_blocked or not evidence_materialized:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_EVIDENCE_INCOMPLETE,
+                    active_step=W02_STEP_FINALIZE,
+                    message="evidence pack incomplete",
+                    failure_code=(w02_failure_code or FAILURE_EVIDENCE_INCOMPLETE) if w02_blocked else FAILURE_EVIDENCE_INCOMPLETE,
+                )
+                if not w02_blocked:
+                    # Evidence-write succeeded as a step but produced an
+                    # incomplete pack — surface as an incomplete run rather
+                    # than promoting it to success.
+                    w02_blocked = True
+                    w02_failure_code = FAILURE_EVIDENCE_INCOMPLETE
+                    w02_failure_message = "evidence pack incomplete"
+            else:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_EVIDENCE_MATERIALIZED,
+                    active_step=W02_STEP_FINALIZE,
+                    message="evidence pack materialised",
+                )
+
+            if w02_blocked:
+                final_classification = CLASSIFICATION_BLOCKED if w02_failure_code != FAILURE_EVIDENCE_INCOMPLETE else (
+                    CLASSIFICATION_INCOMPLETE
+                )
+                self._finalize_w02(
+                    context,
+                    w02_contract,
+                    final_classification,
+                    failure_code=w02_failure_code,
+                    failure_message=w02_failure_message,
+                )
+                blocked_message = (
+                    w02_failure_message
+                    or f"W0.2 workflow blocked: {w02_failure_code}"
+                )
+                self._record_marker_step(
+                    context,
+                    name=STEP_FAILED,
+                    status=STEP_STATUS_FAILED,
+                    run_status="failed",
+                    diagnostic=blocked_message,
+                    failed_step=W02_STEP_COMPILE_TEST_JAVA,
+                )
+                self._emit_workflow_decision_event(
+                    context,
+                    "orchestrator.workflow.failed",
+                    blocked_message,
+                )
+                _write_summary("blocked", message=blocked_message, failed_step=W02_STEP_COMPILE_TEST_JAVA)
+                self.gateway.update_run(
+                    context.run_id,
+                    "failed",
+                    updated_by=self.config.service_name,
+                    message=blocked_message,
+                    evidence_refs=evidence_refs,
+                    policy_decision=POLICY_ALLOW,
+                )
+                try:
+                    self._flush_to_experience_learning(context.run_id, trajectory_payload)
+                except Exception:
+                    pass
+                return {
+                    "runId": context.run_id,
+                    "workflowId": context.workflow_id,
+                    "status": final_classification,
+                    "evidencePack": evidence_output.payload,
+                    "stepCount": len(step_results),
+                    "artifacts": list(artifact_refs),
+                    "workflowContract": w02_contract.to_dict(),
+                }
+
+            self._finalize_w02(
+                context,
+                w02_contract,
+                CLASSIFICATION_SUCCESS,
+                failure_message="workflow completed",
+            )
             self._record_marker_step(
                 context,
                 name=STEP_COMPLETED,
@@ -1005,6 +1481,7 @@ class W0WorkflowRunner:
                 "evidencePack": evidence_output.payload,
                 "stepCount": len(step_results),
                 "artifacts": list(artifact_refs),
+                "workflowContract": w02_contract.to_dict(),
             }
         except Exception as exc:
             try:
@@ -1030,6 +1507,54 @@ class W0WorkflowRunner:
                 if isinstance(exc, CapabilityMissingError)
                 else _failed_step_from_exception(exc)
             )
+            # Issue #166: finalise the W0.2 contract on the failure path so
+            # consumers can read the classification and failure code from
+            # ``GET /v0/runs/{runId}/workflow``.
+            try:
+                exc_failure_code = self._failure_code_from_exception(exc)
+                # Drive the contract into ``run_blocked`` before finalising
+                # so the state-history reflects the workflow ordering. If we
+                # are already past ``final_java_selected`` the state machine
+                # will reject the transition; we silently fall back to a
+                # direct ``finalize`` call in that case.
+                current_state = w02_contract.state_machine.current
+                if current_state not in {
+                    w02.STATE_RUN_BLOCKED,
+                    w02.STATE_EVIDENCE_INCOMPLETE,
+                    w02.STATE_EVIDENCE_MATERIALIZED,
+                    w02.STATE_FINAL_CLASSIFICATION,
+                }:
+                    try:
+                        self._advance_w02(
+                            context,
+                            w02_contract,
+                            STATE_RUN_BLOCKED,
+                            active_step=None,
+                            message=failure_message,
+                            failure_code=exc_failure_code,
+                        )
+                    except IllegalTransitionError:
+                        pass
+                    try:
+                        self._advance_w02(
+                            context,
+                            w02_contract,
+                            STATE_EVIDENCE_INCOMPLETE,
+                            active_step=None,
+                            message="evidence pack incomplete after workflow failure",
+                            failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
+                        )
+                    except IllegalTransitionError:
+                        pass
+                self._finalize_w02(
+                    context,
+                    w02_contract,
+                    CLASSIFICATION_FAILED,
+                    failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
+                    failure_message=failure_message,
+                )
+            except Exception:
+                pass
             try:
                 self._record_marker_step(
                     context,

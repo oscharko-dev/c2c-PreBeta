@@ -247,6 +247,34 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/workflow:
+    get:
+      summary: Retrieve the W0.2 workflow contract for a run (Issue #166)
+      description: >
+        Returns the Orchestrator-owned W0.2 run contract: current state,
+        state history, active step, agent attempt count, repair budget,
+        generated-java/build-test/evidence-pack references, final
+        classification, and (when not successful) the canonical failure
+        code and human-readable message. The contract is the source of
+        truth that the BFF, UI, agent, and evidence-service consumers use
+        to render and audit the workflow.
+      operationId: getRunWorkflowContract
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Workflow-contract envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkflowContractResponse" }
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   schemas:
     HealthResponse:
@@ -464,3 +492,143 @@ components:
       properties:
         error:
           type: string
+    WorkflowContractResponse:
+      type: object
+      required: [runId, workflowId, status]
+      description: Issue #166 — envelope for `GET /v0/runs/{runId}/workflow`.
+      properties:
+        runId: { type: string }
+        workflowId: { type: string }
+        programId: { type: string }
+        runStatus: { type: string }
+        status: { type: string, enum: [complete, incomplete] }
+        missingArtifacts:
+          type: array
+          items: { type: string }
+        source:
+          type: string
+          enum: [live, cached, unavailable]
+          description: >
+            `live` — payload comes from the in-memory contract held by the
+            runner. `cached` — payload comes from the persisted
+            `w02-run-contract.json` artifact. `unavailable` — no contract was
+            recorded for the run.
+        contract:
+          oneOf:
+            - $ref: "#/components/schemas/W02RunContract"
+            - type: 'null'
+        contractRef:
+          oneOf:
+            - $ref: "#/components/schemas/ArtifactMetadata"
+            - type: 'null'
+    W02RunContract:
+      type: object
+      required:
+        - schemaVersion
+        - runId
+        - workflowId
+        - sourceRef
+        - currentState
+        - stateHistory
+        - agentAttemptCount
+        - repairBudget
+      description: >
+        W0.2 workflow contract (Issue #166). The Orchestrator owns this
+        document; the Harness records the state-change events but does not
+        decide transitions.
+      properties:
+        schemaVersion: { type: string, enum: [v0] }
+        runId: { type: string }
+        workflowId: { type: string }
+        requester: { type: string }
+        sourceRef:
+          type: object
+          additionalProperties: true
+        currentState:
+          type: string
+          enum:
+            - run_accepted
+            - source_normalized
+            - cobol_parse_attempted
+            - semantic_ir_ready
+            - semantic_ir_blocked
+            - baseline_generation_attempted
+            - transformation_agent_invoked
+            - java_candidate_persisted
+            - build_test_running
+            - verification_repair_invoked
+            - final_java_selected
+            - run_blocked
+            - evidence_materialized
+            - evidence_incomplete
+            - final_classification
+        stateHistory:
+          type: array
+          items: { $ref: "#/components/schemas/W02StateTransition" }
+        activeStep:
+          oneOf:
+            - type: string
+            - type: 'null'
+        agentAttemptCount:
+          type: integer
+          minimum: 0
+        repairBudget:
+          $ref: "#/components/schemas/W02RepairBudget"
+        generatedJavaRef:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        buildTestResultRef:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        evidencePackRef:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        finalClassification:
+          oneOf:
+            - type: string
+              enum: [success, blocked, failed, cancelled, incomplete]
+            - type: 'null'
+        failureCode:
+          oneOf:
+            - type: string
+              enum:
+                - unsupported_cobol
+                - parse_failed
+                - semantic_ir_failed
+                - model_gateway_unavailable
+                - model_policy_denied
+                - agent_timeout
+                - java_generation_failed
+                - java_compile_failed
+                - java_runtime_failed
+                - oracle_mismatch
+                - evidence_incomplete
+                - cancelled
+            - type: 'null'
+        failureMessage:
+          oneOf:
+            - type: string
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    W02StateTransition:
+      type: object
+      required: [state, at]
+      properties:
+        state: { type: string }
+        at: { type: string, format: date-time }
+        message: { type: string }
+        failureCode: { type: string }
+    W02RepairBudget:
+      type: object
+      required: [limit, used, remaining]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 3 }
+        used: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }

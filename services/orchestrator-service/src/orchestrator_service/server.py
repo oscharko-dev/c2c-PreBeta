@@ -244,6 +244,8 @@ class OrchestratorService:
             return 200, self._progress_view(run_id, envelope_base)
         if action == "learning":
             return 200, self._learning_view(run_id, envelope_base)
+        if action == "workflow":
+            return 200, self._workflow_contract_view(run_id, envelope_base)
         return 404, {"error": "not found"}
 
     def _artifact_payload(
@@ -556,6 +558,28 @@ class OrchestratorService:
             "summaryRef": cached_meta,
             "endpoint": endpoint,
             "source": "live" if live_summary is not None else ("cached" if cached is not None else "unavailable"),
+        }
+
+    def _workflow_contract_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+        """Issue #166: expose the W0.2 run contract for BFF/UI/agent consumers.
+
+        Prefers the in-memory snapshot held by the runner (always up-to-date
+        while the run is active) and falls back to the persisted
+        ``w02-run-contract.json`` artifact for runs that have already left
+        memory.
+        """
+        live = self.runner.workflow_contract_payload(run_id)
+        cached = self.artifact_store.read_json(run_id, "w02-run-contract.json")
+        cached_meta = self.artifact_store.find_metadata(run_id, "w02-run-contract.json")
+        contract = live if live is not None else (cached if isinstance(cached, dict) else None)
+        missing: List[str] = [] if contract is not None else ["w02-run-contract"]
+        return {
+            **envelope,
+            "status": "incomplete" if missing else "complete",
+            "missingArtifacts": missing,
+            "contract": contract,
+            "contractRef": cached_meta,
+            "source": "live" if live is not None else ("cached" if cached is not None else "unavailable"),
         }
 
     def _events_view(self, run_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
