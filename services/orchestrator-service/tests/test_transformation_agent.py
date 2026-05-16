@@ -38,6 +38,7 @@ from orchestrator_service.artifacts import (
     RunArtifactStore,
 )
 from orchestrator_service.config import OrchestratorConfig
+from orchestrator_service.client import HttpResponse
 from orchestrator_service.harness import HarnessFailure
 from orchestrator_service.transformation_agent import (
     AGENT_ROLE,
@@ -524,9 +525,30 @@ class TransformationAgentGatewayFailureTests(unittest.TestCase):
             self.assertNotIn(leaked_token, json.dumps(persisted, sort_keys=True))
             self.assertEqual(
                 persisted["failureMessage"],
-                "model_gateway_unavailable: failure details redacted by agent contract guard",
+                "model gateway unavailable",
             )
             guard_agent_response(persisted)
+
+    def test_gateway_failure_response_does_not_persist_upstream_url(self) -> None:
+        upstream_url = "https://workspacedev.example.invalid/openai/deployments/gpt-oss-120b/chat/completions"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RunArtifactStore(tmp)
+            store.init_run("run-1", "w0-migration-v0")
+            agent = TransformationAgent(
+                config=_config(),
+                artifact_store=store,
+                model_invoker=_StubInvoker(
+                    HarnessFailure(503, f"POST {upstream_url} failed: connection refused")
+                ),
+            )
+            with self.assertRaises(ModelGatewayUnavailableError) as ctx:
+                agent.invoke(_request())
+            self.assertEqual(str(ctx.exception), "model gateway unavailable")
+            response_path = Path(tmp) / "run-1" / TRANSFORMATION_AGENT_DIR / "attempt-01" / "agent-response.json"
+            persisted = json.loads(response_path.read_text("utf-8"))
+            persisted_json = json.dumps(persisted, sort_keys=True)
+            self.assertNotIn(upstream_url, persisted_json)
+            self.assertNotIn("workspacedev.example.invalid", persisted_json)
 
     def test_invalid_model_output_response_redacts_secret_like_message(self) -> None:
         provider_prefix = "s" + "k"
@@ -634,6 +656,94 @@ class HarnessModelGatewayInvokerTests(unittest.TestCase):
         capability_arg, payload_arg = harness.invoke_capability.call_args.args
         self.assertEqual(capability_arg["endpoint"], "http://model.local/v0/invoke")
         self.assertEqual(payload_arg["runId"], "run-1")
+
+    def test_invoker_checks_role_capabilities_before_prompt_bearing_invoke(self) -> None:
+        harness = MagicMock()
+        harness.get_capability.return_value = {
+            "id": "model-gateway",
+            "endpoint": "http://model.local/v0/invoke",
+            "owner": "model-gateway-service",
+        }
+        harness.http.get_json.return_value = HttpResponse(
+            200,
+            {
+                "roles": [
+                    {
+                        "role": "transformation",
+                        "status": "ok",
+                        "availableModels": ["gpt-oss-120b"],
+                    }
+                ]
+            },
+        )
+        harness.invoke_capability.return_value = {"status": "completed", "output": {}}
+
+        invoker = HarnessModelGatewayInvoker(harness, "model-gateway")
+        invoker.invoke({
+            "runId": "run-1",
+            "agentRole": "transformation",
+            "modelId": "gpt-oss-120b",
+        })
+
+        harness.http.get_json.assert_called_once_with("http://model.local/v0/capabilities")
+        harness.invoke_capability.assert_called_once()
+
+    def test_invoker_blocks_when_role_has_no_available_model(self) -> None:
+        harness = MagicMock()
+        harness.get_capability.return_value = {
+            "id": "model-gateway",
+            "endpoint": "http://model.local/v0/invoke",
+        }
+        harness.http.get_json.return_value = HttpResponse(
+            200,
+            {
+                "roles": [
+                    {
+                        "role": "transformation",
+                        "status": "unavailable",
+                        "availableModels": [],
+                        "reason": "no approved active model for role",
+                    }
+                ]
+            },
+        )
+
+        invoker = HarnessModelGatewayInvoker(harness, "model-gateway")
+        with self.assertRaises(ModelGatewayUnavailableError):
+            invoker.invoke({
+                "runId": "run-1",
+                "agentRole": "transformation",
+                "modelId": "gpt-oss-120b",
+            })
+        harness.invoke_capability.assert_not_called()
+
+    def test_invoker_denies_when_requested_model_not_available_for_role(self) -> None:
+        harness = MagicMock()
+        harness.get_capability.return_value = {
+            "id": "model-gateway",
+            "endpoint": "http://model.local/v0/invoke",
+        }
+        harness.http.get_json.return_value = HttpResponse(
+            200,
+            {
+                "roles": [
+                    {
+                        "role": "transformation",
+                        "status": "ok",
+                        "availableModels": ["mistral-large-3"],
+                    }
+                ]
+            },
+        )
+
+        invoker = HarnessModelGatewayInvoker(harness, "model-gateway")
+        with self.assertRaises(ModelPolicyDeniedAgentError):
+            invoker.invoke({
+                "runId": "run-1",
+                "agentRole": "transformation",
+                "modelId": "gpt-oss-120b",
+            })
+        harness.invoke_capability.assert_not_called()
 
     def test_invoker_classifies_policy_denial(self) -> None:
         harness = MagicMock()

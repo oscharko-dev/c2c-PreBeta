@@ -728,7 +728,7 @@ class RepairAgentHarnessEventTests(unittest.TestCase):
         self.assertNotIn(leaked_token, failed_event_json)
         self.assertEqual(
             failed_events[0]["payload"]["output"]["failureMessage"],
-            "repair-agent invocation failed",
+            "repair-agent invocation failed: model_gateway_unavailable; model gateway unavailable",
         )
 
 

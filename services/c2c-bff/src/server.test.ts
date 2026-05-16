@@ -1869,6 +1869,27 @@ test('model gateway health route normalizes upstream service payload to the Stud
       async getModels() {
         return undefined;
       },
+      async getCapabilities() {
+        return {
+          status: 200,
+          body: {
+            schema: 'v0',
+            service: 'model-gateway-service',
+            status: 'ok',
+            provider: 'foundry-development',
+            policyId: 'foundry-development-v0',
+            roles: [
+              {
+                role: 'transformation',
+                status: 'ok',
+                policyId: 'foundry-development-v0',
+                availableModels: ['gpt-oss-120b'],
+                configuredModels: ['gpt-oss-120b'],
+              },
+            ],
+          },
+        };
+      },
     },
   });
   const server = await startTestServer(handler);
@@ -1882,6 +1903,17 @@ test('model gateway health route normalizes upstream service payload to the Stud
       dataPolicy: 'model-gateway',
       ledgerEnabled: true,
       eventEmission: false,
+      policyId: '',
+      roleAvailability: [
+        {
+          role: 'transformation',
+          status: 'ok',
+          policyId: 'foundry-development-v0',
+          availableModels: ['gpt-oss-120b'],
+          configuredModels: ['gpt-oss-120b'],
+          reason: '',
+        },
+      ],
     });
   } finally {
     await server.close();
@@ -1909,6 +1941,9 @@ test('model gateway models route normalizes upstream registry payload to the Stu
           ],
         };
       },
+      async getCapabilities() {
+        return undefined;
+      },
     },
   });
   const server = await startTestServer(handler);
@@ -1919,6 +1954,84 @@ test('model gateway models route normalizes upstream registry payload to the Stu
       models: [
         { id: 'gpt-4.1', name: 'GPT 4.1', provider: 'foundry' },
         { id: 'internal-a', name: 'Internal A', provider: 'customer-internal' },
+      ],
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('model gateway capabilities route exposes per-role availability for blocked-state UI', async () => {
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: 'http://gateway' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: {
+      enabled: true,
+      async getHealth() {
+        return undefined;
+      },
+      async getModels() {
+        return undefined;
+      },
+      async getCapabilities() {
+        return {
+          status: 200,
+          body: {
+            schema: 'v0',
+            service: 'model-gateway-service',
+            status: 'degraded',
+            provider: 'foundry-development',
+            policyId: 'foundry-development-v0',
+            roles: [
+              {
+                role: 'transformation',
+                status: 'ok',
+                policyId: 'foundry-development-v0',
+                availableModels: ['gpt-oss-120b'],
+                configuredModels: ['gpt-oss-120b'],
+              },
+              {
+                role: 'verification-repair',
+                status: 'unavailable',
+                policyId: 'foundry-development-v0',
+                availableModels: [],
+                configuredModels: ['missing-model'],
+                reason: 'no approved active model for role',
+              },
+            ],
+          },
+        };
+      },
+    },
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/model-gateway/capabilities`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, {
+      status: 'degraded',
+      providerMode: 'foundry-development',
+      policyId: 'foundry-development-v0',
+      roles: [
+        {
+          role: 'transformation',
+          status: 'ok',
+          policyId: 'foundry-development-v0',
+          availableModels: ['gpt-oss-120b'],
+          configuredModels: ['gpt-oss-120b'],
+          reason: '',
+        },
+        {
+          role: 'verification-repair',
+          status: 'unavailable',
+          policyId: 'foundry-development-v0',
+          availableModels: [],
+          configuredModels: ['missing-model'],
+          reason: 'no approved active model for role',
+        },
       ],
     });
   } finally {

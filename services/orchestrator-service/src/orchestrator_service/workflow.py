@@ -1146,6 +1146,16 @@ class W0WorkflowRunner:
         return FAILURE_JAVA_GENERATION_FAILED
 
     @staticmethod
+    def _final_classification_for_failure_code(failure_code: str | None) -> str:
+        if failure_code in {
+            FAILURE_AGENT_CONTRACT_INVALID,
+            FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+            FAILURE_MODEL_POLICY_DENIED,
+        }:
+            return CLASSIFICATION_BLOCKED
+        return CLASSIFICATION_FAILED
+
+    @staticmethod
     def _failure_code_from_exception(
         exc: BaseException,
         *,
@@ -2527,6 +2537,8 @@ class W0WorkflowRunner:
                 "workflowContract": w02_contract.to_dict(),
             }
         except Exception as exc:
+            terminal_run_status = "failed"
+            summary_status = "failed"
             try:
                 if model_output is None:
                     if context.model_prompt:
@@ -2594,10 +2606,9 @@ class W0WorkflowRunner:
                         except IllegalTransitionError:
                             pass
                     final_classification = (
-                        CLASSIFICATION_BLOCKED
-                        if exc_failure_code == FAILURE_AGENT_CONTRACT_INVALID
-                        else CLASSIFICATION_FAILED
+                        self._final_classification_for_failure_code(exc_failure_code)
                     )
+                    summary_status = final_classification
                     try:
                         self._finalize_w02(
                             context,
@@ -2615,7 +2626,7 @@ class W0WorkflowRunner:
                     context,
                     name=STEP_FAILED,
                     status=STEP_STATUS_FAILED,
-                    run_status="failed",
+                    run_status=terminal_run_status,
                     diagnostic=failure_message,
                     failed_step=failed_step,
                 )
@@ -2624,7 +2635,7 @@ class W0WorkflowRunner:
             try:
                 self.gateway.update_run(
                     context.run_id,
-                    "failed",
+                    terminal_run_status,
                     updated_by=self.config.service_name,
                     message=failure_message,
                     evidence_refs=evidence_refs,
@@ -2633,7 +2644,7 @@ class W0WorkflowRunner:
             except Exception:
                 pass
             try:
-                _write_summary("failed", message=failure_message, failed_step=failed_step)
+                _write_summary(summary_status, message=failure_message, failed_step=failed_step)
             except Exception:
                 pass
             # Issue #96: even on failure, surface what we observed to EL so

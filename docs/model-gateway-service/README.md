@@ -42,8 +42,9 @@ without parsing free-form error text:
 
 | HTTP status | `errorCode`                | `errorClass`         | Meaning                                                       |
 |-------------|----------------------------|----------------------|---------------------------------------------------------------|
-| 400         | (validation code)          | `validation`         | malformed request (missing fields, bad timeout, etc.)         |
+| 400         | `malformed_request`        | `validation`         | malformed request (missing fields, bad JSON, etc.)            |
 | 403         | `model_policy_denied`      | `validation`         | policy denial (forbidden role/model, inactive model, timeout) |
+| 503         | `model_provider_unavailable` | `validation`       | configured provider is not ready                             |
 | 502         | `model_provider_error`     | `provider_error`     | upstream model provider rejected the call                     |
 | 504         | `model_provider_timeout`   | `provider_timeout`   | upstream model provider exceeded the configured timeout       |
 
@@ -103,32 +104,23 @@ Constraints enforced at load time:
 - every role must list at least one model
 - every model named in a role must also appear in `allowedModelIds`
 
-A request with `agentRole` set is rejected with HTTP 403 +
-`errorCode: model_policy_denied` when the chosen `modelId` is not listed
-for that role. A request without `agentRole` bypasses the role check but
-still hits every other policy gate.
+A request is rejected with HTTP 403 + `errorCode: model_policy_denied`
+when `agentRole` is missing, unknown, or not allowed to use the chosen
+`modelId`. Non-agent callers must be represented as explicit configured
+roles rather than relying on an implicit bypass.
 
 ## Credential setup
 
 For local development with Azure Foundry:
 
-1. Set `AZURE_FOUNDRY_ENDPOINT` to the Azure endpoint for the resource (for
-   example `https://workspacedevfoundrywnal9xa1.cognitiveservices.azure.com/openai/deployments`).
-2. Supply credentials either as a direct key or as a reference:
-   - direct key: `AZURE_FOUNDRY_API_KEY`
-   - secret reference: `AZURE_FOUNDRY_API_KEY_REF`
+1. Set `AZURE_FOUNDRY_ENDPOINT` to the approved Azure Foundry endpoint for
+   your development subscription, for example
+   `https://<foundry-resource>.cognitiveservices.azure.com/openai/deployments`.
+2. Prefer a secret reference via `AZURE_FOUNDRY_API_KEY_REF`. Use
+   `AZURE_FOUNDRY_API_KEY` only in a local shell that cannot resolve the
+   reference.
 3. Keep secrets out of source control. Populate `.env` locally (it is
    ignored) and keep `.env.example` with placeholders.
-4. Optional: you can inspect the key once for setup from Azure CLI (do not
-   commit it):
-
-```bash
-az cognitiveservices account keys list \
-  --name workspacedevfoundrywnal9xa1 \
-  --resource-group rg-workspacedev-foundry-swc-001 \
-  --query key1 -o tsv
-```
-
 The Foundry adapter sends the key as the `api-key` header when
 `AZURE_FOUNDRY_API_KEY` is set, otherwise it sends the value of
 `AZURE_FOUNDRY_API_KEY_REF` as `x-api-key-ref` and expects the secret to be

@@ -15,7 +15,7 @@ roles:
     - "mistral-large-3"
     - "phi-4-mini-instruct"
 foundry:
-  endpoint: "https://workspacedevfoundrywnal9xa1.cognitiveservices.azure.com/openai/deployments"
+  endpoint: "https://foundry-development.example.invalid/openai/deployments"
   apiKeyRef: "keyring/foundry/API_KEY"
   apiVersion: "2024-05-01-preview"
   timeoutMs: 30000

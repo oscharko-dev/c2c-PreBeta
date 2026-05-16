@@ -63,13 +63,13 @@ func TestAllowlist_RolePolicyResolution(t *testing.T) {
 	if cfg.IsRoleAllowed(AgentRoleVerificationRepair, "alpha") {
 		t.Fatalf("alpha must not be allowed for verification-repair")
 	}
-	// Unconfigured role falls back to general allowlist semantics.
-	if !cfg.IsRoleAllowed("custom-role", "alpha") {
-		t.Fatalf("unconfigured role must not deny")
+	// Unconfigured and blank roles are denied in governed mode: callers must
+	// identify a role so the gateway can enforce role-to-model policy.
+	if cfg.IsRoleAllowed("custom-role", "alpha") {
+		t.Fatalf("unconfigured role must be denied")
 	}
-	// Empty role => no role check.
-	if !cfg.IsRoleAllowed("", "alpha") {
-		t.Fatalf("empty role must not deny")
+	if cfg.IsRoleAllowed("", "alpha") {
+		t.Fatalf("empty role must be denied")
 	}
 	models := cfg.AllowedModelsForRole(AgentRoleTransformation)
 	if len(models) != 2 || models[0] != "alpha" || models[1] != "beta" {
@@ -132,6 +132,11 @@ func newGatewayServiceWithRoles(now time.Time, model ModelMetadata, roles map[st
 	ledger := &inMemoryLedger{}
 	events := &inMemoryEventSink{}
 	registry := ModelRegistry{Models: []ModelMetadata{model}}
+	if roles == nil {
+		roles = map[string][]string{
+			AgentRoleTransformation: {model.ID},
+		}
+	}
 	allowlist := FoundryDevelopmentAllowlist{
 		Mode:            ModelProviderFoundryDevelopment,
 		PolicyID:        "foundry-development-v0",
@@ -227,6 +232,47 @@ func TestInvoke_ForbiddenRole(t *testing.T) {
 	}
 	if ledger[0].PolicyID != "foundry-development-v0" {
 		t.Fatalf("expected policyId recorded, got %q", ledger[0].PolicyID)
+	}
+}
+
+func TestInvoke_MissingOrUnknownRoleIsDenied(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	model := activeModel("foundry-gpt", now)
+	service := newGatewayServiceWithRoles(now, model, map[string][]string{
+		AgentRoleTransformation: {model.ID},
+	})
+
+	for _, role := range []string{"", "invented-role"} {
+		payload := ModelInvocationRequest{
+			RunID:                 "run-role-required",
+			ModelID:               "foundry-gpt",
+			Actor:                 "agent-1",
+			AgentRole:             role,
+			DataClass:             "model",
+			PromptTemplateVersion: "v1",
+			Prompt:                "Hello",
+			TimeoutMs:             1000,
+			Parameters:            map[string]any{},
+		}
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
+		req.Header.Set("content-type", "application/json")
+		rr := httptest.NewRecorder()
+
+		service.invokeHandler(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("role %q: expected 403, got %d body=%s", role, rr.Code, rr.Body.String())
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("role %q: expected JSON response: %v", role, err)
+		}
+		if resp["errorCode"] != errorCodePolicyDenied {
+			t.Fatalf("role %q: expected errorCode=%q got %v", role, errorCodePolicyDenied, resp["errorCode"])
+		}
+		if resp["validationCode"] != "forbidden_role" {
+			t.Fatalf("role %q: expected validationCode=forbidden_role got %v", role, resp["validationCode"])
+		}
 	}
 }
 
@@ -335,6 +381,37 @@ func TestCapabilitiesEndpoint_ReportsRoleAvailability(t *testing.T) {
 	}
 	if body.Status != "degraded" {
 		t.Fatalf("expected overall status=degraded when a role is unavailable, got %q", body.Status)
+	}
+}
+
+func TestCapabilitiesEndpoint_UnconfiguredRoleIsUnavailable(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	model := activeModel("foundry-gpt", now)
+	service := newGatewayServiceWithRoles(now, model, map[string][]string{
+		AgentRoleTransformation: {model.ID},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v0/capabilities", nil)
+	rr := httptest.NewRecorder()
+	service.capabilitiesHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected capabilities 200, got %d", rr.Code)
+	}
+	var body ModelGatewayCapabilitiesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("expected json: %v", err)
+	}
+	roleByName := map[string]RoleAvailability{}
+	for _, role := range body.Roles {
+		roleByName[role.Role] = role
+	}
+	repair := roleByName[AgentRoleVerificationRepair]
+	if repair.Status != "unavailable" {
+		t.Fatalf("expected unconfigured repair role unavailable, got %q", repair.Status)
+	}
+	if repair.Reason != "role is not configured in allowlist" {
+		t.Fatalf("unexpected unconfigured role reason %q", repair.Reason)
 	}
 }
 
@@ -452,6 +529,7 @@ func TestInvoke_ProviderTimeoutMapsToGatewayTimeout(t *testing.T) {
 		RunID:                 "run-timeout",
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
 		DataClass:             "model",
 		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
@@ -499,6 +577,7 @@ func TestInvoke_ProviderErrorMapsToBadGateway(t *testing.T) {
 		RunID:                 "run-err",
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
 		DataClass:             "model",
 		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
@@ -520,9 +599,56 @@ func TestInvoke_ProviderErrorMapsToBadGateway(t *testing.T) {
 	if resp["errorCode"] != errorCodeProviderError {
 		t.Fatalf("expected errorCode=%q got %v", errorCodeProviderError, resp["errorCode"])
 	}
+	if resp["error"] != "model provider error" {
+		t.Fatalf("expected sanitized provider error, got %v", resp["error"])
+	}
 	ledger := service.ledger.(*inMemoryLedger).entries
 	if len(ledger) != 1 || ledger[0].ErrorClass != errorClassProviderError {
 		t.Fatalf("expected provider_error ledger entry, got %+v", ledger)
+	}
+	if ledger[0].ErrorMessage != "model provider error" {
+		t.Fatalf("expected sanitized ledger error message, got %q", ledger[0].ErrorMessage)
+	}
+}
+
+func TestInvoke_ProviderNotReadyMapsToUnavailable(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	model := activeModel("foundry-gpt", now)
+	service := newGatewayServiceWithRoles(now, model, nil)
+	service.providers = map[string]ModelProvider{}
+
+	payload := ModelInvocationRequest{
+		RunID:                 "run-no-provider",
+		ModelID:               "foundry-gpt",
+		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
+		DataClass:             "model",
+		PromptTemplateVersion: "v1",
+		Prompt:                "Hello",
+		TimeoutMs:             1000,
+		Parameters:            map[string]any{},
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
+	req.Header.Set("content-type", "application/json")
+	rr := httptest.NewRecorder()
+	service.invokeHandler(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("expected json: %v", err)
+	}
+	if resp["errorCode"] != errorCodeProviderUnavailable {
+		t.Fatalf("expected errorCode=%q got %v", errorCodeProviderUnavailable, resp["errorCode"])
+	}
+	if resp["validationCode"] != "provider_not_ready" {
+		t.Fatalf("expected validationCode=provider_not_ready got %v", resp["validationCode"])
+	}
+	ledger := service.ledger.(*inMemoryLedger).entries
+	if len(ledger) != 1 || ledger[0].ErrorCode != errorCodeProviderUnavailable {
+		t.Fatalf("expected provider unavailable ledger entry, got %+v", ledger)
 	}
 }
 

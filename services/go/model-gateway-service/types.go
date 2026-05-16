@@ -88,9 +88,11 @@ const (
 	// Harness map these to the W0.2 failure-code closed set:
 	//   policy_denied  -> FAILURE_MODEL_POLICY_DENIED
 	//   gateway_unavailable / provider_unavailable -> FAILURE_MODEL_GATEWAY_UNAVAILABLE
-	errorCodePolicyDenied    = "model_policy_denied"
-	errorCodeProviderTimeout = "model_provider_timeout"
-	errorCodeProviderError   = "model_provider_error"
+	errorCodePolicyDenied        = "model_policy_denied"
+	errorCodeProviderTimeout     = "model_provider_timeout"
+	errorCodeProviderUnavailable = "model_provider_unavailable"
+	errorCodeProviderError       = "model_provider_error"
+	errorCodeMalformedRequest    = "malformed_request"
 )
 
 const (
@@ -350,12 +352,12 @@ type ModelGatewayHealthResponse struct {
 // can fail early with model_gateway_unavailable when no approved model is
 // reachable for the requested role.
 type RoleAvailability struct {
-	Role            string   `json:"role"`
-	Status          string   `json:"status"`
-	PolicyID        string   `json:"policyId"`
-	AvailableModels []string `json:"availableModels"`
+	Role             string   `json:"role"`
+	Status           string   `json:"status"`
+	PolicyID         string   `json:"policyId"`
+	AvailableModels  []string `json:"availableModels"`
 	ConfiguredModels []string `json:"configuredModels"`
-	Reason          string   `json:"reason,omitempty"`
+	Reason           string   `json:"reason,omitempty"`
 }
 
 // ModelGatewayCapabilitiesResponse is the body of GET /v0/capabilities.

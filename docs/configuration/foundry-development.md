@@ -39,9 +39,10 @@ default.
 ```env
 AZURE_FOUNDRY_ENDPOINT=https://<workspace>.cognitiveservices.azure.com/openai/deployments
 AZURE_FOUNDRY_API_VERSION=2024-05-01-preview
-# Exactly one of the following two:
-AZURE_FOUNDRY_API_KEY=         # direct key — sent as `api-key` header
-AZURE_FOUNDRY_API_KEY_REF=     # secret reference — sent as `x-api-key-ref`
+# Prefer the reference path. Use the direct key only for local shells that
+# cannot resolve the reference.
+AZURE_FOUNDRY_API_KEY_REF=keyring/foundry/API_KEY
+AZURE_FOUNDRY_API_KEY=         # optional local fallback; never commit
 ```
 
 `.env.example` lists the canonical key names. Never commit a populated

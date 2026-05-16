@@ -580,6 +580,10 @@ class W0WorkflowRunnerTests(unittest.TestCase):
 
         self.assertIn("model-gateway", str(ctx.exception))
         self.assertEqual(gateway.updated_runs[-1][1], "failed")
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["finalClassification"], "blocked")
+        self.assertEqual(contract["failureCode"], "model_gateway_unavailable")
         diagnostic_message = gateway.updated_runs[-1][3]
         self.assertIn("model-gateway", diagnostic_message)
 

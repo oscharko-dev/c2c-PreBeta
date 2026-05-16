@@ -72,8 +72,10 @@ with the `--foundry` flag on a workstation that has the credentials
 exported in its shell:
 
 ```bash
-export AZURE_FOUNDRY_ENDPOINT=https://workspacedevfoundry...cognitiveservices.azure.com/openai/deployments
-export AZURE_FOUNDRY_API_KEY=...   # never commit; never persist to memory
+export AZURE_FOUNDRY_ENDPOINT=https://<foundry-resource>.cognitiveservices.azure.com/openai/deployments
+export AZURE_FOUNDRY_API_KEY_REF=keyring/foundry/API_KEY
+# Optional local fallback only when key references are unavailable:
+# export AZURE_FOUNDRY_API_KEY=...
 ./scripts/w0-2-release-gate.sh --foundry
 ```
 
