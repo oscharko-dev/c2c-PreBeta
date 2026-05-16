@@ -1218,10 +1218,13 @@ test.describe('c2c Studio browser acceptance', () => {
     const agentPanel = page.getByTestId('agent-activity-panel');
     await expect(agentPanel).toBeVisible();
     await expect(agentPanel.getByText('Verification & Repair Agent')).toBeVisible();
-    await expect(agentPanel.getByText('Attempt #1')).toBeVisible();
-    await expect(agentPanel.getByText('Attempt #2')).toBeVisible();
-    await expect(agentPanel.getByText('Refused')).toBeVisible();
-    await expect(agentPanel.getByText(/2 \/ 3 attempts used/)).toBeVisible();
+    const attempt1 = agentPanel.getByTestId('agent-activity-repair-attempt-1');
+    const attempt2 = agentPanel.getByTestId('agent-activity-repair-attempt-2');
+    await expect(attempt1).toContainText('Attempt #1');
+    await expect(attempt1).toContainText('Proposed candidate');
+    await expect(attempt2).toContainText('Attempt #2');
+    await expect(attempt2).toContainText('Refused');
+    await expect(agentPanel.getByTestId('agent-activity-repair-budget')).toContainText('2 / 3 attempts used');
 
     const failure = agentPanel.getByTestId('agent-activity-final-failure');
     await expect(failure).toContainText('Model invocation denied by policy');
