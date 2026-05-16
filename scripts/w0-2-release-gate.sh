@@ -26,9 +26,9 @@
 #      scripts/check_w0_2_evidence.py --success --expect-foundry-invocation,
 #      i.e. carries modelInvocations status=completed, agentTrajectories,
 #      generatedJavaArtifacts, finalJavaArtifact, and oracleComparison.
-#      In deterministic mode the manifest URI is asserted reachable and
-#      pointer-consistent; the productive W0.2 slots are not enforced
-#      because they require the agentic path.
+#      In deterministic mode the manifest hash is asserted resolvable
+#      through safe artifact metadata and pointer-consistent; the productive
+#      W0.2 slots are not enforced because they require the agentic path.
 #   8. POST /api/v0/transform with the FILEIO-UNSUPPORTED fixture reaches
 #      a non-success terminal classification with one of the closed-set
 #      unsupported-source failure codes (unsupported_cobol or
@@ -196,22 +196,46 @@ post_json() {
     "$url"
 }
 
-manifest_uri_to_path() {
-  local uri="$1"
-  if [[ -z "$uri" ]]; then
-    printf ''
+artifact_path_for_hash() {
+  local artifacts_json="$1"
+  local sha="$2"
+  local kind="$3"
+  jq -r --arg sha "$sha" --arg kind "$kind" '
+    .artifacts[]?
+    | select(.kind == $kind and .sha256 == $sha)
+    | .path // empty
+  ' <<<"$artifacts_json" | head -n 1
+}
+
+artifact_store_run_id() {
+  local bff_run_id="$1"
+  local view_json="$2"
+  local upstream_run_id
+  upstream_run_id="$(jq -r '.orchestratorRunId // empty' <<<"$view_json")"
+  if [[ -n "$upstream_run_id" ]]; then
+    printf '%s' "$upstream_run_id"
     return
   fi
-  if [[ "$uri" == file://* ]]; then
-    printf '%s' "${uri#file://}"
-    return
-  fi
-  # Absolute path; pass through.
-  if [[ "$uri" == /* ]]; then
-    printf '%s' "$uri"
-    return
-  fi
-  printf '%s/%s' "$ROOT_DIR" "$uri"
+  printf '%s' "$bff_run_id"
+}
+
+artifact_file_path_for_run() {
+  local run_id="$1"
+  local relpath="$2"
+  [[ -n "$run_id" && -n "$relpath" ]] || { printf ''; return; }
+  [[ "$relpath" != /* && "$relpath" != *'\'* ]] || { printf ''; return; }
+
+  local segment
+  local -a segments
+  IFS='/' read -r -a segments <<<"$relpath"
+  for segment in "${segments[@]}"; do
+    if [[ -z "$segment" || "$segment" == "." || "$segment" == ".." ]]; then
+      printf ''
+      return
+    fi
+  done
+
+  printf '%s/%s/%s' "$RUN_ARTIFACT_ROOT" "$run_id" "$relpath"
 }
 
 # ---------------------------------------------------------------------------
@@ -391,17 +415,22 @@ fi
 jq -e '[.artifacts[].kind] | index("evidence-pack-manifest")' >/dev/null <<<"$artifacts_json" \
   || fail "$POSITIVE_FIXTURE_LABEL run artifacts missing evidence-pack-manifest kind: $artifacts_json" 3
 
-# Resolve the Evidence Pack manifest. In Foundry mode the gate runs the strict
-# W0.2 validator on the success-path manifest. In deterministic mode the
-# success-path manifest is allowed to be a W0/W0.1-era pack (no productive
-# transformation-agent slots) and the strict W0.2 validator is reserved for
-# the --foundry path; here the gate only asserts the manifest exists and is
-# pointer-consistent with the other BFF views (already checked above).
-manifest_uri="$(jq -r '.manifestUri // empty' <<<"$evidence_json")"
-[[ -n "$manifest_uri" ]] || fail "EvidenceView did not include a manifestUri" 5
-manifest_path="$(manifest_uri_to_path "$manifest_uri")"
+# Resolve the Evidence Pack manifest through the browser-safe BFF contract.
+# The BFF intentionally does not expose internal file:// URLs or absolute
+# artifact paths, so the gate pairs EvidenceView.manifestHash with the
+# /artifacts metadata path and reconstructs the local test path itself.
+manifest_hash="$(jq -r '.manifestHash // empty' <<<"$evidence_json")"
+[[ "$manifest_hash" =~ ^[0-9a-f]{64}$ ]] \
+  || fail "EvidenceView did not include a valid manifestHash: $evidence_json" 5
+jq -e --arg sha "$manifest_hash" '.artifactRef.sha256 == $sha' >/dev/null <<<"$evidence_json" \
+  || fail "EvidenceView.artifactRef.sha256 != EvidenceView.manifestHash" 5
+manifest_relpath="$(artifact_path_for_hash "$artifacts_json" "$manifest_hash" "evidence-pack-manifest")"
+[[ -n "$manifest_relpath" ]] \
+  || fail "run artifacts missing evidence-pack-manifest path for manifestHash $manifest_hash: $artifacts_json" 5
+manifest_store_run_id="$(artifact_store_run_id "$positive_run_id" "$artifacts_json")"
+manifest_path="$(artifact_file_path_for_run "$manifest_store_run_id" "$manifest_relpath")"
 [[ -n "$manifest_path" && -f "$manifest_path" ]] \
-  || fail "manifestUri did not resolve to a local file: $manifest_uri" 5
+  || fail "evidence-pack-manifest artifact path did not resolve locally: $manifest_relpath" 5
 
 if [[ "$MODE" == "foundry" ]]; then
   log "running W0.2 evidence completeness check on $manifest_path"
@@ -465,9 +494,14 @@ jq -e '.status != "generated"' >/dev/null <<<"$negative_generated" \
 # Evidence view (blocked path) must still be reachable; manifest must report
 # the blocked completenessStatus and carry no finalJavaArtifact.
 negative_evidence="$(curl_json "$BFF_URL/api/v0/runs/$negative_run_id/evidence")"
-neg_manifest_uri="$(jq -r '.manifestUri // empty' <<<"$negative_evidence")"
-if [[ -n "$neg_manifest_uri" ]]; then
-  neg_manifest_path="$(manifest_uri_to_path "$neg_manifest_uri")"
+neg_manifest_hash="$(jq -r '.manifestHash // empty' <<<"$negative_evidence")"
+if [[ -n "$neg_manifest_hash" ]]; then
+  [[ "$neg_manifest_hash" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "blocked EvidenceView included an invalid manifestHash: $negative_evidence" 5
+  negative_artifacts="$(curl_json "$BFF_URL/api/v0/runs/$negative_run_id/artifacts")"
+  neg_manifest_relpath="$(artifact_path_for_hash "$negative_artifacts" "$neg_manifest_hash" "evidence-pack-manifest")"
+  neg_manifest_store_run_id="$(artifact_store_run_id "$negative_run_id" "$negative_artifacts")"
+  neg_manifest_path="$(artifact_file_path_for_run "$neg_manifest_store_run_id" "$neg_manifest_relpath")"
   if [[ -n "$neg_manifest_path" && -f "$neg_manifest_path" ]]; then
     log "running W0.2 blocked-path evidence check on $neg_manifest_path"
     python3 "$ROOT_DIR/scripts/check_w0_2_evidence.py" \
