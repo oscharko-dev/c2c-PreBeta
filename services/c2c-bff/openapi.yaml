@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: c2c-bff
-  version: 0.2.0
+  version: 0.3.0
   description: >
     W0 backend-for-frontend. Brokers c2c-ui calls to the W0 capability mesh
     (orchestrator-service, evidence-service, build-test-runner-service,
@@ -108,10 +108,10 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "502":
-          description: orchestrator rejected request
+          description: orchestrator rejected request — body carries a UI-safe failureCode
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              schema: { $ref: "#/components/schemas/UpstreamErrorResponse" }
         "503":
           description: orchestrator unavailable or not configured
           content:
@@ -253,6 +253,15 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "413":
+          description: |
+            Issue #172. The requested artifact exceeds
+            ``C2C_ARTIFACT_CONTENT_MAX_BYTES`` (defaults to 1 MiB). The
+            response carries the observed ``byteSize`` and the active
+            ``limit`` so the UI can render a meaningful diagnostic.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactTooLargeError" }
         "503":
           description: orchestrator unavailable
           content:
@@ -402,6 +411,36 @@ paths:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "502":
           description: orchestrator failure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/runs/{runId}/workflow:
+    get:
+      summary: Return the W0.2 workflow contract product-level view
+      description: >
+        Issue #172. Surfaces the orchestrator-side W0.2 run contract
+        (currentState, activeStep, agentAttemptCount, repairBudget,
+        repairAttempts, finalClassification, failureCode/failureMessage,
+        generatedJavaRef, buildTestResultRef, evidencePackRef) as a
+        UI-safe envelope. Orchestrator failure codes are mapped onto the
+        ``W02UiErrorCode`` enum. The raw modelInvocationRef, repairInputRef,
+        and javaCandidateRef URIs are never returned; the response only
+        reports boolean breadcrumbs.
+      operationId: getRunWorkflow
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunWorkflowView" }
+        "404":
+          description: not found
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -560,13 +599,35 @@ components:
         sourceText: { type: string }
         programId: { type: string }
         sourceName: { type: string }
+        # Issue #172: W0.2 transform contract. ``targetLanguage`` defaults
+        # to ``java`` and is the only supported value for W0.2; anything
+        # else is rejected with 400. ``expectedOutput`` and ``oracleInput``
+        # are optional strings that the orchestrator forwards to the
+        # verification/repair agent for oracle-mode comparisons.
+        targetLanguage:
+          type: string
+          enum: [java]
+          default: java
+        expectedOutput: { type: string }
+        oracleInput: { type: string }
         options:
           type: object
           additionalProperties: true
 
     RunSummary:
       type: object
-      required: [runId, programId, status, mode, createdAt]
+      required:
+        - runId
+        - programId
+        - status
+        - mode
+        - createdAt
+        - activeStep
+        - agentAttemptCount
+        - repairBudget
+        - finalClassification
+        - failureCode
+        - failureMessage
       properties:
         runId: { type: string }
         programId: { type: string }
@@ -582,10 +643,36 @@ components:
         policyDecision: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        # Issue #172: W0.2 contract surface. Fields are always present so
+        # the UI can render a stable shape; they default to ``null`` /
+        # ``0`` when the orchestrator has not yet produced a workflow
+        # contract for the run.
+        activeStep:
+          oneOf:
+            - type: string
+            - type: 'null'
+        agentAttemptCount: { type: integer, minimum: 0 }
+        repairBudget:
+          oneOf:
+            - $ref: "#/components/schemas/RepairBudget"
+            - type: 'null'
+        finalClassification:
+          oneOf:
+            - type: string
+              enum: [success, blocked, failed, cancelled, incomplete]
+            - type: 'null'
+        failureCode:
+          oneOf:
+            - $ref: "#/components/schemas/W02UiErrorCode"
+            - type: 'null'
+        failureMessage:
+          oneOf:
+            - type: string
+            - type: 'null'
 
     RunLinks:
       type: object
-      required: [self, generated, generatedFiles, buildTest, evidence, events, progress, artifacts, learning]
+      required: [self, generated, generatedFiles, buildTest, evidence, events, progress, artifacts, learning, workflow]
       properties:
         self: { type: string }
         generated: { type: string }
@@ -596,6 +683,163 @@ components:
         progress: { type: string }
         artifacts: { type: string }
         learning: { type: string }
+        workflow: { type: string }
+
+    W02UiErrorCode:
+      type: string
+      description: >
+        Closed set of user-safe failure codes the BFF exposes to the
+        browser. Orchestrator codes outside this set collapse to
+        ``internal_error``; upstream connectivity issues map to
+        ``service_unavailable``.
+      enum:
+        - unsupported_cobol
+        - parse_failed
+        - semantic_ir_failed
+        - model_gateway_unavailable
+        - model_policy_denied
+        - agent_timeout
+        - agent_contract_invalid
+        - java_generation_failed
+        - java_compile_failed
+        - java_runtime_failed
+        - oracle_mismatch
+        - evidence_incomplete
+        - cancelled
+        - service_unavailable
+        - internal_error
+
+    RepairBudget:
+      type: object
+      required: [limit, used, remaining]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 3 }
+        used: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+
+    RepairAttemptSummary:
+      type: object
+      required: [attemptNumber, repairDecision, failureCategory, hasModelInvocation, hasRepairInput, hasJavaCandidate]
+      properties:
+        attemptNumber: { type: integer, minimum: 1 }
+        repairDecision:
+          type: string
+          enum: [propose_candidate, refuse, escalate, no_change]
+        failureCategory:
+          oneOf:
+            - type: string
+            - type: 'null'
+        # Boolean breadcrumbs replace the raw orchestrator refs so the
+        # browser can show "model was invoked" / "candidate produced"
+        # without exposing internal artifact URIs.
+        hasModelInvocation: { type: boolean }
+        hasRepairInput: { type: boolean }
+        hasJavaCandidate: { type: boolean }
+        rationale: { type: string }
+
+    WorkflowArtifactRef:
+      type: object
+      required: [sha256, byteSize, kind]
+      properties:
+        sha256: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+        kind: { type: string }
+
+    RunWorkflowView:
+      type: object
+      required:
+        - runId
+        - programId
+        - mode
+        - productMode
+        - source
+        - state
+        - activeStep
+        - activeAgent
+        - agentAttemptCount
+        - repairBudget
+        - repairAttempts
+        - finalClassification
+        - failureCode
+        - failureMessage
+        - generatedJavaRef
+        - buildTestResultRef
+        - evidencePackRef
+      properties:
+        runId: { type: string }
+        programId: { type: string }
+        mode: { type: string, enum: [live, 'diagnostic-fixture'] }
+        productMode: { type: string, enum: [live, unavailable] }
+        source: { type: string, enum: [live, cached, unavailable] }
+        state:
+          oneOf:
+            - type: string
+            - type: 'null'
+        activeStep:
+          oneOf:
+            - type: string
+            - type: 'null'
+        activeAgent:
+          oneOf:
+            - type: string
+              enum:
+                - transformation_agent
+                - verification_repair_agent
+                - cobol_parser
+                - semantic_ir
+                - java_generator
+                - build_test_runner
+                - evidence_service
+            - type: 'null'
+        agentAttemptCount: { type: integer, minimum: 0 }
+        repairBudget:
+          oneOf:
+            - $ref: "#/components/schemas/RepairBudget"
+            - type: 'null'
+        repairAttempts:
+          type: array
+          items: { $ref: "#/components/schemas/RepairAttemptSummary" }
+        finalClassification:
+          oneOf:
+            - type: string
+              enum: [success, blocked, failed, cancelled, incomplete]
+            - type: 'null'
+        failureCode:
+          oneOf:
+            - $ref: "#/components/schemas/W02UiErrorCode"
+            - type: 'null'
+        failureMessage:
+          oneOf:
+            - type: string
+            - type: 'null'
+        generatedJavaRef:
+          oneOf:
+            - $ref: "#/components/schemas/WorkflowArtifactRef"
+            - type: 'null'
+        buildTestResultRef:
+          oneOf:
+            - $ref: "#/components/schemas/WorkflowArtifactRef"
+            - type: 'null'
+        evidencePackRef:
+          oneOf:
+            - $ref: "#/components/schemas/WorkflowArtifactRef"
+            - type: 'null'
+
+    ArtifactTooLargeError:
+      type: object
+      required: [error, byteSize, limit]
+      properties:
+        error: { type: string, enum: [artifact_too_large] }
+        path: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+
+    UpstreamErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        failureCode: { $ref: "#/components/schemas/W02UiErrorCode" }
 
     TransformResponse:
       type: object

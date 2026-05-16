@@ -87,6 +87,7 @@ interface ArtifactStubResponses {
   artifacts?: UpstreamResponse;
   progress?: UpstreamResponse;
   learning?: UpstreamResponse;
+  workflow?: UpstreamResponse;
 }
 
 function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
@@ -100,6 +101,9 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       requester?: string;
       sourceName?: string;
       options?: unknown;
+      targetLanguage?: string;
+      expectedOutput?: string;
+      oracleInput?: string;
     }>;
     getGenerated: number;
     getGeneratedFiles: number;
@@ -110,6 +114,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getArtifacts: number;
     getProgress: number;
     getLearning: number;
+    getWorkflow: number;
   };
 } {
   const calls = {
@@ -121,6 +126,9 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       requester?: string;
       sourceName?: string;
       options?: unknown;
+      targetLanguage?: string;
+      expectedOutput?: string;
+      oracleInput?: string;
     }>,
     getGenerated: 0,
     getGeneratedFiles: 0,
@@ -131,6 +139,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getArtifacts: 0,
     getProgress: 0,
     getLearning: 0,
+    getWorkflow: 0,
   };
   const client: OrchestratorClient = {
     enabled: true,
@@ -225,6 +234,10 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       calls.getLearning += 1;
       return artifactResponses.learning;
     },
+    async getWorkflow() {
+      calls.getWorkflow += 1;
+      return artifactResponses.workflow;
+    },
   };
   return { client, calls };
 }
@@ -268,6 +281,9 @@ function disabledOrchestrator(): OrchestratorClient {
     async getLearning() {
       return undefined;
     },
+    async getWorkflow() {
+      return undefined;
+    },
   };
 }
 
@@ -301,6 +317,7 @@ const baseConfig: BffConfig = {
   harnessUrl: '',
   upstreamTimeoutMs: 1_000,
   transformSourceMaxBytes: 1_000_000,
+  artifactContentMaxBytes: 1_048_576,
   enableDiagnosticFixtures: false,
 };
 
@@ -725,6 +742,9 @@ test('starting a run surfaces orchestrator failures instead of silently falling 
     async getLearning() {
       return undefined;
     },
+    async getWorkflow() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
@@ -786,6 +806,9 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
       return undefined;
     },
     async getLearning() {
+      return undefined;
+    },
+    async getWorkflow() {
       return undefined;
     },
   };
@@ -1477,6 +1500,9 @@ test('transform derives program id, calls orchestrator, and returns the full tra
       requester: 'c2c-ui',
       sourceName: 'hello.cbl',
       options: { explain: true },
+      targetLanguage: 'java',
+      expectedOutput: undefined,
+      oracleInput: undefined,
     });
     assert.equal(runStore.list().length, 1);
 
@@ -1505,6 +1531,7 @@ test('transform derives program id, calls orchestrator, and returns the full tra
       artifacts: `/api/v0/runs/${body.runId}/artifacts`,
       progress: `/api/v0/runs/${body.runId}/progress`,
       learning: `/api/v0/runs/${body.runId}/learning`,
+      workflow: `/api/v0/runs/${body.runId}/workflow`,
     });
   } finally {
     await server.close();
@@ -1578,6 +1605,9 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
     async getLearning() {
       return undefined;
     },
+    async getWorkflow() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
@@ -1637,6 +1667,9 @@ test('transform does not create a run when the orchestrator throws', async () =>
       return undefined;
     },
     async getLearning() {
+      return undefined;
+    },
+    async getWorkflow() {
       return undefined;
     },
   };
@@ -2640,6 +2673,481 @@ test('Issue #97: /generated, /build-test, and /evidence all carry the same gener
     const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
     const evBody = evidence.body as { generatedArtifactRef: { sha256: string } | null };
     assert.equal(evBody.generatedArtifactRef?.sha256, manifestHash);
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Issue #172: W0.2 BFF contract — workflow endpoint, sanitized failure codes,
+// run-summary surface, transform input validation, and generated-file size
+// limit. The tests below assert that the browser never sees orchestrator
+// stack traces, raw URLs, or unknown failure codes.
+// ---------------------------------------------------------------------------
+
+test('GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps the failure code', async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'BRNCH01',
+        runStatus: 'failed',
+        status: 'complete',
+        source: 'live',
+        contract: {
+          schemaVersion: 1,
+          runId: 'live-run-1',
+          currentState: 'final_classification',
+          activeStep: 'verification_repair_agent',
+          agentAttemptCount: 2,
+          repairBudget: { limit: 2, used: 2, remaining: 0 },
+          repairAttempts: [
+            {
+              attemptNumber: 1,
+              repairDecision: 'propose_candidate',
+              failureCategory: 'java_compile_failed',
+              createdAt: '2026-05-16T12:00:00Z',
+              modelInvocationRef: { uri: 'urn:mg/invocation/123', sha256: 'a'.repeat(64) },
+              repairInputRef: { uri: 'urn:repair/input/1' },
+              javaCandidateRef: { uri: 'urn:java/cand/1' },
+              rationale: 'compile error in line 12',
+            },
+            {
+              attemptNumber: 2,
+              repairDecision: 'no_change',
+              failureCategory: 'java_compile_failed',
+              createdAt: '2026-05-16T12:01:00Z',
+            },
+          ],
+          finalClassification: 'blocked',
+          failureCode: 'java_compile_failed',
+          failureMessage:
+            'compile at http://orchestrator.internal:18088/v0/runs/live-run-1 failed at module.fn (/Users/me/repo/file.java:10:5)',
+          generatedJavaRef: { uri: 'urn:c2c/gen/1', sha256: 'b'.repeat(64), byteSize: 1024, kind: 'generated-project-manifest' },
+          buildTestResultRef: { uri: 'urn:c2c/bt/1', sha256: 'c'.repeat(64), byteSize: 256, kind: 'build-test-result' },
+          evidencePackRef: { uri: 'urn:c2c/ev/1', sha256: 'd'.repeat(64), byteSize: 512, kind: 'evidence-pack-manifest' },
+        },
+        contractRef: null,
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+
+    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    assert.equal(workflow.status, 200);
+    const wfBody = workflow.body as {
+      mode: string;
+      productMode: string;
+      source: string;
+      state: string;
+      activeStep: string;
+      activeAgent: string;
+      agentAttemptCount: number;
+      repairBudget: { limit: number; used: number; remaining: number };
+      repairAttempts: Array<{
+        attemptNumber: number;
+        repairDecision: string;
+        failureCategory: string | null;
+        hasModelInvocation: boolean;
+        hasRepairInput: boolean;
+        hasJavaCandidate: boolean;
+        rationale?: string;
+      }>;
+      finalClassification: string;
+      failureCode: string;
+      failureMessage: string;
+      generatedJavaRef: { sha256: string; byteSize: number; kind: string } | null;
+      buildTestResultRef: { sha256: string; byteSize: number; kind: string } | null;
+      evidencePackRef: { sha256: string; byteSize: number; kind: string } | null;
+    };
+    assert.equal(wfBody.mode, 'live');
+    assert.equal(wfBody.productMode, 'live');
+    assert.equal(wfBody.source, 'live');
+    assert.equal(wfBody.state, 'final_classification');
+    assert.equal(wfBody.activeStep, 'verification_repair_agent');
+    assert.equal(wfBody.activeAgent, 'verification_repair_agent');
+    assert.equal(wfBody.agentAttemptCount, 2);
+    assert.deepEqual(wfBody.repairBudget, { limit: 2, used: 2, remaining: 0 });
+    assert.equal(wfBody.repairAttempts.length, 2);
+    assert.deepEqual(wfBody.repairAttempts[0], {
+      attemptNumber: 1,
+      repairDecision: 'propose_candidate',
+      failureCategory: 'java_compile_failed',
+      hasModelInvocation: true,
+      hasRepairInput: true,
+      hasJavaCandidate: true,
+      rationale: 'compile error in line 12',
+    });
+    assert.equal(wfBody.repairAttempts[1]?.repairDecision, 'no_change');
+    assert.equal(wfBody.finalClassification, 'blocked');
+    assert.equal(wfBody.failureCode, 'java_compile_failed');
+    assert.ok(!wfBody.failureMessage.includes('http://'), 'failureMessage must not leak orchestrator URL');
+    assert.ok(!wfBody.failureMessage.includes('/Users/'), 'failureMessage must not leak filesystem paths');
+    assert.equal(wfBody.generatedJavaRef?.sha256, 'b'.repeat(64));
+    assert.equal(wfBody.buildTestResultRef?.sha256, 'c'.repeat(64));
+    assert.equal(wfBody.evidencePackRef?.sha256, 'd'.repeat(64));
+    // None of the contract response must carry the raw modelInvocationRef URI.
+    const serialised = JSON.stringify(wfBody);
+    assert.ok(!serialised.includes('urn:mg/invocation/123'), 'model invocation ref must be sanitized out');
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary', async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: 'complete',
+        contract: {
+          currentState: 'transformation_agent_invoked',
+          activeStep: 'transformation_agent',
+          agentAttemptCount: 1,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          repairAttempts: [],
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const run = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`);
+    const body = run.body as {
+      activeStep: string;
+      agentAttemptCount: number;
+      repairBudget: { limit: number; used: number; remaining: number };
+      finalClassification: string | null;
+      failureCode: string | null;
+      failureMessage: string | null;
+    };
+    assert.equal(body.activeStep, 'transformation_agent');
+    assert.equal(body.agentAttemptCount, 1);
+    assert.deepEqual(body.repairBudget, { limit: 2, used: 0, remaining: 2 });
+    assert.equal(body.finalClassification, null);
+    assert.equal(body.failureCode, null);
+    assert.equal(body.failureMessage, null);
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable', async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator(); // no workflow stub -> undefined
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    assert.equal(workflow.status, 200);
+    const body = workflow.body as {
+      source: string;
+      state: string | null;
+      activeStep: string | null;
+      activeAgent: string | null;
+      agentAttemptCount: number;
+      repairBudget: unknown;
+      finalClassification: string | null;
+      failureCode: string | null;
+    };
+    assert.equal(body.source, 'unavailable');
+    assert.equal(body.state, null);
+    assert.equal(body.activeStep, null);
+    assert.equal(body.activeAgent, null);
+    assert.equal(body.agentAttemptCount, 0);
+    assert.equal(body.repairBudget, null);
+    assert.equal(body.finalClassification, null);
+    assert.equal(body.failureCode, null);
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/v0/runs/{runId}/workflow returns internal_error when contract reports a blocked run without a canonical code', async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: 'complete',
+        contract: {
+          currentState: 'final_classification',
+          activeStep: null,
+          agentAttemptCount: 1,
+          repairBudget: { limit: 1, used: 1, remaining: 0 },
+          repairAttempts: [],
+          finalClassification: 'blocked',
+          failureCode: '__never_existed__',
+          failureMessage: 'some upstream error',
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const body = workflow.body as { failureCode: string };
+    assert.equal(body.failureCode, 'internal_error');
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST /api/v0/transform rejects unsupported targetLanguage', async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: {
+        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        targetLanguage: 'python',
+      },
+    });
+    assert.equal(response.status, 400);
+    assert.equal(calls.startTransformRun.length, 0);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST /api/v0/transform forwards expectedOutput and oracleInput to the orchestrator client', async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: {
+        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        targetLanguage: 'java',
+        expectedOutput: 'HELLO WORLD\n',
+        oracleInput: '',
+      },
+    });
+    assert.equal(response.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    assert.equal(calls.startTransformRun[0]?.targetLanguage, 'java');
+    assert.equal(calls.startTransformRun[0]?.expectedOutput, 'HELLO WORLD\n');
+    assert.equal(calls.startTransformRun[0]?.oracleInput, '');
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST /api/v0/transform rejects expectedOutput when it is not a string', async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: {
+        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        expectedOutput: 42,
+      },
+    });
+    assert.equal(response.status, 400);
+    assert.equal(calls.startTransformRun.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact exceeds configured limit', async () => {
+  const runStore = createRunStore();
+  const oversizedContent = 'A'.repeat(2048);
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    generatedFile: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'BRNCH01',
+        path: 'src/main/java/c2c/BRNCH01.java',
+        content: oversizedContent,
+        sha256: 'a'.repeat(64),
+        byteSize: oversizedContent.length,
+        mimeType: 'text/x-java',
+        uri: 'urn:c2c/gen/1',
+        kind: 'generated-project-file',
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream', artifactContentMaxBytes: 1024 },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/BRNCH01.java`,
+    );
+    assert.equal(response.status, 413);
+    const body = response.body as { error: string; limit: number; byteSize: number };
+    assert.equal(body.error, 'artifact_too_large');
+    assert.equal(body.limit, 1024);
+    assert.equal(body.byteSize, oversizedContent.length);
+  } finally {
+    await server.close();
+  }
+});
+
+test('transform 502 response carries a UI-safe failureCode and never leaks orchestrator URL', async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const failingOrchestrator: OrchestratorClient = {
+    enabled: true,
+    async startRun() {
+      return undefined;
+    },
+    async startTransformRun() {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:18088 to http://orchestrator.internal:18088/v0/runs');
+    },
+    async getRun() {
+      return undefined;
+    },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated() {
+      return undefined;
+    },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
+      return undefined;
+    },
+    async getBuildTest() {
+      return undefined;
+    },
+    async getEvidence() {
+      return undefined;
+    },
+    async getEvents() {
+      return undefined;
+    },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
+      return undefined;
+    },
+    async getWorkflow() {
+      return undefined;
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: failingOrchestrator,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n' },
+    });
+    assert.equal(response.status, 502);
+    const body = response.body as { error: string; failureCode: string };
+    assert.equal(body.failureCode, 'service_unavailable');
+    assert.ok(!body.error.includes('http://orchestrator'), `error must not leak upstream url: ${body.error}`);
+    assert.equal(runStore.list().length, 0);
   } finally {
     await server.close();
   }

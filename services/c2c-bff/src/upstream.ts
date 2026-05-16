@@ -94,6 +94,9 @@ export interface OrchestratorClient {
     requester?: string;
     sourceName?: string;
     options?: unknown;
+    targetLanguage?: string;
+    expectedOutput?: string;
+    oracleInput?: string;
   }): Promise<UpstreamResponse | undefined>;
   getRun(runId: string): Promise<UpstreamResponse | undefined>;
   getArtifacts(runId: string): Promise<UpstreamResponse | undefined>;
@@ -107,6 +110,8 @@ export interface OrchestratorClient {
   getProgress(runId: string): Promise<UpstreamResponse | undefined>;
   // Issue #96: experience-learning summary view sourced via orchestrator.
   getLearning(runId: string): Promise<UpstreamResponse | undefined>;
+  // Issue #172: W0.2 run contract (state machine, repair budget, failure code).
+  getWorkflow(runId: string): Promise<UpstreamResponse | undefined>;
 }
 
 export interface EvidenceClient {
@@ -164,6 +169,9 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       async getLearning() {
         return undefined;
       },
+      async getWorkflow() {
+        return undefined;
+      },
     };
   }
   const getRunScopedArtifact = async (runId: string, segment: string): Promise<UpstreamResponse | undefined> => {
@@ -192,24 +200,45 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
         timeoutMs,
       });
     },
-    async startTransformRun({ programId, sourceText, requester, sourceName, options }) {
+    async startTransformRun({
+      programId,
+      sourceText,
+      requester,
+      sourceName,
+      options,
+      targetLanguage,
+      expectedOutput,
+      oracleInput,
+    }) {
       const sha256 = createHash('sha256').update(sourceText, 'utf8').digest('hex');
-      const payload = {
+      const inputRef: Record<string, unknown> = {
+        kind: 'source',
+        uri: `urn:c2c/ui-source/${sha256}`,
+        sourceText,
+        sha256,
+        byteSize: Buffer.byteLength(sourceText, 'utf8'),
+        mimeType: 'text/x-cobol',
+      };
+      if (typeof expectedOutput === 'string' && expectedOutput.length > 0) {
+        inputRef.expectedOutput = expectedOutput;
+      }
+      if (typeof oracleInput === 'string' && oracleInput.length > 0) {
+        inputRef.oracleInput = oracleInput;
+      }
+      const payload: Record<string, unknown> = {
         requester: requester ?? 'c2c-ui',
-        inputRef: {
-          kind: 'source',
-          uri: `urn:c2c/ui-source/${sha256}`,
-          sourceText,
-          sha256,
-          byteSize: Buffer.byteLength(sourceText, 'utf8'),
-          mimeType: 'text/x-cobol',
-        },
+        inputRef,
         evidenceRefs: [],
         modelPrompt: '',
         programId,
-        ...(typeof sourceName === 'string' && sourceName.length > 0 ? { sourceName } : {}),
-        ...(options === undefined ? {} : { options }),
+        targetLanguage: targetLanguage ?? 'java',
       };
+      if (typeof sourceName === 'string' && sourceName.length > 0) {
+        payload.sourceName = sourceName;
+      }
+      if (options !== undefined) {
+        payload.options = options;
+      }
       return http.request(`${baseUrl}/v0/runs`, {
         method: 'POST',
         body: payload,
@@ -262,6 +291,9 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
     },
     async getLearning(runId: string) {
       return getRunScopedArtifact(runId, 'learning');
+    },
+    async getWorkflow(runId: string) {
+      return getRunScopedArtifact(runId, 'workflow');
     },
   };
 }
