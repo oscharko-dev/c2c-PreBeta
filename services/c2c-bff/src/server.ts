@@ -446,7 +446,37 @@ function parseBooleanString(value: string): boolean | undefined {
   return undefined;
 }
 
-function normalizeModelGatewayHealthView(payload: unknown): Record<string, unknown> {
+function normalizeModelGatewayRoleAvailability(payload: unknown): Record<string, unknown>[] {
+  const body = asRecord(payload) ?? {};
+  const roles = Array.isArray(body.roles) ? body.roles : [];
+  return roles.map((entry) => {
+    const role = asRecord(entry) ?? {};
+    return {
+      role: asString(role.role),
+      status: asString(role.status),
+      policyId: asString(role.policyId),
+      availableModels: asStringArray(role.availableModels),
+      configuredModels: asStringArray(role.configuredModels),
+      reason: asString(role.reason),
+    };
+  }).filter((entry) => entry.role.length > 0 && entry.status.length > 0);
+}
+
+function normalizeModelGatewayCapabilitiesView(payload: unknown): Record<string, unknown> {
+  const body = asRecord(payload) ?? {};
+  const providerMode = asString(body.provider);
+  const policyId = asString(body.policyId);
+  const roles = normalizeModelGatewayRoleAvailability(body);
+  const anyUnavailable = roles.some((entry) => entry.status !== 'ok');
+  return {
+    status: anyUnavailable ? 'degraded' : 'ok',
+    providerMode,
+    policyId,
+    roles,
+  };
+}
+
+function normalizeModelGatewayHealthView(payload: unknown, capabilitiesPayload?: unknown): Record<string, unknown> {
   const body = asRecord(payload) ?? {};
   const configured = asStringRecord(body.configured);
   const providerMode = configured.mode || configured.modelProvider || asString(body.status);
@@ -466,6 +496,8 @@ function normalizeModelGatewayHealthView(payload: unknown): Record<string, unkno
     dataPolicy,
     ledgerEnabled,
     eventEmission,
+    policyId: asString(body.policyId) || configured.policyId || '',
+    roleAvailability: normalizeModelGatewayRoleAvailability(capabilitiesPayload),
   };
 }
 
@@ -1709,7 +1741,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         try {
           const upstream = await modelGateway.getHealth();
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
-            jsonResponse(res, upstream.status, normalizeModelGatewayHealthView(upstream.body));
+            let capabilitiesBody: unknown;
+            try {
+              const capabilities = await modelGateway.getCapabilities();
+              if (capabilities && capabilities.status >= 200 && capabilities.status < 300) {
+                capabilitiesBody = capabilities.body;
+              }
+            } catch {
+              capabilitiesBody = undefined;
+            }
+            jsonResponse(res, upstream.status, normalizeModelGatewayHealthView(upstream.body, capabilitiesBody));
             return;
           }
           jsonResponse(res, 503, { error: 'Model Gateway upstream unavailable' });
@@ -1728,6 +1769,24 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           const upstream = await modelGateway.getModels();
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             jsonResponse(res, upstream.status, normalizeModelGatewayModelsView(upstream.body));
+            return;
+          }
+          jsonResponse(res, 503, { error: 'Model Gateway upstream unavailable' });
+        } catch (err) {
+          jsonResponse(res, 503, { error: 'Model Gateway upstream failed' });
+        }
+        return;
+      }
+
+      if (pathname === '/api/v0/model-gateway/capabilities' && method === 'GET') {
+        if (!modelGateway.enabled) {
+          jsonResponse(res, 503, { error: 'Model Gateway unavailable in deterministic W0 mode' });
+          return;
+        }
+        try {
+          const upstream = await modelGateway.getCapabilities();
+          if (upstream && upstream.status >= 200 && upstream.status < 300) {
+            jsonResponse(res, upstream.status, normalizeModelGatewayCapabilitiesView(upstream.body));
             return;
           }
           jsonResponse(res, 503, { error: 'Model Gateway upstream unavailable' });

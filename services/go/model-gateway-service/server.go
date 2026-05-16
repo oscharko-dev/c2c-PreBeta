@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -273,18 +274,13 @@ func (s *ModelGatewayService) roleAvailability(role string) RoleAvailability {
 	now := s.now()
 	available := make([]string, 0)
 	if configured == nil {
-		for _, model := range s.activeModels() {
-			if s.isModelDeploymentAllowed(model.ID) && model.Provider == s.allowlist.Mode {
-				available = append(available, model.ID)
-			}
-		}
 		return RoleAvailability{
 			Role:             role,
-			Status:           "ok",
+			Status:           "unavailable",
 			PolicyID:         s.resolvedPolicyID(),
-			AvailableModels:  available,
+			AvailableModels:  nil,
 			ConfiguredModels: nil,
-			Reason:           "no role-specific allowlist; falls back to general allowlist",
+			Reason:           "role is not configured in allowlist",
 		}
 	}
 	configuredCopy := append([]string{}, configured...)
@@ -374,7 +370,10 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 
 	var request ModelInvocationRequest
 	if err := decodeJSON(r, &request); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":     err.Error(),
+			"errorCode": errorCodeMalformedRequest,
+		})
 		return
 	}
 	if request.Parameters == nil {
@@ -383,7 +382,10 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 
 	requestRef, err := ComputeSHA256Ref(request)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":     "invalid request payload",
+			"errorCode": errorCodeMalformedRequest,
+		})
 		return
 	}
 
@@ -423,10 +425,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		record.ErrorMessage = err.Error()
 		var validationErr ModelGatewayValidationError
 		_ = errors.As(err, &validationErr)
-		errorCode := validationErr.Code
-		if isPolicyValidationCode(validationErr.Code) {
-			errorCode = errorCodePolicyDenied
-		}
+		errorCode := errorCodeForValidationErr(validationErr.Code)
 		record.ErrorCode = errorCode
 		outputRef, outputRefErr := ComputeSHA256Ref(map[string]any{
 			"invocationId": invocationID,
@@ -476,11 +475,11 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 			RelatedRecords: []string{fmt.Sprintf("run:%s", request.RunID)},
 		})
 		writeJSON(w, statusForValidationErr(err), map[string]any{
-			"error":        err.Error(),
-			"errorCode":    errorCode,
+			"error":          err.Error(),
+			"errorCode":      errorCode,
 			"validationCode": validationErr.Code,
-			"invocationId": invocationID,
-			"policyId":     s.resolvedPolicyID(),
+			"invocationId":   invocationID,
+			"policyId":       s.resolvedPolicyID(),
 		})
 		return
 	}
@@ -501,7 +500,6 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	var usage map[string]any
 	if invokeErr != nil {
 		outputStatus = statusFailed
-		errorMessage = invokeErr.Error()
 		switch {
 		case errors.Is(invokeErr, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded):
 			errorClass = errorClassProviderTimeout
@@ -510,6 +508,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 			errorClass = errorClassProviderError
 			errorCode = errorCodeProviderError
 		}
+		errorMessage = safeProviderFailureMessage(errorCode)
 	} else {
 		outputStatus = normalizeInvocationStatus(output.Status)
 		if output.Data != nil {
@@ -603,7 +602,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 			statusCode = http.StatusGatewayTimeout
 		}
 		writeJSON(w, statusCode, map[string]any{
-			"error":        invokeErr.Error(),
+			"error":        errorMessage,
 			"errorCode":    errorCode,
 			"errorClass":   errorClass,
 			"invocationId": invocationID,
@@ -637,6 +636,16 @@ func normalizeInvocationStatus(status string) string {
 	}
 }
 
+func safeProviderFailureMessage(errorCode string) string {
+	if errorCode == errorCodeProviderTimeout {
+		return "model provider timed out"
+	}
+	if errorCode == errorCodeProviderUnavailable {
+		return "model provider unavailable"
+	}
+	return "model provider error"
+}
+
 func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest, requestRef DataReference) (validatedInvocation, error) {
 	result := validatedInvocation{
 		request: request,
@@ -645,7 +654,7 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 			RequestRef:       requestRef,
 			DataClass:        request.DataClass,
 			PromptTemplate:   request.PromptTemplateVersion,
-			Parameters:       request.Parameters,
+			Parameters:       sanitizeLedgerParameters(request.Parameters),
 			StructuredOutput: request.StructuredOutput,
 			PolicyID:         s.resolvedPolicyID(),
 			AgentRole:        strings.TrimSpace(request.AgentRole),
@@ -778,6 +787,105 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 	return result, nil
 }
 
+func sanitizeLedgerParameters(parameters map[string]any) map[string]any {
+	out := make(map[string]any)
+	for key, value := range parameters {
+		switch key {
+		case "temperature", "max_tokens", "attemptNumber", "repairBudgetRemaining":
+			if number, ok := ledgerNumber(value); ok {
+				out[key] = number
+			}
+		case "runId", "promptTemplateId", "failureCategory":
+			if text, ok := value.(string); ok && isSafeLedgerString(text) {
+				out[key] = text
+			}
+		case "sourceRef", "semanticIrRef", "baselineJavaRef", "oracleRef", "previousJavaCandidateRef", "buildTestResultRef":
+			if ref, ok := sanitizeLedgerReference(value); ok {
+				out[key] = ref
+			}
+		case "previousRepairDecisionRefs":
+			if refs, ok := sanitizeLedgerReferenceList(value); ok {
+				out[key] = refs
+			}
+		}
+	}
+	return out
+}
+
+func ledgerNumber(value any) (any, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return typed, true
+	case float64:
+		return typed, true
+	case float32:
+		return typed, true
+	default:
+		return nil, false
+	}
+}
+
+func sanitizeLedgerReference(value any) (map[string]any, bool) {
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	ref := make(map[string]any)
+	if uri, ok := raw["uri"].(string); ok && isSafeLedgerURI(uri) {
+		ref["uri"] = uri
+	}
+	if sha, ok := raw["sha256"].(string); ok && len(sha) == 64 {
+		if _, err := hex.DecodeString(sha); err == nil {
+			ref["sha256"] = sha
+		}
+	}
+	if byteSize, ok := ledgerNumber(raw["byteSize"]); ok {
+		ref["byteSize"] = byteSize
+	}
+	if kind, ok := raw["kind"].(string); ok && isSafeLedgerString(kind) {
+		ref["kind"] = kind
+	}
+	return ref, len(ref) > 0
+}
+
+func sanitizeLedgerReferenceList(value any) ([]map[string]any, bool) {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	refs := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if ref, ok := sanitizeLedgerReference(item); ok {
+			refs = append(refs, ref)
+		}
+	}
+	return refs, len(refs) > 0
+}
+
+func isSafeLedgerURI(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "urn:") && isSafeLedgerString(value)
+}
+
+func isSafeLedgerString(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(trimmed) > 256 {
+		return false
+	}
+	if strings.ContainsAny(trimmed, "\r\n\t") || strings.Contains(trimmed, "://") {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	for _, marker := range []string{"api_key", "apikey", "authorization", "bearer ", "secret", "token", "password", "sk-"} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *ModelGatewayService) activeModels() []ModelMetadata {
 	active := make([]ModelMetadata, 0, len(s.registry.Models))
 	now := s.now()
@@ -828,9 +936,21 @@ func statusForValidationErr(err error) int {
 		switch typedErr.Code {
 		case "forbidden_model", "forbidden_data_class", "forbidden_role", "disallowed_model_endpoint", "inactive_model", "timeout_exceeded_provider", "timeout_exceeded_model_default":
 			return http.StatusForbidden
+		case "provider_not_ready":
+			return http.StatusServiceUnavailable
 		}
 	}
 	return http.StatusBadRequest
+}
+
+func errorCodeForValidationErr(code string) string {
+	if isPolicyValidationCode(code) {
+		return errorCodePolicyDenied
+	}
+	if code == "provider_not_ready" {
+		return errorCodeProviderUnavailable
+	}
+	return errorCodeMalformedRequest
 }
 
 // isPolicyValidationCode reports whether the validation code represents a

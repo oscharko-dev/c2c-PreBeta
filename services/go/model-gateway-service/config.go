@@ -16,8 +16,8 @@ const (
 )
 
 const (
-	AgentRoleTransformation      = "transformation"
-	AgentRoleVerificationRepair  = "verification-repair"
+	AgentRoleTransformation     = "transformation"
+	AgentRoleVerificationRepair = "verification-repair"
 )
 
 var w02AgentRoles = []string{AgentRoleTransformation, AgentRoleVerificationRepair}
@@ -182,14 +182,16 @@ func (c FoundryDevelopmentAllowlist) IsRoleConfigured(role string) bool {
 }
 
 // IsRoleAllowed reports whether the role may invoke the given modelID.
-// If no role is configured, all models that pass the general allowlist are allowed.
+// Governed W0.2 model access is role-scoped: callers must stamp a configured
+// agentRole so the gateway can enforce the role-to-model policy.
 func (c FoundryDevelopmentAllowlist) IsRoleAllowed(role, modelID string) bool {
-	if strings.TrimSpace(role) == "" {
-		return true
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return false
 	}
 	models, ok := c.Roles[role]
 	if !ok {
-		return true
+		return false
 	}
 	for _, id := range models {
 		if id == modelID {

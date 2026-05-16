@@ -436,6 +436,7 @@ export interface ModelGatewayClient {
   enabled: boolean;
   getHealth(): Promise<UpstreamResponse | undefined>;
   getModels(): Promise<UpstreamResponse | undefined>;
+  getCapabilities(): Promise<UpstreamResponse | undefined>;
 }
 
 export interface HarnessClient {
@@ -449,6 +450,7 @@ export function createModelGatewayClient(baseUrl: string, http: HttpClient, time
       enabled: false,
       async getHealth() { return undefined; },
       async getModels() { return undefined; },
+      async getCapabilities() { return undefined; },
     };
   }
   const normalized = baseUrl.replace(/\/+$/, '');
@@ -459,6 +461,9 @@ export function createModelGatewayClient(baseUrl: string, http: HttpClient, time
     },
     async getModels() {
       return http.request(`${normalized}/v0/models`, { method: 'GET', timeoutMs });
+    },
+    async getCapabilities() {
+      return http.request(`${normalized}/v0/capabilities`, { method: 'GET', timeoutMs });
     },
   };
 }

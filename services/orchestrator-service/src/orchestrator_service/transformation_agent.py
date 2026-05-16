@@ -38,11 +38,12 @@ import datetime
 import json
 import re
 import time
-from collections.abc import Callable, Mapping
+import urllib.parse
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from .agent_contracts import (
     AgentContractInvalidError,
@@ -398,13 +399,13 @@ def _classify_gateway_failure(exc: BaseException) -> TransformationAgentError:
     """
     text = str(exc).lower()
     if "model_provider_timeout" in text or "deadline exceeded" in text or "timed out" in text:
-        return AgentTimeoutError(f"model gateway timed out: {exc}")
+        return AgentTimeoutError("model gateway timed out")
     if "policy deny" in text:
-        return ModelPolicyDeniedAgentError(f"model gateway policy denied: {exc}")
+        return ModelPolicyDeniedAgentError("model gateway policy denied")
     for marker in _MODEL_POLICY_DENY_MARKERS:
         if marker in text:
-            return ModelPolicyDeniedAgentError(f"model gateway policy denied: {exc}")
-    return ModelGatewayUnavailableError(f"model gateway unavailable: {exc}")
+            return ModelPolicyDeniedAgentError("model gateway policy denied")
+    return ModelGatewayUnavailableError("model gateway unavailable")
 
 
 def _canonical_json_bytes(payload: Any) -> bytes:
@@ -460,6 +461,7 @@ class HarnessModelGatewayInvoker:
 
     def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         capability = dict(self._capability())
+        self._ensure_role_available(capability, payload)
         try:
             response = self._harness_gateway.invoke_capability(capability, dict(payload))
         except HarnessFailure as exc:
@@ -469,6 +471,87 @@ class HarnessModelGatewayInvoker:
         if not isinstance(response, Mapping):
             raise ModelGatewayUnavailableError("model gateway returned non-object response")
         return dict(response)
+
+    def _ensure_role_available(
+        self,
+        capability: Mapping[str, JsonValue],
+        payload: Mapping[str, JsonValue],
+    ) -> None:
+        """Fail before POST /v0/invoke when the gateway reports no role model.
+
+        The check is intentionally best-effort for test doubles and legacy
+        harnesses that only expose the capability proxy. In production the
+        HarnessGateway carries a JSONHTTPClient, so the invoker can consult the
+        Model Gateway's role-specific `/v0/capabilities` view before sending
+        prompt-bearing invocation content.
+        """
+        agent_role = str(payload.get("agentRole") or "").strip()
+        model_id = str(payload.get("modelId") or "").strip()
+        if not agent_role:
+            return
+        capabilities_url = _model_gateway_capabilities_url(
+            str(capability.get("endpoint") or "")
+        )
+        if capabilities_url is None:
+            return
+        http = getattr(self._harness_gateway, "http", None)
+        get_json = getattr(http, "get_json", None)
+        if not callable(get_json):
+            return
+        try:
+            response = get_json(capabilities_url)
+        except Exception as exc:  # noqa: BLE001 — transport failure blocks model access.
+            raise ModelGatewayUnavailableError(
+                f"model gateway capabilities unavailable for agentRole {agent_role!r}"
+            ) from exc
+        if getattr(response, "status", None) != 200:
+            raise ModelGatewayUnavailableError(
+                f"model gateway capabilities unavailable for agentRole {agent_role!r}"
+            )
+        capabilities = getattr(response, "payload", None)
+        if not isinstance(capabilities, Mapping):
+            raise ModelGatewayUnavailableError("model gateway capabilities returned non-object response")
+        roles = capabilities.get("roles")
+        if not isinstance(roles, Sequence) or isinstance(roles, (str, bytes, bytearray)):
+            raise ModelGatewayUnavailableError("model gateway capabilities missing role availability")
+        for raw_role in roles:
+            if not isinstance(raw_role, Mapping):
+                continue
+            if str(raw_role.get("role") or "").strip() != agent_role:
+                continue
+            status = str(raw_role.get("status") or "").strip().lower()
+            available_raw = raw_role.get("availableModels")
+            available_models = {
+                str(item).strip()
+                for item in available_raw
+                if str(item).strip()
+            } if isinstance(available_raw, Sequence) and not isinstance(available_raw, (str, bytes, bytearray)) else set()
+            if status != "ok" or not available_models:
+                reason = str(raw_role.get("reason") or "no approved active model for role").strip()
+                raise ModelGatewayUnavailableError(
+                    f"no approved model available for agentRole {agent_role!r}: {reason}"
+                )
+            if model_id and model_id not in available_models:
+                raise ModelPolicyDeniedAgentError(
+                    f"modelId {model_id!r} is not available for agentRole {agent_role!r}"
+                )
+            return
+        raise ModelGatewayUnavailableError(
+            f"model gateway capabilities missing agentRole {agent_role!r}"
+        )
+
+
+def _model_gateway_capabilities_url(endpoint: str) -> str | None:
+    parsed = urllib.parse.urlparse(endpoint.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/v0/invoke"):
+        return None
+    capabilities_path = f"{path[:-len('/v0/invoke')]}/v0/capabilities"
+    return urllib.parse.urlunparse(
+        parsed._replace(path=capabilities_path, query="", fragment="")
+    )
 
 
 # ---------------------------------------------------------------------------

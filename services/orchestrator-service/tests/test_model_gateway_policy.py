@@ -16,6 +16,7 @@ import unittest
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.harness import HarnessFailure
 from orchestrator_service.run_contract import (
+    CLASSIFICATION_BLOCKED,
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
 )
@@ -139,11 +140,15 @@ class ModelPolicyDeniedRunFinalisationTests(unittest.TestCase):
                 input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
             )
 
-        final_classification = gateway.updated_runs[-1][1]
+        harness_status = gateway.updated_runs[-1][1]
         # The runner classifies policy denials as blocked, not failed,
         # because the run was rejected by a deterministic policy decision
         # rather than crashing.
-        self.assertIn(final_classification, {"blocked", "failed"})
+        self.assertEqual(harness_status, "failed")
+        contract = runner.workflow_contract_payload("run-policy-1")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertEqual(contract["failureCode"], FAILURE_MODEL_POLICY_DENIED)
         self.assertEqual(
             W0WorkflowRunner._failure_code_from_exception(
                 ModelPolicyDeniedStepError("denied")
@@ -169,6 +174,10 @@ class ModelPolicyDeniedRunFinalisationTests(unittest.TestCase):
                 input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
             )
         self.assertNotIsInstance(cm.exception, ModelPolicyDeniedStepError)
+        contract = runner.workflow_contract_payload("run-policy-2")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertEqual(contract["failureCode"], FAILURE_MODEL_GATEWAY_UNAVAILABLE)
 
     def test_failure_code_resolution_for_policy_denied(self):
         # Independent of the runner: a ModelPolicyDeniedStepError must always

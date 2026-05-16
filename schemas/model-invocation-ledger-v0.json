@@ -63,7 +63,7 @@
     "errorCode": {
       "type": "string",
       "minLength": 1,
-      "description": "Structured error code (Issue #168). Set to model_policy_denied / model_provider_timeout / model_provider_error when the request fails; absent on success."
+      "description": "Structured error code (Issue #168). Set to malformed_request / model_policy_denied / model_provider_unavailable / model_provider_timeout / model_provider_error when the request fails; absent on success."
     },
     "dataClass": {
       "type": "string",

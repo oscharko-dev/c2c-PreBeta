@@ -296,6 +296,7 @@ class TransformationAgentWorkflowIntegrationTests(unittest.TestCase):
         contract = runner.workflow_contract_payload("run-1")
         self.assertIsNotNone(contract)
         self.assertEqual(contract["failureCode"], FAILURE_MODEL_POLICY_DENIED)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
 
     def test_agent_request_payload_carries_baseline_reference(self) -> None:
         invoker = _StubAgentInvoker(_ok_model_response())

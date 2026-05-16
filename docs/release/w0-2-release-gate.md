@@ -270,7 +270,7 @@ Microsoft Foundry credentials exported:
 
 ```bash
 export AZURE_FOUNDRY_ENDPOINT=...    # see .env.example
-export AZURE_FOUNDRY_API_KEY=...     # never commit
+export AZURE_FOUNDRY_API_KEY_REF=keyring/foundry/API_KEY
 ./scripts/w0-2-release-gate.sh --foundry
 ```
 

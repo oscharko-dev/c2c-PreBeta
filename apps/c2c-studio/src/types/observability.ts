@@ -16,7 +16,18 @@ export interface ModelGatewayHealth {
   dataPolicy?: string;
   ledgerEnabled?: boolean;
   eventEmission?: boolean;
+  policyId?: string;
+  roleAvailability?: ModelGatewayRoleAvailability[];
   error?: string;
+}
+
+export interface ModelGatewayRoleAvailability {
+  role: string;
+  status: string;
+  policyId?: string;
+  availableModels: string[];
+  configuredModels: string[];
+  reason?: string;
 }
 
 export interface ModelGatewayModel {

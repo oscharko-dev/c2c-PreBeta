@@ -97,8 +97,14 @@ func newGatewayServiceForTest(now time.Time, provider ModelProvider, model Model
 	}
 	if !allowlisted {
 		allowlist.AllowedModelIDs = []string{"other-model"}
+		allowlist.Roles = map[string][]string{
+			AgentRoleTransformation: {"other-model"},
+		}
 	} else {
 		allowlist.AllowedModelIDs = []string{model.ID}
+		allowlist.Roles = map[string][]string{
+			AgentRoleTransformation: {model.ID},
+		}
 	}
 	return &ModelGatewayService{
 		registry:                    registry,
@@ -172,11 +178,16 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 		RunID:                 "run-1",
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
 		DataClass:             "model",
 		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
 		TimeoutMs:             1000,
-		Parameters:            map[string]any{"temperature": 0.2},
+		Parameters: map[string]any{
+			"temperature":      0.2,
+			"promptTemplateId": "c2c.test-template.v0",
+			"promptCopy":       "AZURE_FOUNDRY_API_KEY=abcdefghijklmnop",
+		},
 	}
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
@@ -198,6 +209,15 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 	}
 	if ledger.entries[0].Status != "completed" {
 		t.Fatalf("expected ledger status completed, got %s", ledger.entries[0].Status)
+	}
+	if ledger.entries[0].Parameters["temperature"] != 0.2 {
+		t.Fatalf("expected safe temperature parameter in ledger, got %#v", ledger.entries[0].Parameters)
+	}
+	if ledger.entries[0].Parameters["promptTemplateId"] != "c2c.test-template.v0" {
+		t.Fatalf("expected promptTemplateId metadata in ledger, got %#v", ledger.entries[0].Parameters)
+	}
+	if _, ok := ledger.entries[0].Parameters["promptCopy"]; ok {
+		t.Fatalf("unexpected promptCopy persisted in ledger parameters: %#v", ledger.entries[0].Parameters)
 	}
 	if response.Provider != ModelProviderFoundryDevelopment {
 		t.Fatalf("expected provider %s, got %s", ModelProviderFoundryDevelopment, response.Provider)
@@ -269,6 +289,7 @@ func TestModelGatewayService_InvokeWithAuditSinksDisabledSkipsLedgerAndEvent(t *
 		RunID:                 "run-1",
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
 		DataClass:             "model",
 		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
@@ -320,6 +341,7 @@ func TestModelGatewayService_RejectsModelNotInAllowlist(t *testing.T) {
 		RunID:                 "run-1",
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
 		DataClass:             "model",
 		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
@@ -385,6 +407,7 @@ func TestModelGatewayService_RejectsInactiveAllowlistedModel(t *testing.T) {
 		RunID:                 "run-1",
 		ModelID:               "foundry-gpt",
 		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
 		DataClass:             "model",
 		PromptTemplateVersion: "v1",
 		Prompt:                "Hello",
@@ -437,6 +460,7 @@ func TestModelGatewayService_RejectsMissingPromptTemplateWithoutLedgerFailure(t 
 		RunID:      "run-1",
 		ModelID:    "foundry-gpt",
 		Actor:      "agent-1",
+		AgentRole:  AgentRoleTransformation,
 		DataClass:  "model",
 		Prompt:     "Hello",
 		TimeoutMs:  1000,
@@ -454,6 +478,13 @@ func TestModelGatewayService_RejectsMissingPromptTemplateWithoutLedgerFailure(t 
 	}
 	if !strings.Contains(rr.Body.String(), "promptTemplateVersion is required") {
 		t.Fatalf("expected prompt template error response, got %s", rr.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected json error response: %v", err)
+	}
+	if response["errorCode"] != errorCodeMalformedRequest {
+		t.Fatalf("expected errorCode=%q, got %v", errorCodeMalformedRequest, response["errorCode"])
 	}
 	if provider.calls != 0 {
 		t.Fatalf("expected no provider call, got %d", provider.calls)
