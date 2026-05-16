@@ -28,8 +28,6 @@ function runLabelFromProductState(productState: ProductState, programId: string 
     case 'verifying':
       return 'Verifying generated Java';
     case 'success':
-      return 'Run verified by BFF';
-    case 'ready':
       return 'Run verified';
     case 'blocked':
       return 'Run blocked';

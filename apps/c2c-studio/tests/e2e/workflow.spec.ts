@@ -230,6 +230,28 @@ test.describe('c2c Studio browser acceptance', () => {
     await expect(generatedJavaPane).toContainText(new RegExp(`class\\s+${generatedClassName}`));
     await expect(page.getByText('Verified', { exact: true })).toBeVisible();
 
+    // Issue #173: live happy path must surface the W0.2 workflow contract.
+    // We fetch /workflow directly to assert the contract shape, then verify
+    // the Agent tab renders without a failure verdict.
+    const workflowBody = await fetchJsonFromPage(
+      page,
+      `${BFF_BASE_URL}/api/v0/runs/${encodeURIComponent(runId)}/workflow`,
+    ) as {
+      runId: string;
+      finalClassification: string | null;
+      failureCode: string | null;
+      repairAttempts: unknown[];
+    };
+    expect(workflowBody.runId).toBe(runId);
+    expect(workflowBody.failureCode).toBeNull();
+    expect(workflowBody.finalClassification === null || workflowBody.finalClassification === 'success').toBe(true);
+    expect(Array.isArray(workflowBody.repairAttempts)).toBe(true);
+
+    await page.getByRole('tab', { name: 'Agent' }).click();
+    const agentPanelHappy = page.getByTestId('agent-activity-panel');
+    await expect(agentPanelHappy).toBeVisible();
+    await expect(agentPanelHappy.getByTestId('agent-activity-final-failure')).toHaveCount(0);
+
     await page.getByRole('tab', { name: 'Build & Test' }).click();
     await expect(page.getByText('Pipeline Stages')).toBeVisible();
     await expect(page.getByText('Parse COBOL')).toBeVisible();

@@ -3,7 +3,6 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
 import { DEFAULT_SOURCE_NAME, MAX_SOURCE_BYTES, getSourceByteSize } from '../lib/sourceAnalysis';
 import { ApiResult, TransformResponse } from '../types/api';
-import { TransformRequest } from '../types/reference-program';
 import { useTransformationRun } from './transformationRun';
 
 export interface SourceWorkspaceState {

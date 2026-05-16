@@ -166,11 +166,6 @@ export function GeneratedJavaEditorPane() {
               Verified
             </Badge>
           )}
-          {productState.state === 'ready' && (
-            <Badge variant="success" icon={true}>
-              Verified
-            </Badge>
-          )}
           {productState.state === 'blocked' && (
             <Badge variant="error" icon={true}>
               Blocked

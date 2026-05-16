@@ -30,7 +30,6 @@ vi.mock('@/stores/transformationRun', async (importOriginal) => {
   };
 });
 
-const mockWorkbench = vi.fn();
 vi.mock('@/stores/workbench', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/workbench')>();
   return {
