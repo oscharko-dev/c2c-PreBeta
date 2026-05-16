@@ -246,7 +246,7 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
     vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
     vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
@@ -281,7 +281,7 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
     vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
     vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
@@ -317,7 +317,7 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
     vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
     vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
@@ -355,7 +355,7 @@ describe('transformation run state machine', () => {
     vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
     vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
     vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
@@ -401,7 +401,7 @@ describe('transformation run state machine', () => {
       details: { kind: 'http', body: { error: 'orchestrator unavailable' } },
     } as any);
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
     vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 
@@ -569,7 +569,7 @@ describe('transformation run state machine', () => {
         : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).artifacts as any)
     );
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(runId => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
     vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
 

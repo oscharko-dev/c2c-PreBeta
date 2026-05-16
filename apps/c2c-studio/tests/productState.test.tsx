@@ -1,6 +1,66 @@
 import { describe, expect, it } from 'vitest';
 import { deriveProductState } from '../src/types/state';
 import { TransformationRunState } from '../src/types/run';
+import { BuildTestView, EvidenceView, GeneratedView, RunSummary } from '../src/types/api';
+
+// Typed fixture factories — keep tests strictly-typed (no `as any`) while
+// staying compact. Each factory fills in the orchestrator/BFF metadata the
+// derivation logic ignores so test cases can focus on the field under test.
+function makeGenerated(overrides: Partial<GeneratedView> = {}): GeneratedView {
+  return {
+    runId: 'run-test',
+    programId: 'PROG',
+    mode: 'live',
+    productMode: 'live',
+    status: 'generated',
+    artifactRef: { uri: '', sha256: 'a' },
+    ...overrides,
+  };
+}
+
+function makeBuildTest(overrides: Partial<BuildTestView> = {}): BuildTestView {
+  return {
+    runId: 'run-test',
+    programId: 'PROG',
+    mode: 'live',
+    productMode: 'live',
+    status: 'ok',
+    classification: 'match',
+    generatedArtifactRef: { uri: '', sha256: 'a' },
+    ...overrides,
+  };
+}
+
+function makeEvidence(overrides: Partial<EvidenceView> = {}): EvidenceView {
+  return {
+    runId: 'run-test',
+    programId: 'PROG',
+    mode: 'live',
+    productMode: 'live',
+    status: 'complete',
+    generatedArtifactRef: { uri: '', sha256: 'a' },
+    ...overrides,
+  };
+}
+
+function makeSummary(overrides: Partial<RunSummary> = {}): RunSummary {
+  return {
+    runId: 'run-test',
+    programId: 'PROG',
+    status: 'completed',
+    mode: 'live',
+    productMode: 'live',
+    createdAt: '2026-05-16T00:00:00Z',
+    updatedAt: '2026-05-16T00:00:01Z',
+    activeStep: null,
+    agentAttemptCount: 0,
+    repairBudget: null,
+    finalClassification: null,
+    failureCode: null,
+    failureMessage: null,
+    ...overrides,
+  };
+}
 
 describe('Product State Derivation', () => {
   function makeState(overrides: Partial<TransformationRunState> = {}): TransformationRunState {
@@ -45,17 +105,16 @@ describe('Product State Derivation', () => {
   it('surfaces upstream-unavailable from product mode metadata', () => {
     const state = makeState({
       phase: 'running',
-      summary: {
+      summary: makeSummary({
         runId: '123',
         programId: 'ABC',
         status: 'updating',
-        mode: 'live',
         productMode: 'unavailable',
         createdAt: '2026-05-15T10:00:00Z',
         updatedAt: '2026-05-15T10:00:01Z',
         message: 'Evidence service unavailable',
-      },
-    } as any);
+      }),
+    });
 
     expect(deriveProductState(state).state).toBe('upstream-unavailable');
   });
@@ -131,16 +190,8 @@ describe('Product State Derivation', () => {
   it('Build/test classification is divergence-known W0 coverage gap', () => {
     const state = makeState({
       phase: 'completed',
-      generated: { status: 'generated', artifactRef: { uri: '', sha256: 'a' } } as any,
-      buildTest: {
-        runId: '123',
-        programId: 'ABC',
-        mode: 'live',
-        productMode: 'live',
-        status: 'output-divergence',
-        classification: 'divergence-known-w0-coverage-gap',
-        generatedArtifactRef: { uri: '', sha256: 'a' }
-      }
+      generated: makeGenerated(),
+      buildTest: makeBuildTest({ status: 'output-divergence', classification: 'divergence-known-w0-coverage-gap' }),
     });
     const result = deriveProductState(state);
     expect(result.state).toBe('equivalence-mismatch');
@@ -149,16 +200,8 @@ describe('Product State Derivation', () => {
   it('Build/test classification is divergence-unknown', () => {
     const state = makeState({
       phase: 'completed',
-      generated: { status: 'generated', artifactRef: { uri: '', sha256: 'a' } } as any,
-      buildTest: {
-        runId: '123',
-        programId: 'ABC',
-        mode: 'live',
-        productMode: 'live',
-        status: 'output-divergence',
-        classification: 'divergence-unknown',
-        generatedArtifactRef: { uri: '', sha256: 'a' }
-      }
+      generated: makeGenerated(),
+      buildTest: makeBuildTest({ status: 'output-divergence', classification: 'divergence-unknown' }),
     });
     const result = deriveProductState(state);
     expect(result.state).toBe('equivalence-mismatch');
@@ -167,17 +210,9 @@ describe('Product State Derivation', () => {
   it('Evidence incomplete with missing artifacts', () => {
     const state = makeState({
       phase: 'completed',
-      generated: { status: 'generated', artifactRef: { uri: '', sha256: 'a' } } as any,
-      buildTest: { status: 'ok', classification: 'match', generatedArtifactRef: { uri: '', sha256: 'a' } } as any,
-      evidence: {
-        runId: '123',
-        programId: 'ABC',
-        mode: 'live',
-        productMode: 'live',
-        status: 'incomplete',
-        missingArtifacts: ['manifest.json'],
-        generatedArtifactRef: { uri: '', sha256: 'a' }
-      }
+      generated: makeGenerated(),
+      buildTest: makeBuildTest(),
+      evidence: makeEvidence({ status: 'incomplete', missingArtifacts: ['manifest.json'] }),
     });
     const result = deriveProductState(state);
     expect(result.state).toBe('evidence-incomplete');
@@ -262,17 +297,12 @@ describe('Product State Derivation', () => {
   it('surfaces build failures before ready state', () => {
     const state = makeState({
       phase: 'completed',
-      generated: { status: 'generated', artifactRef: { uri: '', sha256: 'a' } } as any,
-      buildTest: {
-        runId: '123',
-        programId: 'ABC',
-        mode: 'live',
-        productMode: 'live',
+      generated: makeGenerated(),
+      buildTest: makeBuildTest({
         status: 'compile-failed',
         classification: 'compile-error',
-        generatedArtifactRef: { uri: '', sha256: 'a' },
         note: 'javac failed',
-      },
+      }),
     });
 
     expect(deriveProductState(state).state).toBe('build-failed');
@@ -373,56 +403,46 @@ describe('Product State Derivation', () => {
     it('returns success only when BFF classification + build/test + evidence agree', () => {
       const state = makeState({
         phase: 'completed',
-        generated: { status: 'generated', artifactRef: { uri: '', sha256: 'a' } } as any,
-        buildTest: { status: 'ok', classification: 'match', generatedArtifactRef: { uri: '', sha256: 'a' } } as any,
-        evidence: { status: 'complete', generatedArtifactRef: { uri: '', sha256: 'a' } } as any,
-        summary: {
-          runId: '1',
-          programId: 'P',
-          status: 'completed',
-          mode: 'live',
-          productMode: 'live',
-          createdAt: '2026-05-16T00:00:00Z',
-          updatedAt: '2026-05-16T00:00:01Z',
-          activeStep: null,
-          agentAttemptCount: 1,
-          repairBudget: null,
-          finalClassification: 'success',
-          failureCode: null,
-          failureMessage: null,
-        },
+        generated: makeGenerated(),
+        buildTest: makeBuildTest(),
+        evidence: makeEvidence(),
+        summary: makeSummary({ status: 'completed', agentAttemptCount: 1, finalClassification: 'success' }),
       });
       expect(deriveProductState(state).state).toBe('success');
     });
 
-    it('falls back to legacy ready state when finalClassification missing', () => {
+    it('accepts artifact-level agreement as success when finalClassification is absent (diagnostic-fixture path)', () => {
       const state = makeState({
         phase: 'completed',
-        generated: { status: 'generated', artifactRef: { uri: '', sha256: 'a' } } as any,
-        buildTest: { status: 'ok', classification: 'match', generatedArtifactRef: { uri: '', sha256: 'a' } } as any,
-        evidence: { status: 'complete', generatedArtifactRef: { uri: '', sha256: 'a' } } as any,
+        generated: makeGenerated(),
+        buildTest: makeBuildTest(),
+        evidence: makeEvidence(),
       });
-      expect(deriveProductState(state).state).toBe('ready');
+      expect(deriveProductState(state).state).toBe('success');
+    });
+
+    it('refuses to claim success when BFF says failed even if artifacts look aligned', () => {
+      const state = makeState({
+        phase: 'completed',
+        generated: makeGenerated(),
+        buildTest: makeBuildTest(),
+        evidence: makeEvidence(),
+        summary: makeSummary({ finalClassification: 'failed', failureCode: 'agent_contract_invalid' }),
+      });
+      const result = deriveProductState(state);
+      expect(result.state).toBe('failed');
+      expect(result.failureCode).toBe('agent_contract_invalid');
     });
 
     it('maps model_gateway_unavailable failure code to blocked state', () => {
       const state = makeState({
         phase: 'failed',
-        summary: {
-          runId: '1',
-          programId: 'P',
+        summary: makeSummary({
           status: 'failed',
-          mode: 'live',
-          productMode: 'live',
-          createdAt: '2026-05-16T00:00:00Z',
-          updatedAt: '2026-05-16T00:00:01Z',
-          activeStep: null,
-          agentAttemptCount: 0,
-          repairBudget: null,
           finalClassification: 'blocked',
           failureCode: 'model_gateway_unavailable',
           failureMessage: 'gateway 502',
-        },
+        }),
       });
       const result = deriveProductState(state);
       expect(result.state).toBe('blocked');
@@ -433,21 +453,7 @@ describe('Product State Derivation', () => {
     it('maps agent_timeout failure code to failed state', () => {
       const state = makeState({
         phase: 'failed',
-        summary: {
-          runId: '1',
-          programId: 'P',
-          status: 'failed',
-          mode: 'live',
-          productMode: 'live',
-          createdAt: '2026-05-16T00:00:00Z',
-          updatedAt: '2026-05-16T00:00:01Z',
-          activeStep: null,
-          agentAttemptCount: 0,
-          repairBudget: null,
-          finalClassification: 'failed',
-          failureCode: 'agent_timeout',
-          failureMessage: null,
-        },
+        summary: makeSummary({ status: 'failed', finalClassification: 'failed', failureCode: 'agent_timeout' }),
       });
       const result = deriveProductState(state);
       expect(result.state).toBe('failed');
@@ -457,21 +463,12 @@ describe('Product State Derivation', () => {
     it('maps cancelled classification to cancelled state', () => {
       const state = makeState({
         phase: 'failed',
-        summary: {
-          runId: '1',
-          programId: 'P',
+        summary: makeSummary({
           status: 'failed',
-          mode: 'live',
-          productMode: 'live',
-          createdAt: '2026-05-16T00:00:00Z',
-          updatedAt: '2026-05-16T00:00:01Z',
-          activeStep: null,
-          agentAttemptCount: 0,
-          repairBudget: null,
           finalClassification: 'cancelled',
           failureCode: 'cancelled',
           failureMessage: 'user cancelled',
-        },
+        }),
       });
       const result = deriveProductState(state);
       expect(result.state).toBe('cancelled');
