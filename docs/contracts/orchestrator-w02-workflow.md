@@ -118,8 +118,11 @@ When build-test reports failure, the Orchestrator:
 1. Advances the state machine to `verification_repair_invoked`.
 2. Consumes one budget unit and increments `agentAttemptCount`.
 3. Invokes the Verification/Repair Agent through the Model Gateway and records
-   the attempt in `repairAttempts`, including the `buildTestResultRef` that
-   triggered that repair.
+   the attempt in `repairAttempts`, including the `modelInvocationRef`,
+   `repairInputRef`, `repairDecisionRef`, and `buildTestResultRef` that
+   triggered that repair when those governed artifacts exist. Gateway failures
+   without a real invocation record are recorded without fabricated model
+   lineage and remain evidence-incomplete.
 4. If the agent proposes a repaired candidate, advances through
    `java_candidate_persisted` → `build_test_running` and reruns build/test on
    that candidate.

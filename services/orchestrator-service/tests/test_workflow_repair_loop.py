@@ -292,6 +292,17 @@ class RepairLoopRecoveryTests(_BaseRepairLoopFixture):
         self.assertEqual(entry["repairDecision"], DECISION_PROPOSE)
         self.assertEqual(entry["failureCategory"], "java_compile_failed")
         self.assertIn("javaCandidateRef", entry)
+        self.assertEqual(
+            entry["modelInvocationRef"]["invocationId"],
+            "inv-run-1-01-repair",
+        )
+        self.assertEqual(
+            entry["modelInvocationRef"]["ledgerRef"]["uri"],
+            "urn:model-gateway/inv-run-1-01-repair",
+        )
+        self.assertIn("repairInputRef", entry)
+        self.assertIn("repairDecisionRef", entry)
+        self.assertIn("buildTestResultRef", entry)
         # Build/test was invoked twice (initial + after repair).
         build_calls = [c for c in gateway.calls if c[0] == "invoke" and c[1] == "java.build-test"]
         self.assertEqual(len(build_calls), 2)
@@ -486,6 +497,15 @@ class RepairLoopMalformedResponseTests(_BaseRepairLoopFixture):
         contract = runner.workflow_contract_payload("run-1")
         self.assertEqual(contract["failureCode"], FAILURE_AGENT_CONTRACT_INVALID)
         self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertEqual(len(contract["repairAttempts"]), 1)
+        attempt = contract["repairAttempts"][0]
+        self.assertEqual(attempt["repairDecision"], DECISION_REFUSE)
+        self.assertEqual(
+            attempt["modelInvocationRef"]["invocationId"],
+            "inv-run-1-01-repair",
+        )
+        self.assertIn("repairInputRef", attempt)
+        self.assertIn("repairDecisionRef", attempt)
         self.assertIn(
             STATE_RUN_BLOCKED,
             [entry["state"] for entry in contract["stateHistory"]],
@@ -535,6 +555,16 @@ class RepairLoopBudgetExhaustionTests(_BaseRepairLoopFixture):
         self.assertEqual(len(contract["repairAttempts"]), 2)
         for entry in contract["repairAttempts"]:
             self.assertEqual(entry["repairDecision"], DECISION_PROPOSE)
+            self.assertIn("modelInvocationRef", entry)
+            self.assertIn("repairInputRef", entry)
+            self.assertIn("repairDecisionRef", entry)
+        second_prompt = json.loads(invoker.calls[1]["prompt"])
+        self.assertIn("previousRepairDecisionRefs", second_prompt)
+        self.assertEqual(len(second_prompt["previousRepairDecisionRefs"]), 1)
+        self.assertEqual(
+            second_prompt["previousRepairDecisionRefs"][0]["uri"],
+            contract["repairAttempts"][0]["repairDecisionRef"]["uri"],
+        )
         # Build/test was called three times overall.
         build_calls = [c for c in gateway.calls if c[0] == "invoke" and c[1] == "java.build-test"]
         self.assertEqual(len(build_calls), 3)
@@ -605,7 +635,51 @@ class RepairLoopGatewayUnavailableTests(_BaseRepairLoopFixture):
         self.assertEqual(contract["failureCode"], "model_gateway_unavailable")
         # The trajectory still has one entry recording the failed attempt.
         self.assertEqual(len(contract["repairAttempts"]), 1)
-        self.assertEqual(contract["repairAttempts"][0]["repairDecision"], DECISION_REFUSE)
+        attempt = contract["repairAttempts"][0]
+        self.assertEqual(attempt["repairDecision"], DECISION_REFUSE)
+        self.assertIn("repairInputRef", attempt)
+        self.assertIn("repairDecisionRef", attempt)
+        self.assertNotIn("modelInvocationRef", attempt)
+
+    def test_gateway_timeout_surfaces_as_agent_timeout(self):
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = _StubGatewayWithBuildOutcomes(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+            build_outcomes=[
+                _build_failed("java_compile_failed", attempt_uri="urn:run-1/build/1"),
+            ],
+        )
+        invoker = _ExceptionRepairAgentInvoker(
+            HarnessFailure(504, '{"errorCode":"model_provider_timeout"}')
+        )
+        runner, _tmp = self._runner(gateway, invoker, repair_budget_max=2)
+        runner.run(context=self._context(), input_ref=self._input_ref())
+
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["failureCode"], "agent_timeout")
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertEqual(len(contract["repairAttempts"]), 1)
+
+    def test_gateway_policy_denial_surfaces_as_model_policy_denied(self):
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = _StubGatewayWithBuildOutcomes(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+            build_outcomes=[
+                _build_failed("java_compile_failed", attempt_uri="urn:run-1/build/1"),
+            ],
+        )
+        invoker = _ExceptionRepairAgentInvoker(
+            HarnessFailure(403, '{"errorCode":"model_policy_denied"}')
+        )
+        runner, _tmp = self._runner(gateway, invoker, repair_budget_max=2)
+        runner.run(context=self._context(), input_ref=self._input_ref())
+
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["failureCode"], FAILURE_MODEL_POLICY_DENIED)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertEqual(len(contract["repairAttempts"]), 1)
 
 
 if __name__ == "__main__":

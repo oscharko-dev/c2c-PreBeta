@@ -19,8 +19,26 @@ func completeW02Artifacts(t *testing.T) Artifacts {
 	repairDecisionRef := mustRef(t, "urn:c2c/agent/repair-decision/HELLO/1", map[string]string{"decision": "propose_candidate"})
 	transformationLedgerRef := mustRef(t, "urn:c2c/trajectory/run-1/transformation", map[string]string{"role": "transformation"})
 	verificationLedgerRef := mustRef(t, "urn:c2c/trajectory/run-1/verification", map[string]string{"role": "verification-repair"})
+	transformationModelLedgerRef := mustRef(t, "urn:c2c/model-invocation/inv-run-1-transformation", map[string]string{"role": "transformation"})
+	repairModelLedgerRef := mustRef(t, "urn:c2c/model-invocation/inv-run-1-repair-1", map[string]string{"role": "verification-repair"})
 	oracleExpectedRef := mustRef(t, "urn:c2c/oracle/HELLO/expected", "Hello")
 	oracleActualRef := mustRef(t, "urn:c2c/oracle/HELLO/actual", "Hello")
+	transformationModelRef := ModelInvocationRef{
+		InvocationID: "inv-run-1-transformation",
+		ModelID:      "model-x",
+		Provider:     "foundry-development",
+		Status:       "completed",
+		AgentRole:    AgentRoleTransformation,
+		LedgerRef:    transformationModelLedgerRef,
+	}
+	repairModelRef := ModelInvocationRef{
+		InvocationID: "inv-run-1-repair-1",
+		ModelID:      "model-x",
+		Provider:     "foundry-development",
+		Status:       "completed",
+		AgentRole:    AgentRoleVerificationRepair,
+		LedgerRef:    repairModelLedgerRef,
+	}
 
 	base.GeneratedJavaArtifacts = []JavaCandidateRef{
 		{
@@ -49,6 +67,7 @@ func completeW02Artifacts(t *testing.T) Artifacts {
 		AttemptNumber:       1,
 		Decision:            RepairDecisionProposeCandidate,
 		DecisionRef:         &repairDecisionRef,
+		ModelInvocationRef:  &repairModelRef,
 		NewJavaCandidateRef: &final,
 		BuildTestResultRef:  base.BuildTestResults[0],
 	}}
@@ -64,6 +83,10 @@ func completeW02Artifacts(t *testing.T) Artifacts {
 		ExpectedSHA256: oracleExpectedRef.SHA256,
 		ActualSHA256:   oracleActualRef.SHA256,
 		Summary:        "actual output matches COBOL runtime oracle",
+	}
+	base.ModelInvocations = []ModelInvocationRef{
+		transformationModelRef,
+		repairModelRef,
 	}
 
 	return base
@@ -180,6 +203,45 @@ func TestEvaluateValidationW02FailsClosedOnMissingModelInvocations(t *testing.T)
 	}
 	if !containsString(v.MissingArtifacts, "modelInvocations") {
 		t.Fatalf("missingArtifacts must call out modelInvocations; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedWhenProductiveInvocationRoleMissing(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.ModelInvocations = a.ModelInvocations[:1]
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when verification-repair model invocation is missing")
+	}
+	if !containsString(v.MissingArtifacts, "modelInvocations.verification-repair") {
+		t.Fatalf("missingArtifacts must call out missing repair model invocation; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedWhenRepairAttemptMissingModelInvocation(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.RepairAttempts[0].ModelInvocationRef = nil
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when repair attempt lacks modelInvocationRef")
+	}
+	if !containsString(v.MissingArtifacts, "repairAttempts[0].modelInvocationRef") {
+		t.Fatalf("missingArtifacts must call out repair attempt model invocation; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedWhenRepairAttemptReferencesWrongAgentRole(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.RepairAttempts[0].ModelInvocationRef = &a.ModelInvocations[0]
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when repair attempt references transformation invocation")
+	}
+	if !containsString(v.MissingArtifacts, "repairAttempts[0].modelInvocationRef.agentRole") {
+		t.Fatalf("missingArtifacts must call out repair attempt model invocation role; got %v", v.MissingArtifacts)
 	}
 }
 

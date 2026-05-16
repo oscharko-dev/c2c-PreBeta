@@ -1214,6 +1214,7 @@ class W0WorkflowRunner:
         step_results: list[WorkflowStepResult] = []
         model_output = None
         model_policy_skipped_meta: ArtifactMetadata | None = None
+        productive_model_invocations: list[JsonObject] = []
         # noinspection PyUnusedLocal
         model_invocation_input_ref: DataReference | None = None
         # noinspection PyUnusedLocal
@@ -1240,6 +1241,19 @@ class W0WorkflowRunner:
             except AttributeError:
                 return
             artifact_refs.append(payload)
+
+        def _record_productive_model_invocation(
+            model_invocation_ref: Mapping[str, JsonValue] | None,
+            *,
+            agent_role: str,
+        ) -> None:
+            if not isinstance(model_invocation_ref, Mapping):
+                return
+            normalised = self._normalise_model_invocation_ref(model_invocation_ref)
+            if normalised is None:
+                return
+            normalised["agentRole"] = agent_role
+            productive_model_invocations.append(normalised)
 
         # noinspection PyShadowingNames
         def _write_summary(status: str, *, message: str, failed_step: str | None = None) -> None:
@@ -1724,6 +1738,10 @@ class W0WorkflowRunner:
                         f"transformation agent step {W02_STEP_TRANSFORMATION_AGENT} failed: {exc}"
                     ) from exc
 
+                _record_productive_model_invocation(
+                    agent_result.model_invocation_ref,
+                    agent_role="transformation",
+                )
                 if agent_result.candidate is not None:
                     # The persisted manifest the agent wrote IS the source
                     # of truth for build/test. Replace the baseline manifest
@@ -2041,20 +2059,30 @@ class W0WorkflowRunner:
                     repair_failure_code = self._failure_code_for_repair_exception(
                         repair_exc
                     )
-                    w02_contract.record_repair_attempt(
-                        {
-                            "attemptNumber": attempt,
-                            "repairDecision": "refuse",
-                            "failureCategory": build_failure_code,
-                            "rationale": str(repair_exc),
-                            "buildTestResultRef": build_test_result_ref_payload,
-                            "modelInvocationRef": {
-                                "invocationId": (
-                                    f"inv-{context.run_id}-{attempt:02d}-repair-failed"
-                                ),
-                            },
-                        }
-                    )
+                    failed_attempt: JsonObject = {
+                        "attemptNumber": attempt,
+                        "repairDecision": "refuse",
+                        "failureCategory": build_failure_code,
+                        "rationale": str(repair_exc),
+                        "buildTestResultRef": build_test_result_ref_payload,
+                    }
+                    if repair_exc.model_invocation_ref:
+                        _record_productive_model_invocation(
+                            repair_exc.model_invocation_ref,
+                            agent_role="verification-repair",
+                        )
+                        failed_attempt["modelInvocationRef"] = dict(
+                            repair_exc.model_invocation_ref
+                        )
+                    if repair_exc.repair_input_artifact_ref:
+                        failed_attempt["repairInputRef"] = dict(
+                            repair_exc.repair_input_artifact_ref
+                        )
+                    if repair_exc.repair_decision_artifact_ref:
+                        failed_attempt["repairDecisionRef"] = dict(
+                            repair_exc.repair_decision_artifact_ref
+                        )
+                    w02_contract.record_repair_attempt(failed_attempt)
                     w02_blocked = True
                     w02_failure_code = repair_failure_code
                     w02_failure_message = (
@@ -2073,6 +2101,10 @@ class W0WorkflowRunner:
                 # attempt's previousRepairDecisionRefs array.
                 previous_repair_decision_refs.append(
                     dict(repair_result.repair_decision_artifact_ref)
+                )
+                _record_productive_model_invocation(
+                    repair_result.model_invocation_ref,
+                    agent_role="verification-repair",
                 )
                 # Record the trajectory entry for this attempt regardless
                 # of outcome — every attempt must be visible in the run
@@ -2382,6 +2414,7 @@ class W0WorkflowRunner:
                 w02_contract=w02_contract,
                 w02_blocked=w02_blocked,
                 baseline_generated_artifact_ref=baseline_artifact_ref,
+                productive_model_invocations=productive_model_invocations,
             )
             evidence_output = self._invoke_step(
                 context,
@@ -2697,15 +2730,31 @@ class W0WorkflowRunner:
         w02_contract: W02RunContract | None = None,
         w02_blocked: bool = False,
         baseline_generated_artifact_ref: Mapping[str, JsonValue] | None = None,
+        productive_model_invocations: Sequence[Mapping[str, JsonValue]] | None = None,
     ) -> JsonObject:
         trajectory_ref = _build_reference(
             f"urn:orchestrator/{context.run_id}/trajectory",
             trajectory_payload,
         )
-        model_invocation = self._build_model_invocation_ref(
+        # Issue #170: W0.2 evidence must point at the productive agent model
+        # invocations that produced Java, not only the optional model-guidance
+        # call. Deterministic W0 still emits the policy-skipped ledger entry.
+        is_w02 = bool(
+            getattr(context, "use_transformation_agent", False)
+            or (w02_contract is not None and (
+                getattr(w02_contract, "agent_attempt_count", 0) > 0
+                or getattr(w02_contract, "repair_attempts", None)
+            ))
+        )
+        fallback_model_invocation = self._build_model_invocation_ref(
             context,
             model_output,
             model_policy_skipped_meta=model_policy_skipped_meta,
+        )
+        model_invocations = self._build_model_invocation_refs(
+            productive_model_invocations=productive_model_invocations,
+            fallback_model_invocation=fallback_model_invocation,
+            include_fallback=(not is_w02 or model_output is not None),
         )
         if generated_artifact_ref:
             generated_java_payload: Mapping[str, JsonValue] = {
@@ -2725,7 +2774,7 @@ class W0WorkflowRunner:
             "generatedJava": generated_java_payload,
             "buildTestResults": build_test_refs,
             "harnessEvents": _as_reference_payload(trajectory_ref),
-            "modelInvocations": [model_invocation],
+            "modelInvocations": model_invocations,
             "trajectoryLedger": _as_reference_payload(trajectory_ref),
         }
         # Issue #96: when experience-learning is configured, reference its
@@ -2747,14 +2796,6 @@ class W0WorkflowRunner:
         # (transformation agent and/or verification-repair loop), emit the
         # extended evidence fields so reviewers can reconstruct every Java
         # candidate, repair attempt, agent trajectory, and oracle comparison.
-        is_w02 = bool(
-            getattr(context, "use_transformation_agent", False)
-            or (w02_contract is not None and (
-                getattr(w02_contract, "agent_attempt_count", 0) > 0
-                or getattr(w02_contract, "repair_attempts", None)
-            ))
-        )
-
         wave = "w0.2" if is_w02 else "w0"
         if is_w02:
             (
@@ -2892,6 +2933,7 @@ class W0WorkflowRunner:
                 decision = str(entry.get("repairDecision") or "")
                 candidate_ref = entry.get("javaCandidateRef")
                 decision_ref = entry.get("repairDecisionRef")
+                model_invocation_ref = entry.get("modelInvocationRef")
                 build_test_ref = entry.get("buildTestResultRef") or {}
                 refusal = entry.get("refusalCode") or entry.get("escalationCode")
 
@@ -2933,6 +2975,11 @@ class W0WorkflowRunner:
                         "sha256": str(decision_ref.get("sha256") or ""),
                         "byteSize": int(decision_ref.get("byteSize") or 0),
                     }
+                model_invocation_payload = self._normalise_model_invocation_ref(
+                    model_invocation_ref if isinstance(model_invocation_ref, Mapping) else None
+                )
+                if model_invocation_payload is not None:
+                    attempt_payload["modelInvocationRef"] = model_invocation_payload
                 if candidate_entry is not None and decision == "propose_candidate":
                     attempt_payload["newJavaCandidateRef"] = dict(candidate_entry)
                 if refusal:
@@ -3055,6 +3102,76 @@ class W0WorkflowRunner:
         if summary:
             envelope["summary"] = summary
         return envelope
+
+    @staticmethod
+    def _normalise_model_invocation_ref(
+        raw: Mapping[str, JsonValue] | None,
+    ) -> JsonObject | None:
+        if not isinstance(raw, Mapping):
+            return None
+        invocation_id = _text(raw.get("invocationId"))
+        model_id = _text(raw.get("modelId"))
+        ledger_ref = _data_reference_from_mapping(raw.get("ledgerRef"))
+        if invocation_id is None or model_id is None or ledger_ref is None:
+            return None
+        payload: JsonObject = {
+            "invocationId": invocation_id,
+            "modelId": model_id,
+            "ledgerRef": _as_reference_payload(ledger_ref),
+        }
+        for key in (
+            "provider",
+            "promptTemplateVersion",
+            "promptTemplateId",
+            "policyDecision",
+            "status",
+            "reason",
+            "policyVersion",
+            "policyId",
+            "agentRole",
+            "errorCode",
+            "errorClass",
+            "timestamp",
+        ):
+            value = _text(raw.get(key))
+            if value is not None:
+                payload[key] = value
+        try:
+            latency_ms = int(raw.get("latencyMs"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            latency_ms = None
+        if latency_ms is not None and latency_ms >= 0:
+            payload["latencyMs"] = latency_ms
+        return payload
+
+    def _build_model_invocation_refs(
+        self,
+        *,
+        productive_model_invocations: Sequence[Mapping[str, JsonValue]] | None,
+        fallback_model_invocation: Mapping[str, JsonValue],
+        include_fallback: bool,
+    ) -> list[JsonObject]:
+        refs: list[JsonObject] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def add_ref(raw: Mapping[str, JsonValue] | None) -> None:
+            normalised = self._normalise_model_invocation_ref(raw)
+            if normalised is None:
+                return
+            ledger = normalised["ledgerRef"]
+            ledger_uri = str(ledger.get("uri") or "") if isinstance(ledger, Mapping) else ""
+            ledger_sha = str(ledger.get("sha256") or "") if isinstance(ledger, Mapping) else ""
+            key = (str(normalised["invocationId"]), ledger_uri, ledger_sha)
+            if key in seen:
+                return
+            seen.add(key)
+            refs.append(normalised)
+
+        for ref in productive_model_invocations or ():
+            add_ref(ref)
+        if include_fallback or not refs:
+            add_ref(fallback_model_invocation)
+        return refs
 
     # noinspection PyTypeHints
     def _build_model_invocation_ref(
