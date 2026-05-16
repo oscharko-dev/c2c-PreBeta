@@ -42,6 +42,7 @@ KIND_MODEL_POLICY_SKIPPED = "model-policy-skipped"
 KIND_RUN_SUMMARY = "run-summary"
 KIND_RUN_PROGRESS = "run-progress"
 KIND_LEARNING_SUMMARY = "learning-summary"
+KIND_W02_RUN_CONTRACT = "w02-run-contract"
 
 MIME_JSON = "application/json"
 MIME_COBOL = "text/x-cobol"

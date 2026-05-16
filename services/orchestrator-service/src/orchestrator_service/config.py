@@ -29,6 +29,13 @@ DEFAULT_MODEL_POLICY_VERSION = "v0"
 DEFAULT_CAPABILITY_POLICY_PROFILE = "harness-control-plane"
 DEFAULT_CAPABILITY_VERSION = "v0.1.0"
 
+# Issue #166: hard W0.2 bounds for the bounded repair loop. The default is two
+# attempts; the limit is clamped to [1, 3] so configuration cannot escape the
+# W0.2 contract.
+DEFAULT_REPAIR_BUDGET_MAX = 2
+REPAIR_BUDGET_MIN = 1
+REPAIR_BUDGET_MAX = 3
+
 DEFAULT_PARSER_SERVICE_HOST = "127.0.0.1"
 DEFAULT_PARSER_SERVICE_PORT = 8081
 DEFAULT_IR_SERVICE_HOST = "127.0.0.1"
@@ -129,6 +136,7 @@ class OrchestratorConfig:
     model_policy_version: str = DEFAULT_MODEL_POLICY_VERSION
     run_artifact_root: str = DEFAULT_RUN_ARTIFACT_ROOT
     experience_learning_base_url: str = DEFAULT_EXPERIENCE_LEARNING_BASE_URL
+    repair_budget_max: int = DEFAULT_REPAIR_BUDGET_MAX
 
 
 def _read_env_int(name: str, default: int) -> int:
@@ -195,6 +203,15 @@ def load_config() -> OrchestratorConfig:
         os.environ.get("C2C_EXPERIENCE_LEARNING_URL", DEFAULT_EXPERIENCE_LEARNING_BASE_URL),
     ).strip()
 
+    # Issue #166: the W0.2 repair loop is bounded by a small, configurable
+    # iteration limit. The environment variable is clamped to [1, 3] so a
+    # mis-configured value cannot push the contract outside the W0.2 range.
+    repair_budget_max_raw = _read_env_int(
+        "ORCHESTRATOR_REPAIR_BUDGET_MAX",
+        DEFAULT_REPAIR_BUDGET_MAX,
+    )
+    repair_budget_max = max(REPAIR_BUDGET_MIN, min(REPAIR_BUDGET_MAX, repair_budget_max_raw))
+
     run_artifact_root_raw = os.environ.get(
         "C2C_RUN_ARTIFACT_ROOT",
         os.environ.get("ORCHESTRATOR_RUN_ARTIFACT_ROOT", DEFAULT_RUN_ARTIFACT_ROOT),
@@ -236,6 +253,7 @@ def load_config() -> OrchestratorConfig:
         model_policy_version=model_policy_version,
         run_artifact_root=run_artifact_root,
         experience_learning_base_url=experience_learning_base_url,
+        repair_budget_max=repair_budget_max,
     )
 
 
