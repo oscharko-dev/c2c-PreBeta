@@ -247,20 +247,8 @@ func (c JavaCandidateRef) IsZero() bool {
 }
 
 func (c JavaCandidateRef) Validate(path string) error {
-	if c.URI == "" {
-		return fieldError(path+".uri", "uri is required")
-	}
-	if c.SHA256 == "" {
-		return fieldError(path+".sha256", "sha256 is required")
-	}
-	if !sha256Pattern.MatchString(c.SHA256) {
-		return fieldError(path+".sha256", "sha256 must be 64 hex chars")
-	}
-	if _, err := hex.DecodeString(c.SHA256); err != nil {
-		return fieldError(path+".sha256", "sha256 must be valid hex")
-	}
-	if c.ByteSize < 0 {
-		return fieldError(path+".byteSize", "byteSize must be non-negative")
+	if err := c.AsDataReference().Validate(path); err != nil {
+		return err
 	}
 	switch c.Origin {
 	case JavaCandidateOriginBaseline,

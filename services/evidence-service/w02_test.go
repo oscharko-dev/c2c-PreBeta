@@ -512,6 +512,54 @@ func TestCreatePackW02BlockedRunRejectsFinalJavaRefs(t *testing.T) {
 	}
 }
 
+func TestPatchPackW02BlockedNormalizesFinalJavaRefs(t *testing.T) {
+	srv, _ := newTestServer(t)
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-patch-blocked",
+		Wave:      WaveW02,
+		Artifacts: completeW02Artifacts(t),
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201; got %d", res.StatusCode)
+	}
+	var created EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if created.Artifacts.GeneratedJava == nil || created.Artifacts.FinalJavaArtifact == nil {
+		t.Fatalf("complete fixture should start with authoritative Java refs")
+	}
+
+	res = patchJSON(t, srv.URL+"/v0/packs/"+created.PackID, PatchInput{Blocked: ptr(true)})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 after blocked patch; got %d", res.StatusCode)
+	}
+	var patched EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&patched); err != nil {
+		t.Fatalf("decode patch: %v", err)
+	}
+	_ = res.Body.Close()
+
+	if patched.Classification != ClassificationBlocked {
+		t.Fatalf("expected classification=blocked; got %s", patched.Classification)
+	}
+	if patched.CompletenessStatus != CompletenessStatusBlocked {
+		t.Fatalf("expected completenessStatus=blocked; got %s", patched.CompletenessStatus)
+	}
+	if patched.Artifacts.GeneratedJava != nil {
+		t.Fatalf("blocked patch must clear generatedJava")
+	}
+	if patched.Artifacts.FinalJavaArtifact != nil {
+		t.Fatalf("blocked patch must clear finalJavaArtifact")
+	}
+	for i, candidate := range patched.Artifacts.GeneratedJavaArtifacts {
+		if candidate.Selected {
+			t.Fatalf("blocked patch must clear selected candidate at index %d", i)
+		}
+	}
+}
+
 func TestCreatePackW02RejectsMissingModelInvocationMetadata(t *testing.T) {
 	srv, _ := newTestServer(t)
 	artifacts := completeW02Artifacts(t)

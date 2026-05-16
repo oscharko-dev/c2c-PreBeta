@@ -153,6 +153,38 @@ func TestUpdateManifestIsolatesPatchedPointerFields(t *testing.T) {
 	}
 }
 
+func TestUpdateManifestIsAtomicOnValidationError(t *testing.T) {
+	store := NewPackStore()
+	manifest, err := store.Create(CreateInput{
+		RunID:     "run-patch-atomic",
+		Artifacts: completeArtifacts(t),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	original, ok := store.Get(manifest.PackID)
+	if !ok {
+		t.Fatalf("expected manifest to be stored")
+	}
+
+	invalidRef := *original.Artifacts.SourceMetadata
+	invalidRef.URI = "https://artifacts.example/source-ref.json?signature=abc"
+	_, err = store.Update(manifest.PackID, PatchInput{
+		Artifacts: &Artifacts{SourceMetadata: &invalidRef},
+	})
+	if err == nil {
+		t.Fatalf("expected validation error for query-bearing URI")
+	}
+
+	stored, ok := store.Get(manifest.PackID)
+	if !ok {
+		t.Fatalf("expected manifest to remain stored")
+	}
+	if stored.Artifacts.SourceMetadata.URI != original.Artifacts.SourceMetadata.URI {
+		t.Fatalf("failed patch mutated stored manifest: got %q want %q", stored.Artifacts.SourceMetadata.URI, original.Artifacts.SourceMetadata.URI)
+	}
+}
+
 // TestEmittedEventPayloadIsTyped asserts the emitted Harness event payload
 // matches the EvidenceEventPayload contract, not a free-form map.
 func TestEmittedEventPayloadIsTyped(t *testing.T) {

@@ -102,6 +102,32 @@ func TestDataReferenceValidateRejectsSecretOrQueryBearingURI(t *testing.T) {
 	}
 }
 
+func TestJavaCandidateRefValidateRejectsSecretOrQueryBearingURI(t *testing.T) {
+	candidate := JavaCandidateRef{
+		URI:           "https://artifacts.example/generated?token=" + "s" + "k-" + strings.Repeat("A", 20),
+		SHA256:        strings.Repeat("0", 64),
+		ByteSize:      1,
+		Origin:        JavaCandidateOriginTransformationAgent,
+		AttemptNumber: 0,
+	}
+	err := candidate.Validate("candidate")
+	if err == nil {
+		t.Fatalf("expected validation error for secret-bearing candidate uri")
+	}
+	if !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected secret rejection; got %v", err)
+	}
+
+	candidate.URI = "https://artifacts.example/generated?signature=abc"
+	err = candidate.Validate("candidate")
+	if err == nil {
+		t.Fatalf("expected validation error for query-bearing candidate uri")
+	}
+	if !strings.Contains(err.Error(), "query") {
+		t.Fatalf("expected query rejection; got %v", err)
+	}
+}
+
 func TestManifestRoundTripsJSON(t *testing.T) {
 	m := newCompleteManifest(t)
 	m.Artifacts.ModelInvocations[0].PolicyDecision = "policy allow"

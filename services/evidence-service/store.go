@@ -105,10 +105,11 @@ type PatchInput struct {
 func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManifest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	manifest, ok := s.packs[packID]
+	current, ok := s.packs[packID]
 	if !ok {
 		return nil, fmt.Errorf("pack not found: %s", packID)
 	}
+	manifest := cloneManifest(current)
 	if patch.Summary != nil {
 		manifest.Summary = *patch.Summary
 	}
@@ -124,6 +125,9 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 	blocked := manifest.Classification == ClassificationBlocked
 	if patch.Blocked != nil {
 		blocked = *patch.Blocked
+	}
+	if patch.Blocked != nil && *patch.Blocked && manifest.Wave == WaveW02 {
+		normalizeBlockedW02Artifacts(&manifest.Artifacts)
 	}
 	manifest.Validation = EvaluateValidationForWave(&manifest.Artifacts, manifest.Wave)
 	manifest.Status = deriveStatus(manifest.Validation)
@@ -301,6 +305,14 @@ func validateBlockedW02Artifacts(a Artifacts) error {
 		}
 	}
 	return nil
+}
+
+func normalizeBlockedW02Artifacts(a *Artifacts) {
+	a.GeneratedJava = nil
+	a.FinalJavaArtifact = nil
+	for i := range a.GeneratedJavaArtifacts {
+		a.GeneratedJavaArtifacts[i].Selected = false
+	}
 }
 
 // cloneManifest produces a deep-enough copy that callers can safely mutate

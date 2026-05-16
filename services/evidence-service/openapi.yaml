@@ -252,6 +252,21 @@ components:
         buildTestResultRef: { $ref: "#/components/schemas/DataReference" }
         refusalCode: { type: string }
         noChange: { type: boolean }
+      oneOf:
+        - required: [newJavaCandidateRef]
+          properties:
+            decision:
+              type: string
+              enum: [propose_candidate]
+        - required: [refusalCode]
+          properties:
+            decision:
+              type: string
+              enum: [refuse, escalate]
+        - properties:
+            decision:
+              type: string
+              enum: [no_change]
 
     AgentTrajectoryRef:
       type: object

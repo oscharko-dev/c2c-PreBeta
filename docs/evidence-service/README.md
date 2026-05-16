@@ -108,6 +108,9 @@ legacy authoritative `generatedJava` ref, must not declare `finalJavaArtifact`,
 and must not mark any entry in `generatedJavaArtifacts[]` as `selected`.
 Unselected candidate history may remain for auditability, but no blocked pack
 may advertise a final Java artifact.
+When a W0.2 pack transitions to blocked through `PATCH` with `blocked=true`,
+evidence-service normalizes that shape by clearing the authoritative Java refs
+and unselecting any retained candidate-history entries before revalidating.
 
 ### Secret scrubbing
 
