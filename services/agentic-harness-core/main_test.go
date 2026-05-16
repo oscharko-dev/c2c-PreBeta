@@ -30,7 +30,7 @@ func TestCapabilityRegistryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register capability request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", res.StatusCode)
 	}
@@ -39,7 +39,7 @@ func TestCapabilityRegistryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get capability request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected get 200, got %d", res.StatusCode)
 	}
@@ -48,7 +48,7 @@ func TestCapabilityRegistryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate capability request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected validate 200, got %d", res.StatusCode)
 	}
@@ -67,7 +67,7 @@ func TestRunStateLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected run create 201, got %d", res.StatusCode)
 	}
@@ -90,7 +90,7 @@ func TestRunStateLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update run request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected run update 200, got %d", res.StatusCode)
 	}
@@ -109,7 +109,7 @@ func TestRunStateRejectsTerminalTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected run create 201, got %d", res.StatusCode)
 	}
@@ -128,7 +128,7 @@ func TestRunStateRejectsTerminalTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("complete run request failed: %v", err)
 	}
-	defer completeRes.Body.Close()
+	defer func() { _ = completeRes.Body.Close() }()
 	if completeRes.StatusCode != http.StatusOK {
 		t.Fatalf("expected run complete 200, got %d", completeRes.StatusCode)
 	}
@@ -142,7 +142,7 @@ func TestRunStateRejectsTerminalTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("patch terminal run request failed: %v", err)
 	}
-	defer failedRes.Body.Close()
+	defer func() { _ = failedRes.Body.Close() }()
 	if failedRes.StatusCode != http.StatusConflict {
 		t.Fatalf("expected run terminal transition 409, got %d", failedRes.StatusCode)
 	}
@@ -181,7 +181,7 @@ func TestPolicyProtectsDirectAgentIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("policy block request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 for direct agent model integration registration, got %d", res.StatusCode)
 	}
@@ -223,7 +223,7 @@ func TestOrchestratorCanRegisterCoreCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrator registration request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected orchestrator core capability registration 201, got %d", res.StatusCode)
 	}
@@ -241,7 +241,7 @@ func TestMutatingEndpointsRequireHarnessToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 when harness token is not configured, got %d", res.StatusCode)
 	}

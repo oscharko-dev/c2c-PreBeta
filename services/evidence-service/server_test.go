@@ -23,7 +23,7 @@ func TestHealthAndReady(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("GET %s: expected 200, got %d", path, res.StatusCode)
 		}
-		res.Body.Close()
+		_ = res.Body.Close()
 	}
 }
 
@@ -38,7 +38,7 @@ func TestCreateIncompletePackReportsMissingArtifacts(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if manifest.Status != StatusIncomplete {
 		t.Fatalf("expected status=incomplete, got %s", manifest.Status)
 	}
@@ -59,7 +59,7 @@ func TestCreatePackEmitsHarnessEvent(t *testing.T) {
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", res.StatusCode)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	events, err := svc.events.List()
 	if err != nil {
@@ -96,7 +96,7 @@ func TestPatchAccruesArtifactsAndStatusFlipsToComplete(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&initial); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	artifacts := completeArtifacts(t)
 	patch := PatchInput{Artifacts: &artifacts}
@@ -109,7 +109,7 @@ func TestPatchAccruesArtifactsAndStatusFlipsToComplete(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if updated.Status != StatusComplete {
 		t.Fatalf("expected status=complete, got %s", updated.Status)
 	}
@@ -126,14 +126,14 @@ func TestExportRefusedWhenIncomplete(t *testing.T) {
 	}
 	var manifest EvidencePackManifest
 	_ = json.NewDecoder(res.Body).Decode(&manifest)
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	res = postJSON(t, srv.URL+"/v0/packs/"+manifest.PackID+"/export", ExportRequest{Format: ExportFormatDirectory})
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		body, _ := io.ReadAll(res.Body)
 		t.Fatalf("expected 422 when incomplete, got %d body=%s", res.StatusCode, string(body))
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 }
 
 func TestExportDirectoryAndTar(t *testing.T) {
@@ -147,7 +147,7 @@ func TestExportDirectoryAndTar(t *testing.T) {
 	}
 	var manifest EvidencePackManifest
 	_ = json.NewDecoder(res.Body).Decode(&manifest)
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	// directory export
 	res = postJSON(t, srv.URL+"/v0/packs/"+manifest.PackID+"/export", ExportRequest{Format: ExportFormatDirectory})
@@ -160,7 +160,7 @@ func TestExportDirectoryAndTar(t *testing.T) {
 		Export ExportRecord         `json:"export"`
 	}
 	_ = json.NewDecoder(res.Body).Decode(&dirResp)
-	res.Body.Close()
+	_ = res.Body.Close()
 	if len(dirResp.Pack.Exports) != 1 {
 		t.Fatalf("expected 1 export record in response pack, got %d", len(dirResp.Pack.Exports))
 	}
@@ -185,7 +185,7 @@ func TestExportDirectoryAndTar(t *testing.T) {
 		Export ExportRecord `json:"export"`
 	}
 	_ = json.NewDecoder(res.Body).Decode(&tarResp)
-	res.Body.Close()
+	_ = res.Body.Close()
 	if strings.HasPrefix(tarResp.Export.URI, "file://") {
 		t.Fatalf("tar export URI must not expose host-local file paths: %s", tarResp.Export.URI)
 	}
@@ -194,7 +194,7 @@ func TestExportDirectoryAndTar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open tar: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	tr := tar.NewReader(f)
 	header, err := tr.Next()
 	if err != nil {
@@ -224,7 +224,7 @@ func TestExportRefusesEscapeOfBaseDir(t *testing.T) {
 	})
 	var manifest EvidencePackManifest
 	_ = json.NewDecoder(res.Body).Decode(&manifest)
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	res = postJSON(t, srv.URL+"/v0/packs/"+manifest.PackID+"/export", ExportRequest{
 		Format:      ExportFormatDirectory,
@@ -234,7 +234,7 @@ func TestExportRefusesEscapeOfBaseDir(t *testing.T) {
 		body, _ := io.ReadAll(res.Body)
 		t.Fatalf("expected 400 for escape attempt, got %d body=%s", res.StatusCode, string(body))
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 }
 
 func TestPackNotFound(t *testing.T) {
@@ -243,7 +243,7 @@ func TestPackNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", res.StatusCode)
 	}
@@ -254,19 +254,19 @@ func TestValidateEndpointReportsMissing(t *testing.T) {
 	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{RunID: "run-6"})
 	var manifest EvidencePackManifest
 	_ = json.NewDecoder(res.Body).Decode(&manifest)
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	res = postJSON(t, srv.URL+"/v0/packs/"+manifest.PackID+"/validate", map[string]string{})
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 for incomplete validate, got %d", res.StatusCode)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 }
 
 func TestPatchPackNotFound(t *testing.T) {
 	srv, _ := newTestServer(t)
 	res := patchJSON(t, srv.URL+"/v0/packs/epk-missing-0001", PatchInput{Summary: ptr("missing")})
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", res.StatusCode)
 	}
@@ -281,13 +281,13 @@ func TestEventsEndpointReturnsEmittedEvents(t *testing.T) {
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", res.StatusCode)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	res, err := http.Get(srv.URL + "/v0/events")
 	if err != nil {
 		t.Fatalf("get events: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", res.StatusCode)
 	}
@@ -317,7 +317,7 @@ func TestJSONLEventSinkPersistsEvents(t *testing.T) {
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", res.StatusCode)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if info, err := os.Stat(logPath); err != nil {
 		t.Fatalf("expected events.jsonl, got %v", err)
 	} else if info.Size() == 0 {

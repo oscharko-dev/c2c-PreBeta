@@ -249,3 +249,4 @@ artifacts/*.json
 
 # TypeScript test transpilation output
 apps/c2c-ui/dist-test/
+/qodana/

@@ -172,7 +172,7 @@ func TestCreatePackW02StampsCompletenessAndClassification(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if manifest.Wave != WaveW02 {
 		t.Fatalf("expected wave=w0.2; got %s", manifest.Wave)
 	}
@@ -207,7 +207,7 @@ func TestCreatePackW02RefusesSuccessOnEvidenceIncomplete(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if manifest.Classification == ClassificationSuccess {
 		t.Fatalf("classification must NOT be success when finalJavaArtifact is missing")
 	}
@@ -237,7 +237,7 @@ func TestCreatePackW02BlockedRunClassifiedAsBlocked(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if manifest.CompletenessStatus != CompletenessStatusBlocked {
 		t.Fatalf("expected completenessStatus=blocked; got %s", manifest.CompletenessStatus)
 	}
@@ -267,7 +267,7 @@ func TestSecretScrubRejectsAPIKeyInModelInvocation(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	errStr, _ := body["error"].(string)
 	if !strings.Contains(errStr, "secret") {
 		t.Fatalf("expected error to mention secret; got %q", errStr)
@@ -380,7 +380,7 @@ func TestPatchPropagatesW02CompletenessAndClassification(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if created.CompletenessStatus != CompletenessStatusEvidenceIncomplete {
 		t.Fatalf("baseline expected evidence_incomplete; got %s", created.CompletenessStatus)
 	}
@@ -397,7 +397,7 @@ func TestPatchPropagatesW02CompletenessAndClassification(t *testing.T) {
 	if err := json.NewDecoder(patchRes.Body).Decode(&patched); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	patchRes.Body.Close()
+	_ = patchRes.Body.Close()
 	if patched.CompletenessStatus != CompletenessStatusComplete {
 		t.Fatalf("expected completenessStatus=complete after PATCH; got %s", patched.CompletenessStatus)
 	}
