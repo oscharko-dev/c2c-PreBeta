@@ -7,6 +7,11 @@ import { URL } from 'node:url';
 import type { BffConfig } from './config';
 import { loadSampleRegistry, type SampleRegistry, type SampleDetail } from './samples';
 import {
+  loadAcceptanceFixtureRegistry,
+  type AcceptanceFixtureRegistry,
+  type AcceptanceFixtureDetail,
+} from './acceptance-fixtures';
+import {
   createEvidenceClient,
   createExperienceLearningClient,
   createModelGatewayClient,
@@ -56,6 +61,7 @@ const LOCAL_CORS_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 export interface ServerDeps {
   config: BffConfig;
   samples?: SampleRegistry;
+  acceptanceFixtures?: AcceptanceFixtureRegistry;
   orchestrator?: OrchestratorClient;
   evidence?: EvidenceClient;
   experienceLearning?: ExperienceLearningClient;
@@ -69,6 +75,7 @@ export interface ServerDeps {
 interface ResolvedDeps {
   config: BffConfig;
   samples: SampleRegistry;
+  acceptanceFixtures: () => AcceptanceFixtureRegistry;
   orchestrator: OrchestratorClient;
   evidence: EvidenceClient;
   experienceLearning: ExperienceLearningClient;
@@ -79,9 +86,36 @@ interface ResolvedDeps {
 
 function resolveDeps(deps: ServerDeps): ResolvedDeps {
   const httpClient = deps.httpClient ?? createNodeHttpClient();
+  // Lazy-load the acceptance-fixture registry so the BFF can boot without
+  // a populated fixtures/acceptance/index.json (kept out of unit-test
+  // synthetic repos). Both success and failure are cached so a misconfigured
+  // deployment doesn't re-hash the full corpus on every request.
+  let acceptanceFixturesResult:
+    | { ok: true; value: AcceptanceFixtureRegistry }
+    | { ok: false; error: Error }
+    | undefined = deps.acceptanceFixtures
+    ? { ok: true, value: deps.acceptanceFixtures }
+    : undefined;
+  const acceptanceFixturesAccessor = (): AcceptanceFixtureRegistry => {
+    if (!acceptanceFixturesResult) {
+      try {
+        acceptanceFixturesResult = { ok: true, value: loadAcceptanceFixtureRegistry(deps.config.repoRoot) };
+      } catch (err) {
+        acceptanceFixturesResult = {
+          ok: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
+    }
+    if (!acceptanceFixturesResult.ok) {
+      throw acceptanceFixturesResult.error;
+    }
+    return acceptanceFixturesResult.value;
+  };
   return {
     config: deps.config,
     samples: deps.samples ?? loadSampleRegistry(deps.config.repoRoot),
+    acceptanceFixtures: acceptanceFixturesAccessor,
     orchestrator: deps.orchestrator ?? createOrchestratorClient(deps.config.orchestratorUrl, httpClient, deps.config.upstreamTimeoutMs),
     evidence: deps.evidence ?? createEvidenceClient(deps.config.evidenceUrl, httpClient, deps.config.upstreamTimeoutMs),
     experienceLearning:
@@ -1498,7 +1532,7 @@ function applyLiveRunPayload(stored: StoredRun, runStore: RunStore, payload: unk
 
 export function createApp(deps: ServerDeps): http.RequestListener {
   const resolved = resolveDeps(deps);
-  const { config, samples, orchestrator, evidence, experienceLearning, modelGateway, harness, runStore } = resolved;
+  const { config, samples, acceptanceFixtures, orchestrator, evidence, experienceLearning, modelGateway, harness, runStore } = resolved;
 
   return async function handler(req, res) {
     try {
@@ -1530,6 +1564,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
 
       if (pathname === '/api/v0/samples' && method === 'GET') {
         jsonResponse(res, 200, samples.list());
+        return;
+      }
+
+      if (pathname === '/api/v0/acceptance-fixtures' && method === 'GET') {
+        try {
+          jsonResponse(res, 200, acceptanceFixtures().list());
+        } catch (err) {
+          jsonResponse(res, 503, {
+            error: `acceptance fixture registry unavailable: ${err instanceof Error ? err.message : 'unknown error'}`,
+          });
+        }
         return;
       }
 
@@ -1719,6 +1764,24 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         jsonResponse(res, 200, detail satisfies SampleDetail);
+        return;
+      }
+
+      const acceptanceFixtureMatch = /^\/api\/v0\/acceptance-fixtures\/([^\/]+)$/.exec(pathname);
+      if (acceptanceFixtureMatch && method === 'GET') {
+        const fixtureId = decodeURIComponent(acceptanceFixtureMatch[1] ?? '');
+        try {
+          const detail = acceptanceFixtures().get(fixtureId);
+          if (!detail) {
+            notFound(res, `unknown acceptance fixtureId ${JSON.stringify(fixtureId)}`);
+            return;
+          }
+          jsonResponse(res, 200, detail satisfies AcceptanceFixtureDetail);
+        } catch (err) {
+          jsonResponse(res, 503, {
+            error: `acceptance fixture registry unavailable: ${err instanceof Error ? err.message : 'unknown error'}`,
+          });
+        }
         return;
       }
 

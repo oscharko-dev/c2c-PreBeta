@@ -37,6 +37,59 @@ class CobolParserTest {
     }
 
     @Test
+    void parsesHelloW02AcceptanceFixtureCleanly() throws Exception {
+        // Issue #174: positive W0.2 acceptance fixture. Must parse cleanly
+        // (no diagnostics) so the orchestrator can advance the run to the
+        // Java generation and build/test stages and ultimately produce a
+        // 'success' final classification against the cobol-runtime oracle.
+        Model.ParseRequest request = new Model.ParseRequest();
+        request.runId = "issue-174-positive";
+        request.workflowId = "w0.2-acceptance";
+        request.source = Files.readString(Path.of("../../corpus/synthetic/programs/hello-w02.cbl"));
+
+        Model.ParseResult result = parser.parse(request);
+
+        assertEquals("ok", result.status, "hello-w02 acceptance fixture must parse cleanly");
+        assertEquals("HELLOW02", result.program.programId, "PROGRAM-ID must round-trip");
+        assertTrue(
+                result.program.statements.stream().anyMatch(statement -> "DISPLAY".equals(statement.kind)),
+                "hello-w02 must produce at least one DISPLAY statement");
+        assertTrue(
+                result.program.statements.stream().anyMatch(statement ->
+                        "PERFORM".equals(statement.kind)
+                                && "varying-until".equals(statement.operands.get("mode"))),
+                "hello-w02 must produce a PERFORM VARYING ... UNTIL statement");
+        assertTrue(
+                result.diagnostics.stream().noneMatch(d -> "error".equals(d.severity)),
+                "hello-w02 must not emit error-severity diagnostics");
+    }
+
+    @Test
+    void blocksFileIoUnsupportedAcceptanceFixtureWithDiagnostics() throws Exception {
+        // Issue #174: negative W0.2 acceptance fixture. The orchestrator MUST
+        // block the run honestly (finalClassification=blocked,
+        // failureCode=unsupported_cobol) instead of producing misleading
+        // Java. We assert here that the parser emits unsupported-feature
+        // diagnostics on every File-I/O construct the fixture declares.
+        Model.ParseRequest request = new Model.ParseRequest();
+        request.runId = "issue-174-negative";
+        request.workflowId = "w0.2-acceptance";
+        request.source = Files.readString(Path.of("../../corpus/synthetic/programs/file-io-unsupported.cbl"));
+
+        Model.ParseResult result = parser.parse(request);
+
+        assertEquals("failed", result.status, "FILEIO-UNSUPPORTED fixture must fail parse");
+        for (String construct : new String[]{"FILE SECTION", "FD ", "OPEN ", "READ ", "CLOSE "}) {
+            assertTrue(
+                    result.diagnostics.stream().anyMatch(d ->
+                            "unsupported-feature".equals(d.code)
+                                    && d.message != null
+                                    && d.message.contains(construct.trim())),
+                    "Expected unsupported-feature diagnostic mentioning '" + construct.trim() + "'");
+        }
+    }
+
+    @Test
     void unsupportedFileIoFailsWithExplicitDiagnostics() {
         Model.ParseRequest request = new Model.ParseRequest();
         request.source = """

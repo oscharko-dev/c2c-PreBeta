@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/acceptance-fixture-v0.json",
+  "title": "W0.2 Acceptance Fixture & Oracle Contract v0",
+  "description": "Contract for a W0.2 acceptance fixture used to prove that user-provided supported COBOL can be transformed, compiled, executed, and behaviourally verified through the agentic workflow. Issue #174. Each fixture declares a content-addressed COBOL source, an oracle (either an explicit expected-output artifact or a generation mode), the W0.2 COBOL subset it exercises, any unsupported constructs the parser must detect, the fixed target language, and the expected final run classification. Fixtures are loaded in two modes: (1) file-backed, registered in fixtures/acceptance/index.json and resolved against the repository tree; (2) UI paste-mode, where the BFF accepts source text plus optional expected output and validates it against the same contract before forwarding to the orchestrator. Fixtures with `expectedFinalClassification == 'blocked'` MUST list at least one entry in `unsupportedConstructs` so the run can be rejected honestly with a `unsupported_cobol` failure code instead of producing misleading Java.",
+  "type": "object",
+  "required": ["schemaVersion", "fixtures"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/acceptanceFixture" }
+    }
+  },
+  "$defs": {
+    "acceptanceFixture": {
+      "type": "object",
+      "required": [
+        "fixtureId",
+        "title",
+        "sourceCobolArtifactRef",
+        "supportedSubset",
+        "unsupportedConstructs",
+        "targetLanguage",
+        "expectedFinalClassification",
+        "modes",
+        "rationale"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fixtureId": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9-]{1,63}$",
+          "description": "Stable, uppercase identifier for the acceptance fixture. Independent of the COBOL PROGRAM-ID so a fixture can re-use an existing reference program without colliding."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceCobolArtifactRef": { "$ref": "#/$defs/artifactReference" },
+        "expectedOutputArtifactRef": {
+          "$ref": "#/$defs/artifactReference",
+          "description": "Content-addressed reference to the expected behavioural output. Required when oracleGenerationMode == 'static-fixture'."
+        },
+        "oracleGenerationMode": {
+          "type": "string",
+          "enum": ["cobol-runtime", "static-fixture", "user-provided"],
+          "description": "How the oracle output is produced. cobol-runtime: reproduced from the COBOL source via GnuCOBOL by the build-test runner. static-fixture: read verbatim from expectedOutputArtifactRef. user-provided: supplied at paste-mode submission time via TransformInput.expectedOutput."
+        },
+        "supportedSubset": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/cobolConstructName" },
+          "uniqueItems": true,
+          "description": "W0.2 COBOL constructs the fixture is expected to exercise. Empty array is only permitted for fixtures whose expectedFinalClassification == 'blocked' (i.e. the program is intentionally outside the supported subset)."
+        },
+        "unsupportedConstructs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/unsupportedConstruct" },
+          "description": "Constructs the parser MUST detect as unsupported. Empty for successful fixtures. Non-empty for blocked fixtures, including the diagnostic code that maps to the parser's emitted Diagnostic.code."
+        },
+        "targetLanguage": {
+          "type": "string",
+          "enum": ["java"],
+          "description": "Fixed at W0.2."
+        },
+        "expectedFinalClassification": {
+          "type": "string",
+          "enum": ["success", "blocked"],
+          "description": "Run-contract finalClassification the orchestrator MUST report when this fixture is executed end-to-end. Aligns with orchestrator-w02-workflow.md."
+        },
+        "expectedFailureCode": {
+          "type": "string",
+          "enum": [
+            "unsupported_cobol",
+            "parse_failed",
+            "semantic_ir_failed",
+            "java_generation_failed",
+            "java_compile_failed",
+            "java_runtime_failed",
+            "oracle_mismatch",
+            "evidence_incomplete",
+            "cancelled"
+          ],
+          "description": "Required when expectedFinalClassification == 'blocked'. Must match the W0.2 run-contract failureCode closed enum."
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["file-backed", "paste-mode"]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "description": "Which submission surfaces this fixture is exercised through in tests. Both modes share the same contract. Required: every shipping fixture must declare at least one submission mode; the TS loader and orchestrator contract test additionally require shipping fixtures to declare both modes so the test surface and the UI surface stay aligned."
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why this fixture is in the acceptance set. Cites the W0.2 capability or unsupported-construct it proves."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "expectedFinalClassification": { "const": "success" } }, "required": ["expectedFinalClassification"] },
+          "then": {
+            "required": ["oracleGenerationMode"],
+            "not": { "required": ["expectedFailureCode"] }
+          }
+        },
+        {
+          "if": { "properties": { "expectedFinalClassification": { "const": "blocked" } }, "required": ["expectedFinalClassification"] },
+          "then": {
+            "required": ["expectedFailureCode"],
+            "properties": {
+              "unsupportedConstructs": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "oracleGenerationMode": { "const": "static-fixture" } }, "required": ["oracleGenerationMode"] },
+          "then": { "required": ["expectedOutputArtifactRef"] }
+        }
+      ]
+    },
+    "cobolConstructName": {
+      "type": "string",
+      "enum": [
+        "MOVE",
+        "DISPLAY",
+        "PERFORM",
+        "PERFORM-VARYING",
+        "PERFORM-UNTIL",
+        "IF",
+        "EVALUATE",
+        "COMPUTE",
+        "ADD",
+        "SUBTRACT",
+        "MULTIPLY",
+        "DIVIDE",
+        "CALL",
+        "STOP-RUN",
+        "PARAGRAPH",
+        "WORKING-STORAGE"
+      ],
+      "description": "Closed enum of W0.2-supported COBOL constructs. Matches the parser's recognised statement kinds (CobolParser.parseStatement) plus the static WORKING-STORAGE division marker."
+    },
+    "unsupportedConstruct": {
+      "type": "object",
+      "required": ["code", "construct"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "unsupported-feature",
+            "unsupported-data-declaration",
+            "unsupported-statement",
+            "unterminated-block",
+            "unmatched-block-end",
+            "mismatched-block-end"
+          ],
+          "description": "Must match the parser's emitted Diagnostic.code so the orchestrator can pair the expectation with the actual diagnostic."
+        },
+        "construct": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short label for the construct (e.g. 'FILE SECTION', 'OPEN', 'EXEC SQL'). Free-form, used for documentation and UI display."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based line number in sourceCobolArtifactRef where the unsupported construct appears. Optional but recommended for negative fixtures."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "path", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative content-addressed URI. For file-backed fixtures, the canonical form is 'fixture://<repo-relative-path>'. The loader resolves it against the repository root."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$",
+          "description": "Repo-relative file path. MUST NOT be absolute, MUST NOT contain '..' segments, and MUST resolve to a file that produces the declared sha256 and byteSize."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
