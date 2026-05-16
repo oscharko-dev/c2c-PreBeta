@@ -261,5 +261,8 @@ artifacts/*.json
 
 # TypeScript test transpilation output
 apps/c2c-ui/dist-test/
+
+# Markdown link-checker cache (regenerated on every lychee run)
+.lycheecache
 /qodana/
 /qodana/

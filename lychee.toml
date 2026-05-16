@@ -1,0 +1,45 @@
+# Markdown link-checker configuration.
+#
+# Run locally from the repository root:
+#
+#   lychee --config lychee.toml './**/*.md'
+#
+# CI runs the same command via .github/workflows/markdown-link-check.yml.
+
+# Accept rate-limited and auth-walled responses as not-broken; only real
+# 4xx/5xx errors should fail the check.
+accept = ["200..=299", "403", "429"]
+
+# Limit parallel requests so CI does not get rate-limited by GitHub.
+max_concurrency = 4
+
+# Cache successful checks across runs (key by URL + status).
+cache = true
+max_cache_age = "7d"
+
+# Do not check links inside fenced code blocks — those are usually
+# illustrative snippets, not real targets.
+include_verbatim = false
+
+# Exclude vendored, build, generated, and tool-state trees. Most of these
+# are already gitignored, but include them defensively so a contributor
+# running lychee locally on a dirty tree still gets a fast, focused run.
+exclude_path = [
+  "node_modules",
+  ".git",
+  ".next",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "var",
+  "qodana",
+  "playwright-report",
+  "test-results",
+  ".venv",
+  ".claude",
+  ".codex",
+  ".air",
+  ".idea",
+  ".only-for-internal-use",
+]

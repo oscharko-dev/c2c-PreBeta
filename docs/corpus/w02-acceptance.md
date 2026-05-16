@@ -42,7 +42,7 @@ these diagnostic codes:
 
 The orchestrator turns any error-severity diagnostic into a
 `finalClassification=blocked` run with `failureCode=unsupported_cobol`
-(see [docs/orchestrator/orchestrator-w02-workflow.md](../orchestrator/orchestrator-w02-workflow.md)).
+(see [docs/contracts/orchestrator-w02-workflow.md](../contracts/orchestrator-w02-workflow.md)).
 
 ## Acceptance fixture / oracle contract
 
