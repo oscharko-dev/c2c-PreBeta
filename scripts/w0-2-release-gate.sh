@@ -89,13 +89,45 @@ for tool in curl jq python3; do
 done
 
 ENV_FILE="${C2C_LOCAL_ENV_FILE:-$ROOT_DIR/.env}"
+NORMALIZED_ENV_FILE=""
+
+# The launcher has a latent quirk: if C2C_LOCAL_VAR_DIR (or its derived
+# READY_MARKER / RUN_ARTIFACT_ROOT) is a relative path, the Go binary
+# build cd's into the service directory while keeping the -o path
+# relative, so the harness binary ends up inside the service tree
+# instead of $ROOT_DIR/var/c2c-local/bin/. To stay robust to both the
+# convenient relative paths in .env.example and the absolute defaults
+# the launcher uses when no env file is present, we materialise a
+# normalised copy of the env file with all c2c-local paths rewritten
+# to absolute, and point the launcher at the copy.
 if [[ -f "$ENV_FILE" ]]; then
+  NORMALIZED_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/c2c-w0.2-env.XXXXXX")"
+  # The cleanup trap further down deletes this file on exit.
+  python3 - "$ENV_FILE" "$ROOT_DIR" "$NORMALIZED_ENV_FILE" <<'PY'
+import os, sys
+src, root, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+relative_keys = {"C2C_LOCAL_VAR_DIR", "C2C_LOCAL_READY_MARKER", "C2C_RUN_ARTIFACT_ROOT"}
+with open(src, "r", encoding="utf-8") as fh, open(dst, "w", encoding="utf-8") as out:
+    for line in fh:
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            out.write(line); continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.rstrip("\n").strip().strip("'\"")
+        if key in relative_keys and value and not os.path.isabs(value):
+            out.write(f"{key}={os.path.join(root, value)}\n")
+        else:
+            out.write(line)
+PY
   set -a
   # shellcheck disable=SC1090
-  source "$ENV_FILE"
+  source "$NORMALIZED_ENV_FILE"
   set +a
+  export C2C_LOCAL_ENV_FILE="$NORMALIZED_ENV_FILE"
+else
+  export C2C_LOCAL_ENV_FILE="$ENV_FILE"
 fi
-export C2C_LOCAL_ENV_FILE="$ENV_FILE"
 
 if [[ "$MODE" == "foundry" ]]; then
   if [[ -z "${AZURE_FOUNDRY_API_KEY:-}" && -z "${AZURE_FOUNDRY_API_KEY_REF:-}" ]]; then
@@ -200,6 +232,9 @@ cleanup() {
     tail -n 120 "$launcher_log" >&2 || true
   fi
   rm -f "$launcher_log"
+  if [[ -n "$NORMALIZED_ENV_FILE" && -f "$NORMALIZED_ENV_FILE" ]]; then
+    rm -f "$NORMALIZED_ENV_FILE"
+  fi
   exit "$exit_code"
 }
 trap cleanup EXIT INT TERM
