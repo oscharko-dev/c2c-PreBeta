@@ -28,6 +28,7 @@ from orchestrator_service.run_contract import (
     DEFAULT_REPAIR_BUDGET,
     FAILURE_CODES,
     FAILURE_JAVA_COMPILE_FAILED,
+    FAILURE_JAVA_GENERATION_FAILED,
     FAILURE_ORACLE_MISMATCH,
     FAILURE_PARSE_FAILED,
     FAILURE_SEMANTIC_IR_FAILED,
@@ -774,6 +775,35 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
         states = [entry["state"] for entry in contract["stateHistory"]]
         self.assertIn(STATE_RUN_BLOCKED, states)
         self.assertNotIn(STATE_EVIDENCE_INCOMPLETE, states)
+
+    def test_missing_generator_capability_uses_step_failure_code(self):
+        capabilities = _BaseFixture._base_capabilities()
+        capabilities.pop("java.generator")
+        gateway = StubGateway(capabilities, _BaseFixture._base_responses())
+        runner = self._runner(gateway)
+        with self.assertRaises(Exception):
+            runner.run(context=self._context(), input_ref=self._input_ref())
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_FAILED)
+        self.assertEqual(contract["failureCode"], FAILURE_JAVA_GENERATION_FAILED)
+        states = [entry["state"] for entry in contract["stateHistory"]]
+        self.assertIn(STATE_RUN_BLOCKED, states)
+        self.assertNotIn(STATE_EVIDENCE_INCOMPLETE, states)
+
+    def test_unknown_pre_evidence_failure_code_is_state_scoped(self):
+        gateway = StubGateway(
+            _BaseFixture._base_capabilities(),
+            _BaseFixture._base_responses(),
+        )
+        runner = self._runner(gateway)
+        self.assertEqual(
+            runner._failure_code_from_exception(
+                RuntimeError("unexpected control-plane failure"),
+                current_state=STATE_SOURCE_NORMALIZED,
+            ),
+            FAILURE_PARSE_FAILED,
+        )
 
     def test_semantic_ir_failure_emits_semantic_ir_blocked_state(self):
         gateway = _StubGatewayWithIrFailure(

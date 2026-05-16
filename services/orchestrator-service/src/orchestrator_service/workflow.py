@@ -117,6 +117,17 @@ class OrchestratorError(Exception):
 class CapabilityMissingError(OrchestratorError):
     """Raised when a required capability is unavailable."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        step_name: str | None = None,
+        failure_code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.step_name = step_name
+        self.failure_code = failure_code
+
 
 class StepExecutionError(OrchestratorError):
     """Raised when a workflow step cannot be completed."""
@@ -1086,20 +1097,84 @@ class W0WorkflowRunner:
         )
 
     @staticmethod
-    def _failure_code_from_exception(exc: BaseException) -> str | None:
+    def _failure_code_for_step_name(
+        step_name: str | None,
+        *,
+        data_class: str | None = None,
+    ) -> str | None:
+        if data_class == DATA_CLASS_MODEL or step_name == STEP_MODEL_GUIDANCE:
+            return FAILURE_MODEL_GATEWAY_UNAVAILABLE
+        if step_name is None:
+            return None
+        return STEP_TO_FAILURE_CODE.get(step_name)
+
+    def _capability_failure_context(self, capability_id: str) -> tuple[str | None, str]:
+        step_by_capability = {
+            self.config.parse_capability_id: STEP_PARSE_COBOL,
+            self.config.ir_capability_id: STEP_GENERATE_IR,
+            self.config.generator_capability_id: STEP_GENERATE_JAVA,
+            self.config.build_test_capability_id: STEP_COMPILE_TEST_JAVA,
+            self.config.evidence_capability_id: STEP_WRITE_EVIDENCE,
+        }
+        if capability_id == self.config.model_gateway_capability_id:
+            return STEP_MODEL_GUIDANCE, FAILURE_MODEL_GATEWAY_UNAVAILABLE
+        step_name = step_by_capability.get(capability_id)
+        failure_code = self._failure_code_for_step_name(step_name)
+        return step_name, failure_code or FAILURE_JAVA_GENERATION_FAILED
+
+    @staticmethod
+    def _fallback_failure_code_for_state(current_state: str | None) -> str:
+        if current_state in {w02.STATE_RUN_ACCEPTED, STATE_SOURCE_NORMALIZED}:
+            return w02.FAILURE_PARSE_FAILED
+        if current_state == STATE_COBOL_PARSE_ATTEMPTED:
+            return w02.FAILURE_SEMANTIC_IR_FAILED
+        if current_state in {
+            STATE_SEMANTIC_IR_READY,
+            STATE_BASELINE_GENERATION_ATTEMPTED,
+            STATE_TRANSFORMATION_AGENT_INVOKED,
+            STATE_JAVA_CANDIDATE_PERSISTED,
+        }:
+            return FAILURE_JAVA_GENERATION_FAILED
+        if current_state == STATE_BUILD_TEST_RUNNING:
+            return w02.FAILURE_JAVA_COMPILE_FAILED
+        if current_state in {
+            STATE_FINAL_JAVA_SELECTED,
+            STATE_EVIDENCE_MATERIALIZED,
+            STATE_EVIDENCE_INCOMPLETE,
+        }:
+            return FAILURE_EVIDENCE_INCOMPLETE
+        return FAILURE_JAVA_GENERATION_FAILED
+
+    @staticmethod
+    def _failure_code_from_exception(
+        exc: BaseException,
+        *,
+        current_state: str | None = None,
+        failed_step: str | None = None,
+    ) -> str:
         if isinstance(exc, ModelPolicyDeniedStepError):
             return FAILURE_MODEL_POLICY_DENIED
         if isinstance(exc, AgentContractInvalidStepError):
             return FAILURE_AGENT_CONTRACT_INVALID
         if isinstance(exc, CapabilityMissingError):
+            if exc.failure_code is not None:
+                return exc.failure_code
+            step_failure_code = W0WorkflowRunner._failure_code_for_step_name(exc.step_name)
+            if step_failure_code is not None:
+                return step_failure_code
             text = str(exc).lower()
             if "model" in text:
                 return FAILURE_MODEL_GATEWAY_UNAVAILABLE
-            return None
+        if failed_step is not None:
+            step_failure_code = W0WorkflowRunner._failure_code_for_step_name(failed_step)
+            if step_failure_code is not None:
+                return step_failure_code
         failed_step = _failed_step_from_exception(exc)
-        if failed_step is None:
-            return None
-        return STEP_TO_FAILURE_CODE.get(failed_step)
+        if failed_step is not None:
+            step_failure_code = W0WorkflowRunner._failure_code_for_step_name(failed_step)
+            if step_failure_code is not None:
+                return step_failure_code
+        return W0WorkflowRunner._fallback_failure_code_for_state(current_state)
 
     def run(self, context: W0RunContext, input_ref: Mapping[str, JsonValue]) -> JsonObject:
         input_reference = _normalize_input_ref(input_ref, context.run_id)
@@ -2479,7 +2554,11 @@ class W0WorkflowRunner:
             # consumers can read the classification and failure code from
             # ``GET /v0/runs/{runId}/workflow``.
             try:
-                exc_failure_code = self._failure_code_from_exception(exc)
+                exc_failure_code = self._failure_code_from_exception(
+                    exc,
+                    current_state=w02_contract.state_machine.current,
+                    failed_step=failed_step,
+                )
                 # Drive the contract into ``run_blocked`` before finalising
                 # so the state-history reflects the workflow ordering. Evidence
                 # states are only recorded when the evidence step was actually
@@ -2494,7 +2573,7 @@ class W0WorkflowRunner:
                                 STATE_EVIDENCE_INCOMPLETE,
                                 active_step=None,
                                 message="evidence pack incomplete after workflow failure",
-                                failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
+                                failure_code=exc_failure_code,
                             )
                         except IllegalTransitionError:
                             pass
@@ -2519,7 +2598,7 @@ class W0WorkflowRunner:
                             context,
                             w02_contract,
                             CLASSIFICATION_FAILED,
-                            failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
+                            failure_code=exc_failure_code,
                             failure_message=failure_message,
                         )
                     except IllegalTransitionError:
@@ -3120,10 +3199,22 @@ class W0WorkflowRunner:
         capability_id = str(capability.get("id", "")).strip()
         actor = str(capability.get("owner", self.config.service_name)).strip()
         endpoint = str(capability.get("endpoint", "")).strip()
+        failure_code = self._failure_code_for_step_name(
+            step_name,
+            data_class=data_class,
+        ) or FAILURE_JAVA_GENERATION_FAILED
         if not capability_id:
-            raise CapabilityMissingError(f"{step_name} capability id is invalid")
+            raise CapabilityMissingError(
+                f"{step_name} capability id is invalid",
+                step_name=step_name,
+                failure_code=failure_code,
+            )
         if not endpoint:
-            raise CapabilityMissingError(f"{step_name} capability endpoint is missing")
+            raise CapabilityMissingError(
+                f"{step_name} capability endpoint is missing",
+                step_name=step_name,
+                failure_code=failure_code,
+            )
 
         event_input_payload = self._event_input_payload(data_class, payload)
 
@@ -3302,18 +3393,30 @@ class W0WorkflowRunner:
         return _build_reference(f"urn:orchestrator/{run_id}/step/{step_name}", output_payload)
 
     def _require_capability(self, run_id: str, capability_id: str) -> JsonObject:
+        step_name, failure_code = self._capability_failure_context(capability_id)
         if not capability_id:
-            raise CapabilityMissingError("capability id is required")
+            raise CapabilityMissingError(
+                "capability id is required",
+                failure_code=FAILURE_JAVA_GENERATION_FAILED,
+            )
         cached = self._capability_cache.get(capability_id)
         if cached is not None:
             return cached
         try:
             capability = self.gateway.get_capability(capability_id)
         except Exception as exc:
-            raise CapabilityMissingError(f"required capability {capability_id} unavailable") from exc
+            raise CapabilityMissingError(
+                f"required capability {capability_id} unavailable",
+                step_name=step_name,
+                failure_code=failure_code,
+            ) from exc
         capability_name = capability.get("id")
         if not isinstance(capability_name, str) or not capability_name.strip():
-            raise CapabilityMissingError(f"invalid capability payload for {capability_id}")
+            raise CapabilityMissingError(
+                f"invalid capability payload for {capability_id}",
+                step_name=step_name,
+                failure_code=failure_code,
+            )
         self._capability_cache[capability_id] = capability
         self._post_event(
             run_id,
