@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/agent-invocation-request-v0.json",
+  "title": "Agent Invocation Request v0",
+  "description": "Structured request the Orchestrator hands to a W0.2 productive agent (Transformation or Verification/Repair). Every productive agent invocation MUST be expressible as an instance of this schema. The schema captures inputs as content-addressed references (never inline secrets), the policy-controlled prompt template id, the Harness capability the Orchestrator selected, and the model invocation reference governed by the Model Gateway. Issue #167.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "attemptNumber",
+    "agentRole",
+    "capabilityRef",
+    "promptTemplateId",
+    "inputArtifactRefs",
+    "policyDecisionRef",
+    "modelInvocationRef",
+    "requestedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attemptNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "agentRole": {
+      "type": "string",
+      "enum": [
+        "transformation-agent",
+        "verification-repair-agent"
+      ]
+    },
+    "capabilityRef": { "$ref": "#/$defs/capabilityResolutionRecord" },
+    "promptTemplateId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier of the policy-controlled prompt template (not the prompt body)."
+    },
+    "promptTemplateVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputArtifactRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/artifactReference" }
+    },
+    "toolRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/toolReference" }
+    },
+    "policyDecisionRef": { "$ref": "#/$defs/policyDecisionReference" },
+    "modelInvocationRef": { "$ref": "#/$defs/modelInvocationReference" },
+    "repairContextRef": {
+      "$ref": "#/$defs/artifactReference",
+      "description": "Reference to an Agent Repair Input artifact (agent-repair-input-v0). Required when agentRole == verification-repair-agent and attemptNumber > 1."
+    },
+    "deadlineMs": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "traceRef": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque identifier the Harness uses to correlate Experience Learning and Evidence records."
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "agentRole": { "const": "verification-repair-agent" } },
+        "required": ["agentRole"]
+      },
+      "then": {
+        "required": ["repairContextRef"]
+      }
+    }
+  ],
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "capabilityResolutionRecord": {
+      "type": "object",
+      "required": ["capabilityId", "resolvedAt"],
+      "properties": {
+        "capabilityId": { "type": "string", "minLength": 1 },
+        "capabilityVersion": { "type": "string", "minLength": 1 },
+        "providerService": { "type": "string", "minLength": 1 },
+        "resolvedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "toolReference": {
+      "type": "object",
+      "required": ["toolId"],
+      "properties": {
+        "toolId": { "type": "string", "minLength": 1 },
+        "toolVersion": { "type": "string", "minLength": 1 },
+        "surface": {
+          "type": "string",
+          "enum": ["mcp", "harness", "model-gateway", "rag", "graph", "other"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "policyDecisionReference": {
+      "type": "object",
+      "required": ["policyVersion", "decision"],
+      "properties": {
+        "policyVersion": { "type": "string", "minLength": 1 },
+        "decision": { "type": "string", "minLength": 1 },
+        "decidedAt": { "type": "string", "format": "date-time" },
+        "ledgerRef": { "$ref": "#/$defs/artifactReference" }
+      },
+      "additionalProperties": false
+    },
+    "modelInvocationReference": {
+      "type": "object",
+      "required": ["invocationId", "modelId"],
+      "properties": {
+        "invocationId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "provider": {
+          "type": "string",
+          "enum": ["foundry-development", "customer-internal-mock"]
+        },
+        "ledgerRef": { "$ref": "#/$defs/artifactReference" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

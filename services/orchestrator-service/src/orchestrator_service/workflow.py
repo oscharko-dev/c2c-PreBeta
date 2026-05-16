@@ -15,6 +15,10 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 def _iso_now() -> str:
     return datetime.datetime.now(tz=datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
+from .agent_contracts import (
+    AgentContractInvalidError,
+    guard_agent_response,
+)
 from .artifacts import (
     KIND_BUILD_TEST_RESULT,
     KIND_EVIDENCE_PACK_MANIFEST,
@@ -43,6 +47,7 @@ from .run_contract import (
     CLASSIFICATION_BLOCKED,
     CLASSIFICATION_FAILED,
     CLASSIFICATION_SUCCESS,
+    FAILURE_AGENT_CONTRACT_INVALID,
     FAILURE_EVIDENCE_INCOMPLETE,
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
@@ -86,6 +91,13 @@ class CapabilityMissingError(OrchestratorError):
 
 class StepExecutionError(OrchestratorError):
     """Raised when a workflow step cannot be completed."""
+
+
+class AgentContractInvalidStepError(StepExecutionError):
+    """Raised when a productive agent returned a payload that fails W0.2
+    Agent I/O contract validation (Issue #167). Surfaces as the
+    ``agent_contract_invalid`` failure code on the run contract.
+    """
 
 
 PROFILE_CONTROLLED_BY_HARNESS = "harness-control-plane"
@@ -647,6 +659,32 @@ class W0WorkflowRunner:
             kind=KIND_W02_RUN_CONTRACT,
         )
 
+    def _guard_agent_invocation_payload(
+        self,
+        payload: Any,
+    ) -> Optional[str]:
+        """Validate an agent invocation response if the payload claims that
+        shape. Returns an error description string on failure, otherwise
+        ``None``.
+
+        The deterministic W0/W0.2 path never sets ``agentRole`` on its
+        generator output, so this guard is a no-op for current production
+        flows. Once a productive Transformation or Verification/Repair Agent
+        is plugged into the workflow, every contract-shaped payload it returns
+        is validated here before the Orchestrator uses it.
+
+        Issue #167.
+        """
+        if not isinstance(payload, Mapping):
+            return None
+        if "agentRole" not in payload:
+            return None
+        try:
+            guard_agent_response(payload)
+        except AgentContractInvalidError as exc:
+            return "; ".join(exc.errors) if exc.errors else str(exc)
+        return None
+
     def _finalize_w02(
         self,
         context: W0RunContext,
@@ -681,6 +719,8 @@ class W0WorkflowRunner:
 
     @staticmethod
     def _failure_code_from_exception(exc: BaseException) -> Optional[str]:
+        if isinstance(exc, AgentContractInvalidStepError):
+            return FAILURE_AGENT_CONTRACT_INVALID
         if isinstance(exc, CapabilityMissingError):
             text = str(exc).lower()
             if "model" in text:
@@ -996,6 +1036,16 @@ class W0WorkflowRunner:
                 },
                 ir_output.output_ref,
             )
+            # Issue #167: validate any productive-agent-shaped payload before
+            # the Orchestrator consumes it. The deterministic generator never
+            # sets ``agentRole`` so this is a no-op for the W0/W0.2 default
+            # path; the guard becomes load-bearing once a productive
+            # Transformation Agent is plugged in here.
+            agent_error = self._guard_agent_invocation_payload(generator_output.payload)
+            if agent_error is not None:
+                raise AgentContractInvalidStepError(
+                    f"step generate-java failed: {agent_error}"
+                )
             step_results.append(generator_output)
             evidence_refs.append(generator_output.output_ref.uri)
 
@@ -1190,6 +1240,15 @@ class W0WorkflowRunner:
                     },
                     ir_output.output_ref,
                 )
+                # Issue #167: validate repair-agent-shaped payloads before
+                # use. No-op for the deterministic generator; load-bearing
+                # once a productive Verification/Repair Agent returns
+                # ``agent-invocation-response-v0`` shaped output here.
+                repair_agent_error = self._guard_agent_invocation_payload(generator_output.payload)
+                if repair_agent_error is not None:
+                    raise AgentContractInvalidStepError(
+                        f"step generate-java failed: {repair_agent_error}"
+                    )
                 step_results.append(generator_output)
                 self._advance_w02(
                     context,

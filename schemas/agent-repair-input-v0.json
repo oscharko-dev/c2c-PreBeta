@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/agent-repair-input-v0.json",
+  "title": "Agent Repair Input v0",
+  "description": "Structured input the Orchestrator hands to a Verification/Repair Agent. Carries enough structured failure context for the agent to either propose a bounded repair, return a corrected Java candidate, or refuse with a precise reason. Compile errors, runtime failures, and oracle/equivalence diffs are referenced by content hash. Issue #167.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "attemptNumber",
+    "previousJavaCandidateRef",
+    "buildTestResultRef",
+    "failureCategory",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attemptNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previousJavaCandidateRef": { "$ref": "#/$defs/artifactReference" },
+    "buildTestResultRef": { "$ref": "#/$defs/artifactReference" },
+    "semanticIrRef": { "$ref": "#/$defs/artifactReference" },
+    "sourceCobolRef": { "$ref": "#/$defs/artifactReference" },
+    "failureCategory": {
+      "type": "string",
+      "enum": [
+        "java_compile_failed",
+        "java_runtime_failed",
+        "oracle_mismatch"
+      ]
+    },
+    "compileErrorRef": { "$ref": "#/$defs/artifactReference" },
+    "runtimeErrorRef": { "$ref": "#/$defs/artifactReference" },
+    "oracleDiffRef": { "$ref": "#/$defs/artifactReference" },
+    "previousRepairDecisionRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifactReference" },
+      "description": "All prior agent-repair-decision-v0 artifacts for this run, oldest first. Used by Experience Learning to spot no-change/repeated-attempt patterns."
+    },
+    "repairBudgetRemaining": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -306,6 +306,10 @@ class W02RunContractShapeTests(unittest.TestCase):
             "model_gateway_unavailable",
             "model_policy_denied",
             "agent_timeout",
+            # Issue #167 extends the closed set with one additional code for
+            # invalid agent I/O contract output. The orchestrator-w02-workflow
+            # contract doc lists the full set.
+            "agent_contract_invalid",
             "java_generation_failed",
             "java_compile_failed",
             "java_runtime_failed",
