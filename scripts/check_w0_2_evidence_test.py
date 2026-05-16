@@ -211,6 +211,40 @@ class CheckW02EvidenceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
         self.assertIn("finalJavaArtifact", result.stderr)
 
+    def test_failed_classification_accepted_as_blocked(self) -> None:
+        # The orchestrator surfaces `parse_failed` (W0.2 workflow contract,
+        # Issue #166) for unsupported source whose parser bails before
+        # emitting structured diagnostics. The resulting manifest has
+        # classification="failed" — which is still a non-success outcome
+        # and must be accepted by the blocked-path validator.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "failed"
+        manifest["completenessStatus"] = "evidence_incomplete"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("finalJavaArtifact")
+        manifest["validation"] = {
+            "ok": False,
+            "requiredArtifacts": ["evidence-pack-manifest"],
+            "missingArtifacts": [],
+        }
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_success_classification_rejected_as_blocked(self) -> None:
+        # Symmetric to the above: a manifest whose classification is
+        # "success" must NOT pass the blocked-path validator. Otherwise
+        # the gate could silently accept a successful agentic run on the
+        # negative-fixture path and lose the honest-blocking guarantee.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("finalJavaArtifact")
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 3)
+        # The validator rejects this with the blocked-path classification
+        # check, NOT the secret-scan check. Anchor on the
+        # classification='success' fragment which is the actual diagnostic
+        # the user needs to act on.
+        self.assertIn("classification='success'", result.stderr)
+
     # ----- secret-scan --------------------------------------------------
 
     def test_referenced_artifact_with_secret_token_fails(self) -> None:

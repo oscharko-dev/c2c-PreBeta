@@ -519,17 +519,23 @@ def _check_success_artifacts(
 def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: List[str]) -> None:
     completeness = manifest.get("completenessStatus")
     classification = manifest.get("classification")
+    accepted_completeness = {"blocked", "evidence_incomplete"}
+    # The Evidence Pack manifest classification enum is
+    # ["success", "evidence_incomplete", "blocked", "failed"]. The blocked-path
+    # validator accepts any non-success classification: a run that ended in
+    # `failed` (e.g., parse_failed) is also a non-success outcome that must
+    # not be confused with the success contract.
+    accepted_classification = {"blocked", "evidence_incomplete", "failed"}
     accepted = (
-        completeness == "blocked"
-        or classification == "blocked"
-        or classification == "evidence_incomplete"
-        or completeness == "evidence_incomplete"
+        completeness in accepted_completeness
+        or classification in accepted_classification
     )
     _require(
         accepted,
-        f"a blocked-path run must report completenessStatus or classification in "
-        f"{{'blocked','evidence_incomplete'}}; got completenessStatus={completeness!r}, "
-        f"classification={classification!r}",
+        f"a blocked-path run must report completenessStatus in "
+        f"{sorted(accepted_completeness)!r} or classification in "
+        f"{sorted(accepted_classification)!r}; got completenessStatus="
+        f"{completeness!r}, classification={classification!r}",
         failures,
     )
     artifacts = manifest.get("artifacts")

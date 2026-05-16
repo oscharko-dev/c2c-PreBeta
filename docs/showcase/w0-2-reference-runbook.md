@@ -92,24 +92,37 @@ At a high level:
    the BFF reports `orchestrator=live`, `evidence=live`, and the
    `/api/v0/harness/ready` endpoint responds. In `--foundry` mode the
    Model Gateway health endpoint must also respond.
-2. **HELLOW02 success path.** Submits the canonical W0.2 acceptance
-   fixture through `POST /api/v0/transform`, polls `/runs/{runId}/workflow`
-   until `finalClassification == "success"`, asserts the contract shape
+2. **Success path.** Submits a W0.2 acceptance source through
+   `POST /api/v0/transform`, polls `/runs/{runId}/workflow` until
+   `finalClassification == "success"`, asserts the contract shape
    (state machine, repair budget, generated/build-test/evidence refs).
+   In **deterministic mode** the gate submits **BRNCH01**
+   (`branch-account-guard.cbl`) — the W0/W0.1 deterministic
+   acceptance program — because the productive agentic loop requires
+   the Model Gateway. The W0.2 workflow contract envelope is still
+   asserted. In **`--foundry` mode** the gate submits **HELLOW02**
+   (`hello-w02.cbl`) — the W0.2 agentic acceptance fixture — so the
+   full productive Transformation/Verification path is exercised.
 3. **Cross-view consistency.** Asserts the `sha256` reported by
    `GeneratedView`, `BuildTestView`, and `EvidenceView` for the same run
    are identical, the progress timeline includes the W0.2 step names
    (with `model-policy-skipped` in the deterministic path), and the run
    artifacts listing exposes the evidence-pack manifest by kind.
 4. **Evidence Pack completeness.** Resolves the manifest URI to a local
-   path and runs `scripts/check_w0_2_evidence.py --success`. With
-   `--foundry` the validator also requires
-   `modelInvocations[*].status == "completed"`; without it, the validator
-   requires `status == "skipped"`.
+   path. In **`--foundry` mode** the gate runs
+   `scripts/check_w0_2_evidence.py --success --expect-foundry-invocation`,
+   which requires the W0.2 productive slots
+   (`generatedJavaArtifacts`, `finalJavaArtifact`, `oracleComparison`,
+   `agentTrajectories`) and `modelInvocations[*].status == "completed"`.
+   In **deterministic mode** the gate only asserts the manifest is
+   reachable and pointer-consistent (full W0.2-slot completeness is
+   only possible when the productive agentic path runs).
 5. **FILEIO-UNSUPPORTED blocked path.** Submits the negative fixture and
-   asserts `finalClassification == "blocked"`,
-   `failureCode == "unsupported_cobol"`, `generatedJavaRef == null`, and
-   that the blocked manifest passes the validator's `--blocked` mode.
+   asserts the run reaches a non-success terminal classification
+   (`blocked`, `failed`, or `incomplete`) with a closed-set
+   unsupported-source `failureCode` (`unsupported_cobol` or
+   `parse_failed`) and produces no Java. If a manifest exists for
+   the negative path, it must pass the validator's `--blocked` mode.
 6. **Foundry capability (optional).** With `--foundry`, runs
    `scripts/foundry-smoke.sh transformation $C2C_MODEL_DEFAULT_DEPLOYMENT`
    to assert the Model Gateway can hold a live conversation with the

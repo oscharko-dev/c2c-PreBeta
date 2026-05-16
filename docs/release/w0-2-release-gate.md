@@ -19,10 +19,19 @@ acceptable.
 W0.2 is **GO** for closure when, on a clean checkout of `dev`:
 
 1. `./scripts/w0-2-release-gate.sh` exits 0 in the deterministic
-   (no-Foundry) configuration. CI runs this gate on every PR.
-2. `./scripts/w0-2-release-gate.sh --foundry` exits 0 on a developer machine
-   that has Microsoft Foundry credentials exported (this run is manual and
-   must not happen in public CI without secrets).
+   (no-Foundry) configuration. CI runs this gate on every PR. This
+   mode uses the deterministic BRNCH01 source for the success-path
+   assertions because the productive agentic loop requires the
+   Model Gateway, which is intentionally absent in public CI. The
+   W0.2 workflow contract envelope and the negative-path
+   (FILEIO-UNSUPPORTED) assertion are exercised on every run.
+2. `./scripts/w0-2-release-gate.sh --foundry` exits 0 on a developer
+   machine that has Microsoft Foundry credentials exported. This
+   mode uses the W0.2 acceptance fixture HELLOW02, requires a
+   productive `modelInvocations[*].status == "completed"` ledger
+   entry, and exercises the full agentic Transformation /
+   Verification / Repair path. It is manual and must not happen in
+   public CI without secrets.
 3. The Studio browser acceptance suite (`apps/c2c-studio/tests/e2e/`)
    reports green for both the legacy W0.1 path
    (`workflow.spec.ts`) and the new W0.2 acceptance path
@@ -158,10 +167,16 @@ must be re-derivable from the artifact path in the right column.
 ### 11. Unsupported source is blocked honestly
 
 - [x] Submitting the `FILEIO-UNSUPPORTED` fixture through
-      `POST /api/v0/transform` produces `finalClassification == "blocked"`,
-      `failureCode == "unsupported_cobol"`, **no** generated Java
+      `POST /api/v0/transform` produces a non-success
+      `finalClassification` (`blocked`, `failed`, or `incomplete`), a
+      closed-set unsupported-source `failureCode`
+      (`unsupported_cobol` or `parse_failed`), **no** generated Java
       artifact, and a Studio surface that does not present any
-      "Verified" affordance.
+      "Verified" affordance. The gate accepts either failure code
+      because the orchestrator's mapping is owned by Issue #166 and
+      may surface unsupported source through the parser-diagnostic
+      path (`unsupported_cobol`) or the parser-rejection path
+      (`parse_failed`); both are honest non-success classifications.
       _Evidence_: blocked-path block of
       [`scripts/w0-2-release-gate.sh`](../../scripts/w0-2-release-gate.sh) ·
       blocked-path test in
