@@ -38,10 +38,11 @@ import datetime
 import json
 import re
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import Any, Protocol, Sequence
 
 from .agent_contracts import (
     AgentContractInvalidError,
@@ -55,6 +56,8 @@ from .artifacts import (
     KIND_TRANSFORMATION_AGENT_RESPONSE,
     MIME_JAVA,
     ArtifactMetadata,
+    JsonObject,
+    JsonValue,
     RunArtifactStore,
 )
 from .config import OrchestratorConfig
@@ -75,7 +78,7 @@ class TransformationAgentError(Exception):
 
     failure_code: str = "java_generation_failed"
 
-    def __init__(self, message: str, *, failure_code: Optional[str] = None) -> None:
+    def __init__(self, message: str, *, failure_code: str | None = None) -> None:
         super().__init__(message)
         if failure_code is not None:
             self.failure_code = failure_code
@@ -139,6 +142,7 @@ _JAVA_PACKAGE_PATTERN = re.compile(
 # ---------------------------------------------------------------------------
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class ArtifactRef:
     """Content-addressed artifact reference shared by every contract."""
@@ -146,11 +150,11 @@ class ArtifactRef:
     uri: str
     sha256: str
     byte_size: int
-    mime_type: Optional[str] = None
-    kind: Optional[str] = None
+    mime_type: str | None = None
+    kind: str | None = None
 
-    def to_payload(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+    def to_payload(self) -> JsonObject:
+        payload: JsonObject = {
             "uri": self.uri,
             "sha256": self.sha256,
             "byteSize": int(self.byte_size),
@@ -162,6 +166,7 @@ class ArtifactRef:
         return payload
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class TransformationAgentRequest:
     """Structured input to :meth:`TransformationAgent.invoke`.
@@ -176,20 +181,20 @@ class TransformationAgentRequest:
     attempt_number: int
     requester: str
     source_text: str
-    source_ref: Mapping[str, Any]
+    source_ref: Mapping[str, JsonValue]
     capability_id: str
     capability_version: str
     capability_provider: str
     capability_resolved_at: str
     model_id: str
     policy_version: str
-    semantic_ir: Optional[Mapping[str, Any]] = None
-    semantic_ir_ref: Optional[Mapping[str, Any]] = None
-    baseline_java_ref: Optional[Mapping[str, Any]] = None
-    baseline_files: Optional[Mapping[str, str]] = None
-    oracle_ref: Optional[Mapping[str, Any]] = None
+    semantic_ir: Mapping[str, JsonValue] | None = None
+    semantic_ir_ref: Mapping[str, JsonValue] | None = None
+    baseline_java_ref: Mapping[str, JsonValue] | None = None
+    baseline_files: Mapping[str, str] | None = None
+    oracle_ref: Mapping[str, JsonValue] | None = None
     deadline_ms: int = 30000
-    trace_ref: Optional[str] = None
+    trace_ref: str | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id:
@@ -210,6 +215,7 @@ class TransformationAgentRequest:
             raise ValueError("deadline_ms must be positive")
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class GeneratedJavaCandidate:
     """Decoded Java candidate the agent returns.
@@ -218,15 +224,15 @@ class GeneratedJavaCandidate:
     POSIX paths so persistence cannot escape the run directory.
     """
 
-    files: Dict[str, str]
+    files: dict[str, str]
     entry_class: str
     entry_package: str
     entry_file_path: str
-    unsupported_constructs: Tuple[str, ...]
+    unsupported_constructs: tuple[str, ...]
     explanation: str
 
-    def to_manifest(self) -> Dict[str, Any]:
-        manifest_files: List[Dict[str, Any]] = []
+    def to_manifest(self) -> JsonObject:
+        manifest_files: list[JsonObject] = []
         for path, content in sorted(self.files.items()):
             encoded = content.encode("utf-8")
             manifest_files.append(
@@ -247,6 +253,7 @@ class GeneratedJavaCandidate:
         }
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class TransformationAgentResult:
     """Outcome the Orchestrator consumes after an agent invocation.
@@ -258,18 +265,18 @@ class TransformationAgentResult:
     """
 
     status: str
-    candidate: Optional[GeneratedJavaCandidate]
-    failure_code: Optional[str]
-    failure_message: Optional[str]
-    model_invocation_ref: Dict[str, Any]
-    java_candidate_ref: Optional[Dict[str, Any]]
-    output_artifact_refs: List[Dict[str, Any]]
-    trajectory_record: Dict[str, Any]
-    response_payload: Dict[str, Any]
-    request_payload: Dict[str, Any]
-    request_artifact_ref: Dict[str, Any]
-    response_artifact_ref: Dict[str, Any]
-    persisted_artifacts: List[Dict[str, Any]] = field(default_factory=list)
+    candidate: GeneratedJavaCandidate | None
+    failure_code: str | None
+    failure_message: str | None
+    model_invocation_ref: JsonObject
+    java_candidate_ref: JsonObject | None
+    output_artifact_refs: list[JsonObject]
+    trajectory_record: JsonObject
+    response_payload: JsonObject
+    request_payload: JsonObject
+    request_artifact_ref: JsonObject
+    response_artifact_ref: JsonObject
+    persisted_artifacts: list[JsonObject] = field(default_factory=list)
 
     @property
     def succeeded(self) -> bool:
@@ -295,14 +302,14 @@ class ModelGatewayInvoker(Protocol):
     agent can classify them.
     """
 
-    def invoke(self, payload: Mapping[str, Any]) -> Dict[str, Any]:  # pragma: no cover - protocol
+    def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:  # pragma: no cover - protocol
         ...
 
 
 class HarnessEventSink(Protocol):
     """Subset of :class:`HarnessGateway` the agent needs for event emission."""
 
-    def post_event(self, event: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - protocol
+    def post_event(self, event: JsonObject) -> JsonObject:  # pragma: no cover - protocol
         ...
 
 
@@ -311,7 +318,7 @@ class HarnessEventSink(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def _iso_now(clock: Optional[Callable[[], datetime.datetime]] = None) -> str:
+def _iso_now(clock: Callable[[], datetime.datetime] | None = None) -> str:
     fn = clock or (lambda: datetime.datetime.now(tz=datetime.timezone.utc))
     now = fn()
     if now.tzinfo is None:
@@ -335,8 +342,8 @@ def _looks_like_artifact_ref(ref: Any) -> bool:
     return True
 
 
-def _coerce_artifact_ref(ref: Mapping[str, Any]) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+def _coerce_artifact_ref(ref: Mapping[str, JsonValue]) -> JsonObject:
+    payload: JsonObject = {
         "uri": str(ref["uri"]),
         "sha256": str(ref["sha256"]).lower(),
         "byteSize": int(ref["byteSize"]),
@@ -350,7 +357,7 @@ def _coerce_artifact_ref(ref: Mapping[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _safe_relpath(raw: Any) -> Optional[str]:
+def _safe_relpath(raw: Any) -> str | None:
     if not isinstance(raw, str) or not raw:
         return None
     if "\x00" in raw:
@@ -366,7 +373,7 @@ def _safe_relpath(raw: Any) -> Optional[str]:
     return "/".join(parts)
 
 
-_MODEL_POLICY_DENY_MARKERS: Tuple[str, ...] = (
+_MODEL_POLICY_DENY_MARKERS: tuple[str, ...] = (
     "model_policy_denied",
     "forbidden_model",
     "forbidden_role",
@@ -428,9 +435,9 @@ class HarnessModelGatewayInvoker:
             raise ValueError("capability_id is required")
         self._harness_gateway = harness_gateway
         self._capability_id = capability_id
-        self._cached_capability: Optional[Mapping[str, Any]] = None
+        self._cached_capability: Mapping[str, JsonValue] | None = None
 
-    def _capability(self) -> Mapping[str, Any]:
+    def _capability(self) -> Mapping[str, JsonValue]:
         if self._cached_capability is None:
             capability = self._harness_gateway.get_capability(self._capability_id)
             if not isinstance(capability, Mapping) or not capability.get("endpoint"):
@@ -440,7 +447,7 @@ class HarnessModelGatewayInvoker:
             self._cached_capability = capability
         return self._cached_capability
 
-    def invoke(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         capability = dict(self._capability())
         try:
             response = self._harness_gateway.invoke_capability(capability, dict(payload))
@@ -458,7 +465,7 @@ class HarnessModelGatewayInvoker:
 # ---------------------------------------------------------------------------
 
 
-def _parse_model_output_envelope(raw_output: Any) -> Mapping[str, Any]:
+def _parse_model_output_envelope(raw_output: Any) -> Mapping[str, JsonValue]:
     """Extract the Java-candidate JSON object from the model output.
 
     The Model Gateway returns an ``output`` field that is either already a
@@ -499,7 +506,7 @@ def _validate_inner_status(status: Any) -> str:
     return status
 
 
-def _validate_inner_failure(envelope: Mapping[str, Any], status: str) -> Tuple[str, str]:
+def _validate_inner_failure(envelope: Mapping[str, JsonValue], status: str) -> tuple[str, str]:
     failure_code = envelope.get("failureCode") or envelope.get("failure_code")
     failure_message = envelope.get("failureMessage") or envelope.get("failure_message")
     if status == "blocked":
@@ -515,7 +522,7 @@ def _validate_inner_failure(envelope: Mapping[str, Any], status: str) -> Tuple[s
 
 
 def _decode_candidate(
-    envelope: Mapping[str, Any],
+    envelope: Mapping[str, JsonValue],
     *,
     max_output_bytes: int,
     default_package: str,
@@ -525,7 +532,7 @@ def _decode_candidate(
         raise AgentContractInvalidAgentError(
             "success response must include non-empty 'files' map"
         )
-    files: Dict[str, str] = {}
+    files: dict[str, str] = {}
     total_bytes = 0
     has_java_shape = False
     for raw_path, raw_content in files_raw.items():
@@ -571,7 +578,7 @@ def _decode_candidate(
             f"invalid entryPackage identifier: {entry_package_raw!r}"
         )
     entry_file_path_raw = envelope.get("entryFilePath") or envelope.get("entry_file_path")
-    entry_file_path: Optional[str]
+    entry_file_path: str | None
     if isinstance(entry_file_path_raw, str) and entry_file_path_raw.strip():
         entry_file_path = _safe_relpath(entry_file_path_raw)
         if entry_file_path is None:
@@ -650,8 +657,8 @@ class TransformationAgent:
         config: OrchestratorConfig,
         artifact_store: RunArtifactStore,
         model_invoker: ModelGatewayInvoker,
-        harness_events: Optional[HarnessEventSink] = None,
-        clock: Optional[Callable[[], datetime.datetime]] = None,
+        harness_events: HarnessEventSink | None = None,
+        clock: Callable[[], datetime.datetime] | None = None,
     ) -> None:
         self._config = config
         self._artifact_store = artifact_store
@@ -751,9 +758,9 @@ class TransformationAgent:
         try:
             inner_envelope = _parse_model_output_envelope(gateway_response.get("output"))
             inner_status = _validate_inner_status(inner_envelope.get("status"))
-            candidate: Optional[GeneratedJavaCandidate] = None
-            failure_code: Optional[str] = None
-            failure_message: Optional[str] = None
+            candidate: GeneratedJavaCandidate | None = None
+            failure_code: str | None = None
+            failure_message: str | None = None
             unsupported_constructs_raw = inner_envelope.get(
                 "unsupportedConstructs"
             ) or inner_envelope.get("unsupported_constructs") or ()
@@ -795,7 +802,7 @@ class TransformationAgent:
                 model_invocation_id=str(gateway_response.get("invocationId") or "")
                 or f"inv-{request.run_id}-{request.attempt_number:02d}-invalid",
                 model_provider=str(gateway_response.get("provider") or "foundry-development"),
-                latency_ms=latency_ms,
+                _latency_ms=latency_ms,
             )
             response_meta = self._artifact_store.write_json(
                 request.run_id,
@@ -820,9 +827,9 @@ class TransformationAgent:
 
         # 4. Persist the Java candidate as run artifacts. The persisted
         # manifest is the source of truth for downstream consumers.
-        output_artifact_refs: List[Dict[str, Any]] = []
-        persisted_artifacts: List[Dict[str, Any]] = []
-        java_candidate_ref: Optional[Dict[str, Any]] = None
+        output_artifact_refs: list[JsonObject] = []
+        persisted_artifacts: list[JsonObject] = []
+        java_candidate_ref: JsonObject | None = None
         if candidate is not None:
             for relpath, content in sorted(candidate.files.items()):
                 file_meta = self._artifact_store.write_text(
@@ -872,12 +879,12 @@ class TransformationAgent:
             gateway_response=gateway_response,
             started_at=started_at,
             ended_at=ended_at,
-            latency_ms=latency_ms,
+            _latency_ms=latency_ms,
             output_artifact_refs=output_artifact_refs,
             java_candidate_ref=java_candidate_ref,
             failure_code=failure_code,
             failure_message=failure_message,
-            unsupported_constructs=(
+            _unsupported_constructs=(
                 candidate.unsupported_constructs
                 if candidate is not None
                 else tuple(
@@ -948,11 +955,12 @@ class TransformationAgent:
     def _iso_now(self) -> str:
         return _iso_now(self._clock)
 
-    def _attempt_dir(self, attempt_number: int) -> str:
+    @staticmethod
+    def _attempt_dir(attempt_number: int) -> str:
         return f"{TRANSFORMATION_AGENT_DIR}/attempt-{attempt_number:02d}"
 
     @staticmethod
-    def _meta_to_ref(meta: ArtifactMetadata) -> Dict[str, Any]:
+    def _meta_to_ref(meta: ArtifactMetadata) -> JsonObject:
         return {
             "uri": meta.uri,
             "sha256": meta.sha256,
@@ -965,9 +973,9 @@ class TransformationAgent:
         self,
         request: TransformationAgentRequest,
         requested_at: str,
-    ) -> Dict[str, Any]:
+    ) -> JsonObject:
         """Materialise the ``agent-invocation-request-v0`` payload."""
-        input_artifact_refs: List[Dict[str, Any]] = [_coerce_artifact_ref(request.source_ref)]
+        input_artifact_refs: list[JsonObject] = [_coerce_artifact_ref(request.source_ref)]
         if request.semantic_ir_ref and _looks_like_artifact_ref(request.semantic_ir_ref):
             input_artifact_refs.append(_coerce_artifact_ref(request.semantic_ir_ref))
         if request.baseline_java_ref and _looks_like_artifact_ref(request.baseline_java_ref):
@@ -985,7 +993,7 @@ class TransformationAgent:
             f"inv-{request.run_id}-{request.attempt_number:02d}-transformation"
         )
 
-        payload: Dict[str, Any] = {
+        payload: JsonObject = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -1022,16 +1030,16 @@ class TransformationAgent:
         request: TransformationAgentRequest,
         *,
         inner_status: str,
-        gateway_response: Mapping[str, Any],
+        gateway_response: Mapping[str, JsonValue],
         started_at: str,
         ended_at: str,
-        latency_ms: int,
-        output_artifact_refs: Sequence[Mapping[str, Any]],
-        java_candidate_ref: Optional[Mapping[str, Any]],
-        failure_code: Optional[str],
-        failure_message: Optional[str],
-        unsupported_constructs: Sequence[str],
-    ) -> Dict[str, Any]:
+        _latency_ms: int,
+        output_artifact_refs: Sequence[Mapping[str, JsonValue]],
+        java_candidate_ref: Mapping[str, JsonValue] | None,
+        failure_code: str | None,
+        failure_message: str | None,
+        _unsupported_constructs: Sequence[str],
+    ) -> JsonObject:
         invocation_id = (
             str(gateway_response.get("invocationId") or "").strip()
             or f"inv-{request.run_id}-{request.attempt_number:02d}-transformation"
@@ -1044,7 +1052,7 @@ class TransformationAgent:
             else "foundry-development"
         )
         ledger_ref_raw = gateway_response.get("ledgerRef")
-        model_invocation_ref: Dict[str, Any] = {
+        model_invocation_ref: JsonObject = {
             "invocationId": invocation_id,
             "modelId": model_id,
             "provider": provider,
@@ -1061,7 +1069,7 @@ class TransformationAgent:
             "relatedRecords": [invocation_id],
         }
 
-        payload: Dict[str, Any] = {
+        payload: JsonObject = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -1107,8 +1115,8 @@ class TransformationAgent:
         ended_at: str,
         model_invocation_id: str,
         model_provider: str,
-        latency_ms: int = 0,
-    ) -> Dict[str, Any]:
+        _latency_ms: int = 0,
+    ) -> JsonObject:
         """Materialise a contract-shaped failure response for persistence.
 
         Used on early-failure paths (gateway unavailability, policy denial,
@@ -1128,7 +1136,7 @@ class TransformationAgent:
             "createdAt": ended_at,
             "relatedRecords": [model_invocation_id],
         }
-        payload: Dict[str, Any] = {
+        payload: JsonObject = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -1161,7 +1169,7 @@ class TransformationAgent:
 
     def _call_model_gateway(
         self, request: TransformationAgentRequest
-    ) -> Dict[str, Any]:
+    ) -> JsonObject:
         """Build the Model Gateway request and call the configured invoker.
 
         The agent does not embed direct provider HTTP calls. The invoker is
@@ -1266,9 +1274,9 @@ class TransformationAgent:
         event_type: str,
         state_transition: str,
         status: str,
-        input_payload: Mapping[str, Any],
-        output_payload: Mapping[str, Any],
-        latency_ms: Optional[int] = None,
+        input_payload: Mapping[str, JsonValue],
+        output_payload: Mapping[str, JsonValue],
+        latency_ms: int | None = None,
     ) -> None:
         """Best-effort Harness event emission. Failures must not break the
         agent invocation; the Harness is observational, not controlling."""
@@ -1277,7 +1285,7 @@ class TransformationAgent:
         now = self._iso_now()
         input_canonical = _canonical_json_bytes(dict(input_payload))
         output_canonical = _canonical_json_bytes(dict(output_payload))
-        event: Dict[str, Any] = {
+        event: JsonObject = {
             "eventType": event_type,
             "schemaVersion": "v0",
             "service": "orchestrator-service",
@@ -1323,7 +1331,7 @@ _TRANSFORMATION_INNER_OUTPUT_SCHEMA_ID = (
 )
 
 
-_TRANSFORMATION_INNER_OUTPUT_SCHEMA: Dict[str, Any] = {
+_TRANSFORMATION_INNER_OUTPUT_SCHEMA: JsonObject = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": _TRANSFORMATION_INNER_OUTPUT_SCHEMA_ID,
     "title": "Transformation Agent Inner Output v0",

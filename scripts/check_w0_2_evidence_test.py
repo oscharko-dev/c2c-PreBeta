@@ -14,7 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 
 SCRIPT = Path(__file__).with_name("check_w0_2_evidence.py")
@@ -24,7 +24,7 @@ def _hex(byte: str) -> str:
     return byte * 64
 
 
-GOOD_SUCCESS_MANIFEST: Dict[str, Any] = {
+GOOD_SUCCESS_MANIFEST: dict[str, Any] = {
     "schemaVersion": "v0",
     "capability": "evidence.pack",
     "service": "evidence-service",
@@ -93,7 +93,8 @@ GOOD_SUCCESS_MANIFEST: Dict[str, Any] = {
 
 
 class CheckW02EvidenceTest(unittest.TestCase):
-    def _run(self, manifest: Dict[str, Any], *extra_args: str) -> subprocess.CompletedProcess[str]:
+    @staticmethod
+    def _run(manifest: dict[str, Any], *extra_args: str) -> subprocess.CompletedProcess[str]:
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
             json.dump(manifest, handle)
             path = handle.name

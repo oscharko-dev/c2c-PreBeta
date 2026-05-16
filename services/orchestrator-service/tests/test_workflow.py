@@ -75,6 +75,7 @@ class StubGateway:
         return dict(self.trajectory_ledger.get(run_id, {"runId": run_id, "events": []}))
 
 
+# noinspection PyAttributeOutsideInitInspection
 class SummaryCheckingGateway(StubGateway):
     def __init__(self, capabilities, responses, *, artifact_root: Path):
         super().__init__(capabilities, responses)
@@ -616,12 +617,14 @@ class WorkflowArtifactPersistenceTests(unittest.TestCase):
 
     @staticmethod
     def _config():
+        # noinspection PyProtectedMemberInspection
         return W0WorkflowRunnerTests._base_config()  # reuse helper
 
     def _runner_with_store(self, gateway, *, max_retries: int = 0):
         store_dir = tempfile.TemporaryDirectory()
         self.addCleanup(store_dir.cleanup)
         store = RunArtifactStore(store_dir.name, created_by="orchestrator-service-test")
+        # noinspection PyProtectedMemberInspection
         config = W0WorkflowRunnerTests._base_config(max_retries=max_retries)
         runner = W0WorkflowRunner(config=config, gateway=gateway, artifact_store=store)
         return runner, store, Path(store_dir.name)

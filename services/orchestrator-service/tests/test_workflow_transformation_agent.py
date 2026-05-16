@@ -20,9 +20,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-from orchestrator_service.artifacts import RunArtifactStore
+from orchestrator_service.artifacts import JsonObject, JsonValue, RunArtifactStore
 from orchestrator_service.harness import HarnessFailure
 from orchestrator_service.run_contract import (
     CLASSIFICATION_BLOCKED,
@@ -58,8 +59,8 @@ SAMPLE_JAVA = (
 )
 
 
-def _ok_model_response(*, files: Mapping[str, str] | None = None, status: str = "success") -> Dict[str, Any]:
-    output: Dict[str, Any] = {"status": status}
+def _ok_model_response(*, files: Mapping[str, str] | None = None, status: str = "success") -> JsonObject:
+    output: JsonObject = {"status": status}
     if status == "success":
         output["files"] = dict(files) if files else {
             "src/main/java/com/c2c/generated/Hello.java": SAMPLE_JAVA,
@@ -91,11 +92,11 @@ def _ok_model_response(*, files: Mapping[str, str] | None = None, status: str = 
 
 
 class _StubAgentInvoker:
-    def __init__(self, response: Mapping[str, Any] | Exception) -> None:
+    def __init__(self, response: Mapping[str, JsonValue] | Exception) -> None:
         self._response = response
-        self.calls: list[Mapping[str, Any]] = []
+        self.calls: list[Mapping[str, JsonValue]] = []
 
-    def invoke(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         self.calls.append(dict(payload))
         if isinstance(self._response, Exception):
             raise self._response
@@ -105,7 +106,9 @@ class _StubAgentInvoker:
 class TransformationAgentWorkflowIntegrationTests(unittest.TestCase):
     """End-to-end W0.2 workflow with the productive agent enabled."""
 
-    def _runner(self, *, agent_response: Any) -> tuple[W0WorkflowRunner, StubGateway, RunArtifactStore, str]:
+    # noinspection PyProtectedMemberInspection
+    @staticmethod
+    def _runner(*, agent_response: Any) -> tuple[W0WorkflowRunner, StubGateway, RunArtifactStore, str]:
         tmp = tempfile.mkdtemp()
         gateway = StubGateway(
             W0WorkflowRunnerTests._base_capabilities(),
@@ -313,6 +316,51 @@ class TransformationAgentWorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("semanticIrRef", parameters)
         self.assertIn("sourceRef", parameters)
         self.assertEqual(gateway_request["agentRole"], "transformation")
+
+    def test_agent_blocked_does_not_enter_repair_loop(self) -> None:
+        """Guard: build_test_input={} default is safe when w02_blocked=True.
+
+        When the Transformation Agent returns ``blocked``, build_test_output
+        is never set (remains None) so the repair loop guard
+        ``while build_test_output is not None`` prevents any repair invocation.
+        A loud-failure invoker makes any accidental loop entry an immediate
+        test failure rather than a silent no-op.
+        """
+        class _LoudFailRepairInvoker:
+            @staticmethod
+            def invoke(_payload):
+                raise AssertionError("repair loop entered when w02_blocked=True")
+
+        tmp = tempfile.mkdtemp()
+        gateway = StubGateway(
+            W0WorkflowRunnerTests._base_capabilities(),
+            W0WorkflowRunnerTests._base_responses(),
+        )
+        runner = W0WorkflowRunner(
+            config=W0WorkflowRunnerTests._base_config(),
+            gateway=gateway,
+            artifact_store=RunArtifactStore(tmp),
+            transformation_agent_invoker=_StubAgentInvoker(_ok_model_response(status="blocked")),
+            repair_agent_invoker=_LoudFailRepairInvoker(),
+        )
+
+        result = runner.run(
+            context=W0RunContext(
+                run_id="run-1",
+                workflow_id="w0-migration-v0",
+                requester="orchestrator",
+                evidence_refs=[],
+                use_transformation_agent=True,
+            ),
+            input_ref={"uri": "urn:src/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        contract = result["workflowContract"]
+        self.assertIn(
+            contract["finalClassification"],
+            {CLASSIFICATION_BLOCKED, CLASSIFICATION_INCOMPLETE},
+        )
+        self.assertEqual(contract.get("repairAttempts", []), [])
 
 
 if __name__ == "__main__":

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import urllib.parse
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+from collections.abc import Mapping
 
+from .artifacts import JsonObject, JsonValue
 from .client import JSONHTTPClient
 
 
@@ -25,17 +26,17 @@ class DataReference:
 
 
 class HarnessGateway:
-    def __init__(self, base_url: str, http: JSONHTTPClient, harness_headers: Optional[Dict[str, str]] = None):
+    def __init__(self, base_url: str, http: JSONHTTPClient, harness_headers: Mapping[str, str] | None = None):
         if not base_url:
             raise ValueError("harness base URL is required")
         self.base_url = base_url.rstrip("/")
         self.http = http
         self.harness_headers = dict(harness_headers or {})
 
-    def create_run(self, workflow_id: str, requester: str = "orchestrator", evidence_refs=None) -> Dict[str, Any]:
+    def create_run(self, workflow_id: str, requester: str = "orchestrator", evidence_refs=None) -> JsonObject:
         if evidence_refs is None:
             evidence_refs = []
-        payload: Dict[str, Any] = {
+        payload: JsonObject = {
             "workflowId": workflow_id,
             "requester": requester,
             "evidenceRefs": list(evidence_refs),
@@ -47,7 +48,7 @@ class HarnessGateway:
             raise ValueError("invalid run create response")
         return resp.payload
 
-    def register_capability(self, capability: Mapping[str, Any]) -> Dict[str, Any]:
+    def register_capability(self, capability: Mapping[str, JsonValue]) -> JsonObject:
         payload = {
             "callerRole": "orchestrator",
             "capability": dict(capability),
@@ -59,7 +60,7 @@ class HarnessGateway:
             raise ValueError("invalid capability registration response")
         return resp.payload
 
-    def get_trajectory_ledger(self, run_id: str) -> Dict[str, Any]:
+    def get_trajectory_ledger(self, run_id: str) -> JsonObject:
         if not run_id:
             raise ValueError("run_id is required")
         resp = self.http.get_json(f"{self.base_url}/v0/runs/{urllib.parse.quote(run_id)}/ledger", headers=self.harness_headers)
@@ -76,12 +77,12 @@ class HarnessGateway:
         *,
         updated_by: str = "orchestrator",
         message: str = "",
-        evidence_refs: Optional[List[str]] = None,
+        evidence_refs: list[str] | None = None,
         policy_decision: str = "policy allow",
-    ) -> Dict[str, Any]:
+    ) -> JsonObject:
         if not run_id:
             raise ValueError("run_id is required")
-        payload: Dict[str, Any] = {
+        payload: JsonObject = {
             "status": status,
             "updatedBy": updated_by,
             "message": message,
@@ -95,7 +96,7 @@ class HarnessGateway:
             raise ValueError("invalid run update response")
         return resp.payload
 
-    def get_run(self, run_id: str) -> Dict[str, Any]:
+    def get_run(self, run_id: str) -> JsonObject:
         if not run_id:
             raise ValueError("run_id is required")
         resp = self.http.get_json(f"{self.base_url}/v0/runs/{urllib.parse.quote(run_id)}")
@@ -105,7 +106,7 @@ class HarnessGateway:
             raise ValueError("invalid run state response")
         return resp.payload
 
-    def get_capability(self, capability_id: str) -> Dict[str, Any]:
+    def get_capability(self, capability_id: str) -> JsonObject:
         if not capability_id:
             raise ValueError("capability_id is required")
         resp = self.http.get_json(f"{self.base_url}/v0/capabilities/{urllib.parse.quote(capability_id)}")
@@ -115,7 +116,7 @@ class HarnessGateway:
             raise ValueError("invalid capability response")
         return resp.payload
 
-    def invoke_capability(self, capability: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    def invoke_capability(self, capability: JsonObject, payload: JsonObject) -> JsonObject:
         endpoint = str(capability.get("endpoint", "")).strip()
         if not endpoint:
             raise ValueError("capability endpoint is required")
@@ -126,7 +127,7 @@ class HarnessGateway:
             raise ValueError("invalid capability response")
         return resp.payload
 
-    def post_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    def post_event(self, event: JsonObject) -> JsonObject:
         if "schemaVersion" not in event:
             event = dict(event)
             event["schemaVersion"] = "v0"

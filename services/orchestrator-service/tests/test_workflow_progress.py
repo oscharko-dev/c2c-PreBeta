@@ -40,6 +40,7 @@ class _StubExperienceLearning:
     enabled = True
     base_url = "http://experience-learning.test"
 
+    # noinspection PyTypeHintsInspection
     def __init__(self, *, summary: dict | None = None):
         self.harness_event_batches: list[list[dict]] = []
         self.trajectory_ledgers: list[dict] = []
@@ -82,6 +83,7 @@ class StepProgressContractTests(unittest.TestCase):
         store_dir = tempfile.TemporaryDirectory()
         self.addCleanup(store_dir.cleanup)
         store = RunArtifactStore(store_dir.name, created_by="orchestrator-test")
+        # noinspection PyProtectedMemberInspection
         config = W0WorkflowRunnerTests._base_config()
         runner = W0WorkflowRunner(
             config=config,
@@ -181,6 +183,7 @@ class ExperienceLearningForwardingTests(unittest.TestCase):
         store_dir = tempfile.TemporaryDirectory()
         self.addCleanup(store_dir.cleanup)
         store = RunArtifactStore(store_dir.name, created_by="orchestrator-test")
+        # noinspection PyProtectedMemberInspection
         config = W0WorkflowRunnerTests._base_config()
         return W0WorkflowRunner(
             config=config,
@@ -257,13 +260,18 @@ class EvidencePackReferencesLearningTests(unittest.TestCase):
 
         captured: dict[str, object] = {}
 
+        # noinspection PyClassHasNoInitInspection
         class _CapturingHttp:
-            def post_json(self, url, payload, headers=None):
+            @staticmethod
+            # noinspection PyUnusedLocal
+            def post_json(url, payload, headers=None):
                 captured["post_url"] = url
                 captured["post_payload"] = payload
                 return HttpResponse(201, {"ok": True})
 
-            def get_json(self, url, headers=None):
+            @staticmethod
+            # noinspection PyUnusedLocal
+            def get_json(url, headers=None):
                 captured["get_url"] = url
                 return HttpResponse(404, None)
 

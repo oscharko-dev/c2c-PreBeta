@@ -20,7 +20,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from typing import Any
 from unittest.mock import MagicMock
 
 from orchestrator_service.agent_contracts import (
@@ -32,6 +33,8 @@ from orchestrator_service.artifacts import (
     KIND_TRANSFORMATION_AGENT_PROJECT_MANIFEST,
     KIND_TRANSFORMATION_AGENT_REQUEST,
     KIND_TRANSFORMATION_AGENT_RESPONSE,
+    JsonObject,
+    JsonValue,
     RunArtifactStore,
 )
 from orchestrator_service.config import OrchestratorConfig
@@ -60,7 +63,7 @@ SAMPLE_JAVA = (
 
 
 def _config(**overrides: Any) -> OrchestratorConfig:
-    base: Dict[str, Any] = dict(
+    base: JsonObject = dict(
         listen_addr="127.0.0.1:0",
         harness_base_url="http://127.0.0.1:1",
         workflow_id="w0-migration-v0",
@@ -83,12 +86,12 @@ def _config(**overrides: Any) -> OrchestratorConfig:
     return OrchestratorConfig(**base)
 
 
-def _artifact_ref(uri: str = "urn:src/main.cob") -> Dict[str, Any]:
+def _artifact_ref(uri: str = "urn:src/main.cob") -> JsonObject:
     return {"uri": uri, "sha256": "a" * 64, "byteSize": 16}
 
 
 def _request(**overrides: Any) -> TransformationAgentRequest:
-    base: Dict[str, Any] = dict(
+    base: JsonObject = dict(
         run_id="run-1",
         workflow_id="w0-migration-v0",
         attempt_number=1,
@@ -116,18 +119,18 @@ def _request(**overrides: Any) -> TransformationAgentRequest:
 class _StubInvoker:
     """Captures the request payload and returns a configurable response."""
 
-    def __init__(self, response: Mapping[str, Any] | Exception) -> None:
+    def __init__(self, response: Mapping[str, JsonValue] | Exception) -> None:
         self._response = response
-        self.requests: list[Mapping[str, Any]] = []
+        self.requests: list[Mapping[str, JsonValue]] = []
 
-    def invoke(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         self.requests.append(dict(payload))
         if isinstance(self._response, Exception):
             raise self._response
         return dict(self._response)
 
 
-def _ok_gateway_response(*, files: Mapping[str, str] | None = None, **overrides: Any) -> Dict[str, Any]:
+def _ok_gateway_response(*, files: Mapping[str, str] | None = None, **overrides: Any) -> JsonObject:
     payload_files = dict(files) if files is not None else {
         "src/main/java/com/c2c/generated/Hello.java": SAMPLE_JAVA,
     }
@@ -361,7 +364,8 @@ class TransformationAgentRejectionTests(unittest.TestCase):
     accepted. Every case maps to ``agent_contract_invalid`` in the W0.2 run
     contract via :class:`AgentContractInvalidAgentError`."""
 
-    def _agent_for_response(self, response_or_exc: Mapping[str, Any] | Exception) -> TransformationAgent:
+    @staticmethod
+    def _agent_for_response(response_or_exc: Mapping[str, JsonValue] | Exception) -> TransformationAgent:
         tmp = tempfile.mkdtemp()
         store = RunArtifactStore(tmp)
         store.init_run("run-1", "w0-migration-v0")
@@ -388,6 +392,7 @@ class TransformationAgentRejectionTests(unittest.TestCase):
         with self.assertRaises(AgentContractInvalidAgentError):
             agent.invoke(_request())
 
+    # noinspection PyPep8Naming
     def test_missing_modelInvocationId_is_synthesised_safely(self) -> None:
         gateway_response = _ok_gateway_response()
         # If the gateway omits invocationId the agent must still build a
@@ -614,10 +619,12 @@ class TransformationAgentHarnessEventTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = RunArtifactStore(tmp)
             store.init_run("run-1", "w0-migration-v0")
-            events: list[Dict[str, Any]] = []
+            events: list[JsonObject] = []
 
+            # noinspection PyClassHasNoInitInspection
             class Sink:
-                def post_event(self, event):
+                @staticmethod
+                def post_event(event):
                     events.append(dict(event))
                     return {"eventId": f"evt-{len(events)}"}
 
@@ -643,6 +650,7 @@ class TransformationAgentHarnessEventTests(unittest.TestCase):
             store = RunArtifactStore(tmp)
             store.init_run("run-1", "w0-migration-v0")
 
+            # noinspection PyClassHasNoInitInspection
             class FailingSink:
                 def post_event(self, event):
                     raise RuntimeError("harness down")

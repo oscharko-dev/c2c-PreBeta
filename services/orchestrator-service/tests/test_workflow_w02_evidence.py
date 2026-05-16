@@ -14,9 +14,8 @@ from __future__ import annotations
 import datetime
 import tempfile
 import unittest
-from typing import Any, Dict, Mapping
-
-from orchestrator_service.artifacts import RunArtifactStore
+from collections.abc import Mapping
+from orchestrator_service.artifacts import JsonValue, RunArtifactStore
 from orchestrator_service.run_contract import new_run_contract
 from orchestrator_service.workflow import (
     DataReference,
@@ -33,7 +32,7 @@ def _ref(uri: str, sha: str = "a" * 64, byte_size: int = 4) -> DataReference:
     return DataReference(uri=uri, sha256=sha, byte_size=byte_size)
 
 
-def _step(name: str, *, payload: Mapping[str, Any] | None = None, output_uri: str = "urn:x/out") -> WorkflowStepResult:
+def _step(name: str, *, payload: Mapping[str, JsonValue] | None = None, output_uri: str = "urn:x/out") -> WorkflowStepResult:
     output_ref = _ref(output_uri)
     return WorkflowStepResult(
         capability_id=f"cap.{name}",
@@ -45,7 +44,9 @@ def _step(name: str, *, payload: Mapping[str, Any] | None = None, output_uri: st
     )
 
 
+# noinspection PyAttributeOutsideInitInspection
 class _BaseEvidenceFixture(unittest.TestCase):
+    # noinspection PyPep8Naming,PyProtectedMemberInspection
     def setUp(self) -> None:
         tmp = tempfile.mkdtemp()
         self._artifact_store = RunArtifactStore(tmp, created_by="orchestrator-service")
@@ -122,7 +123,8 @@ class W0DeterministicEvidenceTests(_BaseEvidenceFixture):
 class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
     """W0.2 runs must emit every W0.2 contract field with the right shape."""
 
-    def _w02_contract(self):
+    @staticmethod
+    def _w02_contract():
         return new_run_contract(
             run_id="run-evidence",
             workflow_id="w0-migration-v0",
@@ -282,9 +284,10 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         # classification handled at evidence-service derives that.
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["origin"], "deterministic-baseline")
-        # Selected status is allowed when an explicit final_artifact_ref
-        # is present; the evidence-service uses blocked=True to override
-        # to classification=blocked regardless.
+        # An explicit generated_artifact_ref was passed, so exactly one
+        # candidate is selected; blocked=True still overrides classification.
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["origin"], "deterministic-baseline")
         # Oracle comparison surfaces matched=False.
         self.assertFalse(artifacts["oracleComparison"]["matched"])
 

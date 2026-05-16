@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import datetime
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from .artifacts import JsonObject, JsonValue
 
 
 SCHEMA_VERSION = "v0"
@@ -57,7 +59,7 @@ STATE_EVIDENCE_MATERIALIZED = "evidence_materialized"
 STATE_EVIDENCE_INCOMPLETE = "evidence_incomplete"
 STATE_FINAL_CLASSIFICATION = "final_classification"
 
-WORKFLOW_STATES: Tuple[str, ...] = (
+WORKFLOW_STATES: tuple[str, ...] = (
     STATE_RUN_ACCEPTED,
     STATE_SOURCE_NORMALIZED,
     STATE_COBOL_PARSE_ATTEMPTED,
@@ -78,7 +80,7 @@ WORKFLOW_STATES: Tuple[str, ...] = (
 # Transitions allowed from each state. Any transition that is not listed here
 # is rejected by ``WorkflowStateMachine`` with ``IllegalTransitionError``.
 # ``STATE_FINAL_CLASSIFICATION`` is terminal.
-_ALLOWED_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
+_ALLOWED_TRANSITIONS: dict[str, tuple[str, ...]] = {
     STATE_RUN_ACCEPTED: (
         STATE_SOURCE_NORMALIZED,
         STATE_RUN_BLOCKED,
@@ -179,7 +181,7 @@ FAILURE_CANCELLED = "cancelled"
 # unapproved artifact references.
 FAILURE_AGENT_CONTRACT_INVALID = "agent_contract_invalid"
 
-FAILURE_CODES: Tuple[str, ...] = (
+FAILURE_CODES: tuple[str, ...] = (
     FAILURE_UNSUPPORTED_COBOL,
     FAILURE_PARSE_FAILED,
     FAILURE_SEMANTIC_IR_FAILED,
@@ -206,7 +208,7 @@ CLASSIFICATION_FAILED = "failed"
 CLASSIFICATION_CANCELLED = "cancelled"
 CLASSIFICATION_INCOMPLETE = "incomplete"
 
-FINAL_CLASSIFICATIONS: Tuple[str, ...] = (
+FINAL_CLASSIFICATIONS: tuple[str, ...] = (
     CLASSIFICATION_SUCCESS,
     CLASSIFICATION_BLOCKED,
     CLASSIFICATION_FAILED,
@@ -252,6 +254,7 @@ def clamp_repair_budget(value: int) -> int:
     return value
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass
 class RepairBudget:
     """Tracks repair attempts against a bounded W0.2 iteration limit."""
@@ -287,7 +290,7 @@ class RepairBudget:
         self.used += 1
         return self.used
 
-    def to_dict(self) -> Dict[str, int]:
+    def to_dict(self) -> dict[str, int]:
         return {
             "limit": self.limit,
             "used": self.used,
@@ -300,6 +303,7 @@ class RepairBudget:
 # ---------------------------------------------------------------------------
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class StateTransition:
     """One entry in the run state history."""
@@ -307,10 +311,10 @@ class StateTransition:
     state: str
     at: str
     message: str = ""
-    failure_code: Optional[str] = None
+    failure_code: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+    def to_dict(self) -> JsonObject:
+        payload: JsonObject = {
             "state": self.state,
             "at": self.at,
         }
@@ -333,31 +337,33 @@ class WorkflowStateMachine:
     while consumers serialise a snapshot via :meth:`to_dict`.
     """
 
-    def __init__(self, *, initial_state: str = STATE_RUN_ACCEPTED, now: Optional[str] = None):
+    def __init__(self, *, initial_state: str = STATE_RUN_ACCEPTED, now: str | None = None):
         if initial_state not in WORKFLOW_STATES:
             raise WorkflowContractError(f"unknown state: {initial_state}")
         self._lock = threading.Lock()
         self._current: str = initial_state
-        self._history: List[StateTransition] = [
+        self._history: list[StateTransition] = [
             StateTransition(state=initial_state, at=now or _iso_now(), message="run accepted")
         ]
 
     @property
     def current(self) -> str:
         with self._lock:
-            return self._current
+            result = self._current
+        return result
 
-    def history(self) -> List[StateTransition]:
+    def history(self) -> list[StateTransition]:
         with self._lock:
-            return list(self._history)
+            result = list(self._history)
+        return result
 
     def advance(
         self,
         target: str,
         *,
         message: str = "",
-        failure_code: Optional[str] = None,
-        now: Optional[str] = None,
+        failure_code: str | None = None,
+        now: str | None = None,
     ) -> StateTransition:
         """Advance to ``target`` if the transition is allowed.
 
@@ -385,11 +391,12 @@ class WorkflowStateMachine:
             )
             self._current = target
             self._history.append(transition)
-            return transition
+        return transition
 
-    def allowed_next(self) -> Tuple[str, ...]:
+    def allowed_next(self) -> tuple[str, ...]:
         with self._lock:
-            return _ALLOWED_TRANSITIONS.get(self._current, ())
+            result = _ALLOWED_TRANSITIONS.get(self._current, ())
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +404,7 @@ class WorkflowStateMachine:
 # ---------------------------------------------------------------------------
 
 
+# noinspection PyClassHasNoInitInspection
 @dataclass
 class W02RunContract:
     """Serialisable run contract exposed to BFF/UI/agent/evidence consumers.
@@ -408,18 +416,18 @@ class W02RunContract:
     run_id: str
     workflow_id: str
     requester: str
-    source_ref: Dict[str, Any]
+    source_ref: JsonObject
     state_machine: WorkflowStateMachine
     repair_budget: RepairBudget
-    active_step: Optional[str] = None
+    active_step: str | None = None
     agent_attempt_count: int = 0
-    generated_java_ref: Optional[Dict[str, Any]] = None
-    build_test_result_ref: Optional[Dict[str, Any]] = None
-    evidence_pack_ref: Optional[Dict[str, Any]] = None
-    final_classification: Optional[str] = None
-    failure_code: Optional[str] = None
-    failure_message: Optional[str] = None
-    repair_attempts: List[Dict[str, Any]] = field(default_factory=list)
+    generated_java_ref: JsonObject | None = None
+    build_test_result_ref: JsonObject | None = None
+    evidence_pack_ref: JsonObject | None = None
+    final_classification: str | None = None
+    failure_code: str | None = None
+    failure_message: str | None = None
+    repair_attempts: list[JsonObject] = field(default_factory=list)
     created_at: str = field(default_factory=_iso_now)
     updated_at: str = field(default_factory=_iso_now)
 
@@ -431,10 +439,10 @@ class W02RunContract:
         if self.final_classification is not None and self.final_classification not in FINAL_CLASSIFICATIONS:
             raise ValueError(f"unknown final classification: {self.final_classification}")
 
-    def touch(self, now: Optional[str] = None) -> None:
+    def touch(self, now: str | None = None) -> None:
         self.updated_at = now or _iso_now()
 
-    def set_active_step(self, step: Optional[str]) -> None:
+    def set_active_step(self, step: str | None) -> None:
         self.active_step = step
         self.touch()
 
@@ -443,7 +451,7 @@ class W02RunContract:
         self.touch()
         return self.agent_attempt_count
 
-    def record_repair_attempt(self, entry: Mapping[str, Any]) -> Dict[str, Any]:
+    def record_repair_attempt(self, entry: Mapping[str, JsonValue]) -> JsonObject:
         """Record one verification/repair-agent attempt on the run contract.
 
         Issue #170: every repair attempt — successful, refused, escalated,
@@ -464,7 +472,7 @@ class W02RunContract:
             raise ValueError("repair attempt entry requires integer attemptNumber") from exc
         if attempt_number < 1:
             raise ValueError("repair attempt entry attemptNumber must be >= 1")
-        normalised: Dict[str, Any] = {
+        normalised: JsonObject = {
             "attemptNumber": attempt_number,
             "repairDecision": decision,
             "failureCategory": str(entry.get("failureCategory") or "") or None,
@@ -502,15 +510,15 @@ class W02RunContract:
             if entry.get("repairDecision") == "no_change"
         )
 
-    def set_generated_java_ref(self, ref: Optional[Mapping[str, Any]]) -> None:
+    def set_generated_java_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.generated_java_ref = dict(ref) if ref else None
         self.touch()
 
-    def set_build_test_result_ref(self, ref: Optional[Mapping[str, Any]]) -> None:
+    def set_build_test_result_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.build_test_result_ref = dict(ref) if ref else None
         self.touch()
 
-    def set_evidence_pack_ref(self, ref: Optional[Mapping[str, Any]]) -> None:
+    def set_evidence_pack_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.evidence_pack_ref = dict(ref) if ref else None
         self.touch()
 
@@ -518,8 +526,8 @@ class W02RunContract:
         self,
         classification: str,
         *,
-        failure_code: Optional[str] = None,
-        failure_message: Optional[str] = None,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
     ) -> None:
         if classification not in FINAL_CLASSIFICATIONS:
             raise ValueError(f"unknown final classification: {classification}")
@@ -544,8 +552,8 @@ class W02RunContract:
         self.active_step = None
         self.touch()
 
-    def to_dict(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+    def to_dict(self) -> JsonObject:
+        payload: JsonObject = {
             "schemaVersion": SCHEMA_VERSION,
             "runId": self.run_id,
             "workflowId": self.workflow_id,
@@ -574,9 +582,9 @@ def new_run_contract(
     run_id: str,
     workflow_id: str,
     requester: str,
-    source_ref: Mapping[str, Any],
+    source_ref: Mapping[str, JsonValue],
     repair_budget_limit: int = DEFAULT_REPAIR_BUDGET,
-    now: Optional[str] = None,
+    now: str | None = None,
 ) -> W02RunContract:
     """Construct a fresh W0.2 run contract in the ``run_accepted`` state."""
     timestamp = now or _iso_now()
@@ -597,7 +605,7 @@ def new_run_contract(
 # Mapping from common step-failure markers (the substrings reported by
 # ``workflow.py`` exception text) to canonical W0.2 failure codes. Used by
 # the runner to label run failures consistently.
-STEP_TO_FAILURE_CODE: Dict[str, str] = {
+STEP_TO_FAILURE_CODE: dict[str, str] = {
     STEP_PARSE_COBOL: FAILURE_PARSE_FAILED,
     STEP_GENERATE_IR: FAILURE_SEMANTIC_IR_FAILED,
     STEP_GENERATE_JAVA: FAILURE_JAVA_GENERATION_FAILED,
@@ -615,7 +623,7 @@ BUILD_TEST_SUCCESS_STATUSES = frozenset({"ok", "passed", "success", "complete", 
 # Build-test payload failure reasons mapped to canonical failure codes. The
 # runner uses this map to pick the failure code attached to a blocked run
 # when the build-test runner returns a structured reason.
-BUILD_TEST_FAILURE_REASONS: Dict[str, str] = {
+BUILD_TEST_FAILURE_REASONS: dict[str, str] = {
     "compile_failed": FAILURE_JAVA_COMPILE_FAILED,
     "compile-failed": FAILURE_JAVA_COMPILE_FAILED,
     "compile_error": FAILURE_JAVA_COMPILE_FAILED,
@@ -631,7 +639,7 @@ BUILD_TEST_FAILURE_REASONS: Dict[str, str] = {
 }
 
 
-def build_test_outcome(payload: Mapping[str, Any]) -> Tuple[bool, Optional[str]]:
+def build_test_outcome(payload: Mapping[str, JsonValue]) -> tuple[bool, str | None]:
     """Classify a build-test runner payload.
 
     Returns ``(success, failure_code_or_none)``. The orchestrator uses this to

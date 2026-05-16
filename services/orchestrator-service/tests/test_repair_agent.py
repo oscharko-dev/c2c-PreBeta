@@ -24,7 +24,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from orchestrator_service.agent_contracts import (
     guard_repair_decision,
@@ -35,6 +36,7 @@ from orchestrator_service.artifacts import (
     KIND_REPAIR_AGENT_INPUT,
     KIND_REPAIR_AGENT_JAVA_FILE,
     KIND_REPAIR_AGENT_PROJECT_MANIFEST,
+    JsonObject,
     RunArtifactStore,
 )
 from orchestrator_service.config import OrchestratorConfig
@@ -77,7 +79,7 @@ SAMPLE_JAVA_REPAIRED = (
 
 
 def _config(**overrides: Any) -> OrchestratorConfig:
-    base: Dict[str, Any] = dict(
+    base: JsonObject = dict(
         listen_addr="127.0.0.1:0",
         harness_base_url="http://127.0.0.1:1",
         workflow_id="w0-migration-v0",
@@ -100,12 +102,12 @@ def _config(**overrides: Any) -> OrchestratorConfig:
     return OrchestratorConfig(**base)
 
 
-def _ref(uri: str = "urn:src/main.cob", *, sha_char: str = "a", byte_size: int = 16) -> Dict[str, Any]:
+def _ref(uri: str = "urn:src/main.cob", *, sha_char: str = "a", byte_size: int = 16) -> JsonObject:
     return {"uri": uri, "sha256": sha_char * 64, "byteSize": byte_size}
 
 
 def _request(**overrides: Any) -> RepairAgentRequest:
-    base: Dict[str, Any] = dict(
+    base: JsonObject = dict(
         run_id="run-1",
         workflow_id="w0-migration-v0",
         attempt_number=1,
@@ -139,7 +141,7 @@ def _request(**overrides: Any) -> RepairAgentRequest:
 class _StubInvoker:
     def __init__(self, response):
         self._response = response
-        self.calls: list[Dict[str, Any]] = []
+        self.calls: list[JsonObject] = []
 
     def invoke(self, payload):
         self.calls.append(dict(payload))
@@ -185,7 +187,7 @@ def _ok_propose_response(*, files=None, **overrides):
     return response
 
 
-def _refuse_response(refusal_code: str, *, rationale: str = "Cannot repair safely.") -> Dict[str, Any]:
+def _refuse_response(refusal_code: str, *, rationale: str = "Cannot repair safely.") -> JsonObject:
     return _ok_propose_response(
         output_overrides={
             "decision": DECISION_REFUSE,
@@ -196,7 +198,7 @@ def _refuse_response(refusal_code: str, *, rationale: str = "Cannot repair safel
     )
 
 
-def _escalate_response(escalation_code: str, *, rationale: str = "Out of scope.") -> Dict[str, Any]:
+def _escalate_response(escalation_code: str, *, rationale: str = "Out of scope.") -> JsonObject:
     response = _ok_propose_response(
         output_overrides={
             "decision": DECISION_ESCALATE,
@@ -643,10 +645,12 @@ class RepairAgentNoDirectFoundryImportTests(unittest.TestCase):
 
 class RepairAgentHarnessEventTests(unittest.TestCase):
     def test_invoked_and_completed_events_emitted(self):
-        events: list[Dict[str, Any]] = []
+        events: list[JsonObject] = []
 
+        # noinspection PyClassHasNoInitInspection
         class Sink:
-            def post_event(self, event):
+            @staticmethod
+            def post_event(event):
                 events.append(dict(event))
                 return {"eventId": f"evt-{len(events)}"}
 
@@ -670,6 +674,7 @@ class RepairAgentHarnessEventTests(unittest.TestCase):
             self.assertEqual(event["policyDecision"], "policy allow")
 
     def test_emit_errors_do_not_break_invocation(self):
+        # noinspection PyClassHasNoInitInspection
         class FailingSink:
             def post_event(self, event):
                 raise RuntimeError("harness down")

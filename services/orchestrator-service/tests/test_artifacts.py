@@ -17,7 +17,9 @@ from orchestrator_service.artifacts import (
 )
 
 
+# noinspection PyAttributeOutsideInitInspection
 class RunArtifactStoreTests(unittest.TestCase):
+    # noinspection PyPep8Naming
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
