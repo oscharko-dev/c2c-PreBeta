@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any
 
+from .artifacts import JsonValue
 from .client import JSONHTTPClient
 
 
@@ -29,15 +29,15 @@ class NullExperienceLearningGateway:
     base_url: str = ""
 
     @staticmethod
-    def post_harness_events(_events: Sequence[Mapping[str, Any]]) -> None:
+    def post_harness_events(_events: Sequence[Mapping[str, JsonValue]]) -> None:
         return None
 
     @staticmethod
-    def post_trajectory_ledger(_ledger: Mapping[str, Any]) -> None:
+    def post_trajectory_ledger(_ledger: Mapping[str, JsonValue]) -> None:
         return None
 
     @staticmethod
-    def get_run_summary(_run_id: str) -> Mapping[str, Any] | None:
+    def get_run_summary(_run_id: str) -> Mapping[str, JsonValue] | None:
         return None
 
     @staticmethod
@@ -65,7 +65,7 @@ class ExperienceLearningGateway:
         self.headers = dict(headers or {})
         self._logger = logging.getLogger(__name__)
 
-    def post_harness_events(self, events: Sequence[Mapping[str, Any]]) -> None:
+    def post_harness_events(self, events: Sequence[Mapping[str, JsonValue]]) -> None:
         if not events:
             return
         payload = [dict(event) for event in events]
@@ -82,7 +82,7 @@ class ExperienceLearningGateway:
                 exc,
             )
 
-    def post_trajectory_ledger(self, ledger: Mapping[str, Any]) -> None:
+    def post_trajectory_ledger(self, ledger: Mapping[str, JsonValue]) -> None:
         if not ledger:
             return
         try:
@@ -98,7 +98,7 @@ class ExperienceLearningGateway:
                 exc,
             )
 
-    def get_run_summary(self, run_id: str) -> Mapping[str, Any] | None:
+    def get_run_summary(self, run_id: str) -> Mapping[str, JsonValue] | None:
         if not run_id:
             return None
         try:

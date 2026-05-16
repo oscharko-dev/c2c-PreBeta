@@ -331,7 +331,7 @@ class RunArtifactStore:
     def _record(self, run_id: str, meta: ArtifactMetadata) -> None:
         index_path = self._run_dir(run_id) / INDEX_FILE
         if not index_path.exists():
-            state: dict[str, Any] = {
+            state: JsonObject = {
                 "runId": run_id,
                 "workflowId": meta.workflowId,
                 "requester": "",
@@ -356,7 +356,7 @@ class RunArtifactStore:
         self._atomic_write_bytes(index_path, _index_bytes(state))
 
 
-def _index_bytes(state: Mapping[str, Any]) -> bytes:
+def _index_bytes(state: Mapping[str, JsonValue]) -> bytes:
     return json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8")
 
 

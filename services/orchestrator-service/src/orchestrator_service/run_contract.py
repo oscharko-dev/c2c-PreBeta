@@ -27,7 +27,8 @@ import datetime
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+
+from .artifacts import JsonObject, JsonValue
 
 
 SCHEMA_VERSION = "v0"
@@ -312,8 +313,8 @@ class StateTransition:
     message: str = ""
     failure_code: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
+    def to_dict(self) -> JsonObject:
+        payload: JsonObject = {
             "state": self.state,
             "at": self.at,
         }
@@ -415,18 +416,18 @@ class W02RunContract:
     run_id: str
     workflow_id: str
     requester: str
-    source_ref: dict[str, Any]
+    source_ref: JsonObject
     state_machine: WorkflowStateMachine
     repair_budget: RepairBudget
     active_step: str | None = None
     agent_attempt_count: int = 0
-    generated_java_ref: dict[str, Any] | None = None
-    build_test_result_ref: dict[str, Any] | None = None
-    evidence_pack_ref: dict[str, Any] | None = None
+    generated_java_ref: JsonObject | None = None
+    build_test_result_ref: JsonObject | None = None
+    evidence_pack_ref: JsonObject | None = None
     final_classification: str | None = None
     failure_code: str | None = None
     failure_message: str | None = None
-    repair_attempts: list[dict[str, Any]] = field(default_factory=list)
+    repair_attempts: list[JsonObject] = field(default_factory=list)
     created_at: str = field(default_factory=_iso_now)
     updated_at: str = field(default_factory=_iso_now)
 
@@ -450,7 +451,7 @@ class W02RunContract:
         self.touch()
         return self.agent_attempt_count
 
-    def record_repair_attempt(self, entry: Mapping[str, Any]) -> dict[str, Any]:
+    def record_repair_attempt(self, entry: Mapping[str, JsonValue]) -> JsonObject:
         """Record one verification/repair-agent attempt on the run contract.
 
         Issue #170: every repair attempt — successful, refused, escalated,
@@ -471,7 +472,7 @@ class W02RunContract:
             raise ValueError("repair attempt entry requires integer attemptNumber") from exc
         if attempt_number < 1:
             raise ValueError("repair attempt entry attemptNumber must be >= 1")
-        normalised: dict[str, Any] = {
+        normalised: JsonObject = {
             "attemptNumber": attempt_number,
             "repairDecision": decision,
             "failureCategory": str(entry.get("failureCategory") or "") or None,
@@ -509,15 +510,15 @@ class W02RunContract:
             if entry.get("repairDecision") == "no_change"
         )
 
-    def set_generated_java_ref(self, ref: Mapping[str, Any] | None) -> None:
+    def set_generated_java_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.generated_java_ref = dict(ref) if ref else None
         self.touch()
 
-    def set_build_test_result_ref(self, ref: Mapping[str, Any] | None) -> None:
+    def set_build_test_result_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.build_test_result_ref = dict(ref) if ref else None
         self.touch()
 
-    def set_evidence_pack_ref(self, ref: Mapping[str, Any] | None) -> None:
+    def set_evidence_pack_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.evidence_pack_ref = dict(ref) if ref else None
         self.touch()
 
@@ -551,8 +552,8 @@ class W02RunContract:
         self.active_step = None
         self.touch()
 
-    def to_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
+    def to_dict(self) -> JsonObject:
+        payload: JsonObject = {
             "schemaVersion": SCHEMA_VERSION,
             "runId": self.run_id,
             "workflowId": self.workflow_id,
@@ -581,7 +582,7 @@ def new_run_contract(
     run_id: str,
     workflow_id: str,
     requester: str,
-    source_ref: Mapping[str, Any],
+    source_ref: Mapping[str, JsonValue],
     repair_budget_limit: int = DEFAULT_REPAIR_BUDGET,
     now: str | None = None,
 ) -> W02RunContract:
@@ -638,7 +639,7 @@ BUILD_TEST_FAILURE_REASONS: dict[str, str] = {
 }
 
 
-def build_test_outcome(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
+def build_test_outcome(payload: Mapping[str, JsonValue]) -> tuple[bool, str | None]:
     """Classify a build-test runner payload.
 
     Returns ``(success, failure_code_or_none)``. The orchestrator uses this to

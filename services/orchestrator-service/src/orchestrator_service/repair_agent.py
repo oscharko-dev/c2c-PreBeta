@@ -66,6 +66,8 @@ from .artifacts import (
     KIND_REPAIR_AGENT_PROJECT_MANIFEST,
     MIME_JAVA,
     ArtifactMetadata,
+    JsonObject,
+    JsonValue,
     RunArtifactStore,
 )
 from .config import OrchestratorConfig
@@ -196,10 +198,10 @@ class RepairAgentRequest:
     workflow_id: str
     attempt_number: int
     requester: str
-    previous_java_candidate_ref: Mapping[str, Any]
+    previous_java_candidate_ref: Mapping[str, JsonValue]
     previous_java_files: Mapping[str, str]
-    build_test_result_ref: Mapping[str, Any]
-    build_test_payload: Mapping[str, Any]
+    build_test_result_ref: Mapping[str, JsonValue]
+    build_test_payload: Mapping[str, JsonValue]
     failure_category: str
     capability_id: str
     capability_version: str
@@ -208,14 +210,14 @@ class RepairAgentRequest:
     model_id: str
     policy_version: str
     repair_budget_remaining: int
-    compile_error_ref: Mapping[str, Any] | None = None
-    runtime_error_ref: Mapping[str, Any] | None = None
-    oracle_diff_ref: Mapping[str, Any] | None = None
-    source_cobol_ref: Mapping[str, Any] | None = None
+    compile_error_ref: Mapping[str, JsonValue] | None = None
+    runtime_error_ref: Mapping[str, JsonValue] | None = None
+    oracle_diff_ref: Mapping[str, JsonValue] | None = None
+    source_cobol_ref: Mapping[str, JsonValue] | None = None
     source_text: str | None = None
-    semantic_ir_ref: Mapping[str, Any] | None = None
-    semantic_ir: Mapping[str, Any] | None = None
-    previous_repair_decision_refs: tuple[Mapping[str, Any], ...] = ()
+    semantic_ir_ref: Mapping[str, JsonValue] | None = None
+    semantic_ir: Mapping[str, JsonValue] | None = None
+    previous_repair_decision_refs: tuple[Mapping[str, JsonValue], ...] = ()
     deadline_ms: int = 30000
     trace_ref: str | None = None
 
@@ -263,8 +265,8 @@ class RepairedJavaCandidate:
     unsupported_constructs: tuple[str, ...]
     explanation: str
 
-    def to_manifest(self) -> dict[str, Any]:
-        manifest_files: list[dict[str, Any]] = []
+    def to_manifest(self) -> JsonObject:
+        manifest_files: list[JsonObject] = []
         for path, content in sorted(self.files.items()):
             encoded = content.encode("utf-8")
             manifest_files.append(
@@ -306,14 +308,14 @@ class RepairAgentResult:
     confidence: float | None
     failure_code: str | None
     failure_message: str | None
-    model_invocation_ref: dict[str, Any]
-    new_java_candidate_ref: dict[str, Any] | None
-    diff_from_previous_ref: dict[str, Any] | None
-    repair_input_payload: dict[str, Any]
-    repair_decision_payload: dict[str, Any]
-    repair_input_artifact_ref: dict[str, Any]
-    repair_decision_artifact_ref: dict[str, Any]
-    persisted_artifacts: list[dict[str, Any]] = field(default_factory=list)
+    model_invocation_ref: JsonObject
+    new_java_candidate_ref: JsonObject | None
+    diff_from_previous_ref: JsonObject | None
+    repair_input_payload: JsonObject
+    repair_decision_payload: JsonObject
+    repair_input_artifact_ref: JsonObject
+    repair_decision_artifact_ref: JsonObject
+    persisted_artifacts: list[JsonObject] = field(default_factory=list)
 
     @property
     def proposed_candidate(self) -> bool:
@@ -337,7 +339,7 @@ class RepairAgentResult:
 # ---------------------------------------------------------------------------
 
 
-def _meta_to_ref(meta: ArtifactMetadata) -> dict[str, Any]:
+def _meta_to_ref(meta: ArtifactMetadata) -> JsonObject:
     return {
         "uri": meta.uri,
         "sha256": meta.sha256,
@@ -367,7 +369,7 @@ def _files_canonical_sha256(files: Mapping[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _parse_model_output_envelope(raw_output: Any) -> Mapping[str, Any]:
+def _parse_model_output_envelope(raw_output: Any) -> Mapping[str, JsonValue]:
     """Extract the repair-agent decision JSON object from the model output.
 
     Mirrors the transformation agent's helper. The Model Gateway returns
@@ -579,8 +581,8 @@ class RepairAgent:
         # 4. When the agent proposes a candidate, persist the Java files +
         # generated-project manifest. The persisted manifest is the source
         # of truth for newJavaCandidateRef.
-        persisted_artifacts: list[dict[str, Any]] = []
-        new_java_candidate_ref: dict[str, Any] | None = None
+        persisted_artifacts: list[JsonObject] = []
+        new_java_candidate_ref: JsonObject | None = None
         is_no_change = False
         if candidate is not None:
             for relpath, content in sorted(candidate.files.items()):
@@ -709,7 +711,7 @@ class RepairAgent:
         provider = str(gateway_response.get("provider") or "foundry-development")
         if provider not in {"foundry-development", "customer-internal-mock"}:
             provider = "foundry-development"
-        model_invocation_ref: dict[str, Any] = {
+        model_invocation_ref: JsonObject = {
             "invocationId": invocation_id,
             "modelId": model_id,
             "provider": provider,
@@ -743,7 +745,7 @@ class RepairAgent:
         return _iso_now(self._clock)
 
     def _decode_repair_candidate(
-        self, inner_envelope: Mapping[str, Any]
+        self, inner_envelope: Mapping[str, JsonValue]
     ) -> RepairedJavaCandidate:
         """Decode the proposed Java candidate using the shared validator.
 
@@ -775,9 +777,9 @@ class RepairAgent:
     def _build_repair_input_payload(
         request: RepairAgentRequest,
         created_at: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Materialise the ``agent-repair-input-v0`` payload."""
-        payload: dict[str, Any] = {
+        payload: JsonObject = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -801,7 +803,7 @@ class RepairAgent:
         if request.oracle_diff_ref and _looks_like_artifact_ref(request.oracle_diff_ref):
             payload["oracleDiffRef"] = _coerce_artifact_ref(request.oracle_diff_ref)
         if request.previous_repair_decision_refs:
-            previous_refs: list[dict[str, Any]] = []
+            previous_refs: list[JsonObject] = []
             for ref in request.previous_repair_decision_refs:
                 if _looks_like_artifact_ref(ref):
                     previous_refs.append(_coerce_artifact_ref(ref))
@@ -817,15 +819,15 @@ class RepairAgent:
         rationale: str,
         refusal_code: str | None,
         escalation_code: str | None,
-        new_java_candidate_ref: Mapping[str, Any] | None,
+        new_java_candidate_ref: Mapping[str, JsonValue] | None,
         confidence: float | None,
         ended_at: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Materialise the ``agent-repair-decision-v0`` payload."""
         truncated_rationale = rationale.strip()
         if len(truncated_rationale) > 4000:
             truncated_rationale = truncated_rationale[:4000]
-        payload: dict[str, Any] = {
+        payload: JsonObject = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -848,9 +850,9 @@ class RepairAgent:
     def _build_manifest_payload(
         request: RepairAgentRequest,
         candidate: RepairedJavaCandidate,
-        gateway_response: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        manifest_payload: dict[str, Any] = {
+        gateway_response: Mapping[str, JsonValue],
+    ) -> JsonObject:
+        manifest_payload: JsonObject = {
             "runId": request.run_id,
             "workflowId": request.workflow_id,
             "attemptNumber": request.attempt_number,
@@ -877,7 +879,7 @@ class RepairAgent:
         failure_code: str,
         failure_message: str,
         ended_at: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Build a contract-shaped synthetic decision used when the gateway
         fails or returns invalid output. The synthetic decision is always
         ``refuse`` with a reason that maps cleanly to ``no_safe_repair`` so
@@ -906,7 +908,7 @@ class RepairAgent:
         attempt_dir: str,
         _started_at: str,
         exc: RepairAgentError,
-        request_artifact_ref: Mapping[str, Any],
+        request_artifact_ref: Mapping[str, JsonValue],
         latency_ms: int = 0,
     ) -> None:
         """Persist a synthetic decision artifact and emit a failure event."""
@@ -966,7 +968,7 @@ class RepairAgent:
 
     def _call_model_gateway(
         self, request: RepairAgentRequest
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Build the Model Gateway request and call the configured invoker.
 
         The agent never embeds direct provider HTTP calls. The invoker is
@@ -975,7 +977,7 @@ class RepairAgent:
         not at the agent boundary.
         """
         prompt_payload = self._build_model_prompt(request)
-        invoke_payload: dict[str, Any] = {
+        invoke_payload: JsonObject = {
             "schemaVersion": "v0",
             "runId": request.run_id,
             "workflowId": request.workflow_id,
@@ -1064,7 +1066,7 @@ class RepairAgent:
         template by id so the registry author and the gateway agree on
         what is being asked.
         """
-        envelope: dict[str, Any] = {
+        envelope: JsonObject = {
             "promptTemplateId": self._config.repair_agent_prompt_template_id,
             "promptTemplateVersion": self._config.repair_agent_prompt_template_version,
             "task": "java-verification-repair",
@@ -1112,8 +1114,8 @@ class RepairAgent:
         event_type: str,
         state_transition: str,
         status: str,
-        input_payload: Mapping[str, Any],
-        output_payload: Mapping[str, Any],
+        input_payload: Mapping[str, JsonValue],
+        output_payload: Mapping[str, JsonValue],
         latency_ms: int | None = None,
     ) -> None:
         """Best-effort Harness event emission. Failures must not break the
@@ -1127,7 +1129,7 @@ class RepairAgent:
         output_clean = {k: v for k, v in output_payload.items() if v is not None}
         input_canonical = _canonical_json_bytes(dict(input_payload))
         output_canonical = _canonical_json_bytes(output_clean)
-        event: dict[str, Any] = {
+        event: JsonObject = {
             "eventType": event_type,
             "schemaVersion": "v0",
             "service": "orchestrator-service",
@@ -1173,7 +1175,7 @@ _REPAIR_INNER_OUTPUT_SCHEMA_ID = (
 )
 
 
-_REPAIR_INNER_OUTPUT_SCHEMA: dict[str, Any] = {
+_REPAIR_INNER_OUTPUT_SCHEMA: JsonObject = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": _REPAIR_INNER_OUTPUT_SCHEMA_ID,
     "title": "Verification/Repair Agent Inner Output v0",

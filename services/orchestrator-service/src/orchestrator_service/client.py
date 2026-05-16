@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.request import Request, urlopen
 
+from .artifacts import JsonValue
+
 
 class HttpClientError(Exception):
     """Raised when an HTTP interaction fails."""
@@ -24,7 +26,7 @@ class HttpResponse:
 # Issue #96 EL ingestion accepts both single envelopes (mappings) and
 # batches (sequences of mappings) at /v0/harness-events. Spell that
 # explicitly so callers stay type-safe instead of falling back to ``Any``.
-JSONBody = Mapping[str, Any] | Sequence[Mapping[str, Any]]
+JSONBody = Mapping[str, JsonValue] | Sequence[Mapping[str, JsonValue]]
 
 
 class JSONHTTPClient:
@@ -42,7 +44,7 @@ class JSONHTTPClient:
         )
         return self._send(request)
 
-    def patch_json(self, url: str, payload: Mapping[str, Any], headers: Mapping[str, str] | None = None) -> HttpResponse:
+    def patch_json(self, url: str, payload: Mapping[str, JsonValue], headers: Mapping[str, str] | None = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,

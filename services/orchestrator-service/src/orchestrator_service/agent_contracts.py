@@ -44,6 +44,8 @@ from pathlib import Path
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .artifacts import JsonValue
+
 
 # ---------------------------------------------------------------------------
 # Public errors
@@ -98,9 +100,9 @@ def _schemas_dir() -> Path:
     return here.parents[4] / "schemas"
 
 
-def _load_all_schemas() -> dict[str, Mapping[str, Any]]:
+def _load_all_schemas() -> dict[str, Mapping[str, JsonValue]]:
     base = _schemas_dir()
-    loaded: dict[str, Mapping[str, Any]] = {}
+    loaded: dict[str, Mapping[str, JsonValue]] = {}
     for name, filename in _SCHEMA_FILES.items():
         path = base / filename
         try:
@@ -113,10 +115,10 @@ def _load_all_schemas() -> dict[str, Mapping[str, Any]]:
     return loaded
 
 
-_SCHEMAS: dict[str, Mapping[str, Any]] = _load_all_schemas()
+_SCHEMAS: dict[str, Mapping[str, JsonValue]] = _load_all_schemas()
 
 
-def schema(name: str) -> Mapping[str, Any]:
+def schema(name: str) -> Mapping[str, JsonValue]:
     """Return the parsed JSON Schema by short name (e.g. 'agent-invocation-request-v0').
 
     Raises ``KeyError`` for unknown names.
@@ -188,7 +190,7 @@ def _is_number(value: Any) -> bool:
     return (isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)
 
 
-def _resolve_ref(ref: str, schema_doc: Mapping[str, Any]) -> Mapping[str, Any]:
+def _resolve_ref(ref: str, schema_doc: Mapping[str, JsonValue]) -> Mapping[str, JsonValue]:
     if not ref.startswith("#/$defs/"):
         raise UnsupportedSchemaFeatureError(f"unsupported $ref form: {ref!r}")
     key = ref[len("#/$defs/"):]
@@ -198,7 +200,7 @@ def _resolve_ref(ref: str, schema_doc: Mapping[str, Any]) -> Mapping[str, Any]:
     return defs[key]
 
 
-def _check_keywords(node: Mapping[str, Any], where: str) -> None:
+def _check_keywords(node: Mapping[str, JsonValue], where: str) -> None:
     unknown = set(node.keys()) - _KNOWN_KEYWORDS
     if unknown:
         raise UnsupportedSchemaFeatureError(
@@ -208,8 +210,8 @@ def _check_keywords(node: Mapping[str, Any], where: str) -> None:
 
 def _validate_node(
     payload: Any,
-    node: Mapping[str, Any],
-    schema_doc: Mapping[str, Any],
+    node: Mapping[str, JsonValue],
+    schema_doc: Mapping[str, JsonValue],
     path: str,
     errors: list[str],
 ) -> None:
@@ -352,8 +354,8 @@ def _validate_node(
 
 def _apply_conditional(
     payload: Any,
-    node: Mapping[str, Any],
-    schema_doc: Mapping[str, Any],
+    node: Mapping[str, JsonValue],
+    schema_doc: Mapping[str, JsonValue],
     path: str,
     errors: list[str],
 ) -> None:

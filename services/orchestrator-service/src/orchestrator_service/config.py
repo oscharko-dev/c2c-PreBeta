@@ -6,9 +6,9 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Iterable, Mapping
 
-from .artifacts import DEFAULT_RUN_ARTIFACT_ROOT
+from .artifacts import DEFAULT_RUN_ARTIFACT_ROOT, JsonObject
 
 
 DEFAULT_LISTEN_ADDR = "0.0.0.0:8084"
@@ -157,7 +157,7 @@ class OrchestratorConfig:
     build_test_capability_id: str
     evidence_capability_id: str
     model_gateway_capability_id: str
-    w0_capabilities: tuple[dict[str, Any], ...]
+    w0_capabilities: tuple[JsonObject, ...]
     harness_token: str = ""
     service_name: str = "orchestrator-service"
     model_gateway_model_id: str = DEFAULT_MODEL_GATEWAY_MODEL_ID
@@ -409,7 +409,7 @@ def load_config() -> OrchestratorConfig:
     )
 
 
-def _load_w0_capabilities(required_ids: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+def _load_w0_capabilities(required_ids: tuple[str, ...]) -> tuple[JsonObject, ...]:
     manifest = os.environ.get("ORCHESTRATOR_W0_CAPABILITIES")
     if manifest:
         return tuple(_parse_w0_capability_manifest(manifest))
@@ -417,14 +417,14 @@ def _load_w0_capabilities(required_ids: tuple[str, ...]) -> tuple[dict[str, Any]
     return _default_w0_capabilities_from_env(required_ids)
 
 
-def _parse_w0_capability_manifest(raw: str) -> list[dict[str, Any]]:
+def _parse_w0_capability_manifest(raw: str) -> list[JsonObject]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError("ORCHESTRATOR_W0_CAPABILITIES must be valid JSON") from exc
     if not isinstance(parsed, list):
         raise ValueError("ORCHESTRATOR_W0_CAPABILITIES must be a JSON array")
-    manifest: list[dict[str, Any]] = []
+    manifest: list[JsonObject] = []
     for item in parsed:
         if not isinstance(item, Mapping):
             raise ValueError("ORCHESTRATOR_W0_CAPABILITIES entries must be objects")
@@ -437,7 +437,7 @@ def _parse_w0_capability_manifest(raw: str) -> list[dict[str, Any]]:
     return manifest
 
 
-def _default_w0_capabilities_from_env(required_ids: Iterable[str]) -> tuple[dict[str, Any], ...]:
+def _default_w0_capabilities_from_env(required_ids: Iterable[str]) -> tuple[JsonObject, ...]:
     defaults = list(DEFAULT_W0_CAPABILITIES)
     endpoint_map = {
         DEFAULT_PARSE_CAPABILITY: os.environ.get(
@@ -470,7 +470,7 @@ def _default_w0_capabilities_from_env(required_ids: Iterable[str]) -> tuple[dict
     if not required_ids:
         return tuple(defaults)
 
-    configured: list[dict[str, Any]] = []
+    configured: list[JsonObject] = []
     for capability in defaults:
         if capability["id"] not in required_ids:
             continue
