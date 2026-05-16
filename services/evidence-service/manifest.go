@@ -277,13 +277,14 @@ func (c JavaCandidateRef) AsDataReference() DataReference {
 // invocation. attemptNumber matches the orchestrator's repair counter; the
 // referenced build/test result is the run that triggered the call.
 type RepairAttempt struct {
-	AttemptNumber       int               `json:"attemptNumber"`
-	Decision            string            `json:"decision"`
-	DecisionRef         *DataReference    `json:"decisionRef,omitempty"`
-	NewJavaCandidateRef *JavaCandidateRef `json:"newJavaCandidateRef,omitempty"`
-	BuildTestResultRef  DataReference     `json:"buildTestResultRef"`
-	RefusalCode         string            `json:"refusalCode,omitempty"`
-	NoChange            bool              `json:"noChange,omitempty"`
+	AttemptNumber       int                 `json:"attemptNumber"`
+	Decision            string              `json:"decision"`
+	DecisionRef         *DataReference      `json:"decisionRef,omitempty"`
+	ModelInvocationRef  *ModelInvocationRef `json:"modelInvocationRef,omitempty"`
+	NewJavaCandidateRef *JavaCandidateRef   `json:"newJavaCandidateRef,omitempty"`
+	BuildTestResultRef  DataReference       `json:"buildTestResultRef"`
+	RefusalCode         string              `json:"refusalCode,omitempty"`
+	NoChange            bool                `json:"noChange,omitempty"`
 }
 
 func (r RepairAttempt) Validate(path string) error {
@@ -303,6 +304,11 @@ func (r RepairAttempt) Validate(path string) error {
 	}
 	if r.DecisionRef != nil {
 		if err := r.DecisionRef.Validate(path + ".decisionRef"); err != nil {
+			return err
+		}
+	}
+	if r.ModelInvocationRef != nil {
+		if err := r.ModelInvocationRef.Validate(path + ".modelInvocationRef"); err != nil {
 			return err
 		}
 	}
@@ -758,6 +764,26 @@ func validateW02ReferentialIntegrity(a *Artifacts) []string {
 	if hasAgentTrajectoryRole(a.AgentTrajectories, AgentRoleVerificationRepair) && len(a.RepairAttempts) == 0 {
 		missing = append(missing, "repairAttempts")
 	}
+	modelInvocationRefs := make(map[string]struct{}, len(a.ModelInvocations))
+	modelInvocationRoles := make(map[string]struct{}, len(a.ModelInvocations))
+	for _, invocation := range a.ModelInvocations {
+		if invocation.InvocationID != "" && !invocation.LedgerRef.IsZero() {
+			modelInvocationRefs[modelInvocationKey(invocation)] = struct{}{}
+		}
+		if invocation.AgentRole != "" {
+			modelInvocationRoles[invocation.AgentRole] = struct{}{}
+		}
+	}
+	if hasAgentTrajectoryRole(a.AgentTrajectories, AgentRoleTransformation) {
+		if _, ok := modelInvocationRoles[AgentRoleTransformation]; !ok {
+			missing = append(missing, "modelInvocations.transformation")
+		}
+	}
+	if hasAgentTrajectoryRole(a.AgentTrajectories, AgentRoleVerificationRepair) {
+		if _, ok := modelInvocationRoles[AgentRoleVerificationRepair]; !ok {
+			missing = append(missing, "modelInvocations.verification-repair")
+		}
+	}
 	if a.FinalJavaArtifact != nil && !a.FinalJavaArtifact.IsZero() && len(a.GeneratedJavaArtifacts) > 0 {
 		matchCount := 0
 		selectedMatchCount := 0
@@ -791,6 +817,11 @@ func validateW02ReferentialIntegrity(a *Artifacts) []string {
 		if _, ok := buildTestRefs[dataReferenceKey(attempt.BuildTestResultRef)]; !ok {
 			missing = append(missing, fmt.Sprintf("repairAttempts[%d].buildTestResultRef", i))
 		}
+		if attempt.ModelInvocationRef == nil {
+			missing = append(missing, fmt.Sprintf("repairAttempts[%d].modelInvocationRef", i))
+		} else if _, ok := modelInvocationRefs[modelInvocationKey(*attempt.ModelInvocationRef)]; !ok {
+			missing = append(missing, fmt.Sprintf("repairAttempts[%d].modelInvocationRef", i))
+		}
 		if attempt.NewJavaCandidateRef != nil {
 			if _, ok := candidateRefs[javaCandidateKey(*attempt.NewJavaCandidateRef)]; !ok {
 				missing = append(missing, fmt.Sprintf("repairAttempts[%d].newJavaCandidateRef", i))
@@ -815,6 +846,10 @@ func sameJavaCandidate(left, right JavaCandidateRef) bool {
 
 func dataReferenceKey(ref DataReference) string {
 	return ref.URI + "\x00" + ref.SHA256
+}
+
+func modelInvocationKey(ref ModelInvocationRef) string {
+	return ref.InvocationID + "\x00" + dataReferenceKey(ref.LedgerRef)
 }
 
 func javaCandidateKey(ref JavaCandidateRef) string {

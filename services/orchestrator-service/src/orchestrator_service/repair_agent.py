@@ -102,10 +102,31 @@ class RepairAgentError(Exception):
 
     failure_code: str = "java_generation_failed"
 
-    def __init__(self, message: str, *, failure_code: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str | None = None,
+        model_invocation_ref: Mapping[str, JsonValue] | None = None,
+        repair_input_artifact_ref: Mapping[str, JsonValue] | None = None,
+        repair_decision_artifact_ref: Mapping[str, JsonValue] | None = None,
+    ) -> None:
         super().__init__(message)
         if failure_code is not None:
             self.failure_code = failure_code
+        self.model_invocation_ref = (
+            dict(model_invocation_ref) if isinstance(model_invocation_ref, Mapping) else None
+        )
+        self.repair_input_artifact_ref = (
+            dict(repair_input_artifact_ref)
+            if isinstance(repair_input_artifact_ref, Mapping)
+            else None
+        )
+        self.repair_decision_artifact_ref = (
+            dict(repair_decision_artifact_ref)
+            if isinstance(repair_decision_artifact_ref, Mapping)
+            else None
+        )
 
 
 class RepairAgentContractInvalidError(RepairAgentError):
@@ -451,6 +472,47 @@ def _coerce_confidence(value: Any) -> float | None:
     return coerced
 
 
+def _model_invocation_ref_from_gateway(
+    request: RepairAgentRequest,
+    gateway_response: Mapping[str, JsonValue],
+) -> JsonObject:
+    invocation_id = str(gateway_response.get("invocationId") or "").strip()
+    if not invocation_id:
+        raise RepairAgentContractInvalidError(
+            "model gateway response missing invocationId; cannot build modelInvocationRef"
+        )
+    ledger_ref_raw = gateway_response.get("ledgerRef")
+    if not isinstance(ledger_ref_raw, Mapping) or not _looks_like_artifact_ref(ledger_ref_raw):
+        raise RepairAgentContractInvalidError(
+            "model gateway response missing ledgerRef; cannot reference model invocation ledger"
+        )
+    provider_raw = str(gateway_response.get("provider") or "foundry-development")
+    provider = (
+        provider_raw
+        if provider_raw in {"foundry-development", "customer-internal-mock"}
+        else "foundry-development"
+    )
+    model_invocation_ref: JsonObject = {
+        "invocationId": invocation_id,
+        "modelId": str(gateway_response.get("modelId") or request.model_id),
+        "provider": provider,
+        "ledgerRef": _coerce_artifact_ref(ledger_ref_raw),
+        "agentRole": MODEL_GATEWAY_AGENT_ROLE,
+    }
+    for key in (
+        "promptTemplateVersion",
+        "policyDecision",
+        "status",
+        "policyVersion",
+        "policyId",
+        "promptTemplateId",
+    ):
+        value = gateway_response.get(key)
+        if isinstance(value, str) and value.strip():
+            model_invocation_ref[key] = value.strip()
+    return model_invocation_ref
+
+
 # ---------------------------------------------------------------------------
 # Verification/Repair Agent
 # ---------------------------------------------------------------------------
@@ -534,20 +596,27 @@ class RepairAgent:
         try:
             gateway_response = self._call_model_gateway(request)
         except RepairAgentError as exc:
-            self._persist_failure_decision(
+            decision_ref = self._persist_failure_decision(
                 request,
                 attempt_dir=attempt_dir,
                 _started_at=started_at,
                 exc=exc,
                 request_artifact_ref=request_artifact_ref,
             )
+            exc.repair_input_artifact_ref = dict(request_artifact_ref)
+            exc.repair_decision_artifact_ref = dict(decision_ref)
             raise
 
         latency_ms = max(0, int((time.monotonic() - invoke_started) * 1000))
         ended_at = self._iso_now()
 
         # 3. Parse the gateway envelope and decode the agent's decision.
+        model_invocation_ref: JsonObject | None = None
         try:
+            model_invocation_ref = _model_invocation_ref_from_gateway(
+                request,
+                gateway_response,
+            )
             inner_envelope = _parse_model_output_envelope(gateway_response.get("output"))
             decision = _validate_inner_decision(inner_envelope.get("decision"))
             rationale = inner_envelope.get("rationale")
@@ -570,7 +639,7 @@ class RepairAgent:
                     inner_envelope.get("escalationCode")
                 )
         except RepairAgentContractInvalidError as exc:
-            self._persist_failure_decision(
+            decision_ref = self._persist_failure_decision(
                 request,
                 attempt_dir=attempt_dir,
                 _started_at=started_at,
@@ -578,6 +647,13 @@ class RepairAgent:
                 request_artifact_ref=request_artifact_ref,
                 latency_ms=latency_ms,
             )
+            exc.model_invocation_ref = (
+                dict(model_invocation_ref)
+                if isinstance(model_invocation_ref, Mapping)
+                else None
+            )
+            exc.repair_input_artifact_ref = dict(request_artifact_ref)
+            exc.repair_decision_artifact_ref = dict(decision_ref)
             raise
 
         # 4. When the agent proposes a candidate, persist the Java files +
@@ -598,7 +674,9 @@ class RepairAgent:
                 )
                 persisted_artifacts.append(file_meta.to_dict())
             manifest_payload = self._build_manifest_payload(
-                request, candidate, gateway_response
+                request,
+                candidate,
+                model_invocation_ref,
             )
             manifest_meta = self._artifact_store.write_json(
                 request.run_id,
@@ -645,7 +723,7 @@ class RepairAgent:
             wrapped = RepairAgentContractInvalidError(
                 f"agent-repair-decision failed schema validation: {'; '.join(exc.errors) or exc}"
             )
-            self._persist_failure_decision(
+            decision_ref = self._persist_failure_decision(
                 request,
                 attempt_dir=attempt_dir,
                 _started_at=started_at,
@@ -653,6 +731,9 @@ class RepairAgent:
                 request_artifact_ref=request_artifact_ref,
                 latency_ms=latency_ms,
             )
+            wrapped.model_invocation_ref = dict(model_invocation_ref)
+            wrapped.repair_input_artifact_ref = dict(request_artifact_ref)
+            wrapped.repair_decision_artifact_ref = dict(decision_ref)
             raise wrapped from exc
 
         decision_meta = self._artifact_store.write_json(
@@ -704,23 +785,6 @@ class RepairAgent:
                 f"no-change repair detected after attempt {request.attempt_number}; "
                 f"terminating loop"
             )
-
-        invocation_id = (
-            str(gateway_response.get("invocationId") or "").strip()
-            or f"inv-{request.run_id}-{request.attempt_number:02d}-repair"
-        )
-        model_id = str(gateway_response.get("modelId") or request.model_id)
-        provider = str(gateway_response.get("provider") or "foundry-development")
-        if provider not in {"foundry-development", "customer-internal-mock"}:
-            provider = "foundry-development"
-        model_invocation_ref: JsonObject = {
-            "invocationId": invocation_id,
-            "modelId": model_id,
-            "provider": provider,
-        }
-        ledger_ref_raw = gateway_response.get("ledgerRef")
-        if isinstance(ledger_ref_raw, Mapping) and _looks_like_artifact_ref(ledger_ref_raw):
-            model_invocation_ref["ledgerRef"] = _coerce_artifact_ref(ledger_ref_raw)
 
         return RepairAgentResult(
             decision=effective_decision,
@@ -852,7 +916,7 @@ class RepairAgent:
     def _build_manifest_payload(
         request: RepairAgentRequest,
         candidate: RepairedJavaCandidate,
-        gateway_response: Mapping[str, JsonValue],
+        model_invocation_ref: Mapping[str, JsonValue],
     ) -> JsonObject:
         manifest_payload: JsonObject = {
             "runId": request.run_id,
@@ -860,7 +924,7 @@ class RepairAgent:
             "attemptNumber": request.attempt_number,
             "generationSource": "verification-repair-agent",
             "targetLanguage": "java",
-            "modelInvocationRef": str(gateway_response.get("invocationId") or ""),
+            "modelInvocationRef": dict(model_invocation_ref),
             "previousJavaCandidateRef": _coerce_artifact_ref(
                 request.previous_java_candidate_ref
             ),
@@ -912,7 +976,7 @@ class RepairAgent:
         exc: RepairAgentError,
         request_artifact_ref: Mapping[str, JsonValue],
         latency_ms: int = 0,
-    ) -> None:
+    ) -> JsonObject:
         """Persist a synthetic decision artifact and emit a failure event."""
         ended_at = self._iso_now()
         synthetic = self._build_failure_decision_payload(
@@ -967,6 +1031,7 @@ class RepairAgent:
             },
             latency_ms=latency_ms,
         )
+        return _meta_to_ref(decision_meta)
 
     def _call_model_gateway(
         self, request: RepairAgentRequest
@@ -1107,6 +1172,12 @@ class RepairAgent:
                 for ref in request.previous_repair_decision_refs
                 if _looks_like_artifact_ref(ref)
             ]
+        try:
+            assert_no_secret_leak(envelope)
+        except AgentContractInvalidError as exc:
+            raise RepairAgentContractInvalidError(
+                f"repair prompt failed secret-leak guard: {'; '.join(exc.errors) or exc}"
+            ) from exc
         return json.dumps(envelope, sort_keys=True, ensure_ascii=False)
 
     def _emit_event(

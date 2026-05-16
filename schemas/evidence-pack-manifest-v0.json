@@ -329,6 +329,10 @@
           "$ref": "#/$defs/dataReference",
           "description": "Reference to the persisted agent-repair-decision-v0 envelope."
         },
+        "modelInvocationRef": {
+          "$ref": "#/$defs/modelInvocationRef",
+          "description": "Reference to the governed model invocation ledger that produced this repair attempt."
+        },
         "newJavaCandidateRef": {
           "$ref": "#/$defs/javaCandidateRef",
           "description": "Set when decision=propose_candidate. Points to the Java candidate the agent emitted for re-verification."

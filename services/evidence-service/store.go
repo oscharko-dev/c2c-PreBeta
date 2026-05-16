@@ -321,6 +321,10 @@ func cloneArtifacts(a Artifacts) Artifacts {
 				ref := *r.DecisionRef
 				out.RepairAttempts[i].DecisionRef = &ref
 			}
+			if r.ModelInvocationRef != nil {
+				ref := *r.ModelInvocationRef
+				out.RepairAttempts[i].ModelInvocationRef = &ref
+			}
 			if r.NewJavaCandidateRef != nil {
 				c := *r.NewJavaCandidateRef
 				out.RepairAttempts[i].NewJavaCandidateRef = &c

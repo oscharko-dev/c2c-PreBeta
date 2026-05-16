@@ -44,6 +44,26 @@ def _step(name: str, *, payload: Mapping[str, JsonValue] | None = None, output_u
     )
 
 
+def _model_invocation_ref(
+    agent_role: str,
+    *,
+    invocation_id: str,
+    sha: str,
+) -> dict[str, JsonValue]:
+    return {
+        "invocationId": invocation_id,
+        "modelId": "gpt-oss-120b",
+        "provider": "foundry-development",
+        "agentRole": agent_role,
+        "status": "completed",
+        "ledgerRef": {
+            "uri": f"urn:model-gateway/{invocation_id}",
+            "sha256": sha,
+            "byteSize": 64,
+        },
+    }
+
+
 # noinspection PyAttributeOutsideInitInspection
 class _BaseEvidenceFixture(unittest.TestCase):
     # noinspection PyPep8Naming,PyProtectedMemberInspection
@@ -136,6 +156,16 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         context = self._w0_context(use_transformation_agent=True)
         contract = self._w02_contract()
         contract.set_build_test_result_ref({"uri": "urn:run/build-2", "sha256": "c" * 64, "byteSize": 1})
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        repair_model_ref = _model_invocation_ref(
+            "verification-repair",
+            invocation_id="inv-run-evidence-01-repair",
+            sha="b" * 64,
+        )
 
         # Simulate one repair attempt that proposed the winning candidate.
         contract.record_repair_attempt({
@@ -144,6 +174,7 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             "failureCategory": "java_compile_failed",
             "javaCandidateRef": {"uri": "urn:run/repair-1", "sha256": "d" * 64, "byteSize": 10, "kind": "transformation-agent-project-manifest"},
             "repairDecisionRef": {"uri": "urn:run/repair-decision-1", "sha256": "e" * 64, "byteSize": 6},
+            "modelInvocationRef": repair_model_ref,
             "buildTestResultRef": {"uri": "urn:run/build-1", "sha256": "f" * 64, "byteSize": 8},
             "rationale": "fix",
         })
@@ -179,6 +210,7 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             baseline_generated_artifact_ref=baseline_ref,
             w02_contract=contract,
             w02_blocked=False,
+            productive_model_invocations=[transformation_model_ref, repair_model_ref],
         )
 
         self.assertEqual(payload["wave"], "w0.2")
@@ -209,6 +241,13 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertIn("newJavaCandidateRef", attempts[0])
         self.assertIn("decisionRef", attempts[0])
         self.assertIn("buildTestResultRef", attempts[0])
+        self.assertEqual(
+            attempts[0]["modelInvocationRef"]["invocationId"],
+            "inv-run-evidence-01-repair",
+        )
+
+        model_roles = sorted(entry["agentRole"] for entry in artifacts["modelInvocations"])
+        self.assertEqual(model_roles, ["transformation", "verification-repair"])
 
         # agentTrajectories: orchestrator + transformation + verification-repair
         self.assertIn("agentTrajectories", artifacts)
@@ -227,11 +266,22 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         context = self._w0_context(use_transformation_agent=True)
         contract = self._w02_contract()
         contract.set_build_test_result_ref({"uri": "urn:run/build-1", "sha256": "c" * 64, "byteSize": 1})
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        repair_model_ref = _model_invocation_ref(
+            "verification-repair",
+            invocation_id="inv-run-evidence-01-repair",
+            sha="b" * 64,
+        )
         contract.record_repair_attempt({
             "attemptNumber": 1,
             "repairDecision": "refuse",
             "failureCategory": "oracle_mismatch",
             "refusalCode": "unsupported_construct",
+            "modelInvocationRef": repair_model_ref,
             "buildTestResultRef": {"uri": "urn:run/build-1", "sha256": "c" * 64, "byteSize": 1},
             "rationale": "agent refused",
         })
@@ -264,6 +314,7 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             baseline_generated_artifact_ref=baseline_ref,
             w02_contract=contract,
             w02_blocked=True,
+            productive_model_invocations=[transformation_model_ref, repair_model_ref],
         )
 
         self.assertEqual(payload["wave"], "w0.2")
@@ -274,6 +325,10 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(len(attempts), 1)
         self.assertEqual(attempts[0]["decision"], "refuse")
         self.assertEqual(attempts[0]["refusalCode"], "unsupported_construct")
+        self.assertEqual(
+            attempts[0]["modelInvocationRef"]["invocationId"],
+            "inv-run-evidence-01-repair",
+        )
         # When the run is blocked we MUST NOT auto-mark a candidate as
         # selected unless the orchestrator handed us one explicitly.
         history = artifacts.get("generatedJavaArtifacts") or []
@@ -295,12 +350,23 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         context = self._w0_context(use_transformation_agent=True)
         contract = self._w02_contract()
         contract.set_build_test_result_ref({"uri": "urn:run/build-final", "sha256": "c" * 64, "byteSize": 1})
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        repair_model_ref = _model_invocation_ref(
+            "verification-repair",
+            invocation_id="inv-run-evidence-01-repair",
+            sha="b" * 64,
+        )
         contract.record_repair_attempt({
             "attemptNumber": 1,
             "repairDecision": "propose_candidate",
             "failureCategory": "java_compile_failed",
             "javaCandidateRef": {"uri": "urn:run/repair-1", "sha256": "d" * 64, "byteSize": 10},
             "repairDecisionRef": {"uri": "urn:run/repair-decision-1", "sha256": "e" * 64, "byteSize": 6},
+            "modelInvocationRef": repair_model_ref,
             "rationale": "missing build-test ref must not be substituted",
         })
 
@@ -331,12 +397,74 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             baseline_generated_artifact_ref=baseline_ref,
             w02_contract=contract,
             w02_blocked=False,
+            productive_model_invocations=[transformation_model_ref, repair_model_ref],
         )
 
         artifacts = payload["artifacts"]
         self.assertNotIn("repairAttempts", artifacts)
         roles = sorted(entry["agentRole"] for entry in artifacts["agentTrajectories"])
         self.assertEqual(roles, ["orchestrator", "transformation", "verification-repair"])
+
+    def test_no_change_w02_evidence_carries_attempt_model_invocation(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        contract.set_build_test_result_ref({"uri": "urn:run/build-1", "sha256": "c" * 64, "byteSize": 1})
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        repair_model_ref = _model_invocation_ref(
+            "verification-repair",
+            invocation_id="inv-run-evidence-01-repair",
+            sha="b" * 64,
+        )
+        contract.record_repair_attempt({
+            "attemptNumber": 1,
+            "repairDecision": "no_change",
+            "failureCategory": "java_compile_failed",
+            "javaCandidateRef": {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12},
+            "repairDecisionRef": {"uri": "urn:run/repair-decision-1", "sha256": "e" * 64, "byteSize": 6},
+            "modelInvocationRef": repair_model_ref,
+            "buildTestResultRef": {"uri": "urn:run/build-1", "sha256": "c" * 64, "byteSize": 1},
+            "rationale": "same candidate",
+        })
+        baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12}
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "failed",
+                "classification": "java_compile_failed",
+                "comparison": {"matched": False},
+                "goldenMaster": {"classification": "synthetic"},
+            },
+            output_uri="urn:run/build-1",
+        )
+
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/baseline"),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            generated_artifact_ref=baseline_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=True,
+            productive_model_invocations=[transformation_model_ref, repair_model_ref],
+        )
+
+        attempt = payload["artifacts"]["repairAttempts"][0]
+        self.assertTrue(attempt["noChange"])
+        self.assertEqual(attempt["decision"], "no_change")
+        self.assertEqual(
+            attempt["modelInvocationRef"]["invocationId"],
+            "inv-run-evidence-01-repair",
+        )
 
     def test_missing_oracle_classified_as_absent(self) -> None:
         context = self._w0_context(use_transformation_agent=True)
@@ -352,6 +480,11 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         )
         trajectory = {"schemaVersion": "v0", "runId": "run-evidence", "steps": []}
         baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12}
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
 
         payload = self.runner._build_evidence_payload(
             context=context,
@@ -367,6 +500,7 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             baseline_generated_artifact_ref=baseline_ref,
             w02_contract=contract,
             w02_blocked=False,
+            productive_model_invocations=[transformation_model_ref],
         )
         self.assertEqual(payload["artifacts"]["oracleComparison"]["oracleKind"], "absent")
 

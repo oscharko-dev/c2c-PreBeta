@@ -244,7 +244,14 @@ def _agent_for(response_or_exc) -> tuple[RepairAgent, RunArtifactStore, str]:
 class RepairAgentRequestAssemblyTests(unittest.TestCase):
     def test_input_payload_passes_schema_validation(self):
         agent, store, tmp = _agent_for(_ok_propose_response())
-        request = _request()
+        request = _request(
+            compile_error_ref=_ref("urn:build/compile-error", sha_char="1"),
+            runtime_error_ref=_ref("urn:build/runtime-error", sha_char="2"),
+            oracle_diff_ref=_ref("urn:build/oracle-diff", sha_char="3"),
+            previous_repair_decision_refs=(
+                _ref("urn:repair/decision-0", sha_char="4"),
+            ),
+        )
         payload = agent._build_repair_input_payload(request, "2026-05-16T00:00:00Z")
         validate_repair_input(payload)
         self.assertEqual(payload["schemaVersion"], "v0")
@@ -256,6 +263,13 @@ class RepairAgentRequestAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(payload["semanticIrRef"]["uri"], "urn:ir/HELLO")
         self.assertEqual(payload["sourceCobolRef"]["uri"], "urn:src/main.cob")
+        self.assertEqual(payload["compileErrorRef"]["uri"], "urn:build/compile-error")
+        self.assertEqual(payload["runtimeErrorRef"]["uri"], "urn:build/runtime-error")
+        self.assertEqual(payload["oracleDiffRef"]["uri"], "urn:build/oracle-diff")
+        self.assertEqual(
+            payload["previousRepairDecisionRefs"][0]["uri"],
+            "urn:repair/decision-0",
+        )
 
     def test_input_payload_omits_optional_refs_when_absent(self):
         agent, store, tmp = _agent_for(_ok_propose_response())
@@ -297,7 +311,11 @@ class RepairAgentGatewayRequestTests(unittest.TestCase):
     def test_gateway_request_carries_verification_repair_role_and_refs(self):
         agent, store, tmp = _agent_for(_ok_propose_response())
         invoker: _StubInvoker = agent._model_invoker  # type: ignore[assignment]
-        agent.invoke(_request())
+        agent.invoke(_request(
+            compile_error_ref=_ref("urn:build/compile-error", sha_char="1"),
+            runtime_error_ref=_ref("urn:build/runtime-error", sha_char="2"),
+            oracle_diff_ref=_ref("urn:build/oracle-diff", sha_char="3"),
+        ))
         self.assertEqual(len(invoker.calls), 1)
         call = invoker.calls[0]
         self.assertEqual(call["agentRole"], MODEL_GATEWAY_AGENT_ROLE)
@@ -310,10 +328,16 @@ class RepairAgentGatewayRequestTests(unittest.TestCase):
         self.assertEqual(params["buildTestResultRef"]["uri"], "urn:build/result")
         self.assertEqual(params["semanticIrRef"]["uri"], "urn:ir/HELLO")
         self.assertEqual(params["sourceCobolRef"]["uri"], "urn:src/main.cob")
+        self.assertEqual(params["compileErrorRef"]["uri"], "urn:build/compile-error")
+        self.assertEqual(params["runtimeErrorRef"]["uri"], "urn:build/runtime-error")
+        self.assertEqual(params["oracleDiffRef"]["uri"], "urn:build/oracle-diff")
         prompt = json.loads(call["prompt"])
         self.assertEqual(prompt["task"], "java-verification-repair")
         self.assertEqual(prompt["failureCategory"], "java_compile_failed")
         self.assertIn("previousJavaFiles", prompt)
+        self.assertEqual(prompt["compileErrorRef"]["uri"], "urn:build/compile-error")
+        self.assertEqual(prompt["runtimeErrorRef"]["uri"], "urn:build/runtime-error")
+        self.assertEqual(prompt["oracleDiffRef"]["uri"], "urn:build/oracle-diff")
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +374,17 @@ class RepairAgentProposePersistenceTests(unittest.TestCase):
             decision_payload["newJavaCandidateRef"]["uri"],
             (attempt_dir / "generated-project-manifest.json").resolve().as_uri(),
         )
+        manifest_payload = json.loads(
+            (attempt_dir / "generated-project-manifest.json").read_text("utf-8")
+        )
+        self.assertEqual(
+            manifest_payload["modelInvocationRef"]["invocationId"],
+            "inv-run-1-01-repair",
+        )
+        self.assertEqual(
+            manifest_payload["modelInvocationRef"]["ledgerRef"]["uri"],
+            "urn:model-gateway/inv-run-1-01-repair",
+        )
 
         # Artifact index records all four kinds.
         kinds = {entry["kind"] for entry in store.list_artifacts("run-1")}
@@ -366,6 +401,7 @@ class RepairAgentProposePersistenceTests(unittest.TestCase):
         )
         self.assertEqual(result.model_invocation_ref["modelId"], "gpt-oss-120b")
         self.assertEqual(result.model_invocation_ref["provider"], "foundry-development")
+        self.assertEqual(result.model_invocation_ref["agentRole"], "verification-repair")
         self.assertIn("ledgerRef", result.model_invocation_ref)
 
 
@@ -528,8 +564,33 @@ class RepairAgentGatewayFailureTests(unittest.TestCase):
         bad = _ok_propose_response()
         bad["output"] = "not a json object at all"
         agent, store, tmp = _agent_for(bad)
-        with self.assertRaises(RepairAgentContractInvalidError):
+        with self.assertRaises(RepairAgentContractInvalidError) as ctx:
             agent.invoke(_request())
+        self.assertEqual(
+            ctx.exception.model_invocation_ref["invocationId"],
+            "inv-run-1-01-repair",
+        )
+        self.assertIsNotNone(ctx.exception.repair_decision_artifact_ref)
+        self._assert_synthetic_decision_exists(tmp)
+
+    def test_missing_gateway_invocation_id_rejected(self):
+        bad = _ok_propose_response()
+        bad.pop("invocationId")
+        agent, store, tmp = _agent_for(bad)
+        with self.assertRaises(RepairAgentContractInvalidError) as ctx:
+            agent.invoke(_request())
+        self.assertIn("missing invocationId", str(ctx.exception))
+        self.assertIsNone(ctx.exception.model_invocation_ref)
+        self._assert_synthetic_decision_exists(tmp)
+
+    def test_missing_gateway_ledger_ref_rejected(self):
+        bad = _ok_propose_response()
+        bad.pop("ledgerRef")
+        agent, store, tmp = _agent_for(bad)
+        with self.assertRaises(RepairAgentContractInvalidError) as ctx:
+            agent.invoke(_request())
+        self.assertIn("missing ledgerRef", str(ctx.exception))
+        self.assertIsNone(ctx.exception.model_invocation_ref)
         self._assert_synthetic_decision_exists(tmp)
 
     def test_unknown_decision_value_raises_contract_invalid(self):
