@@ -419,6 +419,7 @@ class W02RunContract:
     final_classification: Optional[str] = None
     failure_code: Optional[str] = None
     failure_message: Optional[str] = None
+    repair_attempts: List[Dict[str, Any]] = field(default_factory=list)
     created_at: str = field(default_factory=_iso_now)
     updated_at: str = field(default_factory=_iso_now)
 
@@ -441,6 +442,65 @@ class W02RunContract:
         self.agent_attempt_count += 1
         self.touch()
         return self.agent_attempt_count
+
+    def record_repair_attempt(self, entry: Mapping[str, Any]) -> Dict[str, Any]:
+        """Record one verification/repair-agent attempt on the run contract.
+
+        Issue #170: every repair attempt — successful, refused, escalated,
+        or no-change — leaves an entry on the trajectory ledger so Experience
+        Learning can spot loop pathologies (no-change repeats, repeated
+        contract-invalid, escalation rate per failure category).
+        """
+        if not isinstance(entry, Mapping):
+            raise TypeError("repair attempt entry must be a mapping")
+        decision = str(entry.get("repairDecision") or "").strip()
+        if decision not in {"propose_candidate", "refuse", "escalate", "no_change"}:
+            raise ValueError(
+                f"unknown repairDecision on repair attempt entry: {decision!r}"
+            )
+        try:
+            attempt_number = int(entry.get("attemptNumber"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("repair attempt entry requires integer attemptNumber") from exc
+        if attempt_number < 1:
+            raise ValueError("repair attempt entry attemptNumber must be >= 1")
+        normalised: Dict[str, Any] = {
+            "attemptNumber": attempt_number,
+            "repairDecision": decision,
+            "failureCategory": str(entry.get("failureCategory") or "") or None,
+            "createdAt": str(entry.get("createdAt") or _iso_now()),
+        }
+        for optional_key in (
+            "refusalCode",
+            "escalationCode",
+            "modelInvocationRef",
+            "repairInputRef",
+            "repairDecisionRef",
+            "javaCandidateRef",
+            "rationale",
+            "diffFromPreviousRef",
+        ):
+            value = entry.get(optional_key)
+            if value is None:
+                continue
+            if isinstance(value, Mapping):
+                normalised[optional_key] = dict(value)
+            else:
+                normalised[optional_key] = value
+        if normalised["failureCategory"] is None:
+            normalised.pop("failureCategory")
+        self.repair_attempts.append(normalised)
+        self.touch()
+        return normalised
+
+    @property
+    def repeated_no_change_count(self) -> int:
+        """Return the count of repair attempts classified as ``no_change``."""
+        return sum(
+            1
+            for entry in self.repair_attempts
+            if entry.get("repairDecision") == "no_change"
+        )
 
     def set_generated_java_ref(self, ref: Optional[Mapping[str, Any]]) -> None:
         self.generated_java_ref = dict(ref) if ref else None
@@ -502,6 +562,7 @@ class W02RunContract:
             "finalClassification": self.final_classification,
             "failureCode": self.failure_code,
             "failureMessage": self.failure_message,
+            "repairAttempts": [dict(entry) for entry in self.repair_attempts],
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         }

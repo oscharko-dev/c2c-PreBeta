@@ -58,6 +58,12 @@ DEFAULT_TRANSFORMATION_AGENT_W0_SUBSET: tuple[str, ...] = (
     "PERFORM",
 )
 
+# Issue #170: defaults for the productive Verification/Repair Agent.
+DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_ID = "c2c.verification-repair-agent.cobol-to-java.v0"
+DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION = "v0"
+DEFAULT_REPAIR_AGENT_DEADLINE_MS = 30000
+DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES = 256 * 1024
+
 DEFAULT_PARSER_SERVICE_HOST = "127.0.0.1"
 DEFAULT_PARSER_SERVICE_PORT = 8081
 DEFAULT_IR_SERVICE_HOST = "127.0.0.1"
@@ -170,6 +176,16 @@ class OrchestratorConfig:
     transformation_agent_java_version: str = DEFAULT_TRANSFORMATION_AGENT_JAVA_VERSION
     transformation_agent_runtime_library: str = DEFAULT_TRANSFORMATION_AGENT_RUNTIME_LIBRARY
     transformation_agent_w0_subset: tuple[str, ...] = DEFAULT_TRANSFORMATION_AGENT_W0_SUBSET
+    # Issue #170: productive Verification/Repair Agent defaults. Stamped on
+    # the agent invocation request and used to bound the model output. The
+    # repair agent reuses the transformation agent's package base unless the
+    # operator overrides it explicitly.
+    repair_agent_prompt_template_id: str = DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_ID
+    repair_agent_prompt_template_version: str = DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION
+    repair_agent_deadline_ms: int = DEFAULT_REPAIR_AGENT_DEADLINE_MS
+    repair_agent_max_output_bytes: int = DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES
+    repair_agent_package_base: str = DEFAULT_TRANSFORMATION_AGENT_PACKAGE_BASE
+    repair_agent_model_id: str = ""
 
 
 def _read_env_int(name: str, default: int) -> int:
@@ -317,6 +333,46 @@ def load_config() -> OrchestratorConfig:
         or DEFAULT_TRANSFORMATION_AGENT_RUNTIME_LIBRARY
     )
 
+    # Issue #170: optional environment overrides for the Verification/Repair
+    # Agent defaults. Empty strings fall back to the dataclass defaults.
+    repair_agent_prompt_template_id = (
+        os.environ.get(
+            "ORCHESTRATOR_REPAIR_AGENT_PROMPT_TEMPLATE_ID",
+            DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_ID,
+        ).strip()
+        or DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_ID
+    )
+    repair_agent_prompt_template_version = (
+        os.environ.get(
+            "ORCHESTRATOR_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION",
+            DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION,
+        ).strip()
+        or DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION
+    )
+    repair_agent_deadline_ms = _read_env_int(
+        "ORCHESTRATOR_REPAIR_AGENT_DEADLINE_MS",
+        DEFAULT_REPAIR_AGENT_DEADLINE_MS,
+    )
+    if repair_agent_deadline_ms <= 0:
+        repair_agent_deadline_ms = DEFAULT_REPAIR_AGENT_DEADLINE_MS
+    repair_agent_max_output_bytes = _read_env_int(
+        "ORCHESTRATOR_REPAIR_AGENT_MAX_OUTPUT_BYTES",
+        DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES,
+    )
+    if repair_agent_max_output_bytes <= 0:
+        repair_agent_max_output_bytes = DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES
+    repair_agent_package_base = (
+        os.environ.get(
+            "ORCHESTRATOR_REPAIR_AGENT_PACKAGE_BASE",
+            transformation_agent_package_base,
+        ).strip()
+        or transformation_agent_package_base
+    )
+    repair_agent_model_id = os.environ.get(
+        "ORCHESTRATOR_REPAIR_AGENT_MODEL_ID",
+        "",
+    ).strip()
+
     return OrchestratorConfig(
         listen_addr=listen_addr,
         harness_base_url=harness_base_url,
@@ -344,6 +400,12 @@ def load_config() -> OrchestratorConfig:
         transformation_agent_package_base=transformation_agent_package_base,
         transformation_agent_java_version=transformation_agent_java_version,
         transformation_agent_runtime_library=transformation_agent_runtime_library,
+        repair_agent_prompt_template_id=repair_agent_prompt_template_id,
+        repair_agent_prompt_template_version=repair_agent_prompt_template_version,
+        repair_agent_deadline_ms=repair_agent_deadline_ms,
+        repair_agent_max_output_bytes=repair_agent_max_output_bytes,
+        repair_agent_package_base=repair_agent_package_base,
+        repair_agent_model_id=repair_agent_model_id,
     )
 
 

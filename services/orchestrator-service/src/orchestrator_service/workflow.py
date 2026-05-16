@@ -42,6 +42,17 @@ from .artifacts import (
 from .config import OrchestratorConfig
 from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import DataReference, HarnessFailure, HarnessGateway
+from .repair_agent import (
+    REFUSAL_TO_FAILURE_CODE as REPAIR_REFUSAL_TO_FAILURE_CODE,
+    RepairAgent,
+    RepairAgentContractInvalidError,
+    RepairAgentError,
+    RepairAgentGatewayUnavailableError,
+    RepairAgentPolicyDeniedError,
+    RepairAgentRequest,
+    RepairAgentResult,
+    RepairAgentTimeoutError,
+)
 from .transformation_agent import (
     AgentContractInvalidAgentError,
     AgentTimeoutError,
@@ -60,7 +71,9 @@ from .run_contract import (
     CLASSIFICATION_FAILED,
     CLASSIFICATION_SUCCESS,
     FAILURE_AGENT_CONTRACT_INVALID,
+    FAILURE_AGENT_TIMEOUT,
     FAILURE_EVIDENCE_INCOMPLETE,
+    FAILURE_JAVA_GENERATION_FAILED,
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
     IllegalTransitionError,
@@ -592,6 +605,8 @@ class W0WorkflowRunner:
         experience_learning: Optional[Any] = None,
         transformation_agent: Optional[TransformationAgent] = None,
         transformation_agent_invoker: Optional[ModelGatewayInvoker] = None,
+        repair_agent: Optional[RepairAgent] = None,
+        repair_agent_invoker: Optional[ModelGatewayInvoker] = None,
     ):
         self.config = config
         self.gateway = gateway
@@ -606,6 +621,14 @@ class W0WorkflowRunner:
         # the first time a run requests ``use_transformation_agent=True``.
         self._transformation_agent: Optional[TransformationAgent] = transformation_agent
         self._transformation_agent_invoker: Optional[ModelGatewayInvoker] = transformation_agent_invoker
+        # Issue #170: the productive Verification/Repair Agent is invoked
+        # whenever the build/test runner reports failure and the repair
+        # budget still has remaining attempts. Lazy construction lets tests
+        # inject a stub agent through the constructor while production
+        # falls back to the Harness-backed Model Gateway invoker (shared
+        # with the transformation agent so both go through the same proxy).
+        self._repair_agent: Optional[RepairAgent] = repair_agent
+        self._repair_agent_invoker: Optional[ModelGatewayInvoker] = repair_agent_invoker
         self._step_lock = threading.Lock()
         self._step_id_by_run: Dict[str, int] = {}
         self._capability_cache: Dict[str, Dict[str, Any]] = {}
@@ -832,6 +855,138 @@ class W0WorkflowRunner:
             trace_ref=f"trace-{context.run_id}",
         )
         return agent.invoke(request)
+
+    # ------------------------------------------------------------------
+    # Issue #170: Verification/Repair Agent integration helpers
+    # ------------------------------------------------------------------
+
+    def _ensure_repair_agent(self) -> RepairAgent:
+        """Return the verification/repair agent, building it lazily.
+
+        Production callers reach the Model Gateway through the Harness
+        capability proxy. Tests inject a stub via the constructor. The
+        agent shares its model invoker with the transformation agent when
+        no dedicated repair invoker was supplied so both productive
+        agents go through the same gateway.
+        """
+        if self._repair_agent is not None:
+            return self._repair_agent
+        if isinstance(self.artifact_store, NullArtifactStore):
+            raise OrchestratorError(
+                "verification/repair agent requires a real artifact store; refusing to run with NullArtifactStore"
+            )
+        invoker = self._repair_agent_invoker or self._transformation_agent_invoker
+        if invoker is None:
+            invoker = HarnessModelGatewayInvoker(
+                self.gateway,
+                self.config.model_gateway_capability_id,
+            )
+            self._transformation_agent_invoker = invoker
+        self._repair_agent_invoker = invoker
+        self._repair_agent = RepairAgent(
+            config=self.config,
+            artifact_store=self.artifact_store,
+            model_invoker=invoker,
+            harness_events=self.gateway,
+        )
+        return self._repair_agent
+
+    def _invoke_repair_agent(
+        self,
+        context: W0RunContext,
+        contract: W02RunContract,
+        *,
+        attempt_number: int,
+        previous_java_candidate_ref: Mapping[str, Any],
+        previous_java_files: Mapping[str, str],
+        build_test_result_ref: Mapping[str, Any],
+        build_test_payload: Mapping[str, Any],
+        failure_category: str,
+        source_text: Optional[str],
+        source_cobol_ref: Optional[Mapping[str, Any]],
+        semantic_ir: Optional[Mapping[str, Any]],
+        semantic_ir_ref: Optional[Mapping[str, Any]],
+        previous_repair_decision_refs: Sequence[Mapping[str, Any]],
+        repair_budget_remaining: int,
+    ) -> RepairAgentResult:
+        """Run one Verification/Repair Agent attempt and return its result.
+
+        Raises a typed :class:`RepairAgentError` on terminal failures
+        (policy denial, gateway unavailability, timeout, contract-invalid
+        output). The caller maps those errors to the canonical W0.2
+        failure code and finalises the run.
+        """
+        agent = self._ensure_repair_agent()
+        capability = self._require_capability(
+            context.run_id, self.config.model_gateway_capability_id
+        )
+        capability_resolved_at = _iso_now()
+        configured_repair_model = _text(
+            getattr(self.config, "repair_agent_model_id", None)
+        )
+        configured_default_model = _text(
+            getattr(self.config, "model_gateway_model_id", None)
+        )
+        request = RepairAgentRequest(
+            run_id=context.run_id,
+            workflow_id=context.workflow_id,
+            attempt_number=attempt_number,
+            requester=context.requester or self.config.service_name,
+            previous_java_candidate_ref=dict(previous_java_candidate_ref),
+            previous_java_files=dict(previous_java_files),
+            build_test_result_ref=dict(build_test_result_ref),
+            build_test_payload=dict(build_test_payload) if build_test_payload else {},
+            failure_category=failure_category,
+            capability_id=str(capability.get("id") or self.config.model_gateway_capability_id),
+            capability_version=str(capability.get("version") or "v0"),
+            capability_provider=str(capability.get("owner") or "model-gateway-service"),
+            capability_resolved_at=capability_resolved_at,
+            model_id=configured_repair_model or configured_default_model or DEFAULT_MODEL_ID,
+            policy_version=getattr(self.config, "model_policy_version", None) or "v0",
+            repair_budget_remaining=int(repair_budget_remaining),
+            source_text=source_text,
+            source_cobol_ref=dict(source_cobol_ref) if source_cobol_ref else None,
+            semantic_ir=dict(semantic_ir) if isinstance(semantic_ir, Mapping) and semantic_ir else None,
+            semantic_ir_ref=dict(semantic_ir_ref) if semantic_ir_ref else None,
+            previous_repair_decision_refs=tuple(
+                dict(ref) for ref in previous_repair_decision_refs
+            ),
+            deadline_ms=getattr(
+                self.config,
+                "repair_agent_deadline_ms",
+                DEFAULT_MODEL_TIMEOUT_MS,
+            )
+            or DEFAULT_MODEL_TIMEOUT_MS,
+            trace_ref=f"trace-{context.run_id}",
+        )
+        return agent.invoke(request)
+
+    @staticmethod
+    def _failure_code_for_repair_outcome(result: RepairAgentResult) -> str:
+        """Map a non-success repair-agent outcome to a canonical W0.2 code."""
+        if result.is_refusal and result.refusal_code is not None:
+            return REPAIR_REFUSAL_TO_FAILURE_CODE.get(
+                result.refusal_code,
+                FAILURE_JAVA_GENERATION_FAILED,
+            )
+        if result.is_escalation:
+            return FAILURE_JAVA_GENERATION_FAILED
+        if result.is_no_change:
+            return FAILURE_JAVA_GENERATION_FAILED
+        return FAILURE_JAVA_GENERATION_FAILED
+
+    @staticmethod
+    def _failure_code_for_repair_exception(exc: RepairAgentError) -> str:
+        """Map a repair-agent exception to a canonical W0.2 failure code."""
+        if isinstance(exc, RepairAgentContractInvalidError):
+            return FAILURE_AGENT_CONTRACT_INVALID
+        if isinstance(exc, RepairAgentPolicyDeniedError):
+            return FAILURE_MODEL_POLICY_DENIED
+        if isinstance(exc, RepairAgentTimeoutError):
+            return FAILURE_AGENT_TIMEOUT
+        if isinstance(exc, RepairAgentGatewayUnavailableError):
+            return FAILURE_MODEL_GATEWAY_UNAVAILABLE
+        return FAILURE_JAVA_GENERATION_FAILED
 
     def _guard_agent_invocation_payload(
         self,
@@ -1554,15 +1709,23 @@ class W0WorkflowRunner:
                 _write_summary("updating", message="compile-test-java completed")
                 w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
 
-            # Issue #166: W0.2 verification/repair loop. The build-test
-            # runner is the deterministic gate; on a failed outcome we
-            # invoke the verification/repair agent role and re-attempt
-            # generation up to the configured budget. The repair loop is
-            # bounded — once the budget is exhausted the run is finalised
-            # as ``blocked`` with the canonical failure code. When the
-            # productive Transformation Agent blocked the run before
-            # build/test ran, there is no outcome to classify; we skip the
-            # loop and proceed to evidence finalisation.
+            # Issue #166 / Issue #170: W0.2 verification/repair loop. The
+            # build-test runner is the deterministic gate; on a failed
+            # outcome we invoke the productive Verification/Repair Agent.
+            # The agent inspects the failure context and returns one of:
+            #   * propose_candidate — re-run build/test on its Java,
+            #   * refuse / escalate — terminate the loop as blocked,
+            #   * no_change       — terminate the loop (Orchestrator-side
+            #                       no-change detection prevents the agent
+            #                       from burning budget on identical files).
+            # The loop is bounded by the repair budget; when the budget is
+            # exhausted with no successful build, the run is blocked with
+            # the LAST objective build-test failure code preserved. When
+            # the productive Transformation Agent already blocked the run
+            # before build/test ran, there is no outcome to classify and
+            # the loop is skipped entirely.
+            previous_repair_decision_refs: list[Dict[str, Any]] = []
+            repair_attempt_counter = 0
             if build_test_output is not None:
                 success, build_failure_code = build_test_outcome(build_test_output.payload)
             while build_test_output is not None and not success:
@@ -1582,6 +1745,45 @@ class W0WorkflowRunner:
                         failure_code=build_failure_code,
                     )
                     break
+                # Capture the failing candidate's reference and content
+                # *before* we consume budget so the repair agent receives
+                # a complete failure context. The deterministic baseline
+                # files (or the prior agent's files) are the input for
+                # no-change detection.
+                previous_candidate_files: Dict[str, str] = {
+                    path: content
+                    for path, content in _iter_generated_files(generated_project)
+                }
+                if not previous_candidate_files:
+                    # Defensive: a generator that does not surface its
+                    # files map cannot drive a meaningful repair attempt.
+                    w02_blocked = True
+                    w02_failure_code = build_failure_code
+                    w02_failure_message = (
+                        "verification/repair agent cannot run without the "
+                        "previous candidate's files"
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=build_failure_code,
+                    )
+                    break
+                previous_candidate_ref: Dict[str, Any]
+                if generated_artifact_ref is not None:
+                    previous_candidate_ref = dict(generated_artifact_ref)
+                else:
+                    # Materialise an artifact ref out of the generator
+                    # output so the repair agent has a stable reference.
+                    previous_candidate_ref = dict(
+                        _as_reference_payload(generator_output.output_ref)
+                    )
+                build_test_result_ref_payload = dict(
+                    _as_reference_payload(build_test_output.output_ref)
+                )
                 self._advance_w02(
                     context,
                     w02_contract,
@@ -1593,9 +1795,10 @@ class W0WorkflowRunner:
                 try:
                     w02_contract.repair_budget.consume()
                 except RepairBudgetExhaustedError:
-                    # Defensive: the ``exhausted`` check above should make this
-                    # unreachable, but a concurrent caller could in principle
-                    # advance the counter. Treat it as the same blocked path.
+                    # Defensive: the ``exhausted`` check above should make
+                    # this unreachable, but a concurrent caller could in
+                    # principle advance the counter. Treat it as the
+                    # blocked path.
                     w02_blocked = True
                     w02_failure_code = build_failure_code
                     w02_failure_message = (
@@ -1611,40 +1814,232 @@ class W0WorkflowRunner:
                         failure_code=build_failure_code,
                     )
                     break
-                attempt = w02_contract.record_agent_attempt()
-                self._advance_w02(
+                repair_attempt_counter += 1
+                attempt = repair_attempt_counter
+                # The agent_attempt_count tracks productive-agent
+                # invocations across the run; each repair attempt is a
+                # distinct productive agent call so we increment here
+                # alongside the dedicated repair counter.
+                w02_contract.record_agent_attempt()
+                # The repair agent produces the next Java candidate. The
+                # Transformation-Agent state is reused as the "agent
+                # generating Java" marker on the state machine because the
+                # state-machine contract (Issue #166) only knows about
+                # those two productive-agent transitions.
+                self._record_step_start(
                     context,
-                    w02_contract,
-                    STATE_TRANSFORMATION_AGENT_INVOKED,
-                    active_step=W02_STEP_TRANSFORMATION_AGENT,
-                    message=f"repair attempt {attempt}/{w02_contract.repair_budget.limit}",
+                    name=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    capability_id=self.config.model_gateway_capability_id,
+                    actor="verification-repair-agent",
+                    input_ref=build_test_output.output_ref,
                 )
-                generator_output = self._invoke_step(
-                    context,
-                    "generate-java",
-                    generator_capability,
-                    DATA_CLASS_GENERATOR,
-                    {
-                        "schemaVersion": "v0",
-                        "runId": context.run_id,
-                        "workflowId": context.workflow_id,
-                        "sourceRef": source_ref_from_ir,
-                        "ir": ir_document,
-                        "repairAttempt": attempt,
-                        "previousBuildTestRef": _as_reference_payload(build_test_output.output_ref),
-                    },
-                    ir_output.output_ref,
-                )
-                # Issue #167: validate repair-agent-shaped payloads before
-                # use. No-op for the deterministic generator; load-bearing
-                # once a productive Verification/Repair Agent returns
-                # ``agent-invocation-response-v0`` shaped output here.
-                repair_agent_error = self._guard_agent_invocation_payload(generator_output.payload)
-                if repair_agent_error is not None:
-                    raise AgentContractInvalidStepError(
-                        f"step generate-java failed: {repair_agent_error}"
+                try:
+                    repair_result = self._invoke_repair_agent(
+                        context,
+                        w02_contract,
+                        attempt_number=attempt,
+                        previous_java_candidate_ref=previous_candidate_ref,
+                        previous_java_files=previous_candidate_files,
+                        build_test_result_ref=build_test_result_ref_payload,
+                        build_test_payload=dict(build_test_output.payload),
+                        failure_category=build_failure_code or "java_compile_failed",
+                        source_text=source_text,
+                        source_cobol_ref=_as_reference_payload(input_reference),
+                        semantic_ir=ir_document,
+                        semantic_ir_ref=_as_reference_payload(ir_output.output_ref),
+                        previous_repair_decision_refs=list(previous_repair_decision_refs),
+                        repair_budget_remaining=w02_contract.repair_budget.remaining,
                     )
-                step_results.append(generator_output)
+                except RepairAgentError as repair_exc:
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="verification-repair-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=build_test_output.output_ref,
+                        diagnostic=str(repair_exc),
+                        run_status="failed",
+                        failed_step=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    )
+                    repair_failure_code = self._failure_code_for_repair_exception(
+                        repair_exc
+                    )
+                    w02_contract.record_repair_attempt(
+                        {
+                            "attemptNumber": attempt,
+                            "repairDecision": "refuse",
+                            "failureCategory": build_failure_code,
+                            "rationale": str(repair_exc),
+                            "modelInvocationRef": {
+                                "invocationId": (
+                                    f"inv-{context.run_id}-{attempt:02d}-repair-failed"
+                                ),
+                            },
+                        }
+                    )
+                    w02_blocked = True
+                    w02_failure_code = repair_failure_code
+                    w02_failure_message = (
+                        f"verification/repair agent failed: {repair_exc}"
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=repair_failure_code,
+                    )
+                    break
+                # Persist the agent's decision reference for any subsequent
+                # attempt's previousRepairDecisionRefs array.
+                previous_repair_decision_refs.append(
+                    dict(repair_result.repair_decision_artifact_ref)
+                )
+                # Record the trajectory entry for this attempt regardless
+                # of outcome — every attempt must be visible in the run
+                # contract for Experience Learning.
+                w02_contract.record_repair_attempt(
+                    {
+                        "attemptNumber": attempt,
+                        "repairDecision": repair_result.decision,
+                        "failureCategory": build_failure_code,
+                        "refusalCode": repair_result.refusal_code,
+                        "escalationCode": repair_result.escalation_code,
+                        "rationale": repair_result.rationale,
+                        "modelInvocationRef": dict(repair_result.model_invocation_ref),
+                        "repairInputRef": dict(repair_result.repair_input_artifact_ref),
+                        "repairDecisionRef": dict(
+                            repair_result.repair_decision_artifact_ref
+                        ),
+                        "javaCandidateRef": (
+                            dict(repair_result.new_java_candidate_ref)
+                            if repair_result.new_java_candidate_ref
+                            else None
+                        ),
+                    }
+                )
+                if repair_result.is_refusal or repair_result.is_escalation:
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="verification-repair-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=build_test_output.output_ref,
+                        diagnostic=repair_result.failure_message
+                        or repair_result.rationale,
+                        run_status="failed",
+                        failed_step=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    )
+                    w02_blocked = True
+                    w02_failure_code = (
+                        repair_result.failure_code
+                        or self._failure_code_for_repair_outcome(repair_result)
+                    )
+                    w02_failure_message = (
+                        repair_result.failure_message
+                        or repair_result.rationale
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=w02_failure_code,
+                    )
+                    break
+                if repair_result.is_no_change:
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="verification-repair-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=build_test_output.output_ref,
+                        diagnostic=repair_result.failure_message
+                        or "no-change repair detected",
+                        run_status="failed",
+                        failed_step=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    )
+                    w02_blocked = True
+                    w02_failure_code = (
+                        repair_result.failure_code
+                        or FAILURE_JAVA_GENERATION_FAILED
+                    )
+                    w02_failure_message = (
+                        repair_result.failure_message
+                        or f"no-change repair detected after attempt {attempt}; terminating loop"
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=w02_failure_code,
+                    )
+                    break
+                # propose_candidate path: the persisted manifest IS the
+                # new generated Java artifact. Replace the generated
+                # project + manifest reference and re-run build/test.
+                if repair_result.candidate is None or repair_result.new_java_candidate_ref is None:
+                    # Defensive: the contract guarantees these are set when
+                    # decision == propose_candidate. If the schema layer
+                    # ever mutates we still terminate cleanly.
+                    w02_blocked = True
+                    w02_failure_code = FAILURE_AGENT_CONTRACT_INVALID
+                    w02_failure_message = (
+                        "verification/repair agent returned propose_candidate "
+                        "without a Java candidate"
+                    )
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="verification-repair-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=build_test_output.output_ref,
+                        diagnostic=w02_failure_message,
+                        run_status="failed",
+                        failed_step=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=w02_failure_code,
+                    )
+                    break
+                generated_artifact_ref = dict(repair_result.new_java_candidate_ref)
+                w02_contract.set_generated_java_ref(generated_artifact_ref)
+                generated_project = {
+                    "entryClass": repair_result.candidate.entry_class,
+                    "entryFilePath": repair_result.candidate.entry_file_path,
+                    "fileCount": len(repair_result.candidate.files),
+                    "files": dict(repair_result.candidate.files),
+                    "unsupportedConstructs": list(
+                        repair_result.candidate.unsupported_constructs
+                    ),
+                    "generationSource": "verification-repair-agent",
+                }
+                self._record_step_finish(
+                    context,
+                    name=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    capability_id=self.config.model_gateway_capability_id,
+                    actor="verification-repair-agent",
+                    status=STEP_STATUS_OK,
+                    input_ref=build_test_output.output_ref,
+                    output_ref=DataReference(
+                        uri=str(generated_artifact_ref.get("uri") or ""),
+                        sha256=str(generated_artifact_ref.get("sha256") or ""),
+                        byte_size=int(generated_artifact_ref.get("byteSize") or 0),
+                    ),
+                )
                 self._advance_w02(
                     context,
                     w02_contract,
@@ -1659,17 +2054,41 @@ class W0WorkflowRunner:
                     active_step=W02_STEP_COMPILE_TEST_JAVA,
                     message=f"repair attempt {attempt} build-test invoked",
                 )
+                # Re-run build/test on the agent's candidate. We pass the
+                # repaired generatedProject content explicitly so the build
+                # runner does not see the prior failing files.
+                build_test_input_for_repair = {
+                    **build_test_input,
+                    "generatedProject": generated_project,
+                    "generatedArtifactRef": generated_artifact_ref,
+                    "repairAttempt": attempt,
+                }
                 build_test_output = self._invoke_step(
                     context,
                     "compile-test-java",
                     build_test_capability,
                     DATA_CLASS_BUILD_TEST,
-                    {**build_test_input, "repairAttempt": attempt},
-                    generator_output.output_ref,
+                    build_test_input_for_repair,
+                    DataReference(
+                        uri=str(generated_artifact_ref.get("uri") or ""),
+                        sha256=str(generated_artifact_ref.get("sha256") or ""),
+                        byte_size=int(generated_artifact_ref.get("byteSize") or 0),
+                    ),
                 )
                 step_results.append(build_test_output)
                 evidence_refs.append(build_test_output.output_ref.uri)
-                w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
+                w02_contract.set_build_test_result_ref(
+                    _as_reference_payload(build_test_output.output_ref)
+                )
+                _record_artifact(
+                    self.artifact_store.write_json(
+                        context.run_id,
+                        context.workflow_id,
+                        f"build-test-result-repair-{attempt:02d}.json",
+                        dict(build_test_output.payload),
+                        kind=KIND_BUILD_TEST_RESULT,
+                    )
+                )
                 success, build_failure_code = build_test_outcome(build_test_output.payload)
 
             if success:
