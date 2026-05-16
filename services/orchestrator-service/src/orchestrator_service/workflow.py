@@ -42,6 +42,18 @@ from .artifacts import (
 from .config import OrchestratorConfig
 from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import DataReference, HarnessFailure, HarnessGateway
+from .transformation_agent import (
+    AgentContractInvalidAgentError,
+    AgentTimeoutError,
+    HarnessModelGatewayInvoker,
+    ModelGatewayInvoker,
+    ModelGatewayUnavailableError,
+    ModelPolicyDeniedAgentError,
+    TransformationAgent,
+    TransformationAgentError,
+    TransformationAgentRequest,
+    TransformationAgentResult,
+)
 from . import run_contract as w02
 from .run_contract import (
     CLASSIFICATION_BLOCKED,
@@ -145,6 +157,13 @@ class W0RunContext:
     requester: str
     evidence_refs: Sequence[str]
     model_prompt: Optional[str] = None
+    # Issue #169: when ``True``, the orchestrator invokes the productive
+    # Transformation Agent after the deterministic baseline succeeds, uses
+    # the agent's Java candidate as the artifact fed into build/test, and
+    # records the agent attempt in the W0.2 contract. When ``False`` (the
+    # default) the orchestrator preserves the W0/W0.2 deterministic-only
+    # path.
+    use_transformation_agent: bool = False
 
 
 # noinspection PyClassHasNoInitInspection
@@ -487,6 +506,9 @@ def _failed_step_from_exception(exc: BaseException) -> Optional[str]:
         ("compile-test-java", "compile-test-java"),
         ("model-guidance", "model-guidance"),
         ("write-evidence", "write-evidence"),
+        # Issue #169: surface productive Transformation Agent failures.
+        ("transformation-agent", "transformation-agent"),
+        ("transformation agent", "transformation-agent"),
     ):
         if marker[0] in text:
             return marker[1]
@@ -568,6 +590,8 @@ class W0WorkflowRunner:
         gateway: HarnessGateway,
         artifact_store: Optional[RunArtifactStore] = None,
         experience_learning: Optional[Any] = None,
+        transformation_agent: Optional[TransformationAgent] = None,
+        transformation_agent_invoker: Optional[ModelGatewayInvoker] = None,
     ):
         self.config = config
         self.gateway = gateway
@@ -576,6 +600,12 @@ class W0WorkflowRunner:
         # ExperienceLearningGateway protocol so a NullExperienceLearningGateway
         # can no-op when the service is unconfigured.
         self.experience_learning = experience_learning if experience_learning is not None else NullExperienceLearningGateway()
+        # Issue #169: the productive Transformation Agent is optional. When
+        # neither an instance nor a model invoker is supplied, the runner
+        # builds an invoker on-demand from the Harness gateway capability
+        # the first time a run requests ``use_transformation_agent=True``.
+        self._transformation_agent: Optional[TransformationAgent] = transformation_agent
+        self._transformation_agent_invoker: Optional[ModelGatewayInvoker] = transformation_agent_invoker
         self._step_lock = threading.Lock()
         self._step_id_by_run: Dict[str, int] = {}
         self._capability_cache: Dict[str, Dict[str, Any]] = {}
@@ -705,6 +735,103 @@ class W0WorkflowRunner:
             contract.to_dict(),
             kind=KIND_W02_RUN_CONTRACT,
         )
+
+    # ------------------------------------------------------------------
+    # Issue #169: Transformation Agent integration helpers
+    # ------------------------------------------------------------------
+
+    def _ensure_transformation_agent(self) -> TransformationAgent:
+        """Return the transformation agent, building it lazily if needed.
+
+        Lazy construction lets tests inject a stub agent through the
+        constructor while production code falls back to the Harness-backed
+        Model Gateway invoker.
+        """
+        if self._transformation_agent is not None:
+            return self._transformation_agent
+        if isinstance(self.artifact_store, NullArtifactStore):
+            raise OrchestratorError(
+                "transformation agent requires a real artifact store; refusing to run with NullArtifactStore"
+            )
+        invoker = self._transformation_agent_invoker
+        if invoker is None:
+            invoker = HarnessModelGatewayInvoker(
+                self.gateway,
+                self.config.model_gateway_capability_id,
+            )
+            self._transformation_agent_invoker = invoker
+        self._transformation_agent = TransformationAgent(
+            config=self.config,
+            artifact_store=self.artifact_store,
+            model_invoker=invoker,
+            harness_events=self.gateway,
+        )
+        return self._transformation_agent
+
+    def _invoke_transformation_agent(
+        self,
+        context: W0RunContext,
+        contract: W02RunContract,
+        *,
+        source_text: str,
+        source_reference: DataReference,
+        ir_document: Optional[Mapping[str, Any]],
+        ir_output_ref: Optional[DataReference],
+        baseline_artifact_ref: Optional[Mapping[str, Any]],
+        baseline_files: Optional[Mapping[str, str]],
+        oracle_reference: Optional[DataReference],
+    ) -> TransformationAgentResult:
+        """Run one Transformation Agent attempt and return its structured
+        result. Raises :class:`TransformationAgentError` on terminal
+        failures (policy denial, gateway unavailability, timeout,
+        contract-invalid output).
+        """
+        agent = self._ensure_transformation_agent()
+        # Resolving the model-gateway capability through the Harness
+        # guarantees we attach the capabilityResolutionRecord required by
+        # the agent-invocation-request contract.
+        capability = self._require_capability(
+            context.run_id, self.config.model_gateway_capability_id
+        )
+        capability_resolved_at = _iso_now()
+        attempt_number = contract.record_agent_attempt()
+
+        ir_ref_payload: Optional[Mapping[str, Any]] = None
+        if ir_output_ref is not None:
+            ir_ref_payload = _as_reference_payload(ir_output_ref)
+
+        oracle_ref_payload: Optional[Mapping[str, Any]] = None
+        if oracle_reference is not None:
+            oracle_ref_payload = _as_reference_payload(oracle_reference)
+
+        request = TransformationAgentRequest(
+            run_id=context.run_id,
+            workflow_id=context.workflow_id,
+            attempt_number=attempt_number,
+            requester=context.requester or self.config.service_name,
+            source_text=source_text,
+            source_ref=_as_reference_payload(source_reference),
+            capability_id=str(capability.get("id") or self.config.model_gateway_capability_id),
+            capability_version=str(capability.get("version") or "v0"),
+            capability_provider=str(capability.get("owner") or "model-gateway-service"),
+            capability_resolved_at=capability_resolved_at,
+            model_id=getattr(self.config, "model_gateway_model_id", DEFAULT_MODEL_ID)
+            or DEFAULT_MODEL_ID,
+            policy_version=getattr(self.config, "model_policy_version", None) or "v0",
+            semantic_ir=dict(ir_document) if isinstance(ir_document, Mapping) and ir_document else None,
+            semantic_ir_ref=ir_ref_payload,
+            baseline_java_ref=dict(baseline_artifact_ref) if baseline_artifact_ref else None,
+            baseline_files=dict(baseline_files) if baseline_files else None,
+            oracle_ref=oracle_ref_payload,
+            deadline_ms=getattr(
+                self.config,
+                "transformation_agent_deadline_ms",
+                DEFAULT_MODEL_TIMEOUT_MS,
+            )
+            or DEFAULT_MODEL_TIMEOUT_MS,
+            trace_ref=f"trace-{context.run_id}",
+        )
+        return agent.invoke(request)
 
     def _guard_agent_invocation_payload(
         self,
@@ -1174,6 +1301,178 @@ class W0WorkflowRunner:
                 }
             completed_steps.append("generate-java")
             _write_summary("updating", message="generate-java completed")
+            baseline_artifact_ref: Optional[Dict[str, Any]] = generated_artifact_ref
+            baseline_generated_project: Optional[Mapping[str, Any]] = generated_project
+            agent_result: Optional[TransformationAgentResult] = None
+
+            # Issue #169: when the requester opted into the productive
+            # Transformation Agent, invoke it after the deterministic
+            # baseline. On success its Java candidate becomes the artifact
+            # fed into build/test; the baseline is preserved as a traceable
+            # artifact and as a fallback reference in the run contract.
+            if context.use_transformation_agent:
+                # Drive the W0.2 state machine through the productive-agent
+                # transition before invoking the agent so the run contract
+                # accurately reflects what the orchestrator is doing.
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_TRANSFORMATION_AGENT_INVOKED,
+                    active_step=W02_STEP_TRANSFORMATION_AGENT,
+                    message="productive transformation agent invoked",
+                )
+                self._record_step_start(
+                    context,
+                    name=W02_STEP_TRANSFORMATION_AGENT,
+                    capability_id=self.config.model_gateway_capability_id,
+                    actor="transformation-agent",
+                    input_ref=ir_output.output_ref,
+                )
+                oracle_payload_for_agent = _build_cobol_oracle_payload(
+                    raw_source_text,
+                    input_reference,
+                    getattr(
+                        self.config,
+                        "build_test_oracle_timeout_ms",
+                        DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS,
+                    ),
+                )
+                oracle_reference_for_agent: Optional[DataReference] = None
+                if oracle_payload_for_agent is not None:
+                    oracle_reference_for_agent = _build_reference(
+                        f"urn:orchestrator/{context.run_id}/oracle",
+                        oracle_payload_for_agent,
+                    )
+                try:
+                    agent_result = self._invoke_transformation_agent(
+                        context,
+                        w02_contract,
+                        source_text=source_text,
+                        source_reference=input_reference,
+                        ir_document=ir_document,
+                        ir_output_ref=ir_output.output_ref,
+                        baseline_artifact_ref=baseline_artifact_ref,
+                        baseline_files=(
+                            {
+                                path: content
+                                for path, content in _iter_generated_files(baseline_generated_project)
+                            }
+                            if baseline_generated_project
+                            else None
+                        ),
+                        oracle_reference=oracle_reference_for_agent,
+                    )
+                except (
+                    AgentContractInvalidAgentError,
+                    ModelGatewayUnavailableError,
+                    ModelPolicyDeniedAgentError,
+                    AgentTimeoutError,
+                ) as exc:
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_TRANSFORMATION_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="transformation-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=ir_output.output_ref,
+                        diagnostic=str(exc),
+                        run_status="failed",
+                        failed_step=W02_STEP_TRANSFORMATION_AGENT,
+                    )
+                    if isinstance(exc, ModelPolicyDeniedAgentError):
+                        raise ModelPolicyDeniedStepError(
+                            f"transformation agent blocked by model gateway policy: {exc}"
+                        ) from exc
+                    if isinstance(exc, AgentContractInvalidAgentError):
+                        raise AgentContractInvalidStepError(
+                            f"transformation agent contract violation: {exc}"
+                        ) from exc
+                    # Gateway unavailable / agent timeout map to canonical
+                    # W0.2 failure codes via the runner's exception
+                    # classification, but we surface a StepExecutionError so
+                    # the existing failure-handling path reports the right
+                    # run state.
+                    raise StepExecutionError(
+                        f"transformation agent step {W02_STEP_TRANSFORMATION_AGENT} failed: {exc}"
+                    ) from exc
+
+                if agent_result.candidate is not None:
+                    # The persisted manifest the agent wrote IS the source
+                    # of truth for build/test. Replace the baseline manifest
+                    # reference with the agent's manifest reference so
+                    # downstream consumers point at the agent's output.
+                    agent_manifest_ref = dict(agent_result.java_candidate_ref or {})
+                    if agent_manifest_ref:
+                        generated_artifact_ref = agent_manifest_ref
+                    # Build a generatedProject snapshot from the candidate
+                    # files so the build-test runner receives the agent's
+                    # Java content (mirrors the deterministic generator
+                    # payload shape).
+                    generated_project = {
+                        "entryClass": agent_result.candidate.entry_class,
+                        "entryFilePath": agent_result.candidate.entry_file_path,
+                        "fileCount": len(agent_result.candidate.files),
+                        "files": dict(agent_result.candidate.files),
+                        "unsupportedConstructs": list(
+                            agent_result.candidate.unsupported_constructs
+                        ),
+                        "generationSource": "transformation-agent",
+                    }
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_TRANSFORMATION_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="transformation-agent",
+                        status=STEP_STATUS_OK,
+                        input_ref=ir_output.output_ref,
+                        output_ref=DataReference(
+                            uri=agent_manifest_ref.get("uri", ""),
+                            sha256=str(agent_manifest_ref.get("sha256") or ""),
+                            byte_size=int(agent_manifest_ref.get("byteSize") or 0),
+                        ),
+                    )
+                    completed_steps.append(W02_STEP_TRANSFORMATION_AGENT)
+                    _write_summary(
+                        "updating",
+                        message="transformation-agent completed",
+                    )
+                else:
+                    # Agent returned blocked/failed without a candidate.
+                    # Map to the canonical W0.2 failure code and finalise
+                    # the run as blocked. We still keep the baseline
+                    # candidate visible in the run contract for traceability
+                    # but do not feed it to build/test because the
+                    # requester explicitly asked for the productive agent.
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_TRANSFORMATION_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="transformation-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=ir_output.output_ref,
+                        diagnostic=agent_result.failure_message or agent_result.status,
+                        run_status="failed",
+                        failed_step=W02_STEP_TRANSFORMATION_AGENT,
+                    )
+                    failure_code_for_state = (
+                        agent_result.failure_code or "java_generation_failed"
+                    )
+                    if failure_code_for_state not in (
+                        FAILURE_AGENT_CONTRACT_INVALID,
+                        FAILURE_MODEL_POLICY_DENIED,
+                        FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+                        "unsupported_cobol",
+                        "agent_timeout",
+                        "java_generation_failed",
+                    ):
+                        failure_code_for_state = "java_generation_failed"
+                    w02_blocked = True
+                    w02_failure_code = failure_code_for_state
+                    w02_failure_message = (
+                        agent_result.failure_message
+                        or f"transformation agent returned {agent_result.status}"
+                    )
+
             if generated_artifact_ref is not None:
                 w02_contract.set_generated_java_ref(generated_artifact_ref)
             self._advance_w02(
@@ -1183,64 +1482,90 @@ class W0WorkflowRunner:
                 active_step=W02_STEP_COMPILE_TEST_JAVA,
                 message="java candidate persisted to artifact store",
             )
-            self._advance_w02(
-                context,
-                w02_contract,
-                STATE_BUILD_TEST_RUNNING,
-                active_step=W02_STEP_COMPILE_TEST_JAVA,
-                message="build-test runner invoked",
-            )
-
-            build_test_input = {
-                "schemaVersion": "v0",
-                "runId": context.run_id,
-                "workflowId": context.workflow_id,
-                "programId": program_id or f"{context.run_id}-build",
-                "generatedProject": generated_project,
-                "generationResponse": generator_output.payload,
-                "sourceRef": _as_reference_payload(generator_output.input_ref),
-            }
-            if generated_artifact_ref is not None:
-                build_test_input["generatedArtifactRef"] = generated_artifact_ref
-            oracle_payload = _build_cobol_oracle_payload(
-                raw_source_text,
-                input_reference,
-                getattr(self.config, "build_test_oracle_timeout_ms", DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS),
-            )
-            if oracle_payload is not None:
-                build_test_input["oracle"] = oracle_payload
-
-            build_test_output = self._invoke_step(
-                context,
-                "compile-test-java",
-                build_test_capability,
-                DATA_CLASS_BUILD_TEST,
-                build_test_input,
-                generator_output.output_ref,
-            )
-            step_results.append(build_test_output)
-            evidence_refs.append(build_test_output.output_ref.uri)
-            _record_artifact(
-                self.artifact_store.write_json(
-                    context.run_id,
-                    context.workflow_id,
-                    "build-test-result.json",
-                    dict(build_test_output.payload),
-                    kind=KIND_BUILD_TEST_RESULT,
+            if w02_blocked:
+                # When the productive agent failed we record run_blocked
+                # immediately and skip build/test so the deterministic
+                # gatekeeper does not silently pass an unverified baseline.
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_RUN_BLOCKED,
+                    active_step=None,
+                    message=w02_failure_message or "transformation agent blocked",
+                    failure_code=w02_failure_code,
                 )
-            )
-            completed_steps.append("compile-test-java")
-            _write_summary("updating", message="compile-test-java completed")
-            w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
+            else:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_BUILD_TEST_RUNNING,
+                    active_step=W02_STEP_COMPILE_TEST_JAVA,
+                    message="build-test runner invoked",
+                )
+
+            # When the productive Transformation Agent blocked the run we
+            # skip build/test entirely so the deterministic gatekeeper does
+            # not pass an unverified baseline behind the agent's back.
+            build_test_output: Optional[WorkflowStepResult] = None
+            success = False
+            build_failure_code: Optional[str] = w02_failure_code
+            if w02_blocked:
+                pass
+            else:
+                build_test_input = {
+                    "schemaVersion": "v0",
+                    "runId": context.run_id,
+                    "workflowId": context.workflow_id,
+                    "programId": program_id or f"{context.run_id}-build",
+                    "generatedProject": generated_project,
+                    "generationResponse": generator_output.payload,
+                    "sourceRef": _as_reference_payload(generator_output.input_ref),
+                }
+                if generated_artifact_ref is not None:
+                    build_test_input["generatedArtifactRef"] = generated_artifact_ref
+                oracle_payload = _build_cobol_oracle_payload(
+                    raw_source_text,
+                    input_reference,
+                    getattr(self.config, "build_test_oracle_timeout_ms", DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS),
+                )
+                if oracle_payload is not None:
+                    build_test_input["oracle"] = oracle_payload
+
+                build_test_output = self._invoke_step(
+                    context,
+                    "compile-test-java",
+                    build_test_capability,
+                    DATA_CLASS_BUILD_TEST,
+                    build_test_input,
+                    generator_output.output_ref,
+                )
+                step_results.append(build_test_output)
+                evidence_refs.append(build_test_output.output_ref.uri)
+                _record_artifact(
+                    self.artifact_store.write_json(
+                        context.run_id,
+                        context.workflow_id,
+                        "build-test-result.json",
+                        dict(build_test_output.payload),
+                        kind=KIND_BUILD_TEST_RESULT,
+                    )
+                )
+                completed_steps.append("compile-test-java")
+                _write_summary("updating", message="compile-test-java completed")
+                w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
 
             # Issue #166: W0.2 verification/repair loop. The build-test
             # runner is the deterministic gate; on a failed outcome we
             # invoke the verification/repair agent role and re-attempt
             # generation up to the configured budget. The repair loop is
             # bounded — once the budget is exhausted the run is finalised
-            # as ``blocked`` with the canonical failure code.
-            success, build_failure_code = build_test_outcome(build_test_output.payload)
-            while not success:
+            # as ``blocked`` with the canonical failure code. When the
+            # productive Transformation Agent blocked the run before
+            # build/test ran, there is no outcome to classify; we skip the
+            # loop and proceed to evidence finalisation.
+            if build_test_output is not None:
+                success, build_failure_code = build_test_outcome(build_test_output.payload)
+            while build_test_output is not None and not success:
                 if w02_contract.repair_budget.exhausted:
                     w02_blocked = True
                     w02_failure_code = build_failure_code
@@ -1743,7 +2068,7 @@ class W0WorkflowRunner:
         parse_output: WorkflowStepResult,
         ir_output: WorkflowStepResult,
         generator_output: WorkflowStepResult,
-        build_test_output: WorkflowStepResult,
+        build_test_output: Optional[WorkflowStepResult],
         model_output: Optional[Mapping[str, Any]],
         model_policy_skipped_meta: Optional[ArtifactMetadata],
         trajectory_payload: Mapping[str, Any],
@@ -1767,11 +2092,14 @@ class W0WorkflowRunner:
             }
         else:
             generated_java_payload = _as_reference_payload(generator_output.output_ref)
+        build_test_refs: list[Dict[str, Any]] = []
+        if build_test_output is not None:
+            build_test_refs.append(_as_reference_payload(build_test_output.output_ref))
         artifacts = {
             "sourceCobol": [_as_reference_payload(input_ref)],
             "semanticIr": _as_reference_payload(_coerce_output_ref(ir_output.payload, generator_output.output_ref.uri, ir_output.payload)),
             "generatedJava": generated_java_payload,
-            "buildTestResults": [_as_reference_payload(build_test_output.output_ref)],
+            "buildTestResults": build_test_refs,
             "harnessEvents": _as_reference_payload(trajectory_ref),
             "modelInvocations": [model_invocation],
             "trajectoryLedger": _as_reference_payload(trajectory_ref),
@@ -2385,7 +2713,7 @@ class W0WorkflowRunner:
         parse_output: WorkflowStepResult,
         ir_output: WorkflowStepResult,
         generator_output: WorkflowStepResult,
-        build_output: WorkflowStepResult,
+        build_output: Optional[WorkflowStepResult],
     ) -> str:
         return json.dumps({
             "runId": context.run_id,
@@ -2395,5 +2723,5 @@ class W0WorkflowRunner:
             "parseRef": parse_output.output_ref.uri,
             "irRef": ir_output.output_ref.uri,
             "javaRef": generator_output.output_ref.uri,
-            "buildRef": build_output.output_ref.uri,
+            "buildRef": build_output.output_ref.uri if build_output is not None else "",
         })

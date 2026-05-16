@@ -36,6 +36,28 @@ DEFAULT_REPAIR_BUDGET_MAX = 2
 REPAIR_BUDGET_MIN = 1
 REPAIR_BUDGET_MAX = 3
 
+# Issue #169: defaults for the productive Transformation Agent.
+DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID = "c2c.transformation-agent.cobol-to-java.v0"
+DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION = "v0"
+DEFAULT_TRANSFORMATION_AGENT_DEADLINE_MS = 30000
+DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES = 1024 * 1024
+DEFAULT_TRANSFORMATION_AGENT_PACKAGE_BASE = "com.c2c.generated"
+DEFAULT_TRANSFORMATION_AGENT_JAVA_VERSION = "21"
+DEFAULT_TRANSFORMATION_AGENT_RUNTIME_LIBRARY = "c2c-target-java-runtime"
+DEFAULT_TRANSFORMATION_AGENT_W0_SUBSET: tuple[str, ...] = (
+    "IDENTIFICATION DIVISION",
+    "DATA DIVISION",
+    "PROCEDURE DIVISION",
+    "DISPLAY",
+    "STOP RUN",
+    "MOVE",
+    "ADD",
+    "SUBTRACT",
+    "COMPUTE",
+    "IF",
+    "PERFORM",
+)
+
 DEFAULT_PARSER_SERVICE_HOST = "127.0.0.1"
 DEFAULT_PARSER_SERVICE_PORT = 8081
 DEFAULT_IR_SERVICE_HOST = "127.0.0.1"
@@ -137,6 +159,17 @@ class OrchestratorConfig:
     run_artifact_root: str = DEFAULT_RUN_ARTIFACT_ROOT
     experience_learning_base_url: str = DEFAULT_EXPERIENCE_LEARNING_BASE_URL
     repair_budget_max: int = DEFAULT_REPAIR_BUDGET_MAX
+    # Issue #169: productive Transformation Agent defaults. The orchestrator
+    # treats these as in-process configuration; values are stamped on the
+    # agent invocation request and used to bound the model output.
+    transformation_agent_prompt_template_id: str = DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID
+    transformation_agent_prompt_template_version: str = DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION
+    transformation_agent_deadline_ms: int = DEFAULT_TRANSFORMATION_AGENT_DEADLINE_MS
+    transformation_agent_max_output_bytes: int = DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES
+    transformation_agent_package_base: str = DEFAULT_TRANSFORMATION_AGENT_PACKAGE_BASE
+    transformation_agent_java_version: str = DEFAULT_TRANSFORMATION_AGENT_JAVA_VERSION
+    transformation_agent_runtime_library: str = DEFAULT_TRANSFORMATION_AGENT_RUNTIME_LIBRARY
+    transformation_agent_w0_subset: tuple[str, ...] = DEFAULT_TRANSFORMATION_AGENT_W0_SUBSET
 
 
 def _read_env_int(name: str, default: int) -> int:
@@ -234,6 +267,56 @@ def load_config() -> OrchestratorConfig:
         )
     )
 
+    # Issue #169: optional environment overrides for the Transformation
+    # Agent defaults. Empty strings fall back to the dataclass defaults.
+    transformation_agent_prompt_template_id = (
+        os.environ.get(
+            "ORCHESTRATOR_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID",
+            DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID,
+        ).strip()
+        or DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID
+    )
+    transformation_agent_prompt_template_version = (
+        os.environ.get(
+            "ORCHESTRATOR_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION",
+            DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION,
+        ).strip()
+        or DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION
+    )
+    transformation_agent_deadline_ms = _read_env_int(
+        "ORCHESTRATOR_TRANSFORMATION_AGENT_DEADLINE_MS",
+        DEFAULT_TRANSFORMATION_AGENT_DEADLINE_MS,
+    )
+    if transformation_agent_deadline_ms <= 0:
+        transformation_agent_deadline_ms = DEFAULT_TRANSFORMATION_AGENT_DEADLINE_MS
+    transformation_agent_max_output_bytes = _read_env_int(
+        "ORCHESTRATOR_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES",
+        DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES,
+    )
+    if transformation_agent_max_output_bytes <= 0:
+        transformation_agent_max_output_bytes = DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES
+    transformation_agent_package_base = (
+        os.environ.get(
+            "ORCHESTRATOR_TRANSFORMATION_AGENT_PACKAGE_BASE",
+            DEFAULT_TRANSFORMATION_AGENT_PACKAGE_BASE,
+        ).strip()
+        or DEFAULT_TRANSFORMATION_AGENT_PACKAGE_BASE
+    )
+    transformation_agent_java_version = (
+        os.environ.get(
+            "ORCHESTRATOR_TRANSFORMATION_AGENT_JAVA_VERSION",
+            DEFAULT_TRANSFORMATION_AGENT_JAVA_VERSION,
+        ).strip()
+        or DEFAULT_TRANSFORMATION_AGENT_JAVA_VERSION
+    )
+    transformation_agent_runtime_library = (
+        os.environ.get(
+            "ORCHESTRATOR_TRANSFORMATION_AGENT_RUNTIME_LIBRARY",
+            DEFAULT_TRANSFORMATION_AGENT_RUNTIME_LIBRARY,
+        ).strip()
+        or DEFAULT_TRANSFORMATION_AGENT_RUNTIME_LIBRARY
+    )
+
     return OrchestratorConfig(
         listen_addr=listen_addr,
         harness_base_url=harness_base_url,
@@ -254,6 +337,13 @@ def load_config() -> OrchestratorConfig:
         run_artifact_root=run_artifact_root,
         experience_learning_base_url=experience_learning_base_url,
         repair_budget_max=repair_budget_max,
+        transformation_agent_prompt_template_id=transformation_agent_prompt_template_id,
+        transformation_agent_prompt_template_version=transformation_agent_prompt_template_version,
+        transformation_agent_deadline_ms=transformation_agent_deadline_ms,
+        transformation_agent_max_output_bytes=transformation_agent_max_output_bytes,
+        transformation_agent_package_base=transformation_agent_package_base,
+        transformation_agent_java_version=transformation_agent_java_version,
+        transformation_agent_runtime_library=transformation_agent_runtime_library,
     )
 
 
