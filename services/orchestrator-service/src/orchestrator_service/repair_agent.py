@@ -56,6 +56,7 @@ from typing import Any
 
 from .agent_contracts import (
     AgentContractInvalidError,
+    assert_no_secret_leak,
     guard_repair_decision,
     validate_repair_input,
 )
@@ -499,10 +500,11 @@ class RepairAgent:
         # an input artifact for the attempt even if the gateway fails.
         repair_input_payload = self._build_repair_input_payload(request, started_at)
         try:
+            assert_no_secret_leak(repair_input_payload)
             validate_repair_input(repair_input_payload)
         except AgentContractInvalidError as exc:
             raise RepairAgentContractInvalidError(
-                f"agent-repair-input failed schema validation: {'; '.join(exc.errors) or exc}"
+                f"agent-repair-input failed contract validation: {'; '.join(exc.errors) or exc}"
             ) from exc
         request_meta = self._artifact_store.write_json(
             request.run_id,
@@ -959,7 +961,7 @@ class RepairAgent:
             },
             output_payload={
                 "failureCode": exc.failure_code,
-                "failureMessage": str(exc),
+                "failureMessage": str(synthetic["rationale"]),
                 "decisionRef": _meta_to_ref(decision_meta),
                 "requestRef": dict(request_artifact_ref),
             },

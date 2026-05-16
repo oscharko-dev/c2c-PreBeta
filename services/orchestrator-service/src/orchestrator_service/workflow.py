@@ -2593,11 +2593,16 @@ class W0WorkflowRunner:
                             )
                         except IllegalTransitionError:
                             pass
+                    final_classification = (
+                        CLASSIFICATION_BLOCKED
+                        if exc_failure_code == FAILURE_AGENT_CONTRACT_INVALID
+                        else CLASSIFICATION_FAILED
+                    )
                     try:
                         self._finalize_w02(
                             context,
                             w02_contract,
-                            CLASSIFICATION_FAILED,
+                            final_classification,
                             failure_code=exc_failure_code,
                             failure_message=failure_message,
                         )

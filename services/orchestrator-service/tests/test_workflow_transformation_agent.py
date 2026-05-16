@@ -259,6 +259,21 @@ class TransformationAgentWorkflowIntegrationTests(unittest.TestCase):
         contract = runner.workflow_contract_payload("run-1")
         self.assertIsNotNone(contract)
         self.assertEqual(contract["failureCode"], FAILURE_AGENT_CONTRACT_INVALID)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertIn(
+            STATE_RUN_BLOCKED,
+            [entry["state"] for entry in contract["stateHistory"]],
+        )
+        build_test_calls = [
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == "java.build-test"
+        ]
+        evidence_calls = [
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == runner.config.evidence_capability_id
+        ]
+        self.assertEqual(build_test_calls, [])
+        self.assertEqual(evidence_calls, [])
 
     def test_agent_policy_denial_surfaces_as_model_policy_denied(self) -> None:
         runner, gateway, store, tmp = self._runner(

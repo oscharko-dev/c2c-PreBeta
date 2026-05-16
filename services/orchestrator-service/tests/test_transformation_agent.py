@@ -327,6 +327,9 @@ class TransformationAgentSuccessPersistenceTests(unittest.TestCase):
         self.assertIn("trajectoryRecord", response)
         self.assertEqual(response["trajectoryRecord"]["actor"], AGENT_ROLE)
         self.assertEqual(response["trajectoryRecord"]["dataClass"], "generator")
+        self.assertEqual(response["toolUseRecords"][0]["toolId"], "model-gateway")
+        self.assertEqual(response["toolUseRecords"][0]["surface"], "model-gateway")
+        self.assertEqual(response["toolUseRecords"][0]["status"], "success")
 
 
 class TransformationAgentBlockedTests(unittest.TestCase):
@@ -494,6 +497,8 @@ class TransformationAgentGatewayFailureTests(unittest.TestCase):
             persisted = json.loads(response_path.read_text("utf-8"))
             self.assertEqual(persisted["status"], "policy_denied")
             self.assertEqual(persisted["failureCode"], "model_policy_denied")
+            self.assertEqual(persisted["toolUseRecords"][0]["status"], "denied")
+            guard_agent_response(persisted)
 
     def test_provider_timeout_raises_agent_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

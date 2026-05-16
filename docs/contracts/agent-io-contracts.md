@@ -125,9 +125,14 @@ enforces:
   larger is rejected as oversized.
 - A secret-leak guard that rejects payloads containing keys whose name
   resembles a credential (`apiKey`, `authorization`, `bearerToken`,
-  `password`, `accessToken`, `refreshToken`, `providerCredentials`, …). This
-  is a belt-and-braces safeguard layered on top of the schema's
+  `password`, `accessToken`, `refreshToken`, `providerCredentials`, …) or
+  values that match supported credential/token patterns. This is a
+  belt-and-braces safeguard layered on top of the schema's
   `additionalProperties: false` boundaries.
+- Reference-integrity checks that bind `javaCandidateRef` and
+  `repairDecisionRef` to an entry in `outputArtifactRefs` by `uri`,
+  `sha256`, and `byteSize`. These checks close semantic gaps that JSON
+  Schema cannot express without duplicating payloads.
 
 The validator refuses to load a schema that uses unsupported JSON Schema
 features (`UnsupportedSchemaFeatureError`). This prevents a future schema

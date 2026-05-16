@@ -691,6 +691,46 @@ class RepairAgentHarnessEventTests(unittest.TestCase):
         result = agent.invoke(_request())
         self.assertEqual(result.decision, DECISION_PROPOSE)
 
+    def test_failure_event_does_not_echo_secret_like_exception_text(self):
+        events: list[JsonObject] = []
+
+        # noinspection PyClassHasNoInitInspection
+        class Sink:
+            @staticmethod
+            def post_event(event):
+                events.append(dict(event))
+                return {"eventId": f"evt-{len(events)}"}
+
+        provider_prefix = "s" + "k"
+        leaked_token = provider_prefix + "-" + ("c" * 24)
+
+        tmp = tempfile.mkdtemp()
+        store = RunArtifactStore(tmp)
+        store.init_run("run-1", "w0-migration-v0")
+        agent = RepairAgent(
+            config=_config(),
+            artifact_store=store,
+            model_invoker=_StubInvoker(
+                HarnessFailure(503, json.dumps({"error": leaked_token}))
+            ),
+            harness_events=Sink(),
+        )
+
+        with self.assertRaises(RepairAgentGatewayUnavailableError):
+            agent.invoke(_request())
+
+        failed_events = [
+            event for event in events
+            if event["eventType"] == "orchestrator.agent.repair.failed"
+        ]
+        self.assertEqual(len(failed_events), 1)
+        failed_event_json = json.dumps(failed_events[0], sort_keys=True)
+        self.assertNotIn(leaked_token, failed_event_json)
+        self.assertEqual(
+            failed_events[0]["payload"]["output"]["failureMessage"],
+            "repair-agent invocation failed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
