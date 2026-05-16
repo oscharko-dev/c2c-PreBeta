@@ -77,6 +77,11 @@ func (s *PackStore) Create(input CreateInput) (*EvidencePackManifest, error) {
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, input.Blocked)
 	manifest.Classification = deriveClassification(manifest.Validation, input.Blocked)
+	if input.Blocked && wave == WaveW02 {
+		if err := validateBlockedW02Artifacts(manifest.Artifacts); err != nil {
+			return nil, err
+		}
+	}
 	if err := manifest.Validate(); err != nil {
 		return nil, err
 	}
@@ -124,6 +129,11 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, blocked)
 	manifest.Classification = deriveClassification(manifest.Validation, blocked)
+	if blocked && manifest.Wave == WaveW02 {
+		if err := validateBlockedW02Artifacts(manifest.Artifacts); err != nil {
+			return nil, err
+		}
+	}
 	if err := manifest.Validate(); err != nil {
 		return nil, err
 	}
@@ -276,6 +286,21 @@ func mergeArtifacts(dst, src *Artifacts) {
 	if len(src.ExperienceEvents) > 0 {
 		dst.ExperienceEvents = append(dst.ExperienceEvents, src.ExperienceEvents...)
 	}
+}
+
+func validateBlockedW02Artifacts(a Artifacts) error {
+	if a.GeneratedJava != nil && !a.GeneratedJava.IsZero() {
+		return fieldError("artifacts.generatedJava", "blocked W0.2 packs must not declare generatedJava")
+	}
+	if a.FinalJavaArtifact != nil && !a.FinalJavaArtifact.IsZero() {
+		return fieldError("artifacts.finalJavaArtifact", "blocked W0.2 packs must not declare finalJavaArtifact")
+	}
+	for i, candidate := range a.GeneratedJavaArtifacts {
+		if candidate.Selected {
+			return fieldError(fmt.Sprintf("artifacts.generatedJavaArtifacts[%d].selected", i), "blocked W0.2 packs must not mark a Java candidate as selected")
+		}
+	}
+	return nil
 }
 
 // cloneManifest produces a deep-enough copy that callers can safely mutate

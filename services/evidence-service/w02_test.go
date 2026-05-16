@@ -422,6 +422,11 @@ func TestCreatePackW02BlockedRunClassifiedAsBlocked(t *testing.T) {
 	srv, _ := newTestServer(t)
 	artifacts := completeW02Artifacts(t)
 	artifacts.OracleComparison.Matched = false
+	artifacts.GeneratedJava = nil
+	artifacts.FinalJavaArtifact = nil
+	for i := range artifacts.GeneratedJavaArtifacts {
+		artifacts.GeneratedJavaArtifacts[i].Selected = false
+	}
 
 	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
 		RunID:     "run-w02-3",
@@ -442,6 +447,68 @@ func TestCreatePackW02BlockedRunClassifiedAsBlocked(t *testing.T) {
 	}
 	if manifest.Classification != ClassificationBlocked {
 		t.Fatalf("expected classification=blocked; got %s", manifest.Classification)
+	}
+}
+
+func TestCreatePackW02BlockedRunRejectsFinalJavaRefs(t *testing.T) {
+	srv, _ := newTestServer(t)
+	for _, tc := range []struct {
+		name    string
+		runID   string
+		mutate  func(*Artifacts)
+		message string
+	}{
+		{
+			name:  "legacy generatedJava",
+			runID: "run-w02-blocked-invalid-generated-java",
+			mutate: func(a *Artifacts) {
+				a.FinalJavaArtifact = nil
+				for i := range a.GeneratedJavaArtifacts {
+					a.GeneratedJavaArtifacts[i].Selected = false
+				}
+			},
+			message: "generatedJava",
+		},
+		{
+			name:  "finalJavaArtifact",
+			runID: "run-w02-blocked-invalid-final-java",
+			mutate: func(a *Artifacts) {
+				a.GeneratedJava = nil
+				for i := range a.GeneratedJavaArtifacts {
+					a.GeneratedJavaArtifacts[i].Selected = false
+				}
+			},
+			message: "finalJavaArtifact",
+		},
+		{
+			name:  "selected candidate",
+			runID: "run-w02-blocked-invalid-selected",
+			mutate: func(a *Artifacts) {
+				a.GeneratedJava = nil
+				a.FinalJavaArtifact = nil
+			},
+			message: "selected",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			artifacts := completeW02Artifacts(t)
+			tc.mutate(&artifacts)
+			res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+				RunID:     tc.runID,
+				Wave:      WaveW02,
+				Blocked:   true,
+				Artifacts: artifacts,
+			})
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400 for blocked pack carrying %s; got %d", tc.message, res.StatusCode)
+			}
+			var body map[string]string
+			_ = json.NewDecoder(res.Body).Decode(&body)
+			_ = res.Body.Close()
+			if !strings.Contains(body["error"], tc.message) {
+				t.Fatalf("expected error to mention %s; got %v", tc.message, body)
+			}
+		})
 	}
 }
 

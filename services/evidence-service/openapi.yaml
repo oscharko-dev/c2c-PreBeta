@@ -165,6 +165,8 @@ components:
       properties:
         runId: { type: string }
         workflowId: { type: string }
+        wave: { type: string, enum: [w0, w0.2] }
+        blocked: { type: boolean }
         summary: { type: string }
         createdBy: { type: string }
         artifacts: { $ref: "#/components/schemas/Artifacts" }
@@ -175,6 +177,7 @@ components:
       type: object
       properties:
         summary: { type: string }
+        blocked: { type: boolean }
         artifacts: { $ref: "#/components/schemas/Artifacts" }
         openAssumptions: { type: array, items: { $ref: "#/components/schemas/OpenAssumption" } }
         unsupportedFeatures: { type: array, items: { $ref: "#/components/schemas/UnsupportedFeature" } }
@@ -320,6 +323,9 @@ components:
         requiredArtifacts: { type: array, items: { type: string } }
         missingArtifacts: { type: array, items: { type: string } }
         messages: { type: array, items: { type: string } }
+        completenessStatus:
+          type: string
+          enum: [complete, evidence_incomplete, blocked]
 
     EvidencePackManifest:
       type: object
@@ -341,8 +347,14 @@ components:
         packId: { type: string }
         runId: { type: string }
         workflowId: { type: string }
-        wave: { type: string, enum: [w0] }
+        wave: { type: string, enum: [w0, w0.2] }
         status: { type: string, enum: [complete, incomplete, invalid] }
+        completenessStatus:
+          type: string
+          enum: [complete, evidence_incomplete, blocked]
+        classification:
+          type: string
+          enum: [success, evidence_incomplete, blocked, failed]
         summary: { type: string }
         createdAt: { type: string, format: date-time }
         createdBy: { type: string }

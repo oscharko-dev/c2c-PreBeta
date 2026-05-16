@@ -173,7 +173,8 @@ must be re-derivable from the artifact path in the right column.
       `finalClassification` (`blocked`, `failed`, or `incomplete`), a
       closed-set unsupported-source `failureCode`
       (`unsupported_cobol` or `parse_failed`), **no** generated Java
-      artifact, and a Studio surface that does not present any
+      final artifact (`generatedJavaRef`, Evidence Pack `generatedJava`, or
+      `finalJavaArtifact`), and a Studio surface that does not present any
       "Verified" affordance. The gate accepts either failure code
       because the orchestrator's mapping is owned by Issue #166 and
       may surface unsupported source through the parser-diagnostic

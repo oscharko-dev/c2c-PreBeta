@@ -567,6 +567,13 @@ def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -
     )
     artifacts = manifest.get("artifacts")
     if _is_mapping(artifacts) and isinstance(artifacts, Mapping):
+        legacy_generated = artifacts.get("generatedJava")
+        _require(
+            legacy_generated in (None, {}),
+            "a blocked-path run must not declare artifacts.generatedJava "
+            f"(got {legacy_generated!r})",
+            failures,
+        )
         final_java = artifacts.get("finalJavaArtifact")
         _require(
             final_java in (None, {}),
@@ -574,6 +581,18 @@ def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -
             f"(got {final_java!r})",
             failures,
         )
+        candidates = artifacts.get("generatedJavaArtifacts") or []
+        if _is_seq(candidates):
+            selected = [
+                entry
+                for entry in candidates
+                if _is_mapping(entry) and bool(entry.get("selected"))
+            ]
+            _require(
+                not selected,
+                "a blocked-path run must not mark any generatedJavaArtifacts entry as selected",
+                failures,
+            )
 
 
 def _scan_referenced_artifacts(

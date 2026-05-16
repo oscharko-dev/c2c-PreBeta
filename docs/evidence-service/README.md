@@ -33,14 +33,14 @@ present alongside any pack.
 | `classification` | yes (W0.2) | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed). |
 | `createdAt` | yes | UTC RFC 3339 timestamp. |
 | `artifacts.sourceCobol` | **yes** | One or more references to ingested COBOL source files. |
-| `artifacts.sourceMetadata` | **yes (W0.2)** | Normalized source metadata captured after input intake, usually the persisted `source-ref.json` artifact. |
+| `artifacts.sourceMetadata` | **yes (W0.2)** | Normalized source metadata captured after input intake. W0.2 packs must reference the persisted `source-ref.json` artifact; the orchestrator does not synthesize this reference if persistence failed. |
 | `artifacts.corpusMetadata` | optional | Pointer to the corpus index entry used for the run. |
-| `artifacts.parseOutput` | **yes (W0.2)** | COBOL parser output reference used to produce Semantic IR. |
+| `artifacts.parseOutput` | **yes (W0.2)** | Persisted `parse-output.json` reference used to produce Semantic IR. The field is omitted, and the pack remains incomplete, if that artifact metadata is absent. |
 | `artifacts.semanticIr` | **yes** | Reference to the Semantic IR document. |
 | `artifacts.transformationPasses` | optional | Ordered list of transformation pass outputs. |
-| `artifacts.generatedJava` | **yes** | Reference to the final generated Java project bundle (legacy single-ref field). For W0.2 runs the same artifact is mirrored as the selected entry of `generatedJavaArtifacts[]`. |
+| `artifacts.generatedJava` | **yes for success** | Reference to the final generated Java project bundle (legacy single-ref field). For successful W0.2 runs the same artifact is mirrored as the selected entry of `generatedJavaArtifacts[]`; blocked W0.2 packs must omit it. |
 | `artifacts.generatedJavaArtifacts` | **yes (W0.2)** | One entry per Java candidate persisted during the run: the deterministic baseline, the Transformation Agent's candidate, and each Verification/Repair Agent candidate. Each entry carries `origin`, `attemptNumber`, and `selected`. |
-| `artifacts.finalJavaArtifact` | **yes (W0.2)** | The candidate that passed the deterministic gate (or the last attempt before the repair budget was exhausted). Required for `completenessStatus=complete`. |
+| `artifacts.finalJavaArtifact` | **yes for W0.2 success** | The candidate that passed the deterministic gate. Required for `completenessStatus=complete`; blocked W0.2 packs must omit it. |
 | `artifacts.repairAttempts` | **yes when ≥1 attempt ran** | One entry per Verification/Repair Agent invocation. Captures `attemptNumber`, `decision`, `decisionRef`, `modelInvocationRef`, optional `newJavaCandidateRef`, `buildTestResultRef`, and `refusalCode`/`noChange` when applicable. |
 | `artifacts.agentTrajectories` | **yes (W0.2)** | Per-agent trajectory ledger references (`orchestrator`, `transformation`, `verification-repair`). Replaces the singular `trajectoryLedger` for W0.2 runs; both fields are populated for backwards compatibility. |
 | `artifacts.oracleComparison` | **yes (W0.2)** | Flat envelope summarising the comparison between the Java output and the COBOL oracle / golden master. Carries `matched`, `oracleKind`, `actualSha256`, `expectedSha256`, `classification`, and a pointer to the build/test result. `oracleKind=absent` when no oracle was available. |
@@ -102,6 +102,12 @@ Missing artifacts move the manifest to `status="incomplete"` and surface in
 **cannot** be promoted to `success` while required evidence is absent. The
 service refuses to export an incomplete pack with `422 Unprocessable Entity`
 so consumers never receive a half-bundle that looks complete.
+
+Blocked W0.2 packs use a separate non-success shape: they must not declare the
+legacy authoritative `generatedJava` ref, must not declare `finalJavaArtifact`,
+and must not mark any entry in `generatedJavaArtifacts[]` as `selected`.
+Unselected candidate history may remain for auditability, but no blocked pack
+may advertise a final Java artifact.
 
 ### Secret scrubbing
 

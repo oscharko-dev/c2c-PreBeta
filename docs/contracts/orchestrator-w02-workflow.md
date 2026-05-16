@@ -202,10 +202,16 @@ persisted `source-ref.json`, `artifacts.parseOutput` for `parse-output.json`,
 ledgers, agent trajectory refs, and Harness events. If any required reference
 is absent, evidence-service returns `completenessStatus=evidence_incomplete`
 and the workflow final classification must not be promoted to `success`.
+The orchestrator does not fabricate `sourceMetadata` or `parseOutput` from
+in-memory payloads when the persisted artifact metadata is missing.
 
 For a blocked run the same contract carries
 `finalClassification = "blocked"`, a non-null `failureCode`, and a non-null
 `failureMessage`. The state history shows the full repair-loop trail.
+Blocked Evidence Packs must not publish an authoritative final Java artifact:
+`artifacts.generatedJava` and `artifacts.finalJavaArtifact` are omitted, and
+any retained `generatedJavaArtifacts[]` entries remain unselected audit
+history only.
 
 ## Harness boundary
 

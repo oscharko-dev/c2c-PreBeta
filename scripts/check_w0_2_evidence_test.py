@@ -235,7 +235,10 @@ class CheckW02EvidenceTest(unittest.TestCase):
         manifest["classification"] = "blocked"
         manifest["completenessStatus"] = "blocked"
         manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
         manifest["artifacts"].pop("finalJavaArtifact")
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
         manifest["validation"] = {
             "ok": False,
             "requiredArtifacts": ["evidence-pack-manifest"],
@@ -249,10 +252,34 @@ class CheckW02EvidenceTest(unittest.TestCase):
         manifest["classification"] = "blocked"
         manifest["completenessStatus"] = "blocked"
         manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
         # leave finalJavaArtifact in place — this MUST be a contract violation
         result = self._run(manifest, "--blocked")
         self.assertEqual(result.returncode, 3)
         self.assertIn("finalJavaArtifact", result.stderr)
+
+    def test_blocked_manifest_with_legacy_generated_java_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("finalJavaArtifact")
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("generatedJava", result.stderr)
+
+    def test_blocked_manifest_with_selected_candidate_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
+        manifest["artifacts"].pop("finalJavaArtifact")
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("selected", result.stderr)
 
     def test_failed_classification_accepted_as_blocked(self) -> None:
         # The orchestrator surfaces `parse_failed` (W0.2 workflow contract,
@@ -264,7 +291,10 @@ class CheckW02EvidenceTest(unittest.TestCase):
         manifest["classification"] = "failed"
         manifest["completenessStatus"] = "evidence_incomplete"
         manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
         manifest["artifacts"].pop("finalJavaArtifact")
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
         manifest["validation"] = {
             "ok": False,
             "requiredArtifacts": ["evidence-pack-manifest"],

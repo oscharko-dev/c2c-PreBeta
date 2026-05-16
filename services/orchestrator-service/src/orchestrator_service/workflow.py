@@ -2788,12 +2788,13 @@ class W0WorkflowRunner:
         artifacts: JsonObject = {
             "sourceCobol": [_as_reference_payload(input_ref)],
             "semanticIr": _as_reference_payload(_coerce_output_ref(ir_output.payload, generator_output.output_ref.uri, ir_output.payload)),
-            "generatedJava": generated_java_payload,
             "buildTestResults": build_test_refs,
             "harnessEvents": _as_reference_payload(trajectory_ref),
             "modelInvocations": model_invocations,
             "trajectoryLedger": _as_reference_payload(trajectory_ref),
         }
+        if not (is_w02 and w02_blocked):
+            artifacts["generatedJava"] = generated_java_payload
         # Issue #96: when experience-learning is configured, reference its
         # run summary endpoint so the Evidence Pack carries a verifiable
         # pointer back to the EL system that observed the run.
@@ -2818,31 +2819,13 @@ class W0WorkflowRunner:
             source_metadata_ref = _reference_payload_from_metadata(
                 self.artifact_store.find_metadata(context.run_id, "source-ref.json")
             )
-            if source_metadata_ref is None:
-                source_metadata_ref = _as_reference_payload(
-                    _build_reference(
-                        f"urn:orchestrator/{context.run_id}/source-ref",
-                        {
-                            "runId": context.run_id,
-                            "workflowId": context.workflow_id,
-                            "inputRef": _as_reference_payload(input_ref),
-                        },
-                    )
-                )
-
             parse_output_ref = _reference_payload_from_metadata(
                 self.artifact_store.find_metadata(context.run_id, "parse-output.json")
             )
-            if parse_output_ref is None:
-                parse_output_ref = _as_reference_payload(
-                    _build_reference(
-                        f"urn:orchestrator/{context.run_id}/parse-output",
-                        parse_output.payload,
-                    )
-                )
-
-            artifacts["sourceMetadata"] = source_metadata_ref
-            artifacts["parseOutput"] = parse_output_ref
+            if source_metadata_ref is not None:
+                artifacts["sourceMetadata"] = source_metadata_ref
+            if parse_output_ref is not None:
+                artifacts["parseOutput"] = parse_output_ref
             (
                 generated_java_artifacts,
                 final_java_artifact,
@@ -2850,7 +2833,7 @@ class W0WorkflowRunner:
             ) = self._build_w02_java_history(
                 w02_contract=w02_contract,
                 baseline_artifact_ref=baseline_generated_artifact_ref or generated_artifact_ref,
-                final_artifact_ref=generated_artifact_ref,
+                final_artifact_ref=None if w02_blocked else generated_artifact_ref,
                 generator_output=generator_output,
                 blocked=w02_blocked,
             )
