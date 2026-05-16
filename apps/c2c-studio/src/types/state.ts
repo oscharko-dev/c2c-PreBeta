@@ -204,10 +204,7 @@ export function deriveProductState(runState: TransformationRunState): StateConte
         message: generated.note ?? runState.generatedFiles?.note,
       };
     }
-  } else if (
-    runState.phase === 'completed' ||
-    runState.phase === 'verification-blocked'
-  ) {
+  } else if (runState.phase === 'completed') {
     return { state: 'generated-pending' };
   }
 

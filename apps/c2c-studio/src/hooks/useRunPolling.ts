@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { TransformationRunState } from '../types/run';
-import { BuildTestView, EvidenceView, GeneratedFilesIndex, GeneratedView } from '../types/api';
 
 type SetTransformationRunState = React.Dispatch<React.SetStateAction<TransformationRunState>>;
 
@@ -34,28 +33,6 @@ async function hydrateRunObservability(
       workflow: workflow?.ok ? workflow.data : prev.workflow,
     };
   });
-}
-
-function isVerifiedArtifactState(
-  generated: GeneratedView,
-  generatedFiles: GeneratedFilesIndex,
-  buildTest: BuildTestView,
-  evidence: EvidenceView
-) {
-  if (
-    generated.status !== 'generated' ||
-    generatedFiles.status !== 'complete' ||
-    buildTest.status !== 'ok' ||
-    evidence.status !== 'complete'
-  ) {
-    return false;
-  }
-
-  const genHash = generated.artifactRef?.sha256;
-  const buildHash = buildTest.generatedArtifactRef?.sha256;
-  const evidenceHash = evidence.generatedArtifactRef?.sha256;
-
-  return Boolean(genHash && genHash === buildHash && genHash === evidenceHash);
 }
 
 export async function hydrateRunArtifacts(
@@ -95,14 +72,19 @@ export async function hydrateRunArtifacts(
       workflow: workflow?.ok ? workflow.data : prev.workflow,
     };
 
+    // Issue #173: polling is a transport concern. We stop polling on every
+    // terminal outcome by setting phase='completed' (run is over) or
+    // phase='failed' (run errored before producing artifacts). The
+    // user-facing verdict (success / blocked / hash-mismatch /
+    // equivalence-mismatch / evidence-incomplete) is derived from the BFF
+    // finalClassification + artifact contents in `deriveProductState`; the
+    // polling layer never invents a "verification-blocked" sub-state.
     if (terminalStatus === 'failed' || prev.summary?.status === 'failed') {
       newState.phase = 'failed';
     } else if (!gen.ok || !genFiles.ok || !bt.ok || !ev.ok) {
       newState.phase = 'incomplete';
-    } else if (isVerifiedArtifactState(gen.data, genFiles.data, bt.data, ev.data)) {
-      newState.phase = 'completed';
     } else {
-      newState.phase = 'verification-blocked';
+      newState.phase = 'completed';
     }
 
     return newState;
@@ -123,7 +105,6 @@ export function useRunPolling(
       state.phase === 'completed' ||
       state.phase === 'failed' ||
       state.phase === 'incomplete' ||
-      state.phase === 'verification-blocked' ||
       state.phase === 'unavailable' ||
       state.phase === 'idle'
     ) {

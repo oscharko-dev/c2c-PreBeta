@@ -5,6 +5,7 @@ import { GeneratedJavaEditorPane } from '@/components/generated/GeneratedJavaEdi
 import { TargetJavaInspector } from '@/components/generated/TargetJavaInspector';
 import { GeneratedArtifactsProvider } from '@/hooks/useGeneratedArtifacts';
 import { apiClient } from '@/lib/apiClient';
+import { ApiResult, GeneratedFileContent } from '@/types/api';
 
 vi.mock('@/lib/apiClient', () => ({
   apiClient: {
@@ -40,13 +41,12 @@ vi.mock('@/stores/workbench', async (importOriginal) => {
   };
 });
 
+function okResult<T>(data: T): ApiResult<T> {
+  return { ok: true, data };
+}
+
 describe('Generated Artifacts UI', () => {
   beforeEach(() => {
-    if ((apiClient as any).getModelGatewayHealth) {
-      vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
-      vi.mocked(apiClient.getHarnessReady).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
-      vi.mocked(apiClient.getRunExperience).mockResolvedValue({ ok: true, data: { status: 'complete', summary: null } } as any);
-    }
     vi.clearAllMocks();
     vi.mocked(apiClient.getGeneratedFile).mockReset();
     vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
@@ -54,7 +54,7 @@ describe('Generated Artifacts UI', () => {
       status: 500,
       message: 'HTTP error 500',
       details: { kind: 'http', body: { error: 'HTTP error 500' } },
-    } as any);
+    });
   });
 
   function renderArtifactsUi() {
@@ -243,7 +243,7 @@ describe('Generated Artifacts UI', () => {
     mockTransformationState.mockReturnValue({
       phase: 'completed',
       runId: '123',
-      generated: { 
+      generated: {
         status: 'generated',
         artifactRef: { sha256: 'abc123def456' }
       },
@@ -261,7 +261,7 @@ describe('Generated Artifacts UI', () => {
         <TargetJavaInspector />
       </GeneratedArtifactsProvider>,
     );
-    
+
     expect(screen.getByText('Target Java Inspector')).toBeInTheDocument();
     expect(screen.getByText(/abc123def456/i)).toBeInTheDocument();
     expect(screen.getByText('App.java')).toBeInTheDocument();
@@ -272,7 +272,7 @@ describe('Generated Artifacts UI', () => {
     mockTransformationState.mockReturnValue({
       phase: 'completed',
       runId: '123',
-      generated: { 
+      generated: {
         status: 'generated',
         files: {} // no pre-loaded files
       },
@@ -285,10 +285,18 @@ describe('Generated Artifacts UI', () => {
       },
     });
 
-    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
-      ok: true,
-      data: { content: 'public class App {}', path: 'src/App.java' }
-    } as any);
+    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue(
+      okResult<GeneratedFileContent>({
+        runId: '123',
+        mode: 'live',
+        productMode: 'live',
+        path: 'src/App.java',
+        content: 'public class App {}',
+        sha256: 'a'.repeat(64),
+        byteSize: 19,
+        mimeType: 'text/x-java-source',
+      })
+    );
 
     renderArtifactsUi();
 
@@ -320,7 +328,7 @@ describe('Generated Artifacts UI', () => {
       status: 404,
       message: 'HTTP error 404',
       details: { kind: 'http', body: { error: 'HTTP error 404' } },
-    } as any);
+    });
 
     renderArtifactsUi();
 
@@ -366,9 +374,8 @@ describe('Generated Artifacts UI', () => {
       },
     });
 
-    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
-      ok: true,
-      data: {
+    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue(
+      okResult<GeneratedFileContent>({
         runId: 'run-2',
         mode: 'live',
         productMode: 'live',
@@ -377,8 +384,8 @@ describe('Generated Artifacts UI', () => {
         sha256: 'a'.repeat(64),
         byteSize: 24,
         mimeType: 'text/x-java-source',
-      },
-    } as any);
+      })
+    );
 
     rerender(
       <GeneratedArtifactsProvider>
@@ -435,9 +442,8 @@ describe('Generated Artifacts UI', () => {
       },
     });
 
-    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue({
-      ok: true,
-      data: {
+    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue(
+      okResult<GeneratedFileContent>({
         runId: '123',
         mode: 'live',
         productMode: 'live',
@@ -446,8 +452,8 @@ describe('Generated Artifacts UI', () => {
         sha256: 'b'.repeat(64),
         byteSize: 22,
         mimeType: 'text/x-java-source',
-      },
-    } as any);
+      })
+    );
 
     renderArtifactsUi();
 

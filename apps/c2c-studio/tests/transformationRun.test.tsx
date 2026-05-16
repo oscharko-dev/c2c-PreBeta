@@ -2,6 +2,19 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '@/lib/apiClient';
 import { TransformationRunProvider, useTransformationRun } from '@/stores/transformationRun';
+import {
+  ApiResult,
+  TransformResponse,
+  GeneratedView,
+  GeneratedFilesIndex,
+  BuildTestView,
+  EvidenceView,
+  RunEventsView,
+  RunArtifactsView,
+  RunSummary,
+  RunProgressView,
+} from '@/types/api';
+import { RunExperienceView, ModelGatewayHealth, HarnessReady } from '@/types/observability';
 
 vi.mock('@/lib/apiClient', () => ({
   apiClient: {
@@ -22,6 +35,10 @@ vi.mock('@/lib/apiClient', () => ({
   },
 }));
 
+function okResult<T>(data: T): ApiResult<T> {
+  return { ok: true, data };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(res => {
@@ -31,77 +48,87 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function makeTerminalResponse(runId: string, programId: string, status: 'completed' | 'failed') {
-  return {
-    ok: true,
-    data: {
-      runId,
-      orchestratorRunId: `${runId}-orch`,
-      programId,
-      status,
-      mode: 'live',
-      productMode: 'live',
-      createdAt: '2026-05-15T10:00:00Z',
-      updatedAt: '2026-05-15T10:00:01Z',
-      links: {
-        self: `/runs/${runId}`,
-        generated: `/runs/${runId}/generated`,
-        generatedFiles: `/runs/${runId}/generated/files`,
-        buildTest: `/runs/${runId}/build-test`,
-        evidence: `/runs/${runId}/evidence`,
-        progress: `/runs/${runId}/progress`,
-        events: `/runs/${runId}/events`,
-        artifacts: `/runs/${runId}/artifacts`,
-        learning: `/runs/${runId}/learning`,
-      },
+function makeTerminalResponse(runId: string, programId: string, status: 'completed' | 'failed'): ApiResult<TransformResponse> {
+  return okResult<TransformResponse>({
+    runId,
+    orchestratorRunId: `${runId}-orch`,
+    programId,
+    status,
+    mode: 'live',
+    productMode: 'live',
+    createdAt: '2026-05-15T10:00:00Z',
+    updatedAt: '2026-05-15T10:00:01Z',
+    activeStep: null,
+    agentAttemptCount: 0,
+    repairBudget: null,
+    finalClassification: null,
+    failureCode: null,
+    failureMessage: null,
+    links: {
+      self: `/runs/${runId}`,
+      generated: `/runs/${runId}/generated`,
+      generatedFiles: `/runs/${runId}/generated/files`,
+      buildTest: `/runs/${runId}/build-test`,
+      evidence: `/runs/${runId}/evidence`,
+      progress: `/runs/${runId}/progress`,
+      events: `/runs/${runId}/events`,
+      artifacts: `/runs/${runId}/artifacts`,
+      learning: `/runs/${runId}/learning`,
+      workflow: `/runs/${runId}/workflow`,
     },
-  } as const;
+  });
 }
 
-function makeProgressFixture(runId: string, programId: string) {
-  return {
-    ok: true,
-    data: {
-      runId,
-      programId,
-      mode: 'live',
-      productMode: 'live',
-      status: 'complete',
-      runStatus: 'completed',
-      currentStep: null,
-      failedStep: null,
-      completedSteps: ['accepted', 'parse-cobol', 'generate-ir', 'generate-java', 'compile-test-java', 'write-evidence', 'completed'],
-      stepCount: 8,
-      steps: [
-        {
-          stepId: 1,
-          name: 'accepted',
-          capabilityId: 'orchestrator-service',
-          service: 'orchestrator-service',
-          actor: 'orchestrator-service',
-          status: 'ok',
-        },
-        {
-          stepId: 2,
-          name: 'parse-cobol',
-          capabilityId: 'parse-cobol-service',
-          service: 'orchestrator-service',
-          actor: 'parse-cobol-service',
-          status: 'ok',
-          latencyMs: 12,
-        },
-        {
-          stepId: 3,
-          name: 'model-policy-skipped',
-          capabilityId: 'orchestrator-service',
-          service: 'orchestrator-service',
-          actor: 'orchestrator-service',
-          status: 'skipped',
-          diagnostic: 'no modelPrompt provided by requester',
-        },
-      ],
-    },
-  } as const;
+function makeProgressFixture(runId: string, programId: string): ApiResult<RunProgressView> {
+  return okResult<RunProgressView>({
+    runId,
+    programId,
+    mode: 'live',
+    productMode: 'live',
+    status: 'complete',
+    runStatus: 'completed',
+    currentStep: null,
+    failedStep: null,
+    completedSteps: ['accepted', 'parse-cobol', 'generate-ir', 'generate-java', 'compile-test-java', 'write-evidence', 'completed'],
+    stepCount: 8,
+    steps: [
+      {
+        stepId: 1,
+        name: 'accepted',
+        capabilityId: 'orchestrator-service',
+        service: 'orchestrator-service',
+        actor: 'orchestrator-service',
+        status: 'ok',
+      },
+      {
+        stepId: 2,
+        name: 'parse-cobol',
+        capabilityId: 'parse-cobol-service',
+        service: 'orchestrator-service',
+        actor: 'parse-cobol-service',
+        status: 'ok',
+        latencyMs: 12,
+      },
+      {
+        stepId: 3,
+        name: 'model-policy-skipped',
+        capabilityId: 'orchestrator-service',
+        service: 'orchestrator-service',
+        actor: 'orchestrator-service',
+        status: 'skipped',
+        diagnostic: 'no modelPrompt provided by requester',
+      },
+    ],
+  });
+}
+
+interface ArtifactFixtures {
+  generated: ApiResult<GeneratedView>;
+  generatedFiles: ApiResult<GeneratedFilesIndex>;
+  buildTest: ApiResult<BuildTestView>;
+  evidence: ApiResult<EvidenceView>;
+  events: ApiResult<RunEventsView>;
+  artifacts: ApiResult<RunArtifactsView>;
 }
 
 function makeArtifactFixtures(
@@ -109,88 +136,93 @@ function makeArtifactFixtures(
   programId: string,
   sha256: string,
   eventStatus: 'completed' | 'failed' = 'completed'
-) {
+): ArtifactFixtures {
   return {
-    generated: {
-      ok: true,
-      data: {
-        runId,
-        programId,
-        mode: 'live',
-        productMode: 'live',
-        status: 'generated',
-        artifactRef: { uri: `file:///runs/${runId}/generated.json`, sha256 },
-      },
-    },
-    generatedFiles: {
-      ok: true,
-      data: {
-        runId,
-        programId,
-        mode: 'live',
-        productMode: 'live',
-        status: 'complete',
-        files: [],
-        fileCount: 0,
-        artifactRef: { uri: `file:///runs/${runId}/generated-files.json`, sha256 },
-      },
-    },
-    buildTest: {
-      ok: true,
-      data: {
-        runId,
-        programId,
-        mode: 'live',
-        productMode: 'live',
-        status: 'ok',
-        classification: 'match',
-        generatedArtifactRef: { uri: `file:///runs/${runId}/build-test.json`, sha256 },
-      },
-    },
-    evidence: {
-      ok: true,
-      data: {
-        runId,
-        programId,
-        mode: 'live',
-        productMode: 'live',
-        status: 'complete',
-        generatedArtifactRef: { uri: `file:///runs/${runId}/evidence.json`, sha256 },
-      },
-    },
-    events: {
-      ok: true,
-      data: {
-        runId,
-        programId,
-        mode: 'live',
-        productMode: 'live',
-        events: [{ type: 'run.completed', status: eventStatus, message: 'done', createdAt: '2026-05-15T10:00:02Z' }],
-      },
-    },
-    artifacts: {
-      ok: true,
-      data: {
-        runId,
-        programId,
-        mode: 'live',
-        productMode: 'live',
-        artifacts: [
-          {
-            uri: `file:///runs/${runId}/artifact.json`,
-            sha256,
-            kind: 'generated',
-            createdBy: 'orchestrator',
-            createdAt: '2026-05-15T10:00:02Z',
-            runId,
-            workflowId: `${runId}-workflow`,
-            path: 'artifact.json',
-            name: 'artifact.json',
-          },
-        ],
-      },
-    },
-  } as const;
+    generated: okResult<GeneratedView>({
+      runId,
+      programId,
+      mode: 'live',
+      productMode: 'live',
+      status: 'generated',
+      artifactRef: { uri: `file:///runs/${runId}/generated.json`, sha256 },
+    }),
+    generatedFiles: okResult<GeneratedFilesIndex>({
+      runId,
+      programId,
+      mode: 'live',
+      productMode: 'live',
+      status: 'complete',
+      files: [],
+      fileCount: 0,
+      artifactRef: { uri: `file:///runs/${runId}/generated-files.json`, sha256 },
+    }),
+    buildTest: okResult<BuildTestView>({
+      runId,
+      programId,
+      mode: 'live',
+      productMode: 'live',
+      status: 'ok',
+      classification: 'match',
+      generatedArtifactRef: { uri: `file:///runs/${runId}/build-test.json`, sha256 },
+    }),
+    evidence: okResult<EvidenceView>({
+      runId,
+      programId,
+      mode: 'live',
+      productMode: 'live',
+      status: 'complete',
+      generatedArtifactRef: { uri: `file:///runs/${runId}/evidence.json`, sha256 },
+    }),
+    events: okResult<RunEventsView>({
+      runId,
+      programId,
+      mode: 'live',
+      productMode: 'live',
+      events: [{ type: 'run.completed', status: eventStatus, message: 'done', createdAt: '2026-05-15T10:00:02Z' }],
+    }),
+    artifacts: okResult<RunArtifactsView>({
+      runId,
+      programId,
+      mode: 'live',
+      productMode: 'live',
+      artifacts: [
+        {
+          uri: `file:///runs/${runId}/artifact.json`,
+          sha256,
+          kind: 'generated',
+          createdBy: 'orchestrator',
+          createdAt: '2026-05-15T10:00:02Z',
+          runId,
+          workflowId: `${runId}-workflow`,
+          path: 'artifact.json',
+          name: 'artifact.json',
+        },
+      ],
+    }),
+  };
+}
+
+function makeRunSummary(overrides: Partial<RunSummary> = {}): RunSummary {
+  return {
+    runId: 'run-test',
+    programId: 'P-A',
+    status: 'updating',
+    mode: 'live',
+    productMode: 'live',
+    createdAt: '2026-05-15T10:00:00Z',
+    updatedAt: '2026-05-15T10:00:01Z',
+    activeStep: null,
+    agentAttemptCount: 0,
+    repairBudget: null,
+    finalClassification: null,
+    failureCode: null,
+    failureMessage: null,
+    ...overrides,
+  };
+}
+
+function makeExperienceResult(runId: string, programId: string): ApiResult<RunExperienceView> {
+  return okResult<RunExperienceView>({ runId, programId, mode: 'live', productMode: 'live', summary: undefined });
 }
 
 function RunHarness() {
@@ -225,9 +257,9 @@ function RunHarness() {
 describe('transformation run state machine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(apiClient.getRun).mockResolvedValue({ ok: true, data: { status: 'running' } } as any);
+    vi.mocked(apiClient.getRun).mockResolvedValue(okResult<RunSummary>(makeRunSummary({ status: 'updating' })));
     vi.mocked(apiClient.getRunProgress).mockImplementation((runId: string) =>
-      Promise.resolve(makeProgressFixture(runId, 'P-A') as any)
+      Promise.resolve(makeProgressFixture(runId, 'P-A'))
     );
   });
 
@@ -235,20 +267,20 @@ describe('transformation run state machine', () => {
     const runId = 'run-completed';
     const fixtures = makeArtifactFixtures(runId, 'P-A', 'a'.repeat(64));
 
-    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'completed') as any);
-    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated as any);
-    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(fixtures.generatedFiles as any);
-    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(fixtures.buildTest as any);
-    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence as any);
-    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events as any);
-    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts as any);
-    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
-    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'completed'));
+    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated);
+    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(fixtures.generatedFiles);
+    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(fixtures.buildTest);
+    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence);
+    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events);
+    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(makeExperienceResult(runId, 'P-A'));
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce(okResult<ModelGatewayHealth>({ status: 'ok' }));
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce(okResult<HarnessReady>({ status: 'ok' }));
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
-    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation((runId: string) => Promise.resolve(makeExperienceResult(runId, 'P-A')));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve(okResult<ModelGatewayHealth>({ status: 'ok' })));
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve(okResult<HarnessReady>({ status: 'ok' })));
 
     render(
       <TransformationRunProvider>
@@ -270,20 +302,20 @@ describe('transformation run state machine', () => {
     const runId = 'run-failed';
     const fixtures = makeArtifactFixtures(runId, 'P-A', 'b'.repeat(64));
 
-    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'failed') as any);
-    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated as any);
-    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(fixtures.generatedFiles as any);
-    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(fixtures.buildTest as any);
-    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence as any);
-    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events as any);
-    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts as any);
-    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
-    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'failed'));
+    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated);
+    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(fixtures.generatedFiles);
+    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(fixtures.buildTest);
+    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence);
+    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events);
+    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(makeExperienceResult(runId, 'P-A'));
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce(okResult<ModelGatewayHealth>({ status: 'ok' }));
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce(okResult<HarnessReady>({ status: 'ok' }));
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
-    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation((runId: string) => Promise.resolve(makeExperienceResult(runId, 'P-A')));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve(okResult<ModelGatewayHealth>({ status: 'ok' })));
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve(okResult<HarnessReady>({ status: 'ok' })));
 
     render(
       <TransformationRunProvider>
@@ -301,25 +333,26 @@ describe('transformation run state machine', () => {
 
   it('keeps a completed run incomplete when required artifact views are missing', async () => {
     const runId = 'run-incomplete';
-
-    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'completed') as any);
-    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).generated as any);
-    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce({
+    const generatedFilesError: ApiResult<GeneratedFilesIndex> = {
       ok: false,
       status: 404,
       message: 'missing generated files',
-    } as any);
-    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).buildTest as any);
-    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).evidence as any);
-    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).events as any);
-    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).artifacts as any);
-    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
-    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+    };
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
-    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'completed'));
+    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).generated);
+    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(generatedFilesError);
+    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).buildTest);
+    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).evidence);
+    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).events);
+    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(makeArtifactFixtures(runId, 'P-A', 'c'.repeat(64)).artifacts);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(makeExperienceResult(runId, 'P-A'));
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce(okResult<ModelGatewayHealth>({ status: 'ok' }));
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce(okResult<HarnessReady>({ status: 'ok' }));
+
+    vi.mocked(apiClient.getRunExperience).mockImplementation((runId: string) => Promise.resolve(makeExperienceResult(runId, 'P-A')));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve(okResult<ModelGatewayHealth>({ status: 'ok' })));
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve(okResult<HarnessReady>({ status: 'ok' })));
 
     render(
       <TransformationRunProvider>
@@ -334,30 +367,29 @@ describe('transformation run state machine', () => {
     expect(screen.getByTestId('generated-files-status')).toHaveTextContent('none');
   });
 
-  it('blocks verification when terminal artifact statuses are not all successful', async () => {
-    const runId = 'run-verification-blocked';
+  it('finishes polling at phase=completed when terminal artifact statuses diverge; verdict comes from derivation', async () => {
+    const runId = 'run-divergence';
     const fixtures = makeArtifactFixtures(runId, 'P-A', 'e'.repeat(64));
 
-    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'completed') as any);
-    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated as any);
-    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(fixtures.generatedFiles as any);
-    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce({
-      ...fixtures.buildTest,
-      data: {
+    vi.mocked(apiClient.transform).mockResolvedValueOnce(makeTerminalResponse(runId, 'P-A', 'completed'));
+    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated);
+    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(fixtures.generatedFiles);
+    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(
+      okResult<BuildTestView>({
         ...fixtures.buildTest.data,
         status: 'output-divergence',
-      },
-    } as any);
-    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence as any);
-    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events as any);
-    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts as any);
-    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce({ ok: true, data: { status: 'complete', summary: null } } as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
-    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce({ ok: true, data: { status: 'ok' } } as any);
+      })
+    );
+    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence);
+    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events);
+    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(fixtures.artifacts);
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(makeExperienceResult(runId, 'P-A'));
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValueOnce(okResult<ModelGatewayHealth>({ status: 'ok' }));
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValueOnce(okResult<HarnessReady>({ status: 'ok' }));
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
-    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation((runId: string) => Promise.resolve(makeExperienceResult(runId, 'P-A')));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve(okResult<ModelGatewayHealth>({ status: 'ok' })));
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve(okResult<HarnessReady>({ status: 'ok' })));
 
     render(
       <TransformationRunProvider>
@@ -367,14 +399,13 @@ describe('transformation run state machine', () => {
 
     fireEvent.click(screen.getByText('start-a'));
 
-    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('verification-blocked'));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('completed'));
     expect(screen.getByTestId('build-test-status')).toHaveTextContent('output-divergence');
   });
 
   it('marks a polling run unavailable on backend 503 responses', async () => {
-    vi.mocked(apiClient.transform).mockResolvedValueOnce({
-      ok: true,
-      data: {
+    vi.mocked(apiClient.transform).mockResolvedValueOnce(
+      okResult<TransformResponse>({
         runId: 'run-unavailable',
         orchestratorRunId: 'run-unavailable-orch',
         programId: 'P-A',
@@ -383,6 +414,12 @@ describe('transformation run state machine', () => {
         productMode: 'live',
         createdAt: '2026-05-15T10:00:00Z',
         updatedAt: '2026-05-15T10:00:01Z',
+        activeStep: null,
+        agentAttemptCount: 0,
+        repairBudget: null,
+        finalClassification: null,
+        failureCode: null,
+        failureMessage: null,
         links: {
           self: '/runs/run-unavailable',
           generated: '/runs/run-unavailable/generated',
@@ -392,18 +429,19 @@ describe('transformation run state machine', () => {
           events: '/runs/run-unavailable/events',
           artifacts: '/runs/run-unavailable/artifacts',
         },
-      },
-    } as any);
-    vi.mocked(apiClient.getRun).mockResolvedValueOnce({
+      })
+    );
+    const runUnavailableError: ApiResult<RunSummary> = {
       ok: false,
       status: 503,
       message: 'orchestrator unavailable',
       details: { kind: 'http', body: { error: 'orchestrator unavailable' } },
-    } as any);
+    };
+    vi.mocked(apiClient.getRun).mockResolvedValueOnce(runUnavailableError);
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
-    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation((runId: string) => Promise.resolve(makeExperienceResult(runId, 'P-A')));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve(okResult<ModelGatewayHealth>({ status: 'ok' })));
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve(okResult<HarnessReady>({ status: 'ok' })));
 
     render(
       <TransformationRunProvider>
@@ -418,12 +456,11 @@ describe('transformation run state machine', () => {
   });
 
   it('hydrates live observability while a run is still active and preserves global service state on restart', async () => {
-    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
-    vi.mocked(apiClient.getHarnessReady).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue(okResult<ModelGatewayHealth>({ status: 'ok' }));
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValue(okResult<HarnessReady>({ status: 'ok' }));
     vi.mocked(apiClient.transform)
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
+      .mockResolvedValueOnce(
+        okResult<TransformResponse>({
           runId: 'run-live-a',
           orchestratorRunId: 'run-live-a-orch',
           programId: 'P-A',
@@ -432,6 +469,12 @@ describe('transformation run state machine', () => {
           productMode: 'live',
           createdAt: '2026-05-15T10:00:00Z',
           updatedAt: '2026-05-15T10:00:01Z',
+          activeStep: null,
+          agentAttemptCount: 0,
+          repairBudget: null,
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
           links: {
             self: '/runs/run-live-a',
             generated: '/runs/run-live-a/generated',
@@ -441,11 +484,10 @@ describe('transformation run state machine', () => {
             events: '/runs/run-live-a/events',
             artifacts: '/runs/run-live-a/artifacts',
           },
-        },
-      } as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
+        })
+      )
+      .mockResolvedValueOnce(
+        okResult<TransformResponse>({
           runId: 'run-live-b',
           orchestratorRunId: 'run-live-b-orch',
           programId: 'P-B',
@@ -454,6 +496,12 @@ describe('transformation run state machine', () => {
           productMode: 'live',
           createdAt: '2026-05-15T10:00:02Z',
           updatedAt: '2026-05-15T10:00:03Z',
+          activeStep: null,
+          agentAttemptCount: 0,
+          repairBudget: null,
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
           links: {
             self: '/runs/run-live-b',
             generated: '/runs/run-live-b/generated',
@@ -463,39 +511,36 @@ describe('transformation run state machine', () => {
             events: '/runs/run-live-b/events',
             artifacts: '/runs/run-live-b/artifacts',
           },
-        },
-      } as any);
-    vi.mocked(apiClient.getRun).mockImplementation(async (runId: string) => ({
-      ok: true,
-      data: {
+        })
+      );
+    vi.mocked(apiClient.getRun).mockImplementation(async (runId: string) =>
+      okResult<RunSummary>(makeRunSummary({
         status: 'updating',
         runId,
         programId: runId === 'run-live-a' ? 'P-A' : 'P-B',
-      },
-    }) as any);
-    vi.mocked(apiClient.getRunEvents).mockImplementation(async (runId: string) => ({
-      ok: true,
-      data: {
+      }))
+    );
+    vi.mocked(apiClient.getRunEvents).mockImplementation(async (runId: string) =>
+      okResult<RunEventsView>({
         runId,
         programId: runId === 'run-live-a' ? 'P-A' : 'P-B',
         mode: 'live',
         productMode: 'live',
         events: [{ type: 'run.accepted', status: 'ok', message: 'accepted', createdAt: '2026-05-15T10:00:04Z' }],
-      },
-    }) as any);
-    vi.mocked(apiClient.getRunProgress).mockImplementation(async (runId: string) =>
-      makeProgressFixture(runId, runId === 'run-live-a' ? 'P-A' : 'P-B') as any
+      })
     );
-    vi.mocked(apiClient.getRunExperience).mockImplementation(async (runId: string) => ({
-      ok: true,
-      data: {
+    vi.mocked(apiClient.getRunProgress).mockImplementation(async (runId: string) =>
+      makeProgressFixture(runId, runId === 'run-live-a' ? 'P-A' : 'P-B')
+    );
+    vi.mocked(apiClient.getRunExperience).mockImplementation(async (runId: string) =>
+      okResult<RunExperienceView>({
         runId,
         programId: runId === 'run-live-a' ? 'P-A' : 'P-B',
         mode: 'live',
         productMode: 'live',
         summary: '1 learning candidate observed',
-      },
-    }) as any);
+      })
+    );
 
     render(
       <TransformationRunProvider>
@@ -522,56 +567,56 @@ describe('transformation run state machine', () => {
 
   it('ignores stale artifact hydration from an earlier run after a newer run starts', async () => {
     const aArtifacts = {
-      generated: deferred<any>(),
-      generatedFiles: deferred<any>(),
-      buildTest: deferred<any>(),
-      evidence: deferred<any>(),
-      events: deferred<any>(),
-      artifacts: deferred<any>(),
+      generated: deferred<ApiResult<GeneratedView>>(),
+      generatedFiles: deferred<ApiResult<GeneratedFilesIndex>>(),
+      buildTest: deferred<ApiResult<BuildTestView>>(),
+      evidence: deferred<ApiResult<EvidenceView>>(),
+      events: deferred<ApiResult<RunEventsView>>(),
+      artifacts: deferred<ApiResult<RunArtifactsView>>(),
     };
 
     vi.mocked(apiClient.transform).mockImplementation(async request => {
       if (request.programId === 'P-A') {
-        return makeTerminalResponse('run-a', 'P-A', 'completed') as any;
+        return makeTerminalResponse('run-a', 'P-A', 'completed');
       }
 
-      return makeTerminalResponse('run-b', 'P-B', 'completed') as any;
+      return makeTerminalResponse('run-b', 'P-B', 'completed');
     });
 
     vi.mocked(apiClient.getGenerated).mockImplementation(runId =>
       runId === 'run-a'
         ? aArtifacts.generated.promise
-        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).generated as any)
+        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).generated)
     );
     vi.mocked(apiClient.getGeneratedFiles).mockImplementation(runId =>
       runId === 'run-a'
         ? aArtifacts.generatedFiles.promise
-        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).generatedFiles as any)
+        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).generatedFiles)
     );
     vi.mocked(apiClient.getBuildTest).mockImplementation(runId =>
       runId === 'run-a'
         ? aArtifacts.buildTest.promise
-        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).buildTest as any)
+        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).buildTest)
     );
     vi.mocked(apiClient.getEvidence).mockImplementation(runId =>
       runId === 'run-a'
         ? aArtifacts.evidence.promise
-        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).evidence as any)
+        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).evidence)
     );
     vi.mocked(apiClient.getRunEvents).mockImplementation(runId =>
       runId === 'run-a'
         ? aArtifacts.events.promise
-        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).events as any)
+        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).events)
     );
     vi.mocked(apiClient.getRunArtifacts).mockImplementation(runId =>
       runId === 'run-a'
         ? aArtifacts.artifacts.promise
-        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).artifacts as any)
+        : Promise.resolve(makeArtifactFixtures('run-b', 'P-B', 'd'.repeat(64)).artifacts)
     );
 
-    vi.mocked(apiClient.getRunExperience).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'complete', summary: null } }) as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
-    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve({ ok: true, data: { status: 'ok' } }) as any);
+    vi.mocked(apiClient.getRunExperience).mockImplementation((runId: string) => Promise.resolve(makeExperienceResult(runId, 'P-A')));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() => Promise.resolve(okResult<ModelGatewayHealth>({ status: 'ok' })));
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() => Promise.resolve(okResult<HarnessReady>({ status: 'ok' })));
 
     render(
       <TransformationRunProvider>
@@ -586,12 +631,12 @@ describe('transformation run state machine', () => {
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('completed'));
 
     await act(async () => {
-      aArtifacts.generated.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).generated as any);
-      aArtifacts.generatedFiles.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).generatedFiles as any);
-      aArtifacts.buildTest.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).buildTest as any);
-      aArtifacts.evidence.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).evidence as any);
-      aArtifacts.events.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).events as any);
-      aArtifacts.artifacts.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).artifacts as any);
+      aArtifacts.generated.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).generated);
+      aArtifacts.generatedFiles.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).generatedFiles);
+      aArtifacts.buildTest.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).buildTest);
+      aArtifacts.evidence.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).evidence);
+      aArtifacts.events.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).events);
+      aArtifacts.artifacts.resolve(makeArtifactFixtures('run-a', 'P-A', 'a'.repeat(64)).artifacts);
     });
 
     expect(screen.getByTestId('run-id')).toHaveTextContent('run-b');
