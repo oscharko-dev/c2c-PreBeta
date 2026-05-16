@@ -8,6 +8,7 @@ import {
   createEvidenceClient,
   createNodeHttpClient,
   createOrchestratorClient,
+  UpstreamResponseTooLargeError,
 } from './upstream';
 
 interface CapturedRequest {
@@ -222,4 +223,91 @@ test('evidence client encodes pack id and proxies status', async () => {
       assert.equal(captured[0]?.path, '/v0/packs/epk%20a%2Fb');
     },
   );
+});
+
+test('http client rejects upstream responses whose declared content-length exceeds the cap', async () => {
+  const client = createNodeHttpClient();
+  const big = 'A'.repeat(8_192);
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, {
+      'content-type': 'text/plain',
+      'content-length': Buffer.byteLength(big),
+    });
+    res.end(big);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address() as AddressInfo;
+  try {
+    await assert.rejects(
+      client.request(`http://127.0.0.1:${address.port}/over`, {
+        method: 'GET',
+        timeoutMs: 1_000,
+        maxResponseBytes: 1_024,
+      }),
+      (err: unknown) =>
+        err instanceof UpstreamResponseTooLargeError && err.limit === 1_024 && (err.declaredByteSize ?? 0) > 1_024,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test('http client truncates and aborts when upstream streams more bytes than the cap', async () => {
+  const client = createNodeHttpClient();
+  const server = http.createServer((_req, res) => {
+    // No content-length header so the early reject path does not fire;
+    // the streaming check must catch this.
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    let chunks = 0;
+    const interval = setInterval(() => {
+      if (chunks >= 20) {
+        clearInterval(interval);
+        res.end();
+        return;
+      }
+      try {
+        res.write('A'.repeat(512));
+      } catch {
+        clearInterval(interval);
+      }
+      chunks += 1;
+    }, 5);
+    res.on('close', () => clearInterval(interval));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address() as AddressInfo;
+  try {
+    const response = await client.request(`http://127.0.0.1:${address.port}/stream`, {
+      method: 'GET',
+      timeoutMs: 2_000,
+      maxResponseBytes: 1_024,
+    });
+    assert.equal(response.truncated, true);
+    assert.equal(response.body, null);
+    assert.equal(response.status, 200);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test('http client returns the full body when the upstream stays under the cap', async () => {
+  const client = createNodeHttpClient();
+  const server = http.createServer((_req, res) => {
+    const body = JSON.stringify({ ok: true });
+    res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+    res.end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address() as AddressInfo;
+  try {
+    const response = await client.request(`http://127.0.0.1:${address.port}/ok`, {
+      method: 'GET',
+      timeoutMs: 1_000,
+      maxResponseBytes: 1_048_576,
+    });
+    assert.equal(response.truncated, undefined);
+    assert.deepEqual(response.body, { ok: true });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
 });

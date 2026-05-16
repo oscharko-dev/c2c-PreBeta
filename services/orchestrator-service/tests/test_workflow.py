@@ -293,6 +293,85 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertIn("uri", oracle["sourceRef"])
         self.assertIsInstance(oracle["timeoutMs"], int)
         self.assertGreater(oracle["timeoutMs"], 0)
+        # Issue #172: when the BFF does not forward oracle metadata, the
+        # payload must omit expectedOutput / oracleInput so downstream
+        # consumers fall back to deterministic defaults.
+        self.assertNotIn("expectedOutput", oracle)
+        self.assertNotIn("oracleInput", oracle)
+
+    def test_build_test_oracle_attaches_bff_supplied_expected_output_and_oracle_input(self):
+        # Issue #172: the BFF places ``expectedOutput`` and ``oracleInput``
+        # on the inputRef when the UI submits them via /api/v0/transform.
+        # The orchestrator must forward them onto the oracle payload so the
+        # build/test runner and verification/repair agent can compare
+        # against the user-supplied golden master and feed the stdin to the
+        # oracle execution.
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt=None,
+        )
+        cobol_source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. CASE01.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           DISPLAY 'PASS'.\n"
+            "           STOP RUN.\n"
+        )
+        runner.run(
+            context=context,
+            input_ref={
+                "uri": "urn:source/main.cob",
+                "source": cobol_source,
+                "expectedOutput": "PASS\n",
+                "oracleInput": "ignored-input",
+            },
+        )
+
+        build_test_call = next(
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == "java.build-test"
+        )
+        oracle = build_test_call[2].get("oracle")
+        self.assertIsNotNone(oracle)
+        self.assertEqual(oracle["expectedOutput"], "PASS\n")
+        self.assertEqual(oracle["oracleInput"], "ignored-input")
+
+    def test_build_test_oracle_skips_empty_bff_oracle_metadata(self):
+        # Issue #172: empty string is the BFF's way of saying "user supplied
+        # no oracleInput"; the orchestrator must treat it the same as the
+        # field being absent so the deterministic oracle path is preserved.
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt=None,
+        )
+        runner.run(
+            context=context,
+            input_ref={
+                "uri": "urn:source/main.cob",
+                "source": "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. C.\n",
+                "expectedOutput": "",
+                "oracleInput": "",
+            },
+        )
+
+        build_test_call = next(
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == "java.build-test"
+        )
+        oracle = build_test_call[2].get("oracle")
+        self.assertIsNotNone(oracle)
+        self.assertNotIn("expectedOutput", oracle)
+        self.assertNotIn("oracleInput", oracle)
 
     def test_skipped_model_invocation_uses_configured_model_id(self):
         gateway = StubGateway(self._base_capabilities(), self._base_responses())

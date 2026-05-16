@@ -19,6 +19,14 @@ import {
   RunEvent,
   RunArtifactMetadata,
   GeneratedFileContent,
+  RunWorkflowView,
+  RepairAttemptSummary,
+  RepairBudget,
+  WorkflowArtifactRef,
+  W02UiErrorCode,
+  W02ActiveAgent,
+  W02RepairDecision,
+  RunFinalClassification,
 } from '../types/api';
 import { Sample, SampleDetail, TransformRequest } from '../types/reference-program';
 
@@ -113,7 +121,10 @@ function isRunLinks(payload: unknown): payload is RunLinks {
     (payload.progress === undefined || isString(payload.progress)) &&
     isString(payload.events) &&
     isString(payload.artifacts) &&
-    (payload.learning === undefined || isString(payload.learning))
+    (payload.learning === undefined || isString(payload.learning)) &&
+    // Issue #172: W0.2 workflow contract endpoint may be absent for legacy
+    // diagnostic-fixture responses, present for every live run.
+    (payload.workflow === undefined || isString(payload.workflow))
   );
 }
 
@@ -413,7 +424,117 @@ function isTransformResponsePayload(payload: unknown): payload is TransformRespo
     isRunLinks(payload.links) &&
     (payload.message === undefined || isString(payload.message)) &&
     (payload.evidenceRefs === undefined || isStringArray(payload.evidenceRefs)) &&
-    (payload.policyDecision === undefined || isString(payload.policyDecision))
+    (payload.policyDecision === undefined || isString(payload.policyDecision)) &&
+    hasW02ContractFields(payload)
+  );
+}
+
+// Issue #172: closed enums for the W0.2 surface. Predicates are deliberately
+// strict so the Studio refuses to render an unknown failure code, agent, or
+// classification rather than silently mis-displaying it.
+const W02_UI_ERROR_CODES: ReadonlySet<W02UiErrorCode> = new Set([
+  'unsupported_cobol',
+  'parse_failed',
+  'semantic_ir_failed',
+  'model_gateway_unavailable',
+  'model_policy_denied',
+  'agent_timeout',
+  'agent_contract_invalid',
+  'java_generation_failed',
+  'java_compile_failed',
+  'java_runtime_failed',
+  'oracle_mismatch',
+  'evidence_incomplete',
+  'cancelled',
+  'service_unavailable',
+  'internal_error',
+]);
+
+const W02_ACTIVE_AGENTS: ReadonlySet<W02ActiveAgent> = new Set([
+  'transformation_agent',
+  'verification_repair_agent',
+  'cobol_parser',
+  'semantic_ir',
+  'java_generator',
+  'build_test_runner',
+  'evidence_service',
+]);
+
+const W02_REPAIR_DECISIONS: ReadonlySet<W02RepairDecision> = new Set([
+  'propose_candidate',
+  'refuse',
+  'escalate',
+  'no_change',
+]);
+
+const W02_FINAL_CLASSIFICATIONS: ReadonlySet<RunFinalClassification> = new Set([
+  'success',
+  'blocked',
+  'failed',
+  'cancelled',
+  'incomplete',
+]);
+
+function isW02UiErrorCode(value: unknown): value is W02UiErrorCode {
+  return typeof value === 'string' && W02_UI_ERROR_CODES.has(value as W02UiErrorCode);
+}
+
+function isW02ActiveAgent(value: unknown): value is W02ActiveAgent {
+  return typeof value === 'string' && W02_ACTIVE_AGENTS.has(value as W02ActiveAgent);
+}
+
+function isW02RepairDecision(value: unknown): value is W02RepairDecision {
+  return typeof value === 'string' && W02_REPAIR_DECISIONS.has(value as W02RepairDecision);
+}
+
+function isRunFinalClassification(value: unknown): value is RunFinalClassification {
+  return typeof value === 'string' && W02_FINAL_CLASSIFICATIONS.has(value as RunFinalClassification);
+}
+
+function isRepairBudgetPayload(payload: unknown): payload is RepairBudget {
+  if (!isRecord(payload)) return false;
+  return (
+    isNonNegativeInteger(payload.limit) &&
+    isNonNegativeInteger(payload.used) &&
+    isNonNegativeInteger(payload.remaining)
+  );
+}
+
+function isRepairAttemptSummaryPayload(payload: unknown): payload is RepairAttemptSummary {
+  if (!isRecord(payload)) return false;
+  return (
+    typeof payload.attemptNumber === 'number' &&
+    Number.isInteger(payload.attemptNumber) &&
+    payload.attemptNumber >= 1 &&
+    isW02RepairDecision(payload.repairDecision) &&
+    (payload.failureCategory === null || isString(payload.failureCategory)) &&
+    typeof payload.hasModelInvocation === 'boolean' &&
+    typeof payload.hasRepairInput === 'boolean' &&
+    typeof payload.hasJavaCandidate === 'boolean' &&
+    (payload.rationale === undefined || isString(payload.rationale))
+  );
+}
+
+function isWorkflowArtifactRefPayload(payload: unknown): payload is WorkflowArtifactRef {
+  if (!isRecord(payload)) return false;
+  return isString(payload.sha256) && isNonNegativeInteger(payload.byteSize) && isString(payload.kind);
+}
+
+// W0.2 contract fields validate as ``undefined`` | ``null`` | a typed value.
+// The production BFF always emits explicit ``null``/``0`` (see runSummary in
+// services/c2c-bff/src/server.ts) — but legacy mocks/fixtures can omit the
+// fields entirely. We accept ``undefined`` so the Studio keeps rendering when
+// the BFF response predates Issue #172, but we still reject wrong *types*
+// (e.g. ``failureCode: 'not_a_real_code'``) so a real BFF regression fails
+// contract validation loudly rather than silently mis-rendering.
+function hasW02ContractFields(payload: Record<string, unknown>): boolean {
+  return (
+    (payload.activeStep === undefined || payload.activeStep === null || isString(payload.activeStep)) &&
+    (payload.agentAttemptCount === undefined || isNonNegativeInteger(payload.agentAttemptCount)) &&
+    (payload.repairBudget === undefined || payload.repairBudget === null || isRepairBudgetPayload(payload.repairBudget)) &&
+    (payload.finalClassification === undefined || payload.finalClassification === null || isRunFinalClassification(payload.finalClassification)) &&
+    (payload.failureCode === undefined || payload.failureCode === null || isW02UiErrorCode(payload.failureCode)) &&
+    (payload.failureMessage === undefined || payload.failureMessage === null || isString(payload.failureMessage))
   );
 }
 
@@ -432,7 +553,36 @@ function isRunSummaryPayload(payload: unknown): payload is RunSummary {
     isString(payload.updatedAt) &&
     (payload.message === undefined || isString(payload.message)) &&
     (payload.evidenceRefs === undefined || isStringArray(payload.evidenceRefs)) &&
-    (payload.policyDecision === undefined || isString(payload.policyDecision))
+    (payload.policyDecision === undefined || isString(payload.policyDecision)) &&
+    hasW02ContractFields(payload)
+  );
+}
+
+function isRunWorkflowSource(value: unknown): value is RunWorkflowView['source'] {
+  return value === 'live' || value === 'cached' || value === 'unavailable';
+}
+
+function isRunWorkflowViewPayload(payload: unknown): payload is RunWorkflowView {
+  if (!isRecord(payload)) return false;
+  return (
+    isString(payload.runId) &&
+    isString(payload.programId) &&
+    isRunMode(payload.mode) &&
+    isRunProductMode(payload.productMode) &&
+    isRunWorkflowSource(payload.source) &&
+    (payload.state === null || isString(payload.state)) &&
+    (payload.activeStep === null || isString(payload.activeStep)) &&
+    (payload.activeAgent === null || isW02ActiveAgent(payload.activeAgent)) &&
+    isNonNegativeInteger(payload.agentAttemptCount) &&
+    (payload.repairBudget === null || isRepairBudgetPayload(payload.repairBudget)) &&
+    Array.isArray(payload.repairAttempts) &&
+    payload.repairAttempts.every(isRepairAttemptSummaryPayload) &&
+    (payload.finalClassification === null || isRunFinalClassification(payload.finalClassification)) &&
+    (payload.failureCode === null || isW02UiErrorCode(payload.failureCode)) &&
+    (payload.failureMessage === null || isString(payload.failureMessage)) &&
+    (payload.generatedJavaRef === null || isWorkflowArtifactRefPayload(payload.generatedJavaRef)) &&
+    (payload.buildTestResultRef === null || isWorkflowArtifactRefPayload(payload.buildTestResultRef)) &&
+    (payload.evidencePackRef === null || isWorkflowArtifactRefPayload(payload.evidencePackRef))
   );
 }
 
@@ -672,6 +822,13 @@ function parseGeneratedFileContent(payload: unknown): ApiResult<GeneratedFileCon
   return { ok: true, data: payload };
 }
 
+function parseRunWorkflowView(payload: unknown): ApiResult<RunWorkflowView> {
+  if (!isRunWorkflowViewPayload(payload)) {
+    return createFailure('Contract error: RunWorkflowView payload has missing or invalid fields.', { kind: 'contract', body: payload });
+  }
+  return { ok: true, data: payload };
+}
+
 function encodeGeneratedFilePath(filePath: string): string {
   const segments = filePath.split('/');
   if (
@@ -762,6 +919,8 @@ export const apiClient = {
   getRunProgress: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/progress`, parseRunProgressView),
   getRunArtifacts: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/artifacts`, parseRunArtifactsView),
   getRunExperience: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/experience`, parseRunExperienceView),
+  // Issue #172: W0.2 workflow contract view.
+  getRunWorkflow: (runId: string) => fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}/workflow`, parseRunWorkflowView),
   getModelGatewayHealth: () => fetchJson(`/api/v0/model-gateway/health`, parseModelGatewayHealth),
   getModelGatewayModels: () => fetchJson(`/api/v0/model-gateway/models`, parseModelGatewayModels),
   getHarnessReady: () => fetchJson(`/api/v0/harness/ready`, parseHarnessReady),

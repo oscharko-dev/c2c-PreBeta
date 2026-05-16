@@ -564,6 +564,9 @@ def _build_cobol_oracle_payload(
     source_text: Optional[str],
     input_reference: DataReference,
     timeout_ms: int,
+    *,
+    expected_output: Optional[str] = None,
+    oracle_input: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Construct the executable COBOL oracle payload for build-test-runner.
 
@@ -571,16 +574,45 @@ def _build_cobol_oracle_payload(
     GnuCOBOL and compare its stdout against generated Java stdout (Issue
     #92). Returns ``None`` when no source text is available, so the runner
     falls back to registry Golden Master behaviour.
+
+    Issue #172: when the BFF forwards an ``expectedOutput`` (golden master
+    text) or an ``oracleInput`` (stdin fed to the oracle) on the inputRef,
+    they are attached to the oracle payload so the build/test runner and
+    the verification/repair agent can use them directly instead of
+    re-deriving from defaults.
     """
     if not source_text or not source_text.strip():
         return None
     safe_timeout = timeout_ms if isinstance(timeout_ms, int) and timeout_ms > 0 else DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS
-    return {
+    payload: Dict[str, Any] = {
         "mode": ORACLE_MODE_COBOL_RUNTIME,
         "sourceText": source_text,
         "sourceRef": _as_reference_payload(input_reference),
         "timeoutMs": safe_timeout,
     }
+    if isinstance(expected_output, str) and expected_output:
+        payload["expectedOutput"] = expected_output
+    if isinstance(oracle_input, str) and oracle_input:
+        payload["oracleInput"] = oracle_input
+    return payload
+
+
+def _extract_oracle_metadata(raw: Mapping[str, Any]) -> Dict[str, Optional[str]]:
+    """Extract Issue #172 oracle metadata from a BFF-forwarded inputRef.
+
+    The BFF places ``expectedOutput`` and ``oracleInput`` on the inputRef
+    when the UI submits them via /api/v0/transform. Returning ``None`` for
+    missing/empty values keeps the W0/W0.1 deterministic path untouched.
+    """
+    expected: Optional[str] = None
+    oracle_input: Optional[str] = None
+    expected_value = raw.get("expectedOutput")
+    if isinstance(expected_value, str) and expected_value:
+        expected = expected_value
+    oracle_value = raw.get("oracleInput")
+    if isinstance(oracle_value, str) and oracle_value:
+        oracle_input = oracle_value
+    return {"expectedOutput": expected, "oracleInput": oracle_input}
 
 
 def _coerce_output_ref(payload: Mapping[str, Any], fallback_uri: str, fallback_payload: Any) -> DataReference:
@@ -1066,6 +1098,11 @@ class W0WorkflowRunner:
         input_reference = _normalize_input_ref(input_ref, context.run_id)
         source_text = _extract_source(input_ref)
         raw_source_text = _raw_source(input_ref) or source_text
+        # Issue #172: lift BFF-forwarded oracle metadata so the build/test
+        # runner and verification/repair agent both see expectedOutput /
+        # oracleInput. Empty/missing values fall back to the deterministic
+        # W0/W0.1 oracle path.
+        oracle_metadata = _extract_oracle_metadata(input_ref)
         evidence_refs: list[str] = list(context.evidence_refs)
         step_results: list[WorkflowStepResult] = []
         model_output = None
@@ -1491,6 +1528,8 @@ class W0WorkflowRunner:
                         "build_test_oracle_timeout_ms",
                         DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS,
                     ),
+                    expected_output=oracle_metadata["expectedOutput"],
+                    oracle_input=oracle_metadata["oracleInput"],
                 )
                 oracle_reference_for_agent: Optional[DataReference] = None
                 if oracle_payload_for_agent is not None:
@@ -1682,6 +1721,8 @@ class W0WorkflowRunner:
                     raw_source_text,
                     input_reference,
                     getattr(self.config, "build_test_oracle_timeout_ms", DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS),
+                    expected_output=oracle_metadata["expectedOutput"],
+                    oracle_input=oracle_metadata["oracleInput"],
                 )
                 if oracle_payload is not None:
                     build_test_input["oracle"] = oracle_payload
