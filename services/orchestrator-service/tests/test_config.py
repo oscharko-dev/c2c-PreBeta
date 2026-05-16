@@ -39,6 +39,55 @@ class OrchestratorConfigTests(unittest.TestCase):
         self.assertEqual(config.model_gateway_model_id, "phi-4")
         self.assertEqual(config.model_policy_version, "v2")
 
+    def test_repair_agent_defaults_when_no_env_overrides(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = load_config()
+        self.assertEqual(
+            config.repair_agent_prompt_template_id,
+            "c2c.verification-repair-agent.cobol-to-java.v0",
+        )
+        self.assertEqual(config.repair_agent_prompt_template_version, "v0")
+        self.assertEqual(config.repair_agent_deadline_ms, 30000)
+        self.assertEqual(config.repair_agent_max_output_bytes, 256 * 1024)
+        # By default the repair agent reuses the transformation agent's
+        # package base.
+        self.assertEqual(
+            config.repair_agent_package_base, config.transformation_agent_package_base
+        )
+        # No dedicated model id by default; the runner falls back to the
+        # global model gateway model id at invocation time.
+        self.assertEqual(config.repair_agent_model_id, "")
+
+    def test_repair_agent_env_overrides(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ORCHESTRATOR_REPAIR_AGENT_PROMPT_TEMPLATE_ID": "custom.repair.v1",
+                "ORCHESTRATOR_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION": "v1",
+                "ORCHESTRATOR_REPAIR_AGENT_DEADLINE_MS": "45000",
+                "ORCHESTRATOR_REPAIR_AGENT_MAX_OUTPUT_BYTES": "65536",
+                "ORCHESTRATOR_REPAIR_AGENT_PACKAGE_BASE": "com.example.repaired",
+                "ORCHESTRATOR_REPAIR_AGENT_MODEL_ID": "phi-4",
+            },
+            clear=True,
+        ):
+            config = load_config()
+        self.assertEqual(config.repair_agent_prompt_template_id, "custom.repair.v1")
+        self.assertEqual(config.repair_agent_prompt_template_version, "v1")
+        self.assertEqual(config.repair_agent_deadline_ms, 45000)
+        self.assertEqual(config.repair_agent_max_output_bytes, 65536)
+        self.assertEqual(config.repair_agent_package_base, "com.example.repaired")
+        self.assertEqual(config.repair_agent_model_id, "phi-4")
+
+    def test_repair_agent_invalid_deadline_falls_back_to_default(self):
+        with patch.dict(
+            os.environ,
+            {"ORCHESTRATOR_REPAIR_AGENT_DEADLINE_MS": "0"},
+            clear=True,
+        ):
+            config = load_config()
+        self.assertEqual(config.repair_agent_deadline_ms, 30000)
+
 
 if __name__ == "__main__":
     unittest.main()

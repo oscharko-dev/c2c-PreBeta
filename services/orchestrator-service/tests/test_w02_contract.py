@@ -248,10 +248,13 @@ class W02RunContractShapeTests(unittest.TestCase):
             "finalClassification",
             "failureCode",
             "failureMessage",
+            "repairAttempts",
             "createdAt",
             "updatedAt",
         ):
             self.assertIn(key, payload, f"missing field {key}")
+        # Initial repair-attempts ledger is empty.
+        self.assertEqual(payload["repairAttempts"], [])
         self.assertEqual(payload["schemaVersion"], SCHEMA_VERSION)
         self.assertEqual(payload["currentState"], STATE_RUN_ACCEPTED)
         self.assertEqual(payload["agentAttemptCount"], 0)
@@ -297,6 +300,82 @@ class W02RunContractShapeTests(unittest.TestCase):
         contract = self._build()
         self.assertEqual(contract.record_agent_attempt(), 1)
         self.assertEqual(contract.record_agent_attempt(), 2)
+
+    def test_record_repair_attempt_normalises_and_appends(self):
+        contract = self._build()
+        contract.record_repair_attempt(
+            {
+                "attemptNumber": 1,
+                "repairDecision": "propose_candidate",
+                "failureCategory": "java_compile_failed",
+                "rationale": "fixed semicolon",
+                "modelInvocationRef": {
+                    "invocationId": "inv-1",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                },
+                "repairInputRef": {
+                    "uri": "file://x",
+                    "sha256": "a" * 64,
+                    "byteSize": 16,
+                },
+                "repairDecisionRef": {
+                    "uri": "file://y",
+                    "sha256": "b" * 64,
+                    "byteSize": 32,
+                },
+            }
+        )
+        contract.record_repair_attempt(
+            {
+                "attemptNumber": 2,
+                "repairDecision": "no_change",
+                "failureCategory": "java_compile_failed",
+            }
+        )
+        payload = contract.to_dict()
+        self.assertIn("repairAttempts", payload)
+        self.assertEqual(len(payload["repairAttempts"]), 2)
+        self.assertEqual(payload["repairAttempts"][0]["attemptNumber"], 1)
+        self.assertEqual(payload["repairAttempts"][0]["repairDecision"], "propose_candidate")
+        self.assertEqual(
+            payload["repairAttempts"][0]["modelInvocationRef"]["invocationId"], "inv-1"
+        )
+        self.assertEqual(payload["repairAttempts"][1]["repairDecision"], "no_change")
+
+    def test_record_repair_attempt_rejects_unknown_decision(self):
+        contract = self._build()
+        with self.assertRaises(ValueError):
+            contract.record_repair_attempt(
+                {"attemptNumber": 1, "repairDecision": "totally_made_up"}
+            )
+
+    def test_record_repair_attempt_rejects_zero_attempt_number(self):
+        contract = self._build()
+        with self.assertRaises(ValueError):
+            contract.record_repair_attempt(
+                {"attemptNumber": 0, "repairDecision": "refuse"}
+            )
+
+    def test_record_repair_attempt_rejects_non_mapping(self):
+        contract = self._build()
+        with self.assertRaises(TypeError):
+            contract.record_repair_attempt("not a mapping")
+
+    def test_repeated_no_change_count_property(self):
+        contract = self._build()
+        self.assertEqual(contract.repeated_no_change_count, 0)
+        contract.record_repair_attempt(
+            {"attemptNumber": 1, "repairDecision": "propose_candidate"}
+        )
+        self.assertEqual(contract.repeated_no_change_count, 0)
+        contract.record_repair_attempt(
+            {"attemptNumber": 2, "repairDecision": "no_change"}
+        )
+        contract.record_repair_attempt(
+            {"attemptNumber": 3, "repairDecision": "no_change"}
+        )
+        self.assertEqual(contract.repeated_no_change_count, 2)
 
     def test_failure_codes_match_issue_166_required_set(self):
         required = {
@@ -382,6 +461,80 @@ class _StubGatewayWithBuildOutcomes(StubGateway):
         return super().invoke_capability(capability, payload)
 
 
+_REPAIR_AGENT_SAMPLE_JAVA = (
+    "package com.c2c.generated;\n"
+    "public class CASE01 {\n"
+    "    public static void main(String[] args) {\n"
+    "        System.out.println(\"hi\");\n"
+    "    }\n"
+    "}\n"
+)
+
+
+class _StubRepairAgentInvoker:
+    """Returns a fixed repair-agent envelope on every Model Gateway call.
+
+    The default behaviour is to ``propose_candidate`` with a static piece of
+    Java that the build-test stub then verifies. Tests can pass a sequence
+    of envelopes to model multi-attempt loops and refusal/escalate paths.
+    """
+
+    def __init__(self, envelopes):
+        if isinstance(envelopes, dict):
+            self._envelopes = [envelopes]
+        else:
+            self._envelopes = list(envelopes)
+        self.calls = []
+
+    def invoke(self, payload):
+        self.calls.append(dict(payload))
+        if not self._envelopes:
+            envelope = self._propose_default(payload)
+        else:
+            envelope = self._envelopes.pop(0)
+        attempt_number = int(payload.get("parameters", {}).get("attemptNumber") or 1)
+        return {
+            "invocationId": f"inv-run-1-{attempt_number:02d}-repair",
+            "runId": payload.get("runId"),
+            "modelId": payload.get("modelId") or "gpt-oss-120b",
+            "provider": "foundry-development",
+            "policyDecision": "policy allow",
+            "agentRole": "verification-repair",
+            "promptTemplateVersion": "v0",
+            "status": "completed",
+            "ledgerRef": {
+                "uri": f"urn:model-gateway/inv-run-1-{attempt_number:02d}-repair",
+                "sha256": "f" * 64,
+                "byteSize": 256,
+            },
+            "output": dict(envelope),
+        }
+
+    @staticmethod
+    def _propose_default(payload):
+        attempt_number = int(payload.get("parameters", {}).get("attemptNumber") or 1)
+        # Vary the explanation slightly per attempt so the canonical hash of
+        # successive candidates is not identical (no-change detection only
+        # kicks in for byte-identical candidate file maps; a varying
+        # explanation keeps the file map identical, so we vary a comment in
+        # the source instead).
+        marker = f"// repair-attempt-{attempt_number}\n"
+        files = {
+            "src/main/java/com/c2c/generated/CASE01.java": marker
+            + _REPAIR_AGENT_SAMPLE_JAVA,
+        }
+        return {
+            "decision": "propose_candidate",
+            "rationale": f"repaired java for attempt {attempt_number}",
+            "files": files,
+            "entryClass": "CASE01",
+            "entryPackage": "com.c2c.generated",
+            "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+            "explanation": "auto-generated repaired java",
+            "unsupportedConstructs": [],
+        }
+
+
 class W02WorkflowIntegrationTests(unittest.TestCase):
     def _config(self, repair_budget_max: int = DEFAULT_REPAIR_BUDGET) -> OrchestratorConfig:
         base = _BaseFixture._base_config()
@@ -391,13 +544,19 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
         params["repair_budget_max"] = repair_budget_max
         return OrchestratorConfig(**params)
 
-    def _runner(self, gateway: StubGateway, repair_budget_max: int = DEFAULT_REPAIR_BUDGET) -> W0WorkflowRunner:
+    def _runner(
+        self,
+        gateway: StubGateway,
+        repair_budget_max: int = DEFAULT_REPAIR_BUDGET,
+        repair_agent_invoker=None,
+    ) -> W0WorkflowRunner:
         tmp = tempfile.mkdtemp()
         artifact_store = RunArtifactStore(tmp, created_by="orchestrator-service")
         return W0WorkflowRunner(
             config=self._config(repair_budget_max=repair_budget_max),
             gateway=gateway,
             artifact_store=artifact_store,
+            repair_agent_invoker=repair_agent_invoker or _StubRepairAgentInvoker([]),
         )
 
     def _context(self) -> W0RunContext:
