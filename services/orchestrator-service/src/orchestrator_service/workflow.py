@@ -98,6 +98,7 @@ from .run_contract import (
     STATE_FINAL_JAVA_SELECTED,
     STATE_JAVA_CANDIDATE_PERSISTED,
     STATE_RUN_BLOCKED,
+    STATE_SEMANTIC_IR_BLOCKED,
     STATE_SEMANTIC_IR_READY,
     STATE_SOURCE_NORMALIZED,
     STATE_TRANSFORMATION_AGENT_INVOKED,
@@ -115,6 +116,17 @@ class OrchestratorError(Exception):
 
 class CapabilityMissingError(OrchestratorError):
     """Raised when a required capability is unavailable."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        step_name: str | None = None,
+        failure_code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.step_name = step_name
+        self.failure_code = failure_code
 
 
 class StepExecutionError(OrchestratorError):
@@ -1085,20 +1097,84 @@ class W0WorkflowRunner:
         )
 
     @staticmethod
-    def _failure_code_from_exception(exc: BaseException) -> str | None:
+    def _failure_code_for_step_name(
+        step_name: str | None,
+        *,
+        data_class: str | None = None,
+    ) -> str | None:
+        if data_class == DATA_CLASS_MODEL or step_name == STEP_MODEL_GUIDANCE:
+            return FAILURE_MODEL_GATEWAY_UNAVAILABLE
+        if step_name is None:
+            return None
+        return STEP_TO_FAILURE_CODE.get(step_name)
+
+    def _capability_failure_context(self, capability_id: str) -> tuple[str | None, str]:
+        step_by_capability = {
+            self.config.parse_capability_id: STEP_PARSE_COBOL,
+            self.config.ir_capability_id: STEP_GENERATE_IR,
+            self.config.generator_capability_id: STEP_GENERATE_JAVA,
+            self.config.build_test_capability_id: STEP_COMPILE_TEST_JAVA,
+            self.config.evidence_capability_id: STEP_WRITE_EVIDENCE,
+        }
+        if capability_id == self.config.model_gateway_capability_id:
+            return STEP_MODEL_GUIDANCE, FAILURE_MODEL_GATEWAY_UNAVAILABLE
+        step_name = step_by_capability.get(capability_id)
+        failure_code = self._failure_code_for_step_name(step_name)
+        return step_name, failure_code or FAILURE_JAVA_GENERATION_FAILED
+
+    @staticmethod
+    def _fallback_failure_code_for_state(current_state: str | None) -> str:
+        if current_state in {w02.STATE_RUN_ACCEPTED, STATE_SOURCE_NORMALIZED}:
+            return w02.FAILURE_PARSE_FAILED
+        if current_state == STATE_COBOL_PARSE_ATTEMPTED:
+            return w02.FAILURE_SEMANTIC_IR_FAILED
+        if current_state in {
+            STATE_SEMANTIC_IR_READY,
+            STATE_BASELINE_GENERATION_ATTEMPTED,
+            STATE_TRANSFORMATION_AGENT_INVOKED,
+            STATE_JAVA_CANDIDATE_PERSISTED,
+        }:
+            return FAILURE_JAVA_GENERATION_FAILED
+        if current_state == STATE_BUILD_TEST_RUNNING:
+            return w02.FAILURE_JAVA_COMPILE_FAILED
+        if current_state in {
+            STATE_FINAL_JAVA_SELECTED,
+            STATE_EVIDENCE_MATERIALIZED,
+            STATE_EVIDENCE_INCOMPLETE,
+        }:
+            return FAILURE_EVIDENCE_INCOMPLETE
+        return FAILURE_JAVA_GENERATION_FAILED
+
+    @staticmethod
+    def _failure_code_from_exception(
+        exc: BaseException,
+        *,
+        current_state: str | None = None,
+        failed_step: str | None = None,
+    ) -> str:
         if isinstance(exc, ModelPolicyDeniedStepError):
             return FAILURE_MODEL_POLICY_DENIED
         if isinstance(exc, AgentContractInvalidStepError):
             return FAILURE_AGENT_CONTRACT_INVALID
         if isinstance(exc, CapabilityMissingError):
+            if exc.failure_code is not None:
+                return exc.failure_code
+            step_failure_code = W0WorkflowRunner._failure_code_for_step_name(exc.step_name)
+            if step_failure_code is not None:
+                return step_failure_code
             text = str(exc).lower()
             if "model" in text:
                 return FAILURE_MODEL_GATEWAY_UNAVAILABLE
-            return None
+        if failed_step is not None:
+            step_failure_code = W0WorkflowRunner._failure_code_for_step_name(failed_step)
+            if step_failure_code is not None:
+                return step_failure_code
         failed_step = _failed_step_from_exception(exc)
-        if failed_step is None:
-            return None
-        return STEP_TO_FAILURE_CODE.get(failed_step)
+        if failed_step is not None:
+            step_failure_code = W0WorkflowRunner._failure_code_for_step_name(failed_step)
+            if step_failure_code is not None:
+                return step_failure_code
+        return W0WorkflowRunner._fallback_failure_code_for_state(current_state)
 
     def run(self, context: W0RunContext, input_ref: Mapping[str, JsonValue]) -> JsonObject:
         input_reference = _normalize_input_ref(input_ref, context.run_id)
@@ -1360,19 +1436,30 @@ class W0WorkflowRunner:
                 message="cobol parser returned ok",
             )
 
-            ir_output = self._invoke_step(
-                context,
-                "generate-ir",
-                ir_capability,
-                DATA_CLASS_PARSER,
-                {
-                    "schemaVersion": "v0",
-                    "runId": context.run_id,
-                    "workflowId": context.workflow_id,
-                    "parseOutput": parse_output.payload,
-                },
-                parse_output.output_ref,
-            )
+            try:
+                ir_output = self._invoke_step(
+                    context,
+                    "generate-ir",
+                    ir_capability,
+                    DATA_CLASS_PARSER,
+                    {
+                        "schemaVersion": "v0",
+                        "runId": context.run_id,
+                        "workflowId": context.workflow_id,
+                        "parseOutput": parse_output.payload,
+                    },
+                    parse_output.output_ref,
+                )
+            except Exception:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_SEMANTIC_IR_BLOCKED,
+                    active_step=W02_STEP_GENERATE_IR,
+                    message="semantic IR generation failed",
+                    failure_code=w02.FAILURE_SEMANTIC_IR_FAILED,
+                )
+                raise
             step_results.append(ir_output)
             evidence_refs.append(ir_output.output_ref.uri)
 
@@ -1393,6 +1480,17 @@ class W0WorkflowRunner:
                     kind=KIND_SEMANTIC_IR_OUTPUT,
                 )
             )
+            ir_status = (_text(ir_output.payload.get("status")) or "").strip().lower()
+            if not ir_document or ir_status in {"failed", "error", "unsupported", "blocked"}:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_SEMANTIC_IR_BLOCKED,
+                    active_step=W02_STEP_GENERATE_IR,
+                    message="semantic IR was not produced",
+                    failure_code=w02.FAILURE_SEMANTIC_IR_FAILED,
+                )
+                raise StepExecutionError("step generate-ir failed: semantic IR was not produced")
             if ir_document:
                 _record_artifact(
                     self.artifact_store.write_json(
@@ -1923,6 +2021,7 @@ class W0WorkflowRunner:
                             "repairDecision": "refuse",
                             "failureCategory": build_failure_code,
                             "rationale": str(repair_exc),
+                            "buildTestResultRef": build_test_result_ref_payload,
                             "modelInvocationRef": {
                                 "invocationId": (
                                     f"inv-{context.run_id}-{attempt:02d}-repair-failed"
@@ -1965,6 +2064,7 @@ class W0WorkflowRunner:
                         "repairDecisionRef": dict(
                             repair_result.repair_decision_artifact_ref
                         ),
+                        "buildTestResultRef": build_test_result_ref_payload,
                         "javaCandidateRef": (
                             dict(repair_result.new_java_candidate_ref)
                             if repair_result.new_java_candidate_ref
@@ -2297,14 +2397,18 @@ class W0WorkflowRunner:
             )
             evidence_ref_payload = _as_reference_payload(evidence_output.output_ref)
             w02_contract.set_evidence_pack_ref(evidence_ref_payload)
-            if w02_blocked or not evidence_materialized:
+            if not evidence_materialized:
                 self._advance_w02(
                     context,
                     w02_contract,
                     STATE_EVIDENCE_INCOMPLETE,
                     active_step=W02_STEP_FINALIZE,
                     message="evidence pack incomplete",
-                    failure_code=(w02_failure_code or FAILURE_EVIDENCE_INCOMPLETE) if w02_blocked else FAILURE_EVIDENCE_INCOMPLETE,
+                    failure_code=(
+                        w02_failure_code
+                        if w02_blocked and w02_failure_code is not None
+                        else FAILURE_EVIDENCE_INCOMPLETE
+                    ),
                 )
                 if not w02_blocked:
                     # Evidence-write succeeded as a step but produced an
@@ -2319,7 +2423,11 @@ class W0WorkflowRunner:
                     w02_contract,
                     STATE_EVIDENCE_MATERIALIZED,
                     active_step=W02_STEP_FINALIZE,
-                    message="evidence pack materialised",
+                    message=(
+                        "blocked-run evidence pack materialised"
+                        if w02_blocked
+                        else "evidence pack materialised"
+                    ),
                 )
 
             if w02_blocked:
@@ -2446,48 +2554,55 @@ class W0WorkflowRunner:
             # consumers can read the classification and failure code from
             # ``GET /v0/runs/{runId}/workflow``.
             try:
-                exc_failure_code = self._failure_code_from_exception(exc)
-                # Drive the contract into ``run_blocked`` before finalising
-                # so the state-history reflects the workflow ordering. If we
-                # are already past ``final_java_selected`` the state machine
-                # will reject the transition; we silently fall back to a
-                # direct ``finalize`` call in that case.
-                current_state = w02_contract.state_machine.current
-                if current_state not in {
-                    w02.STATE_RUN_BLOCKED,
-                    w02.STATE_EVIDENCE_INCOMPLETE,
-                    w02.STATE_EVIDENCE_MATERIALIZED,
-                    w02.STATE_FINAL_CLASSIFICATION,
-                }:
-                    try:
-                        self._advance_w02(
-                            context,
-                            w02_contract,
-                            STATE_RUN_BLOCKED,
-                            active_step=None,
-                            message=failure_message,
-                            failure_code=exc_failure_code,
-                        )
-                    except IllegalTransitionError:
-                        pass
-                    try:
-                        self._advance_w02(
-                            context,
-                            w02_contract,
-                            STATE_EVIDENCE_INCOMPLETE,
-                            active_step=None,
-                            message="evidence pack incomplete after workflow failure",
-                            failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
-                        )
-                    except IllegalTransitionError:
-                        pass
-                self._finalize_w02(
-                    context,
-                    w02_contract,
-                    CLASSIFICATION_FAILED,
-                    failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
-                    failure_message=failure_message,
+                exc_failure_code = self._failure_code_from_exception(
+                    exc,
+                    current_state=w02_contract.state_machine.current,
+                    failed_step=failed_step,
                 )
+                # Drive the contract into ``run_blocked`` before finalising
+                # so the state-history reflects the workflow ordering. Evidence
+                # states are only recorded when the evidence step was actually
+                # reached or attempted.
+                current_state = w02_contract.state_machine.current
+                if current_state != w02.STATE_FINAL_CLASSIFICATION:
+                    if failed_step == STEP_WRITE_EVIDENCE or current_state == w02.STATE_FINAL_JAVA_SELECTED:
+                        try:
+                            self._advance_w02(
+                                context,
+                                w02_contract,
+                                STATE_EVIDENCE_INCOMPLETE,
+                                active_step=None,
+                                message="evidence pack incomplete after workflow failure",
+                                failure_code=exc_failure_code,
+                            )
+                        except IllegalTransitionError:
+                            pass
+                    elif current_state not in {
+                        w02.STATE_RUN_BLOCKED,
+                        w02.STATE_EVIDENCE_INCOMPLETE,
+                        w02.STATE_EVIDENCE_MATERIALIZED,
+                    }:
+                        try:
+                            self._advance_w02(
+                                context,
+                                w02_contract,
+                                STATE_RUN_BLOCKED,
+                                active_step=None,
+                                message=failure_message,
+                                failure_code=exc_failure_code,
+                            )
+                        except IllegalTransitionError:
+                            pass
+                    try:
+                        self._finalize_w02(
+                            context,
+                            w02_contract,
+                            CLASSIFICATION_FAILED,
+                            failure_code=exc_failure_code,
+                            failure_message=failure_message,
+                        )
+                    except IllegalTransitionError:
+                        pass
             except Exception:
                 pass
             try:
@@ -3084,10 +3199,22 @@ class W0WorkflowRunner:
         capability_id = str(capability.get("id", "")).strip()
         actor = str(capability.get("owner", self.config.service_name)).strip()
         endpoint = str(capability.get("endpoint", "")).strip()
+        failure_code = self._failure_code_for_step_name(
+            step_name,
+            data_class=data_class,
+        ) or FAILURE_JAVA_GENERATION_FAILED
         if not capability_id:
-            raise CapabilityMissingError(f"{step_name} capability id is invalid")
+            raise CapabilityMissingError(
+                f"{step_name} capability id is invalid",
+                step_name=step_name,
+                failure_code=failure_code,
+            )
         if not endpoint:
-            raise CapabilityMissingError(f"{step_name} capability endpoint is missing")
+            raise CapabilityMissingError(
+                f"{step_name} capability endpoint is missing",
+                step_name=step_name,
+                failure_code=failure_code,
+            )
 
         event_input_payload = self._event_input_payload(data_class, payload)
 
@@ -3266,18 +3393,30 @@ class W0WorkflowRunner:
         return _build_reference(f"urn:orchestrator/{run_id}/step/{step_name}", output_payload)
 
     def _require_capability(self, run_id: str, capability_id: str) -> JsonObject:
+        step_name, failure_code = self._capability_failure_context(capability_id)
         if not capability_id:
-            raise CapabilityMissingError("capability id is required")
+            raise CapabilityMissingError(
+                "capability id is required",
+                failure_code=FAILURE_JAVA_GENERATION_FAILED,
+            )
         cached = self._capability_cache.get(capability_id)
         if cached is not None:
             return cached
         try:
             capability = self.gateway.get_capability(capability_id)
         except Exception as exc:
-            raise CapabilityMissingError(f"required capability {capability_id} unavailable") from exc
+            raise CapabilityMissingError(
+                f"required capability {capability_id} unavailable",
+                step_name=step_name,
+                failure_code=failure_code,
+            ) from exc
         capability_name = capability.get("id")
         if not isinstance(capability_name, str) or not capability_name.strip():
-            raise CapabilityMissingError(f"invalid capability payload for {capability_id}")
+            raise CapabilityMissingError(
+                f"invalid capability payload for {capability_id}",
+                step_name=step_name,
+                failure_code=failure_code,
+            )
         self._capability_cache[capability_id] = capability
         self._post_event(
             run_id,

@@ -532,6 +532,7 @@ components:
         - stateHistory
         - agentAttemptCount
         - repairBudget
+        - repairAttempts
       description: >
         W0.2 workflow contract (Issue #166). The Orchestrator owns this
         document; the Harness records the state-change events but does not
@@ -604,6 +605,7 @@ components:
                 - model_gateway_unavailable
                 - model_policy_denied
                 - agent_timeout
+                - agent_contract_invalid
                 - java_generation_failed
                 - java_compile_failed
                 - java_runtime_failed
@@ -611,12 +613,50 @@ components:
                 - evidence_incomplete
                 - cancelled
             - type: 'null'
+        repairAttempts:
+          type: array
+          items: { $ref: "#/components/schemas/W02RepairAttempt" }
         failureMessage:
           oneOf:
             - type: string
             - type: 'null'
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    W02RepairAttempt:
+      type: object
+      required: [attemptNumber, repairDecision, createdAt]
+      additionalProperties: true
+      properties:
+        attemptNumber: { type: integer, minimum: 1 }
+        repairDecision:
+          type: string
+          enum: [propose_candidate, refuse, escalate, no_change]
+        failureCategory:
+          oneOf:
+            - type: string
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+        refusalCode: { type: string }
+        escalationCode: { type: string }
+        modelInvocationRef:
+          type: object
+          additionalProperties: true
+        repairInputRef:
+          type: object
+          additionalProperties: true
+        repairDecisionRef:
+          type: object
+          additionalProperties: true
+        buildTestResultRef:
+          type: object
+          additionalProperties: true
+        javaCandidateRef:
+          type: object
+          additionalProperties: true
+        rationale: { type: string }
+        diffFromPreviousRef:
+          type: object
+          additionalProperties: true
     W02StateTransition:
       type: object
       required: [state, at]

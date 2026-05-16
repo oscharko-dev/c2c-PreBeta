@@ -37,7 +37,7 @@ transitions; any non-listed transition raises `IllegalTransitionError`.
 | 4a | `semantic_ir_ready` | Parser returned an IR the runner can consume. |
 | 4b | `semantic_ir_blocked` | Source is unsupported or IR generation failed. |
 | 5 | `baseline_generation_attempted` | Deterministic target-Java generator invoked. |
-| 6 | `transformation_agent_invoked` | Productive agent invocation (W0.2 hook; repair attempts also live here). |
+| 6 | `transformation_agent_invoked` | Transformation Agent invoked to produce or improve a Java candidate before deterministic verification. |
 | 7 | `java_candidate_persisted` | Generated Java written to the artifact store. |
 | 8 | `build_test_running` | Build-test runner invoked. |
 | 9 | `verification_repair_invoked` | Build-test failed; orchestrator entered the verification/repair loop. |
@@ -59,8 +59,13 @@ The state machine is a directed graph. The full table lives in
 * `final_java_selected` may only transition to `evidence_materialized` or
   `evidence_incomplete` — there is no path from `final_java_selected` back
   to `run_blocked`.
-* `verification_repair_invoked` may re-enter `transformation_agent_invoked`
-  (when repair budget remains) or `run_blocked` (when it does not).
+* `verification_repair_invoked` may advance to `java_candidate_persisted`
+  when the Verification/Repair Agent proposes a repaired candidate, or to
+  `run_blocked` when the agent refuses, escalates, returns no usable change,
+  fails its contract, or the repair budget is exhausted. The state machine
+  also keeps the older `transformation_agent_invoked` re-entry valid for
+  compatibility with consumers that still model repair as a transformation
+  sub-step.
 * `final_classification` is terminal; no further transitions are allowed.
 
 ## Failure codes
@@ -112,19 +117,42 @@ When build-test reports failure, the Orchestrator:
 
 1. Advances the state machine to `verification_repair_invoked`.
 2. Consumes one budget unit and increments `agentAttemptCount`.
-3. Advances to `transformation_agent_invoked` and re-invokes the generator
-   (and, in later waves, the productive transformation/repair agent).
-4. Advances back through `java_candidate_persisted` → `build_test_running`.
+3. Invokes the Verification/Repair Agent through the Model Gateway and records
+   the attempt in `repairAttempts`, including the `buildTestResultRef` that
+   triggered that repair.
+4. If the agent proposes a repaired candidate, advances through
+   `java_candidate_persisted` → `build_test_running` and reruns build/test on
+   that candidate.
 5. Repeats until build-test passes (→ `final_java_selected`) or the budget
    is exhausted (→ `run_blocked`).
 
 The budget is never used on the success path — a passing first build-test
 keeps `used = 0`.
 
-## Run contract JSON shape
+## Endpoint envelope and run contract shape
 
-The serialised contract — returned by `GET /v0/runs/{runId}/workflow` and
-persisted as `w02-run-contract.json` — has this shape:
+`GET /v0/runs/{runId}/workflow` returns a workflow-contract envelope. The
+actual `W02RunContract` is nested under `contract`; `contractRef` points at the
+persisted `w02-run-contract.json` artifact when one is available.
+
+```jsonc
+{
+  "runId": "run-1",
+  "workflowId": "w0-migration-v0",
+  "programId": "CASE01",
+  "runStatus": "completed",
+  "status": "complete",
+  "missingArtifacts": [],
+  "source": "live",
+  "contract": {
+    // W02RunContract shape shown below
+  },
+  "contractRef": { "uri": "…", "sha256": "…", "byteSize": 2048 }
+}
+```
+
+The persisted `w02-run-contract.json` artifact and the envelope's `contract`
+field have this shape:
 
 ```jsonc
 {
@@ -145,6 +173,7 @@ persisted as `w02-run-contract.json` — has this shape:
   "activeStep": null,
   "agentAttemptCount": 0,
   "repairBudget": { "limit": 2, "used": 0, "remaining": 2 },
+  "repairAttempts": [],
 
   "generatedJavaRef":   { "uri": "…", "sha256": "…", "byteSize": 1024, "kind": "generated-project-manifest" },
   "buildTestResultRef": { "uri": "…", "sha256": "…", "byteSize":  512 },
@@ -159,7 +188,7 @@ persisted as `w02-run-contract.json` — has this shape:
 }
 ```
 
-For a blocked run the same envelope carries
+For a blocked run the same contract carries
 `finalClassification = "blocked"`, a non-null `failureCode`, and a non-null
 `failureMessage`. The state history shows the full repair-loop trail.
 

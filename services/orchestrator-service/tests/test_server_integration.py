@@ -666,6 +666,82 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 orchestrator_server.shutdown()
                 orchestrator_server.server_close()
 
+    def test_workflow_endpoint_returns_contract_envelope(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            MockHarnessHandler.state = state
+            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps(
+                        {
+                            "requester": "integration",
+                            "inputRef": {
+                                "uri": "urn:integration/main.cob",
+                                "source": "IDENTIFICATION DIVISION.",
+                            },
+                        }
+                    ),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 201)
+                run_id = json.loads(response.read().decode("utf-8"))["run"]["runId"]
+            finally:
+                connection.close()
+
+            status = ""
+            for _ in range(60):
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request("GET", f"/v0/runs/{run_id}")
+                    resp = connection.getresponse()
+                    body = json.loads(resp.read().decode("utf-8"))
+                    status = body.get("status", "")
+                finally:
+                    connection.close()
+                if status in {"completed", "failed"}:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(status, "completed")
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request("GET", f"/v0/runs/{run_id}/workflow")
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                workflow = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            self.assertEqual(workflow["status"], "complete")
+            self.assertEqual(workflow["source"], "live")
+            self.assertEqual(workflow["missingArtifacts"], [])
+            self.assertIn("contract", workflow)
+            self.assertIsNotNone(workflow["contract"])
+            self.assertIn("contractRef", workflow)
+            self.assertIsNotNone(workflow["contractRef"])
+            contract = workflow["contract"]
+            self.assertEqual(contract["schemaVersion"], "v0")
+            self.assertEqual(contract["currentState"], "final_classification")
+            self.assertEqual(contract["finalClassification"], "success")
+            self.assertIn("repairAttempts", contract)
+            self.assertEqual(contract["repairAttempts"], [])
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
 
     def test_artifact_endpoints_serve_persisted_run_outputs(self):
         mock_server, mock_port, _ = _start_server(MockHarnessHandler)
