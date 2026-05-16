@@ -635,6 +635,23 @@ class OrchestratorService:
         model_prompt = payload.get("modelPrompt")
         if model_prompt is not None and not isinstance(model_prompt, str):
             raise ValueError("modelPrompt must be a string")
+        # Issue #169: optional opt-in for the productive Transformation
+        # Agent. Defaults to ``False`` so existing W0 deterministic-only
+        # callers retain their behaviour.
+        use_transformation_agent_raw = payload.get("useTransformationAgent", False)
+        if isinstance(use_transformation_agent_raw, str):
+            use_transformation_agent = use_transformation_agent_raw.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        elif isinstance(use_transformation_agent_raw, bool):
+            use_transformation_agent = use_transformation_agent_raw
+        elif use_transformation_agent_raw is None:
+            use_transformation_agent = False
+        else:
+            raise ValueError("useTransformationAgent must be a boolean")
 
         run = self.runner.gateway.create_run(
             self.config.workflow_id,
@@ -651,6 +668,7 @@ class OrchestratorService:
             requester=requester,
             evidence_refs=[str(value) for value in evidence_refs],
             model_prompt=str(model_prompt).strip() if model_prompt else None,
+            use_transformation_agent=use_transformation_agent,
         )
 
         thread = threading.Thread(
