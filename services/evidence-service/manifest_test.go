@@ -60,6 +60,32 @@ func TestManifestValidateRejectsBadHash(t *testing.T) {
 	}
 }
 
+func TestManifestValidateRequiresCompletenessContract(t *testing.T) {
+	m := newCompleteManifest(t)
+	m.CompletenessStatus = ""
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "completenessStatus") {
+		t.Fatalf("expected completenessStatus validation error, got %v", err)
+	}
+
+	m = newCompleteManifest(t)
+	m.Classification = ""
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "classification") {
+		t.Fatalf("expected classification validation error, got %v", err)
+	}
+
+	m = newCompleteManifest(t)
+	m.Validation.CompletenessStatus = ""
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "validation.completenessStatus") {
+		t.Fatalf("expected validation.completenessStatus validation error, got %v", err)
+	}
+
+	m = newCompleteManifest(t)
+	m.Validation.CompletenessStatus = CompletenessStatusEvidenceIncomplete
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "must match") {
+		t.Fatalf("expected validation.completenessStatus mismatch error, got %v", err)
+	}
+}
+
 func TestDataReferenceValidateAcceptsValid(t *testing.T) {
 	ref := DataReference{
 		URI:      "urn:test/abc",
@@ -75,6 +101,56 @@ func TestDataReferenceValidateRejectsMissingURI(t *testing.T) {
 	ref := DataReference{SHA256: strings.Repeat("0", 64), ByteSize: 1}
 	if err := ref.Validate("ref"); err == nil {
 		t.Fatalf("expected validation error for missing uri")
+	}
+}
+
+func TestDataReferenceValidateRejectsSecretOrQueryBearingURI(t *testing.T) {
+	ref := DataReference{
+		URI:      "https://artifacts.example/object?token=" + "s" + "k-" + strings.Repeat("A", 20),
+		SHA256:   strings.Repeat("0", 64),
+		ByteSize: 1,
+	}
+	err := ref.Validate("ref")
+	if err == nil {
+		t.Fatalf("expected validation error for secret-bearing uri")
+	}
+	if !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected secret rejection; got %v", err)
+	}
+
+	ref.URI = "https://artifacts.example/object?signature=abc"
+	err = ref.Validate("ref")
+	if err == nil {
+		t.Fatalf("expected validation error for query-bearing http uri")
+	}
+	if !strings.Contains(err.Error(), "query") {
+		t.Fatalf("expected query rejection; got %v", err)
+	}
+}
+
+func TestJavaCandidateRefValidateRejectsSecretOrQueryBearingURI(t *testing.T) {
+	candidate := JavaCandidateRef{
+		URI:           "https://artifacts.example/generated?token=" + "s" + "k-" + strings.Repeat("A", 20),
+		SHA256:        strings.Repeat("0", 64),
+		ByteSize:      1,
+		Origin:        JavaCandidateOriginTransformationAgent,
+		AttemptNumber: 0,
+	}
+	err := candidate.Validate("candidate")
+	if err == nil {
+		t.Fatalf("expected validation error for secret-bearing candidate uri")
+	}
+	if !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected secret rejection; got %v", err)
+	}
+
+	candidate.URI = "https://artifacts.example/generated?signature=abc"
+	err = candidate.Validate("candidate")
+	if err == nil {
+		t.Fatalf("expected validation error for query-bearing candidate uri")
+	}
+	if !strings.Contains(err.Error(), "query") {
+		t.Fatalf("expected query rejection; got %v", err)
 	}
 }
 
@@ -118,6 +194,60 @@ func TestSchemaPresence(t *testing.T) {
 	t.Fatalf("schemas/evidence-pack-manifest-v0.json not found relative to service module")
 }
 
+func TestManifestSchemaRequiresCompletenessContract(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "schemas", "evidence-pack-manifest-v0.json"))
+	if err != nil {
+		t.Fatalf("read manifest schema: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("parse manifest schema: %v", err)
+	}
+	requireSchemaField(t, doc["required"], "completenessStatus")
+	requireSchemaField(t, doc["required"], "classification")
+
+	properties, ok := doc["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema properties missing or invalid")
+	}
+	validation, ok := properties["validation"].(map[string]any)
+	if !ok {
+		t.Fatalf("validation schema missing or invalid")
+	}
+	requireSchemaField(t, validation["required"], "completenessStatus")
+}
+
+func TestOpenAPIRequiresCompletenessContract(t *testing.T) {
+	body, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatalf("read openapi.yaml: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"required: [ok, requiredArtifacts, missingArtifacts, completenessStatus]",
+		"- completenessStatus",
+		"- classification",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("openapi.yaml missing %q", want)
+		}
+	}
+}
+
+func requireSchemaField(t *testing.T, required any, field string) {
+	t.Helper()
+	fields, ok := required.([]any)
+	if !ok {
+		t.Fatalf("schema required list missing or invalid")
+	}
+	for _, value := range fields {
+		if value == field {
+			return
+		}
+	}
+	t.Fatalf("schema required list missing %q: %v", field, fields)
+}
+
 func newCompleteManifest(t *testing.T) *EvidencePackManifest {
 	t.Helper()
 	store := NewPackStore()
@@ -138,6 +268,8 @@ func completeArtifacts(t *testing.T) Artifacts {
 	t.Helper()
 	cobolRef := mustRef(t, "urn:c2c/cobol/HELLO.cob", "HELLO")
 	corpusRef := mustRef(t, "urn:c2c/corpus/index", map[string]string{"index": "v0"})
+	sourceMetadataRef := mustRef(t, "urn:c2c/source-ref/HELLO", map[string]string{"sourceRef": "normalized"})
+	parseOutputRef := mustRef(t, "urn:c2c/parse-output/HELLO", map[string]string{"status": "ok"})
 	semanticRef := mustRef(t, "urn:c2c/semantic-ir/HELLO", map[string]string{"ir": "v0"})
 	transformRef := mustRef(t, "urn:c2c/transform/HELLO/lower", map[string]string{"lower": "v0"})
 	javaRef := mustRef(t, "urn:c2c/generated/HELLO.java", "Hello")
@@ -152,7 +284,9 @@ func completeArtifacts(t *testing.T) Artifacts {
 
 	return Artifacts{
 		SourceCobol:    []DataReference{cobolRef},
+		SourceMetadata: &sourceMetadataRef,
 		CorpusMetadata: &corpusRef,
+		ParseOutput:    &parseOutputRef,
 		SemanticIR:     &semanticRef,
 		TransformationPasses: []TransformationPass{{
 			Name:      "lower",

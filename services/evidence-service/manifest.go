@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -88,10 +90,13 @@ var requiredArtifactsW0 = []string{
 // classification.
 var requiredArtifactsW02 = []string{
 	"sourceCobol",
+	"sourceMetadata",
+	"parseOutput",
 	"semanticIr",
 	"generatedJava",
 	"generatedJavaArtifacts",
 	"finalJavaArtifact",
+	"runtimeVersion",
 	"buildTestResults",
 	"oracleComparison",
 	"harnessEvents",
@@ -118,6 +123,15 @@ func (r DataReference) IsZero() bool {
 func (r DataReference) Validate(path string) error {
 	if r.URI == "" {
 		return fieldError(path+".uri", "uri is required")
+	}
+	if ContainsSecretLike(r.URI) {
+		return fieldError(path+".uri", "uri appears to contain a secret or credential and was rejected by evidence-service")
+	}
+	if parsed, err := url.Parse(r.URI); err == nil {
+		scheme := strings.ToLower(parsed.Scheme)
+		if (scheme == "http" || scheme == "https") && parsed.RawQuery != "" {
+			return fieldError(path+".uri", "http artifact uri must not contain query parameters")
+		}
 	}
 	if r.SHA256 == "" {
 		return fieldError(path+".sha256", "sha256 is required")
@@ -233,20 +247,8 @@ func (c JavaCandidateRef) IsZero() bool {
 }
 
 func (c JavaCandidateRef) Validate(path string) error {
-	if c.URI == "" {
-		return fieldError(path+".uri", "uri is required")
-	}
-	if c.SHA256 == "" {
-		return fieldError(path+".sha256", "sha256 is required")
-	}
-	if !sha256Pattern.MatchString(c.SHA256) {
-		return fieldError(path+".sha256", "sha256 must be 64 hex chars")
-	}
-	if _, err := hex.DecodeString(c.SHA256); err != nil {
-		return fieldError(path+".sha256", "sha256 must be valid hex")
-	}
-	if c.ByteSize < 0 {
-		return fieldError(path+".byteSize", "byteSize must be non-negative")
+	if err := c.AsDataReference().Validate(path); err != nil {
+		return err
 	}
 	switch c.Origin {
 	case JavaCandidateOriginBaseline,
@@ -419,7 +421,9 @@ func (rv RuntimeVersion) IsZero() bool {
 
 type Artifacts struct {
 	SourceCobol            []DataReference      `json:"sourceCobol,omitempty"`
+	SourceMetadata         *DataReference       `json:"sourceMetadata,omitempty"`
 	CorpusMetadata         *DataReference       `json:"corpusMetadata,omitempty"`
+	ParseOutput            *DataReference       `json:"parseOutput,omitempty"`
 	SemanticIR             *DataReference       `json:"semanticIr,omitempty"`
 	TransformationPasses   []TransformationPass `json:"transformationPasses,omitempty"`
 	GeneratedJava          *DataReference       `json:"generatedJava,omitempty"`
@@ -455,7 +459,7 @@ type ValidationResult struct {
 	RequiredArtifacts  []string `json:"requiredArtifacts"`
 	MissingArtifacts   []string `json:"missingArtifacts"`
 	Messages           []string `json:"messages,omitempty"`
-	CompletenessStatus string   `json:"completenessStatus,omitempty"`
+	CompletenessStatus string   `json:"completenessStatus"`
 }
 
 type ExportRecord struct {
@@ -478,8 +482,8 @@ type EvidencePackManifest struct {
 	WorkflowID          string               `json:"workflowId,omitempty"`
 	Wave                string               `json:"wave"`
 	Status              string               `json:"status"`
-	CompletenessStatus  string               `json:"completenessStatus,omitempty"`
-	Classification      string               `json:"classification,omitempty"`
+	CompletenessStatus  string               `json:"completenessStatus"`
+	Classification      string               `json:"classification"`
 	Summary             string               `json:"summary,omitempty"`
 	CreatedAt           time.Time            `json:"createdAt"`
 	CreatedBy           string               `json:"createdBy,omitempty"`
@@ -534,24 +538,38 @@ func (m *EvidencePackManifest) Validate() error {
 	default:
 		return fieldError("status", "status must be complete|incomplete|invalid")
 	}
-	if m.CompletenessStatus != "" {
-		switch m.CompletenessStatus {
-		case CompletenessStatusComplete,
-			CompletenessStatusEvidenceIncomplete,
-			CompletenessStatusBlocked:
-		default:
-			return fieldError("completenessStatus", "completenessStatus must be complete|evidence_incomplete|blocked")
-		}
+	if m.CompletenessStatus == "" {
+		return fieldError("completenessStatus", "completenessStatus is required")
 	}
-	if m.Classification != "" {
-		switch m.Classification {
-		case ClassificationSuccess,
-			ClassificationEvidenceIncomplete,
-			ClassificationBlocked,
-			ClassificationFailed:
-		default:
-			return fieldError("classification", "classification must be success|evidence_incomplete|blocked|failed")
-		}
+	switch m.CompletenessStatus {
+	case CompletenessStatusComplete,
+		CompletenessStatusEvidenceIncomplete,
+		CompletenessStatusBlocked:
+	default:
+		return fieldError("completenessStatus", "completenessStatus must be complete|evidence_incomplete|blocked")
+	}
+	if m.Classification == "" {
+		return fieldError("classification", "classification is required")
+	}
+	switch m.Classification {
+	case ClassificationSuccess,
+		ClassificationEvidenceIncomplete,
+		ClassificationBlocked,
+		ClassificationFailed:
+	default:
+		return fieldError("classification", "classification must be success|evidence_incomplete|blocked|failed")
+	}
+	if m.Validation.CompletenessStatus == "" {
+		return fieldError("validation.completenessStatus", "completenessStatus is required")
+	}
+	if m.Validation.CompletenessStatus != m.CompletenessStatus {
+		return fieldError("validation.completenessStatus", "must match top-level completenessStatus")
+	}
+	if m.Classification == ClassificationSuccess && m.CompletenessStatus != CompletenessStatusComplete {
+		return fieldError("classification", "success requires completenessStatus=complete")
+	}
+	if m.CompletenessStatus == CompletenessStatusBlocked && m.Classification != ClassificationBlocked {
+		return fieldError("classification", "blocked completenessStatus requires classification=blocked")
 	}
 	if m.CreatedAt.IsZero() {
 		return fieldError("createdAt", "createdAt is required")
@@ -568,8 +586,18 @@ func validateArtifactsShape(a *Artifacts) error {
 			return err
 		}
 	}
+	if a.SourceMetadata != nil {
+		if err := a.SourceMetadata.Validate("artifacts.sourceMetadata"); err != nil {
+			return err
+		}
+	}
 	if a.CorpusMetadata != nil {
 		if err := a.CorpusMetadata.Validate("artifacts.corpusMetadata"); err != nil {
+			return err
+		}
+	}
+	if a.ParseOutput != nil {
+		if err := a.ParseOutput.Validate("artifacts.parseOutput"); err != nil {
 			return err
 		}
 	}
@@ -682,6 +710,12 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		if len(a.SourceCobol) == 0 {
 			missing = append(missing, "sourceCobol")
 		}
+		if a.SourceMetadata == nil || a.SourceMetadata.IsZero() {
+			missing = append(missing, "sourceMetadata")
+		}
+		if a.ParseOutput == nil || a.ParseOutput.IsZero() {
+			missing = append(missing, "parseOutput")
+		}
 		if a.SemanticIR == nil || a.SemanticIR.IsZero() {
 			missing = append(missing, "semanticIr")
 		}
@@ -705,6 +739,9 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		}
 		if a.OracleComparison == nil || a.OracleComparison.IsZero() {
 			missing = append(missing, "oracleComparison")
+		}
+		if a.RuntimeVersion == nil || a.RuntimeVersion.IsZero() {
+			missing = append(missing, "runtimeVersion")
 		}
 		if a.HarnessEvents == nil || a.HarnessEvents.IsZero() {
 			missing = append(missing, "harnessEvents")
@@ -802,6 +839,11 @@ func validateW02ReferentialIntegrity(a *Artifacts) []string {
 		}
 		if matchCount == 1 && selectedMatchCount != 1 {
 			missing = append(missing, "generatedJavaArtifacts.selected")
+		}
+	}
+	if a.GeneratedJava != nil && !a.GeneratedJava.IsZero() && a.FinalJavaArtifact != nil && !a.FinalJavaArtifact.IsZero() {
+		if a.GeneratedJava.URI != a.FinalJavaArtifact.URI || a.GeneratedJava.SHA256 != a.FinalJavaArtifact.SHA256 {
+			missing = append(missing, "generatedJava.finalJavaArtifact")
 		}
 	}
 

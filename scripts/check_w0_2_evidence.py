@@ -454,7 +454,16 @@ def _check_success_artifacts(
         return
 
     # Required artifact slots per the W0.2 success contract.
-    for key in ("sourceCobol", "semanticIr", "generatedJava", "buildTestResults", "harnessEvents", "modelInvocations"):
+    for key in (
+        "sourceCobol",
+        "sourceMetadata",
+        "parseOutput",
+        "semanticIr",
+        "generatedJava",
+        "buildTestResults",
+        "harnessEvents",
+        "modelInvocations",
+    ):
         if key in {"sourceCobol", "buildTestResults", "modelInvocations"}:
             value = artifacts.get(key)
             _require(
@@ -468,6 +477,15 @@ def _check_success_artifacts(
                 f"artifacts.{key} must reference a single artifact for a success run",
                 failures,
             )
+
+    runtime_version = artifacts.get("runtimeVersion")
+    _require(
+        _is_mapping(runtime_version)
+        and isinstance(runtime_version.get("id") if isinstance(runtime_version, Mapping) else None, str)
+        and bool((runtime_version.get("id") if isinstance(runtime_version, Mapping) else "").strip()),
+        f"artifacts.runtimeVersion must declare the Target-Java runtime/version for a success run, got {runtime_version!r}",
+        failures,
+    )
 
     invocations = artifacts.get("modelInvocations") or []
     if _is_seq(invocations):
@@ -509,6 +527,14 @@ def _check_success_artifacts(
             failures,
             "artifacts.generatedJavaArtifacts must be a list for a W0.2 success run",
         )
+    legacy_generated = artifacts.get("generatedJava")
+    if _is_mapping(legacy_generated) and _is_mapping(final_java):
+        _require(
+            legacy_generated.get("sha256") == final_java.get("sha256")
+            and legacy_generated.get("uri") == final_java.get("uri"),
+            "artifacts.generatedJava must match finalJavaArtifact by uri and sha256",
+            failures,
+        )
 
     oracle = artifacts.get("oracleComparison")
     if _is_mapping(oracle):
@@ -541,6 +567,13 @@ def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -
     )
     artifacts = manifest.get("artifacts")
     if _is_mapping(artifacts) and isinstance(artifacts, Mapping):
+        legacy_generated = artifacts.get("generatedJava")
+        _require(
+            legacy_generated in (None, {}),
+            "a blocked-path run must not declare artifacts.generatedJava "
+            f"(got {legacy_generated!r})",
+            failures,
+        )
         final_java = artifacts.get("finalJavaArtifact")
         _require(
             final_java in (None, {}),
@@ -548,6 +581,18 @@ def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -
             f"(got {final_java!r})",
             failures,
         )
+        candidates = artifacts.get("generatedJavaArtifacts") or []
+        if _is_seq(candidates):
+            selected = [
+                entry
+                for entry in candidates
+                if _is_mapping(entry) and bool(entry.get("selected"))
+            ]
+            _require(
+                not selected,
+                "a blocked-path run must not mark any generatedJavaArtifacts entry as selected",
+                failures,
+            )
 
 
 def _scan_referenced_artifacts(

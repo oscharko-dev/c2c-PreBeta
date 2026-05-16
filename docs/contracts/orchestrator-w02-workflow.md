@@ -191,9 +191,27 @@ field have this shape:
 }
 ```
 
+## Evidence Pack Completeness
+
+For productive W0.2 runs, the orchestrator submits the Evidence Pack with
+dedicated references for source intake and parsing, not only the final Java
+result. Successful packs must carry `artifacts.sourceMetadata` for the
+persisted `source-ref.json`, `artifacts.parseOutput` for `parse-output.json`,
+`artifacts.semanticIr`, all generated Java candidates, `finalJavaArtifact`,
+`runtimeVersion`, build/test results, oracle comparison, model invocation
+ledgers, agent trajectory refs, and Harness events. If any required reference
+is absent, evidence-service returns `completenessStatus=evidence_incomplete`
+and the workflow final classification must not be promoted to `success`.
+The orchestrator does not fabricate `sourceMetadata` or `parseOutput` from
+in-memory payloads when the persisted artifact metadata is missing.
+
 For a blocked run the same contract carries
 `finalClassification = "blocked"`, a non-null `failureCode`, and a non-null
 `failureMessage`. The state history shows the full repair-loop trail.
+Blocked Evidence Packs must not publish an authoritative final Java artifact:
+`artifacts.generatedJava` and `artifacts.finalJavaArtifact` are omitted, and
+any retained `generatedJavaArtifacts[]` entries remain unselected audit
+history only.
 
 ## Harness boundary
 

@@ -263,6 +263,33 @@ func TestValidateEndpointReportsMissing(t *testing.T) {
 	_ = res.Body.Close()
 }
 
+func TestValidateEndpointUsesManifestWave(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	artifacts.FinalJavaArtifact = nil
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-validate",
+		Wave:      WaveW02,
+		Artifacts: artifacts,
+	})
+	var manifest EvidencePackManifest
+	_ = json.NewDecoder(res.Body).Decode(&manifest)
+	_ = res.Body.Close()
+
+	res = postJSON(t, srv.URL+"/v0/packs/"+manifest.PackID+"/validate", map[string]string{})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for incomplete W0.2 validate, got %d", res.StatusCode)
+	}
+	var body ValidateResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = res.Body.Close()
+	if !containsString(body.Validation.MissingArtifacts, "finalJavaArtifact") {
+		t.Fatalf("expected W0.2 validation to report finalJavaArtifact; got %v", body.Validation.MissingArtifacts)
+	}
+}
+
 func TestPatchPackNotFound(t *testing.T) {
 	srv, _ := newTestServer(t)
 	res := patchJSON(t, srv.URL+"/v0/packs/epk-missing-0001", PatchInput{Summary: ptr("missing")})

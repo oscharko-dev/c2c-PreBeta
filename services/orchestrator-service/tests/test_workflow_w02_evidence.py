@@ -16,6 +16,7 @@ import tempfile
 import unittest
 from collections.abc import Mapping
 from orchestrator_service.artifacts import JsonValue, RunArtifactStore
+from orchestrator_service.artifacts import KIND_PARSE_OUTPUT, KIND_SOURCE_REF
 from orchestrator_service.run_contract import new_run_contract
 from orchestrator_service.workflow import (
     DataReference,
@@ -152,8 +153,36 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             source_ref={"uri": "urn:source/HELLO.cob"},
         )
 
+    def _write_source_and_parse_metadata(self, context: W0RunContext) -> None:
+        self.runner.artifact_store.write_json(
+            context.run_id,
+            context.workflow_id,
+            "source-ref.json",
+            {
+                "runId": context.run_id,
+                "workflowId": context.workflow_id,
+                "inputRef": {"uri": "urn:source/HELLO.cob", "sha256": "a" * 64, "byteSize": 12},
+                "rawInputRef": {"uri": "urn:source/HELLO.cob", "sha256": "a" * 64, "byteSize": 12},
+            },
+            kind=KIND_SOURCE_REF,
+        )
+        self.runner.artifact_store.write_json(
+            context.run_id,
+            context.workflow_id,
+            "parse-output.json",
+            {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": context.run_id,
+                "workflowId": context.workflow_id,
+                "program": {"programId": "CASE01"},
+            },
+            kind=KIND_PARSE_OUTPUT,
+        )
+
     def test_successful_w02_emits_complete_w02_artifacts(self) -> None:
         context = self._w0_context(use_transformation_agent=True)
+        self._write_source_and_parse_metadata(context)
         contract = self._w02_contract()
         contract.set_build_test_result_ref({"uri": "urn:run/build-2", "sha256": "c" * 64, "byteSize": 1})
         transformation_model_ref = _model_invocation_ref(
@@ -216,6 +245,12 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(payload["wave"], "w0.2")
         self.assertFalse(payload["blocked"])
         artifacts = payload["artifacts"]
+        self.assertIn("sourceMetadata", artifacts)
+        self.assertIn("parseOutput", artifacts)
+        self.assertIn("runtimeVersion", artifacts)
+        self.assertEqual(artifacts["runtimeVersion"]["id"], "c2c-target-java-runtime:21")
+        self.assertEqual(artifacts["sourceMetadata"]["kind"], KIND_SOURCE_REF)
+        self.assertEqual(artifacts["parseOutput"]["kind"], KIND_PARSE_OUTPUT)
 
         # generatedJavaArtifacts: baseline + repair candidate
         self.assertIn("generatedJavaArtifacts", artifacts)
@@ -264,6 +299,7 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
 
     def test_blocked_w02_run_signals_blocked_flag(self) -> None:
         context = self._w0_context(use_transformation_agent=True)
+        self._write_source_and_parse_metadata(context)
         contract = self._w02_contract()
         contract.set_build_test_result_ref({"uri": "urn:run/build-1", "sha256": "c" * 64, "byteSize": 1})
         transformation_model_ref = _model_invocation_ref(
@@ -320,6 +356,8 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(payload["wave"], "w0.2")
         self.assertTrue(payload["blocked"])
         artifacts = payload["artifacts"]
+        self.assertNotIn("generatedJava", artifacts)
+        self.assertNotIn("finalJavaArtifact", artifacts)
         # Repair attempts include the refuse decision with refusalCode.
         attempts = artifacts["repairAttempts"]
         self.assertEqual(len(attempts), 1)
@@ -329,22 +367,118 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             attempts[0]["modelInvocationRef"]["invocationId"],
             "inv-run-evidence-01-repair",
         )
-        # When the run is blocked we MUST NOT auto-mark a candidate as
-        # selected unless the orchestrator handed us one explicitly.
+        # When the run is blocked we keep candidate history only as an
+        # unselected audit trail, never as an authoritative final artifact.
         history = artifacts.get("generatedJavaArtifacts") or []
         selected = [e for e in history if e.get("selected")]
-        # The baseline matched the final_artifact_ref so it shows up selected;
-        # the repair attempt did not propose so no extra candidate exists.
-        # But the contract on blocked runs is "do not claim success" — the
-        # classification handled at evidence-service derives that.
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["origin"], "deterministic-baseline")
-        # An explicit generated_artifact_ref was passed, so exactly one
-        # candidate is selected; blocked=True still overrides classification.
-        self.assertEqual(len(selected), 1)
-        self.assertEqual(selected[0]["origin"], "deterministic-baseline")
+        self.assertEqual(selected, [])
         # Oracle comparison surfaces matched=False.
         self.assertFalse(artifacts["oracleComparison"]["matched"])
+
+    def test_w02_payload_does_not_fabricate_source_or_parse_metadata(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12}
+
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/baseline"),
+            build_test_output=_step("compile-test-java", output_uri="urn:run/build-1"),
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            generated_artifact_ref=baseline_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=False,
+            productive_model_invocations=[transformation_model_ref],
+        )
+
+        artifacts = payload["artifacts"]
+        self.assertNotIn("sourceMetadata", artifacts)
+        self.assertNotIn("parseOutput", artifacts)
+
+    def test_w02_payload_uses_persisted_source_and_parse_metadata_when_available(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        contract.set_build_test_result_ref({"uri": "urn:run/build-2", "sha256": "c" * 64, "byteSize": 1})
+
+        source_meta = self.runner.artifact_store.write_json(
+            context.run_id,
+            context.workflow_id,
+            "source-ref.json",
+            {
+                "runId": context.run_id,
+                "workflowId": context.workflow_id,
+                "inputRef": {"uri": "urn:source/HELLO.cob", "sha256": "a" * 64, "byteSize": 12},
+                "rawInputRef": {"uri": "urn:source/HELLO.cob", "sha256": "a" * 64, "byteSize": 12},
+            },
+            kind=KIND_SOURCE_REF,
+        )
+        parse_meta = self.runner.artifact_store.write_json(
+            context.run_id,
+            context.workflow_id,
+            "parse-output.json",
+            {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": context.run_id,
+                "workflowId": context.workflow_id,
+                "program": {"programId": "CASE01"},
+            },
+            kind=KIND_PARSE_OUTPUT,
+        )
+
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "ok",
+                "classification": "match",
+                "comparison": {"matched": True, "actualSha256": "b" * 64, "expectedSha256": "b" * 64},
+                "goldenMaster": {"classification": "true"},
+            },
+            output_uri="urn:run/build-2",
+        )
+        final_ref = {"uri": "urn:run/repair-1", "sha256": "d" * 64, "byteSize": 10, "kind": "transformation-agent-project-manifest"}
+        baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12, "kind": "generated-project-manifest"}
+
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/baseline"),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            generated_artifact_ref=final_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=False,
+            productive_model_invocations=[transformation_model_ref],
+        )
+
+        artifacts = payload["artifacts"]
+        self.assertEqual(artifacts["sourceMetadata"]["uri"], source_meta.uri)
+        self.assertEqual(artifacts["sourceMetadata"]["kind"], KIND_SOURCE_REF)
+        self.assertEqual(artifacts["parseOutput"]["uri"], parse_meta.uri)
+        self.assertEqual(artifacts["parseOutput"]["kind"], KIND_PARSE_OUTPUT)
 
     def test_repair_attempt_without_build_ref_is_not_fabricated(self) -> None:
         context = self._w0_context(use_transformation_agent=True)

@@ -264,6 +264,20 @@ class InvocationResponseNegativeTests(unittest.TestCase):
             validate_invocation_response(payload)
         self.assertTrue(any("modelInvocationRef" in e for e in ctx.exception.errors))
 
+    def test_missing_model_invocation_ledger_ref_rejected(self) -> None:
+        payload = _valid_invocation_response()
+        del payload["modelInvocationRef"]["ledgerRef"]
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            validate_invocation_response(payload)
+        self.assertTrue(any("ledgerRef" in e for e in ctx.exception.errors))
+
+    def test_missing_model_invocation_provider_rejected(self) -> None:
+        payload = _valid_invocation_response()
+        del payload["modelInvocationRef"]["provider"]
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            validate_invocation_response(payload)
+        self.assertTrue(any("provider" in e for e in ctx.exception.errors))
+
     def test_missing_java_candidate_ref_on_success_rejected(self) -> None:
         payload = _valid_invocation_response()
         del payload["javaCandidateRef"]
@@ -382,6 +396,18 @@ class InvocationRequestNegativeTests(unittest.TestCase):
         with self.assertRaises(AgentContractInvalidError) as ctx:
             validate_invocation_request(payload)
         self.assertTrue(any("modelInvocationRef" in e for e in ctx.exception.errors))
+
+    def test_model_invocation_ledger_ref_optional_until_gateway_response(self) -> None:
+        payload = _valid_invocation_request()
+        del payload["modelInvocationRef"]["ledgerRef"]
+        validate_invocation_request(payload)
+
+    def test_missing_model_invocation_provider_rejected(self) -> None:
+        payload = _valid_invocation_request()
+        del payload["modelInvocationRef"]["provider"]
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            validate_invocation_request(payload)
+        self.assertTrue(any("provider" in e for e in ctx.exception.errors))
 
 
 class RepairInputNegativeTests(unittest.TestCase):

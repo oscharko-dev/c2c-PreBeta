@@ -29,20 +29,22 @@ present alongside any pack.
 | `workflowId` | optional | Filled in when the orchestrator created the run with one. |
 | `wave` | yes | `"w0"` for the deterministic baseline; `"w0.2"` when productive agents ran. The wave enum controls which completeness rule the service applies. |
 | `status` | yes | `complete` only when every required artifact is populated. |
-| `completenessStatus` | yes (W0.2) | `complete` / `evidence_incomplete` / `blocked`. Independent of `status` so the orchestrator can distinguish *missing required evidence* from *upstream failure blocked the run*. |
-| `classification` | yes (W0.2) | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed). |
+| `completenessStatus` | yes | `complete` / `evidence_incomplete` / `blocked`. Independent of `status` so the orchestrator can distinguish *missing required evidence* from *upstream failure blocked the run*. |
+| `classification` | yes | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed). |
 | `createdAt` | yes | UTC RFC 3339 timestamp. |
 | `artifacts.sourceCobol` | **yes** | One or more references to ingested COBOL source files. |
+| `artifacts.sourceMetadata` | **yes (W0.2)** | Normalized source metadata captured after input intake. W0.2 packs must reference the persisted `source-ref.json` artifact; the orchestrator does not synthesize this reference if persistence failed. |
 | `artifacts.corpusMetadata` | optional | Pointer to the corpus index entry used for the run. |
+| `artifacts.parseOutput` | **yes (W0.2)** | Persisted `parse-output.json` reference used to produce Semantic IR. The field is omitted, and the pack remains incomplete, if that artifact metadata is absent. |
 | `artifacts.semanticIr` | **yes** | Reference to the Semantic IR document. |
 | `artifacts.transformationPasses` | optional | Ordered list of transformation pass outputs. |
-| `artifacts.generatedJava` | **yes** | Reference to the final generated Java project bundle (legacy single-ref field). For W0.2 runs the same artifact is mirrored as the selected entry of `generatedJavaArtifacts[]`. |
+| `artifacts.generatedJava` | **yes for success** | Reference to the final generated Java project bundle (legacy single-ref field). For successful W0.2 runs the same artifact is mirrored as the selected entry of `generatedJavaArtifacts[]`; blocked W0.2 packs must omit it. |
 | `artifacts.generatedJavaArtifacts` | **yes (W0.2)** | One entry per Java candidate persisted during the run: the deterministic baseline, the Transformation Agent's candidate, and each Verification/Repair Agent candidate. Each entry carries `origin`, `attemptNumber`, and `selected`. |
-| `artifacts.finalJavaArtifact` | **yes (W0.2)** | The candidate that passed the deterministic gate (or the last attempt before the repair budget was exhausted). Required for `completenessStatus=complete`. |
+| `artifacts.finalJavaArtifact` | **yes for W0.2 success** | The candidate that passed the deterministic gate. Required for `completenessStatus=complete`; blocked W0.2 packs must omit it. |
 | `artifacts.repairAttempts` | **yes when ≥1 attempt ran** | One entry per Verification/Repair Agent invocation. Captures `attemptNumber`, `decision`, `decisionRef`, `modelInvocationRef`, optional `newJavaCandidateRef`, `buildTestResultRef`, and `refusalCode`/`noChange` when applicable. |
 | `artifacts.agentTrajectories` | **yes (W0.2)** | Per-agent trajectory ledger references (`orchestrator`, `transformation`, `verification-repair`). Replaces the singular `trajectoryLedger` for W0.2 runs; both fields are populated for backwards compatibility. |
 | `artifacts.oracleComparison` | **yes (W0.2)** | Flat envelope summarising the comparison between the Java output and the COBOL oracle / golden master. Carries `matched`, `oracleKind`, `actualSha256`, `expectedSha256`, `classification`, and a pointer to the build/test result. `oracleKind=absent` when no oracle was available. |
-| `artifacts.runtimeVersion` | optional | Target Java runtime coordinate plus optional reference. |
+| `artifacts.runtimeVersion` | **yes (W0.2)** | Target Java runtime/contract coordinate plus optional reference. |
 | `artifacts.modelInvocations` | **yes** | One entry per model invocation; W0.2 packs must include productive Transformation and Verification/Repair Agent ledgers when those agent trajectories are present. The ledger holds the structured request/response references — the evidence pack never embeds raw prompts or completions. |
 | `artifacts.buildTestResults` | **yes** | References to `build-test-runner-service` results. |
 | `artifacts.sbom` | optional | SBOM document references (CycloneDX, SPDX). |
@@ -80,10 +82,13 @@ Issue #171 extends the required set for productive-agent runs. A
 `completenessStatus=complete` requires every entry below:
 
 - `sourceCobol`
+- `sourceMetadata`
+- `parseOutput`
 - `semanticIr`
 - `generatedJava` *(legacy single ref preserved for backwards compatibility)*
 - `generatedJavaArtifacts` *(every persisted candidate)*
 - `finalJavaArtifact` *(the selected candidate)*
+- `runtimeVersion`
 - `buildTestResults`
 - `oracleComparison`
 - `harnessEvents`
@@ -98,16 +103,26 @@ Missing artifacts move the manifest to `status="incomplete"` and surface in
 service refuses to export an incomplete pack with `422 Unprocessable Entity`
 so consumers never receive a half-bundle that looks complete.
 
+Blocked W0.2 packs use a separate non-success shape: they must not declare the
+legacy authoritative `generatedJava` ref, must not declare `finalJavaArtifact`,
+and must not mark any entry in `generatedJavaArtifacts[]` as `selected`.
+Unselected candidate history may remain for auditability, but no blocked pack
+may advertise a final Java artifact.
+When a W0.2 pack transitions to blocked through `PATCH` with `blocked=true`,
+evidence-service normalizes that shape by clearing the authoritative Java refs
+and unselecting any retained candidate-history entries before revalidating.
+
 ### Secret scrubbing
 
 Evidence packs are reviewer-visible and MUST NOT contain raw secrets. The
-service rejects creates/updates whose `modelInvocations[]` entries embed
-values matching well-known credential patterns (OpenAI `sk-...`, AWS
-`AKIA...`, GitHub `ghp_.../ghs_...`, Hugging Face `hf_...`, JWT
-triplets, PEM `-----BEGIN ... PRIVATE KEY-----` blocks, bearer-token
-strings, `api_key=...` assignments). Callers must pre-redact before
-posting; evidence-service fails closed with `400 Bad Request` if any field
-on a model-invocation reference appears credential-shaped.
+service rejects creates/updates whose artifact URIs or `modelInvocations[]`
+entries embed values matching well-known credential patterns (OpenAI
+`sk-...`, AWS `AKIA...`, GitHub `ghp_.../ghs_...`, Hugging Face `hf_...`,
+JWT triplets, PEM `-----BEGIN ... PRIVATE KEY-----` blocks, bearer-token
+strings, `api_key=...` assignments). HTTP(S) artifact URIs with query strings
+are also rejected because presigned URLs and access tokens commonly ride in
+query parameters. Callers must pre-redact before posting; evidence-service
+fails closed with `400 Bad Request` if any reference appears credential-shaped.
 
 ## Export contract
 

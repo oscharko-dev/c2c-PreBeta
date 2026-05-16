@@ -12,6 +12,8 @@
     "runId",
     "status",
     "wave",
+    "completenessStatus",
+    "classification",
     "createdAt",
     "artifacts",
     "validation"
@@ -84,7 +86,15 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/dataReference" }
         },
+        "sourceMetadata": {
+          "$ref": "#/$defs/dataReference",
+          "description": "W0.2 — normalized source metadata captured by the orchestrator after input intake, typically the persisted source-ref artifact."
+        },
         "corpusMetadata": { "$ref": "#/$defs/dataReference" },
+        "parseOutput": {
+          "$ref": "#/$defs/dataReference",
+          "description": "W0.2 — reference to the COBOL parser output that fed Semantic IR generation."
+        },
         "semanticIr": { "$ref": "#/$defs/dataReference" },
         "transformationPasses": {
           "type": "array",
@@ -116,6 +126,7 @@
         },
         "runtimeVersion": {
           "type": "object",
+          "description": "W0.2 — Target-Java runtime or contract version used to compile and verify the generated project.",
           "required": ["id"],
           "properties": {
             "id": { "type": "string", "minLength": 1 },
@@ -176,7 +187,7 @@
     },
     "validation": {
       "type": "object",
-      "required": ["requiredArtifacts", "missingArtifacts", "ok"],
+      "required": ["requiredArtifacts", "missingArtifacts", "ok", "completenessStatus"],
       "properties": {
         "ok": { "type": "boolean" },
         "requiredArtifacts": {

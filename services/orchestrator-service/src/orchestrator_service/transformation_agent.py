@@ -52,6 +52,7 @@ from .agent_contracts import (
     validate_invocation_request,
 )
 from .artifacts import (
+    KIND_MODEL_INVOCATION_LEDGER,
     KIND_TRANSFORMATION_AGENT_JAVA_FILE,
     KIND_TRANSFORMATION_AGENT_PROJECT_MANIFEST,
     KIND_TRANSFORMATION_AGENT_REQUEST,
@@ -468,6 +469,27 @@ def _model_invocation_ref_from_gateway(
         "modelId": model_id,
         "provider": provider,
     }
+    for key in (
+        "promptTemplateVersion",
+        "promptTemplateId",
+        "policyDecision",
+        "policyVersion",
+        "policyId",
+        "status",
+        "agentRole",
+        "errorCode",
+        "errorClass",
+        "timestamp",
+    ):
+        value = str(gateway_response.get(key) or "").strip()
+        if value:
+            model_invocation_ref[key] = value
+    try:
+        latency_ms = int(gateway_response.get("latencyMs"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        latency_ms = None
+    if latency_ms is not None and latency_ms >= 0:
+        model_invocation_ref["latencyMs"] = latency_ms
     ledger_ref_raw = gateway_response.get("ledgerRef")
     if not isinstance(ledger_ref_raw, Mapping) or not _looks_like_artifact_ref(ledger_ref_raw):
         raise AgentContractInvalidAgentError(
@@ -948,6 +970,7 @@ class TransformationAgent:
             ended_at = self._iso_now()
             failed_response = self._build_contract_safe_failure_response(
                 request,
+                request_artifact_ref=request_artifact_ref,
                 status="failed" if isinstance(exc, ModelGatewayUnavailableError)
                 else ("policy_denied" if isinstance(exc, ModelPolicyDeniedAgentError)
                       else ("timeout" if isinstance(exc, AgentTimeoutError)
@@ -1025,6 +1048,7 @@ class TransformationAgent:
         except AgentContractInvalidAgentError as exc:
             failed_response = self._build_contract_safe_failure_response(
                 request,
+                request_artifact_ref=request_artifact_ref,
                 status="failed",
                 failure_code=exc.failure_code,
                 failure_message=str(exc),
@@ -1342,6 +1366,7 @@ class TransformationAgent:
         ended_at: str,
         model_invocation_id: str,
         model_provider: str,
+        model_invocation_ledger_ref: Mapping[str, JsonValue],
         _latency_ms: int = 0,
     ) -> JsonObject:
         """Materialise a contract-shaped failure response for persistence.
@@ -1376,6 +1401,7 @@ class TransformationAgent:
                 "invocationId": model_invocation_id,
                 "modelId": request.model_id,
                 "provider": provider,
+                "ledgerRef": dict(model_invocation_ledger_ref),
             },
             "promptTemplateId": self._config.transformation_agent_prompt_template_id,
             "promptTemplateVersion": self._config.transformation_agent_prompt_template_version,
@@ -1409,6 +1435,7 @@ class TransformationAgent:
         self,
         request: TransformationAgentRequest,
         *,
+        request_artifact_ref: Mapping[str, JsonValue],
         status: str,
         failure_code: str,
         failure_message: str,
@@ -1419,6 +1446,17 @@ class TransformationAgent:
         _latency_ms: int = 0,
     ) -> JsonObject:
         """Build a failure response, redacting only if the contract guard trips."""
+        model_invocation_ledger_ref = self._write_failure_model_invocation_ledger(
+            request,
+            request_artifact_ref=request_artifact_ref,
+            status=status,
+            failure_code=failure_code,
+            started_at=started_at,
+            ended_at=ended_at,
+            model_invocation_id=model_invocation_id,
+            model_provider=model_provider,
+            latency_ms=_latency_ms,
+        )
         response = self._build_failure_response(
             request,
             status=status,
@@ -1428,6 +1466,7 @@ class TransformationAgent:
             ended_at=ended_at,
             model_invocation_id=model_invocation_id,
             model_provider=model_provider,
+            model_invocation_ledger_ref=model_invocation_ledger_ref,
             _latency_ms=_latency_ms,
         )
         try:
@@ -1445,10 +1484,75 @@ class TransformationAgent:
                 ended_at=ended_at,
                 model_invocation_id=model_invocation_id,
                 model_provider=model_provider,
+                model_invocation_ledger_ref=model_invocation_ledger_ref,
                 _latency_ms=_latency_ms,
             )
             guard_agent_response(redacted)
             return redacted
+
+    def _write_failure_model_invocation_ledger(
+        self,
+        request: TransformationAgentRequest,
+        *,
+        request_artifact_ref: Mapping[str, JsonValue],
+        status: str,
+        failure_code: str,
+        started_at: str,
+        ended_at: str,
+        model_invocation_id: str,
+        model_provider: str,
+        latency_ms: int,
+    ) -> JsonObject:
+        provider = (
+            model_provider
+            if model_provider in {"foundry-development", "customer-internal-mock"}
+            else "foundry-development"
+        )
+        attempt_dir = self._attempt_dir(request.attempt_number)
+        output_payload: JsonObject = {
+            "schemaVersion": "v0",
+            "invocationId": model_invocation_id,
+            "runId": request.run_id,
+            "status": status,
+            "failureCode": failure_code,
+            "createdAt": ended_at,
+        }
+        output_meta = self._artifact_store.write_json(
+            request.run_id,
+            request.workflow_id,
+            f"{attempt_dir}/model-invocation-failure-output.json",
+            output_payload,
+            kind="model-invocation-output",
+        )
+        ledger_status = "rejected" if status == "policy_denied" else "failed"
+        ledger_payload: JsonObject = {
+            "schemaVersion": "v0",
+            "invocationId": model_invocation_id,
+            "runId": request.run_id,
+            "modelId": request.model_id,
+            "provider": provider,
+            "policyId": request.policy_version or "foundry-development-v0",
+            "agentRole": "transformation",
+            "dataClass": "model-gateway",
+            "promptTemplateVersion": self._config.transformation_agent_prompt_template_version,
+            "policyDecision": "denied" if status == "policy_denied" else "failed",
+            "status": ledger_status,
+            "latencyMs": max(0, int(latency_ms)),
+            "requestRef": dict(request_artifact_ref),
+            "outputRef": self._meta_to_ref(output_meta),
+            "errorCode": failure_code,
+            "errorClass": failure_code,
+            "structuredOutput": True,
+            "createdAt": ended_at,
+        }
+        ledger_meta = self._artifact_store.write_json(
+            request.run_id,
+            request.workflow_id,
+            f"{attempt_dir}/model-invocation-failure-ledger.json",
+            ledger_payload,
+            kind=KIND_MODEL_INVOCATION_LEDGER,
+        )
+        return self._meta_to_ref(ledger_meta)
 
     def _call_model_gateway(
         self, request: TransformationAgentRequest

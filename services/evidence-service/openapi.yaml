@@ -165,6 +165,8 @@ components:
       properties:
         runId: { type: string }
         workflowId: { type: string }
+        wave: { type: string, enum: [w0, w0.2] }
+        blocked: { type: boolean }
         summary: { type: string }
         createdBy: { type: string }
         artifacts: { $ref: "#/components/schemas/Artifacts" }
@@ -175,6 +177,7 @@ components:
       type: object
       properties:
         summary: { type: string }
+        blocked: { type: boolean }
         artifacts: { $ref: "#/components/schemas/Artifacts" }
         openAssumptions: { type: array, items: { $ref: "#/components/schemas/OpenAssumption" } }
         unsupportedFeatures: { type: array, items: { $ref: "#/components/schemas/UnsupportedFeature" } }
@@ -183,10 +186,17 @@ components:
       type: object
       properties:
         sourceCobol: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+        sourceMetadata: { $ref: "#/components/schemas/DataReference" }
         corpusMetadata: { $ref: "#/components/schemas/DataReference" }
+        parseOutput: { $ref: "#/components/schemas/DataReference" }
         semanticIr: { $ref: "#/components/schemas/DataReference" }
         transformationPasses: { type: array, items: { $ref: "#/components/schemas/TransformationPass" } }
         generatedJava: { $ref: "#/components/schemas/DataReference" }
+        generatedJavaArtifacts: { type: array, items: { $ref: "#/components/schemas/JavaCandidateRef" } }
+        finalJavaArtifact: { $ref: "#/components/schemas/JavaCandidateRef" }
+        repairAttempts: { type: array, items: { $ref: "#/components/schemas/RepairAttempt" } }
+        agentTrajectories: { type: array, items: { $ref: "#/components/schemas/AgentTrajectoryRef" } }
+        oracleComparison: { $ref: "#/components/schemas/OracleComparison" }
         runtimeVersion: { $ref: "#/components/schemas/RuntimeVersion" }
         modelInvocations: { type: array, items: { $ref: "#/components/schemas/ModelInvocationRef" } }
         buildTestResults: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
@@ -213,6 +223,76 @@ components:
         id: { type: string }
         ref: { $ref: "#/components/schemas/DataReference" }
 
+    JavaCandidateRef:
+      type: object
+      required: [uri, sha256, byteSize, origin, attemptNumber]
+      properties:
+        uri: { type: string }
+        sha256: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+        origin:
+          type: string
+          enum: [deterministic-baseline, transformation-agent, verification-repair-agent]
+        attemptNumber: { type: integer, minimum: 0 }
+        selected: { type: boolean }
+
+    RepairAttempt:
+      type: object
+      required: [attemptNumber, decision, buildTestResultRef]
+      properties:
+        attemptNumber: { type: integer, minimum: 1 }
+        decision:
+          type: string
+          enum: [propose_candidate, refuse, escalate, no_change]
+        decisionRef: { $ref: "#/components/schemas/DataReference" }
+        modelInvocationRef: { $ref: "#/components/schemas/ModelInvocationRef" }
+        newJavaCandidateRef: { $ref: "#/components/schemas/JavaCandidateRef" }
+        buildTestResultRef: { $ref: "#/components/schemas/DataReference" }
+        refusalCode: { type: string }
+        noChange: { type: boolean }
+      oneOf:
+        - required: [newJavaCandidateRef]
+          properties:
+            decision:
+              type: string
+              enum: [propose_candidate]
+        - required: [refusalCode]
+          properties:
+            decision:
+              type: string
+              enum: [refuse, escalate]
+        - properties:
+            decision:
+              type: string
+              enum: [no_change]
+
+    AgentTrajectoryRef:
+      type: object
+      required: [agentRole, ledgerRef]
+      properties:
+        agentRole:
+          type: string
+          enum: [orchestrator, transformation, verification-repair]
+        ledgerRef: { $ref: "#/components/schemas/DataReference" }
+
+    OracleComparison:
+      type: object
+      required: [matched, oracleKind]
+      properties:
+        matched: { type: boolean }
+        oracleKind:
+          type: string
+          enum: [cobol-runtime, synthetic, true-golden-master, absent]
+        expectedRef: { $ref: "#/components/schemas/DataReference" }
+        actualRef: { $ref: "#/components/schemas/DataReference" }
+        expectedSha256: { type: string }
+        actualSha256: { type: string }
+        buildTestResultRef: { $ref: "#/components/schemas/DataReference" }
+        classification: { type: string }
+        summary: { type: string }
+
     ModelInvocationRef:
       type: object
       required: [invocationId, modelId, ledgerRef]
@@ -221,10 +301,16 @@ components:
         modelId: { type: string }
         provider: { type: string }
         promptTemplateVersion: { type: string }
+        promptTemplateId: { type: string }
         policyDecision: { type: string }
         status: { type: string }
         reason: { type: string }
         policyVersion: { type: string }
+        policyId: { type: string }
+        agentRole: { type: string }
+        latencyMs: { type: integer, minimum: 0 }
+        errorCode: { type: string }
+        errorClass: { type: string }
         timestamp: { type: string, format: date-time }
         ledgerRef: { $ref: "#/components/schemas/DataReference" }
 
@@ -246,12 +332,15 @@ components:
 
     ValidationResult:
       type: object
-      required: [ok, requiredArtifacts, missingArtifacts]
+      required: [ok, requiredArtifacts, missingArtifacts, completenessStatus]
       properties:
         ok: { type: boolean }
         requiredArtifacts: { type: array, items: { type: string } }
         missingArtifacts: { type: array, items: { type: string } }
         messages: { type: array, items: { type: string } }
+        completenessStatus:
+          type: string
+          enum: [complete, evidence_incomplete, blocked]
 
     EvidencePackManifest:
       type: object
@@ -263,6 +352,8 @@ components:
         - runId
         - wave
         - status
+        - completenessStatus
+        - classification
         - createdAt
         - artifacts
         - validation
@@ -273,8 +364,14 @@ components:
         packId: { type: string }
         runId: { type: string }
         workflowId: { type: string }
-        wave: { type: string, enum: [w0] }
+        wave: { type: string, enum: [w0, w0.2] }
         status: { type: string, enum: [complete, incomplete, invalid] }
+        completenessStatus:
+          type: string
+          enum: [complete, evidence_incomplete, blocked]
+        classification:
+          type: string
+          enum: [success, evidence_incomplete, blocked, failed]
         summary: { type: string }
         createdAt: { type: string, format: date-time }
         createdBy: { type: string }
