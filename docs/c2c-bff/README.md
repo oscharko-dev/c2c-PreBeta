@@ -88,6 +88,11 @@ See [`services/c2c-bff/openapi.yaml`](../../services/c2c-bff/openapi.yaml)
 for the canonical schema. The UI consumes only `/api/v0/*` and is not
 allowed to bypass it.
 
+The W0.2-specific behaviour (workflow contract endpoint, failure-code
+mapping, sanitized error responses, artifact size limits, target-language
+constraint) is documented in
+[`docs/c2c-bff/w0.2-api-contract.md`](./w0.2-api-contract.md) (Issue #172).
+
 ## What W0/W0.1 deliberately does not do
 
 - Customer-data upload paths.

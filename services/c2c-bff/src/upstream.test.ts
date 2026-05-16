@@ -129,10 +129,53 @@ test('orchestrator and evidence clients are disabled when no base url is configu
   assert.equal(await orch.getBuildTest('z'), undefined);
   assert.equal(await orch.getEvidence('z'), undefined);
   assert.equal(await orch.getEvents('z'), undefined);
+  assert.equal(await orch.getWorkflow('z'), undefined);
 
   const ev = createEvidenceClient('', client, 1_000);
   assert.equal(ev.enabled, false);
   assert.equal(await ev.getPack('any'), undefined);
+});
+
+test('startTransformRun forwards W0.2 targetLanguage and oracle metadata on the inputRef', async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({ run: { runId: 'live-1', status: 'updating' }, status: 'started' });
+      res.writeHead(201, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      await orch.startTransformRun({
+        programId: 'HELLO01',
+        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        targetLanguage: 'java',
+        expectedOutput: 'HELLO WORLD\n',
+        oracleInput: '',
+      });
+      const parsed = JSON.parse(captured[0]?.body ?? '{}');
+      assert.equal(parsed.targetLanguage, 'java');
+      assert.equal(parsed.inputRef.expectedOutput, 'HELLO WORLD\n');
+      assert.equal(parsed.inputRef.oracleInput, undefined);
+    },
+  );
+});
+
+test('orchestrator client encodes workflow endpoint with the run id', async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({ status: 'complete', contract: { runId: 'run a/b' } });
+      res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      const response = await orch.getWorkflow('run a/b');
+      assert.equal(response?.status, 200);
+      assert.equal(captured[0]?.path, '/v0/runs/run%20a%2Fb/workflow');
+    },
+  );
 });
 
 test('orchestrator client encodes run id and routes artifact endpoints', async () => {

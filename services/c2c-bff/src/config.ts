@@ -13,6 +13,11 @@ export interface BffConfig {
   harnessUrl: string;
   upstreamTimeoutMs: number;
   transformSourceMaxBytes: number;
+  // Issue #172: size limit applied to artifact-content responses
+  // (currently the per-file generated Java view). Anything larger is
+  // rejected with HTTP 413 + { error: 'artifact_too_large' } so a single
+  // run cannot pin the BFF process or the browser tab.
+  artifactContentMaxBytes: number;
   enableDiagnosticFixtures: boolean;
 }
 
@@ -20,6 +25,7 @@ const SERVICE_NAME = 'c2c-bff';
 const DEFAULT_PORT = 8090;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 4_000;
 const DEFAULT_TRANSFORM_SOURCE_MAX_BYTES = 1_000_000;
+const DEFAULT_ARTIFACT_CONTENT_MAX_BYTES = 1_048_576;
 
 function parsePort(raw: string | undefined, fallback: number): number {
   if (!raw || raw.trim() === '') return fallback;
@@ -91,6 +97,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, packageRoot: st
     harnessUrl: env.C2C_HARNESS_URL?.trim() ?? '',
     upstreamTimeoutMs: parseTimeoutMs(env.C2C_UPSTREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS),
     transformSourceMaxBytes: parseSizeBytes(env.C2C_TRANSFORM_SOURCE_MAX_BYTES, DEFAULT_TRANSFORM_SOURCE_MAX_BYTES),
+    artifactContentMaxBytes: parseSizeBytes(env.C2C_ARTIFACT_CONTENT_MAX_BYTES, DEFAULT_ARTIFACT_CONTENT_MAX_BYTES),
     enableDiagnosticFixtures: parseBoolFlag(env.C2C_ENABLE_DIAGNOSTIC_FIXTURES),
   };
 }

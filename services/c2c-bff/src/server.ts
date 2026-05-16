@@ -20,8 +20,24 @@ import {
   type HttpClient,
   type OrchestratorClient,
 } from './upstream';
-import { coerceLiveStatus, createRunStore, type RunStore, type StoredRun } from './run-store';
+import {
+  coerceLiveStatus,
+  createRunStore,
+  type RunStore,
+  type StoredRun,
+  type RunFinalClassification,
+  type StoredRepairBudget,
+} from './run-store';
 import { findPlaceholderInFiles } from './placeholder-markers';
+import {
+  W02_UI_ERROR_CODES,
+  defaultMessageFor,
+  mapFailure,
+  mapOrchestratorFailureCode,
+  mapUpstreamUnavailable,
+  sanitizeUpstreamMessage,
+  type W02UiErrorCode,
+} from './error-codes';
 
 const STATIC_MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -205,7 +221,7 @@ function productModeOf(stored: StoredRun): 'live' | 'unavailable' {
 }
 
 function runSummary(stored: StoredRun): Record<string, unknown> {
-  return {
+  const summary: Record<string, unknown> = {
     runId: stored.runId,
     programId: stored.programId,
     status: stored.status,
@@ -217,7 +233,17 @@ function runSummary(stored: StoredRun): Record<string, unknown> {
     orchestratorRunId: stored.liveRunId ?? '',
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
+    // Issue #172: W0.2 contract surface. Fields are present on every
+    // response so the UI can drive a stable model, even when the underlying
+    // run has not produced a workflow contract yet.
+    activeStep: stored.activeStep ?? null,
+    agentAttemptCount: stored.agentAttemptCount ?? 0,
+    repairBudget: stored.repairBudget ?? null,
+    finalClassification: stored.finalClassification ?? null,
+    failureCode: stored.failureCode ?? null,
+    failureMessage: stored.failureMessage ?? null,
   };
+  return summary;
 }
 
 function runLinks(runId: string): Record<string, string> {
@@ -230,6 +256,7 @@ function runLinks(runId: string): Record<string, string> {
     artifacts: `/api/v0/runs/${runId}/artifacts`,
     progress: `/api/v0/runs/${runId}/progress`,
     learning: `/api/v0/runs/${runId}/learning`,
+    workflow: `/api/v0/runs/${runId}/workflow`,
   };
 }
 
@@ -658,7 +685,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
     };
   } catch (err) {
     return {
-      ...incompleteEnvelope(stored, ['generation-response'], err instanceof Error ? err.message : 'orchestrator request failed'),
+      ...incompleteEnvelope(stored, ['generation-response'], sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed')),
       entryClass: '',
       entryFilePath: '',
       files: {},
@@ -769,7 +796,7 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
     };
   } catch (err) {
     return {
-      ...incompleteEnvelope(stored, ['build-test-result'], err instanceof Error ? err.message : 'orchestrator request failed'),
+      ...incompleteEnvelope(stored, ['build-test-result'], sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed')),
       classification: 'skipped-no-execution',
       compileStatus: 'unknown',
       executionStatus: 'unknown',
@@ -883,7 +910,7 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
     };
   } catch (err) {
     return {
-      ...incompleteEnvelope(stored, ['evidence-pack-manifest'], err instanceof Error ? err.message : 'orchestrator request failed'),
+      ...incompleteEnvelope(stored, ['evidence-pack-manifest'], sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed')),
       packId: '',
       manifestUri: '',
       manifestHash: '',
@@ -1033,7 +1060,7 @@ async function liveProgressView(stored: StoredRun, orchestrator: OrchestratorCli
       stepCount: 0,
       steps: [],
       missingArtifacts: ['run-progress'],
-      note: err instanceof Error ? err.message : 'orchestrator request failed',
+      note: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
     };
   }
 }
@@ -1121,7 +1148,7 @@ async function liveLearningView(
       endpoint: '',
       source: 'unavailable',
       missingArtifacts: ['learning-summary'],
-      note: err instanceof Error ? err.message : 'orchestrator request failed',
+      note: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
     };
   }
 }
@@ -1194,8 +1221,245 @@ async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClien
       productMode: productModeOf(stored),
       events: [],
       missingArtifacts: ['trajectory-ledger'],
-      note: err instanceof Error ? err.message : 'orchestrator request failed',
+      note: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
     };
+  }
+}
+
+// Issue #172: W0.2 workflow contract product-level view.
+//
+// The orchestrator's ``GET /v0/runs/{runId}/workflow`` returns a verbose
+// envelope that mixes internal references (artifact URIs, raw model
+// invocation refs, persisted workflow_id) with the product-level signals
+// the browser actually needs. ``liveWorkflowView`` strips internal-only
+// fields, maps the orchestrator failure code to a UI-safe code, and
+// guarantees a stable response shape regardless of orchestrator state.
+
+const FINAL_CLASSIFICATIONS_SET: ReadonlySet<RunFinalClassification> = new Set([
+  'success',
+  'blocked',
+  'failed',
+  'cancelled',
+  'incomplete',
+]);
+
+function asFinalClassification(value: unknown): RunFinalClassification | null {
+  if (typeof value !== 'string') return null;
+  if (FINAL_CLASSIFICATIONS_SET.has(value as RunFinalClassification)) {
+    return value as RunFinalClassification;
+  }
+  return null;
+}
+
+function asRepairBudget(value: unknown): StoredRepairBudget | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const limit = asNumber(record.limit);
+  const used = asNumber(record.used);
+  if (limit === undefined || used === undefined) return null;
+  if (limit < 0 || used < 0) return null;
+  const remaining = asNumber(record.remaining) ?? Math.max(0, limit - used);
+  return { limit, used, remaining };
+}
+
+// Active agent is derived from ``activeStep`` so the BFF never echoes
+// orchestrator-internal step ids the UI cannot recognise. Anything we
+// don't know maps to ``null`` so the UI can suppress the agent badge.
+function deriveActiveAgent(activeStep: string | null): string | null {
+  if (!activeStep) return null;
+  const normalized = activeStep.replace(/_/g, '-').toLowerCase();
+  if (normalized.includes('transformation-agent')) return 'transformation_agent';
+  if (normalized.includes('verification-repair-agent') || normalized.includes('verification-repair')) {
+    return 'verification_repair_agent';
+  }
+  if (normalized.includes('parse-cobol') || normalized.includes('cobol-parser')) return 'cobol_parser';
+  if (normalized.includes('semantic-ir')) return 'semantic_ir';
+  if (normalized.includes('generate-java') || normalized.includes('java-generation')) return 'java_generator';
+  if (normalized.includes('compile-test') || normalized.includes('build-test')) return 'build_test_runner';
+  if (normalized.includes('write-evidence') || normalized.includes('evidence')) return 'evidence_service';
+  return null;
+}
+
+interface SanitizedRepairAttempt {
+  attemptNumber: number;
+  repairDecision: string;
+  failureCategory: string | null;
+  hasModelInvocation: boolean;
+  hasRepairInput: boolean;
+  hasJavaCandidate: boolean;
+  rationale?: string;
+}
+
+const REPAIR_DECISION_SET = new Set(['propose_candidate', 'refuse', 'escalate', 'no_change']);
+
+function sanitizeRepairAttempts(raw: unknown): SanitizedRepairAttempt[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SanitizedRepairAttempt[] = [];
+  for (const entry of raw) {
+    const record = asRecord(entry);
+    if (!record) continue;
+    const attemptNumber = asNumber(record.attemptNumber);
+    if (attemptNumber === undefined || attemptNumber < 1) continue;
+    const decisionRaw = asString(record.repairDecision);
+    if (!REPAIR_DECISION_SET.has(decisionRaw)) continue;
+    const failureCategoryRaw = asString(record.failureCategory);
+    const sanitized: SanitizedRepairAttempt = {
+      attemptNumber,
+      repairDecision: decisionRaw,
+      failureCategory: failureCategoryRaw.length > 0 ? failureCategoryRaw : null,
+      hasModelInvocation: asRecord(record.modelInvocationRef) !== undefined,
+      hasRepairInput: asRecord(record.repairInputRef) !== undefined,
+      hasJavaCandidate: asRecord(record.javaCandidateRef) !== undefined,
+    };
+    const rationaleRaw = record.rationale;
+    if (typeof rationaleRaw === 'string' && rationaleRaw.length > 0) {
+      sanitized.rationale = sanitizeUpstreamMessage(rationaleRaw, '');
+    }
+    out.push(sanitized);
+  }
+  return out;
+}
+
+function safeArtifactRef(value: unknown): { sha256: string; byteSize: number; kind: string } | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const sha256 = asString(record.sha256);
+  if (sha256.length === 0) return null;
+  return {
+    sha256,
+    byteSize: asNumber(record.byteSize) ?? 0,
+    kind: asString(record.kind),
+  };
+}
+
+export interface WorkflowSnapshot {
+  state: string | null;
+  activeStep: string | null;
+  activeAgent: string | null;
+  agentAttemptCount: number;
+  repairBudget: StoredRepairBudget | null;
+  repairAttempts: SanitizedRepairAttempt[];
+  finalClassification: RunFinalClassification | null;
+  failureCode: W02UiErrorCode | null;
+  failureMessage: string | null;
+  generatedJavaRef: { sha256: string; byteSize: number; kind: string } | null;
+  buildTestResultRef: { sha256: string; byteSize: number; kind: string } | null;
+  evidencePackRef: { sha256: string; byteSize: number; kind: string } | null;
+}
+
+const EMPTY_WORKFLOW_SNAPSHOT: WorkflowSnapshot = {
+  state: null,
+  activeStep: null,
+  activeAgent: null,
+  agentAttemptCount: 0,
+  repairBudget: null,
+  repairAttempts: [],
+  finalClassification: null,
+  failureCode: null,
+  failureMessage: null,
+  generatedJavaRef: null,
+  buildTestResultRef: null,
+  evidencePackRef: null,
+};
+
+function snapshotFromContract(contract: Record<string, unknown> | undefined): WorkflowSnapshot {
+  if (!contract) return { ...EMPTY_WORKFLOW_SNAPSHOT };
+  const state = asString(contract.currentState) || null;
+  const activeStep = asString(contract.activeStep) || null;
+  const agentAttemptCount = asNumber(contract.agentAttemptCount) ?? 0;
+  const repairBudget = asRepairBudget(contract.repairBudget);
+  const repairAttempts = sanitizeRepairAttempts(contract.repairAttempts);
+  const finalClassification = asFinalClassification(contract.finalClassification);
+  const rawFailureCode = contract.failureCode;
+  const rawFailureMessage = contract.failureMessage;
+  let failureCode: W02UiErrorCode | null = null;
+  let failureMessage: string | null = null;
+  const mapped = mapFailure(rawFailureCode, rawFailureMessage);
+  if (mapped !== null) {
+    failureCode = mapped.code;
+    failureMessage = mapped.message;
+  } else if (finalClassification && finalClassification !== 'success' && finalClassification !== 'incomplete') {
+    // The contract reports a non-success terminal classification but no
+    // canonical failure code: keep the surface honest by emitting
+    // ``internal_error`` rather than silently dropping the failure.
+    failureCode = 'internal_error';
+    failureMessage = sanitizeUpstreamMessage(rawFailureMessage, defaultMessageFor('internal_error'));
+  }
+  return {
+    state,
+    activeStep,
+    activeAgent: deriveActiveAgent(activeStep),
+    agentAttemptCount,
+    repairBudget,
+    repairAttempts,
+    finalClassification,
+    failureCode,
+    failureMessage,
+    generatedJavaRef: safeArtifactRef(contract.generatedJavaRef),
+    buildTestResultRef: safeArtifactRef(contract.buildTestResultRef),
+    evidencePackRef: safeArtifactRef(contract.evidencePackRef),
+  };
+}
+
+function workflowEnvelope(stored: StoredRun, snapshot: WorkflowSnapshot, source: 'live' | 'cached' | 'unavailable'): Record<string, unknown> {
+  return {
+    runId: stored.runId,
+    programId: stored.programId,
+    mode: stored.mode,
+    productMode: productModeOf(stored),
+    source,
+    state: snapshot.state,
+    activeStep: snapshot.activeStep,
+    activeAgent: snapshot.activeAgent,
+    agentAttemptCount: snapshot.agentAttemptCount,
+    repairBudget: snapshot.repairBudget,
+    repairAttempts: snapshot.repairAttempts,
+    finalClassification: snapshot.finalClassification,
+    failureCode: snapshot.failureCode,
+    failureMessage: snapshot.failureMessage,
+    generatedJavaRef: snapshot.generatedJavaRef,
+    buildTestResultRef: snapshot.buildTestResultRef,
+    evidencePackRef: snapshot.evidencePackRef,
+  };
+}
+
+function applyWorkflowSnapshotToStore(stored: StoredRun, runStore: RunStore, snapshot: WorkflowSnapshot): StoredRun {
+  const patch: Partial<StoredRun> = {
+    activeStep: snapshot.activeStep ?? undefined,
+    agentAttemptCount: snapshot.agentAttemptCount,
+    repairBudget: snapshot.repairBudget ?? undefined,
+    finalClassification: snapshot.finalClassification ?? undefined,
+    failureCode: snapshot.failureCode ?? undefined,
+    failureMessage: snapshot.failureMessage ?? undefined,
+  };
+  const updated = runStore.update(stored.runId, patch);
+  return updated ?? stored;
+}
+
+async function fetchWorkflowSnapshot(
+  stored: StoredRun,
+  orchestrator: OrchestratorClient,
+  runStore: RunStore,
+): Promise<{ stored: StoredRun; snapshot: WorkflowSnapshot; source: 'live' | 'cached' | 'unavailable' }> {
+  const liveRunId = liveArtifactRunId(stored);
+  if (!liveRunId || !orchestrator.enabled) {
+    return { stored, snapshot: { ...EMPTY_WORKFLOW_SNAPSHOT }, source: 'unavailable' };
+  }
+  try {
+    const upstream = await orchestrator.getWorkflow(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return { stored, snapshot: { ...EMPTY_WORKFLOW_SNAPSHOT }, source: 'unavailable' };
+    }
+    const envelope = asRecord(upstream.body) ?? {};
+    const contract = asRecord(envelope.contract);
+    const snapshot = snapshotFromContract(contract);
+    const reportedSource = asString(envelope.source);
+    const source: 'live' | 'cached' | 'unavailable' =
+      reportedSource === 'cached' ? 'cached' : reportedSource === 'live' ? 'live' : (contract ? 'live' : 'unavailable');
+    const updatedStored = applyWorkflowSnapshotToStore(stored, runStore, snapshot);
+    return { stored: updatedStored, snapshot, source };
+  } catch {
+    return { stored, snapshot: { ...EMPTY_WORKFLOW_SNAPSHOT }, source: 'unavailable' };
   }
 }
 
@@ -1288,6 +1552,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const requestedProgramIdRaw = (body as Record<string, unknown>).programId;
         const sourceNameRaw = (body as Record<string, unknown>).sourceName;
         const optionsRaw = (body as Record<string, unknown>).options;
+        // Issue #172: W0.2 transform contract — optional expected output /
+        // oracle input and explicit target language (must be ``java``).
+        const targetLanguageRaw = (body as Record<string, unknown>).targetLanguage;
+        const expectedOutputRaw = (body as Record<string, unknown>).expectedOutput;
+        const oracleInputRaw = (body as Record<string, unknown>).oracleInput;
         if (typeof sourceTextRaw !== 'string' || sourceTextRaw.trim().length === 0) {
           badRequest(res, 'sourceText must be a non-empty string');
           return;
@@ -1304,6 +1573,27 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, 'options must be an object when provided');
           return;
         }
+        let targetLanguage: 'java' = 'java';
+        if (targetLanguageRaw !== undefined) {
+          if (typeof targetLanguageRaw !== 'string' || targetLanguageRaw.trim().length === 0) {
+            badRequest(res, 'targetLanguage must be a non-empty string when provided');
+            return;
+          }
+          const normalizedLang = targetLanguageRaw.trim().toLowerCase();
+          if (normalizedLang !== 'java') {
+            badRequest(res, `targetLanguage ${JSON.stringify(targetLanguageRaw)} is not supported; only \"java\" is available in W0.2`);
+            return;
+          }
+          targetLanguage = 'java';
+        }
+        if (expectedOutputRaw !== undefined && typeof expectedOutputRaw !== 'string') {
+          badRequest(res, 'expectedOutput must be a string when provided');
+          return;
+        }
+        if (oracleInputRaw !== undefined && typeof oracleInputRaw !== 'string') {
+          badRequest(res, 'oracleInput must be a string when provided');
+          return;
+        }
         if (!orchestrator.enabled) {
           jsonResponse(res, 503, { error: 'orchestrator URL is required for /api/v0/transform' });
           return;
@@ -1312,6 +1602,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const sourceText = sourceTextRaw;
         const programId = resolveTransformProgramId(sourceText, typeof requestedProgramIdRaw === 'string' ? requestedProgramIdRaw : undefined);
         const sourceName = typeof sourceNameRaw === 'string' ? sourceNameRaw : undefined;
+        const expectedOutput = typeof expectedOutputRaw === 'string' ? expectedOutputRaw : undefined;
+        const oracleInput = typeof oracleInputRaw === 'string' ? oracleInputRaw : undefined;
 
         const referenceMatch = samples.get(programId);
         if (referenceMatch && !referenceMatch.supportedInProductMode) {
@@ -1328,6 +1620,9 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             requester: 'c2c-ui',
             sourceName,
             options: optionsRaw,
+            targetLanguage,
+            expectedOutput,
+            oracleInput,
           });
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             const liveRunId = extractLiveRunId(upstream.body);
@@ -1341,19 +1636,25 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             return;
           }
           const status = upstream?.status ?? 502;
+          const failure = mapUpstreamUnavailable(
+            `orchestrator rejected transform request${status ? ` (status ${status})` : ''}`,
+          );
           jsonResponse(res, 502, {
-            error: `orchestrator rejected transform request${status ? ` (${status})` : ''}`,
+            error: failure.message,
+            failureCode: failure.code,
           });
           return;
         } catch (err) {
+          const failure = mapUpstreamUnavailable(sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'));
           jsonResponse(res, 502, {
-            error: err instanceof Error ? err.message : 'orchestrator request failed',
+            error: failure.message,
+            failureCode: failure.code,
           });
           return;
         }
       }
 
-      
+
       if (pathname === '/api/v0/model-gateway/health' && method === 'GET') {
         if (!modelGateway.enabled) {
           jsonResponse(res, 503, { error: 'Model Gateway unavailable in deterministic W0 mode' });
@@ -1469,7 +1770,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             return;
           } catch (err) {
             jsonResponse(res, 502, {
-              error: err instanceof Error ? err.message : 'orchestrator request failed',
+              error: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
             });
             return;
           }
@@ -1512,8 +1813,32 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           } catch {
             // keep last-known state; UI shows updatedAt
           }
+          // Issue #172: refresh the W0.2 contract surface on every poll so
+          // the UI sees activeStep/repairBudget/failureCode update in real
+          // time without an extra round trip.
+          const workflowResult = await fetchWorkflowSnapshot(current, orchestrator, runStore);
+          current = workflowResult.stored;
         }
         jsonResponse(res, 200, runSummary(current));
+        return;
+      }
+
+      // Issue #172: dedicated endpoint for the full W0.2 workflow view
+      // (state, active step/agent, repair budget+attempts, failure code).
+      const workflowMatch = /^\/api\/v0\/runs\/([^\/]+)\/workflow$/.exec(pathname);
+      if (workflowMatch && method === 'GET') {
+        const runId = decodeURIComponent(workflowMatch[1] ?? '');
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === 'diagnostic-fixture') {
+          jsonResponse(res, 200, workflowEnvelope(stored, { ...EMPTY_WORKFLOW_SNAPSHOT }, 'unavailable'));
+          return;
+        }
+        const { stored: refreshed, snapshot, source } = await fetchWorkflowSnapshot(stored, orchestrator, runStore);
+        jsonResponse(res, 200, workflowEnvelope(refreshed, snapshot, source));
         return;
       }
 
@@ -1603,7 +1928,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         } catch (err) {
           jsonResponse(res, 502, {
-            error: err instanceof Error ? err.message : 'orchestrator request failed',
+            error: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
           });
           return;
         }
@@ -1659,6 +1984,21 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             return;
           }
           const envelope = asRecord(upstream.body) ?? {};
+          const content = asString(envelope.content);
+          const byteSize = asNumber(envelope.byteSize) ?? Buffer.byteLength(content, 'utf-8');
+          // Issue #172: large text artifacts must be rejected with a
+          // documented size-limit response so the browser tab and the BFF
+          // process stay healthy. The upstream's byteSize is trusted when
+          // present; otherwise we recompute from the served content.
+          if (byteSize > config.artifactContentMaxBytes) {
+            jsonResponse(res, 413, {
+              error: 'artifact_too_large',
+              path: decodedPath,
+              byteSize,
+              limit: config.artifactContentMaxBytes,
+            });
+            return;
+          }
           jsonResponse(res, 200, {
             runId: stored.runId,
             programId: stored.programId,
@@ -1666,9 +2006,9 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             productMode: 'live',
             path: asString(envelope.path) || decodedPath,
             absolutePath: asString(envelope.absolutePath),
-            content: asString(envelope.content),
+            content,
             sha256: asString(envelope.sha256),
-            byteSize: asNumber(envelope.byteSize) ?? 0,
+            byteSize,
             mimeType: asString(envelope.mimeType),
             uri: asString(envelope.uri),
             kind: asString(envelope.kind),
@@ -1677,7 +2017,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         } catch (err) {
           jsonResponse(res, 502, {
-            error: err instanceof Error ? err.message : 'orchestrator request failed',
+            error: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
           });
           return;
         }
@@ -1878,7 +2218,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         } catch (err) {
           jsonResponse(res, 502, {
-            error: err instanceof Error ? err.message : 'orchestrator request failed',
+            error: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
           });
           return;
         }

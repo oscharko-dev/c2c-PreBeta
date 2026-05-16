@@ -1,8 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { diagnosticFixtureOutcomeFor, type DiagnosticFixtureOutcome } from './diagnostic-fixtures/fixture-data';
 import type { SampleDetail } from './samples';
+import type { W02UiErrorCode } from './error-codes';
 
 export type RunStatus = 'starting' | 'updating' | 'completed' | 'failed';
+
+// Issue #172: W0.2 final classification surfaced to the UI on /api/v0/runs/{runId}.
+// ``success`` corresponds to a deterministic verification pass; ``blocked``
+// and ``failed`` carry a UI-safe ``failureCode``; ``incomplete`` is the
+// non-terminal placeholder used while the orchestrator is still running.
+export type RunFinalClassification =
+  | 'success'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled'
+  | 'incomplete';
+
+export interface StoredRepairBudget {
+  limit: number;
+  used: number;
+  remaining: number;
+}
 // `diagnostic-fixture` is an opt-in developer mode (C2C_ENABLE_DIAGNOSTIC_FIXTURES).
 // It is never a product result and is contained out of product-facing DTOs by
 // `productMode` in server responses.
@@ -21,6 +39,15 @@ export interface StoredRun {
   sample: SampleDetail;
   fixture?: DiagnosticFixtureOutcome;
   liveRunId?: string;
+  // Issue #172: W0.2 contract fields derived from the orchestrator's
+  // ``GET /v0/runs/{runId}/workflow`` view. They are optional because the
+  // BFF caches the last-known snapshot and zeroes them for fixture runs.
+  activeStep?: string;
+  agentAttemptCount?: number;
+  repairBudget?: StoredRepairBudget;
+  finalClassification?: RunFinalClassification;
+  failureCode?: W02UiErrorCode;
+  failureMessage?: string;
 }
 
 export interface RunStore {
