@@ -75,7 +75,7 @@ function makeBuildTest(overrides: Partial<BuildTestView> = {}): BuildTestView {
     classification: 'match',
     expectedOutput: 'X',
     actualOutput: 'X',
-    outputRef: { uri: 'file:///run/build-test-result.json', sha256: '1'.repeat(64) },
+    outputRef: { sha256: '1'.repeat(64) },
     note: '',
     ...overrides,
   };
@@ -88,7 +88,7 @@ function makeEvidence(overrides: Partial<EvidenceView> = {}): EvidenceView {
     mode: 'live',
     status: 'complete',
     packId: 'epk-1',
-    manifestUri: 'urn:c2c-bff/run-1',
+    manifestHash: 'f'.repeat(64),
     missingArtifacts: [],
     note: '',
     ...overrides,
@@ -375,10 +375,19 @@ test('evidenceSummary does not label diagnostic-fixture as a complete Evidence P
   assert.doesNotMatch(summary.headline, /complete/i);
 });
 
-test('evidenceSummary exposes manifest, export and missing artifacts when live', () => {
-  const summary = evidenceSummary(makeEvidence({ status: 'incomplete', missingArtifacts: ['sourceCobol'], exportUri: 'urn:export' }), makeRun(), undefined);
+test('evidenceSummary exposes safe evidence refs and missing artifacts when live', () => {
+  const summary = evidenceSummary(
+    makeEvidence({
+      status: 'incomplete',
+      missingArtifacts: ['sourceCobol'],
+      exportRef: { sha256: 'e'.repeat(64) },
+    }),
+    makeRun(),
+    undefined,
+  );
   assert.equal(summary.status, 'incomplete');
-  assert.equal(summary.exportUri, 'urn:export');
+  assert.equal(summary.manifestHash, 'f'.repeat(64));
+  assert.equal(summary.exportRef?.sha256, 'e'.repeat(64));
   assert.deepEqual(summary.missing, ['sourceCobol']);
   assert.equal(summary.isProductResult, false);
 });
@@ -480,12 +489,11 @@ test('evidenceSummary exposes manifestHash, validationStatus and exportRef in li
     missingArtifacts: ['semanticIr'],
     manifestHash: 'f'.repeat(64),
     validationStatus: 'incomplete',
-    exportRef: { uri: 'file:///run/evidence-pack.tar.gz', sha256: 'e'.repeat(64), byteSize: 1024 },
+    exportRef: { sha256: 'e'.repeat(64), byteSize: 1024 },
   });
   const summary = evidenceSummary(view, makeRun(), undefined);
   assert.equal(summary.manifestHash, 'f'.repeat(64));
   assert.equal(summary.validationStatus, 'incomplete');
-  assert.equal(summary.exportUri, 'file:///run/evidence-pack.tar.gz');
   assert.equal(summary.exportRef?.sha256, 'e'.repeat(64));
   assert.deepEqual(summary.missing, ['semanticIr']);
   assert.equal(summary.isProductResult, false);

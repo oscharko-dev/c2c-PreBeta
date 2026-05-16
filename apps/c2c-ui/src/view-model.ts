@@ -440,8 +440,6 @@ export function buildTestSummary(
 export interface EvidenceSummary {
   status: EvidenceView['status'] | 'idle' | 'diagnostic-fixture';
   headline: string;
-  manifestUri: string;
-  exportUri: string;
   missing: string[];
   note: string;
   isProductResult: boolean;
@@ -459,8 +457,6 @@ export function evidenceSummary(
     return {
       status: 'idle',
       headline: `Failed to load evidence: ${error}`,
-      manifestUri: '',
-      exportUri: '',
       missing: [],
       note: '',
       isProductResult: false,
@@ -468,27 +464,22 @@ export function evidenceSummary(
   }
   if (!view) {
     if (!run) {
-      return { status: 'idle', headline: 'No run started.', manifestUri: '', exportUri: '', missing: [], note: '', isProductResult: false };
+      return { status: 'idle', headline: 'No run started.', missing: [], note: '', isProductResult: false };
     }
-    return { status: 'idle', headline: 'Evidence Pack pending…', manifestUri: '', exportUri: '', missing: [], note: '', isProductResult: false };
+    return { status: 'idle', headline: 'Evidence Pack pending…', missing: [], note: '', isProductResult: false };
   }
   if (view.mode !== 'live') {
     return {
       status: 'diagnostic-fixture',
       headline: 'Diagnostic fixture · not product result',
-      manifestUri: '',
-      exportUri: '',
       missing: view.missingArtifacts,
       note: view.note || 'BFF returned a diagnostic fixture; product mode requires a live orchestrator.',
       isProductResult: false,
     };
   }
-  const exportUri = view.exportRef?.uri ?? view.exportUri ?? '';
   return {
     status: view.status,
     headline: `status=${view.status}${view.packId ? ` · packId=${view.packId}` : ''}`,
-    manifestUri: view.manifestUri,
-    exportUri,
     missing: view.missingArtifacts,
     note: view.note,
     isProductResult: view.status === 'complete',

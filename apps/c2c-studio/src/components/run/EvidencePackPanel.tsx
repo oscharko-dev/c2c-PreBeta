@@ -50,12 +50,12 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
                 <span className="text-text">{ev.packId || 'N/A'}</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-text-dim font-sans mb-1">Manifest URI</span>
-                <span className="text-text break-all">{ev.manifestUri || 'N/A'}</span>
+                <span className="text-text-dim font-sans mb-1">Manifest SHA256</span>
+                <span className="text-text break-all">{ev.manifestHash || ev.artifactRef?.sha256 || 'N/A'}</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-text-dim font-sans mb-1">Generated Artifact Reference</span>
-                <span className="text-text break-all">{ev.generatedArtifactRef?.uri || 'N/A'}</span>
+                <span className="text-text-dim font-sans mb-1">Generated Artifact SHA256</span>
+                <span className="text-text break-all">{ev.generatedArtifactRef?.sha256 || 'N/A'}</span>
               </div>
             </div>
           </div>
@@ -71,8 +71,8 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
               {alignment.entries.map((entry) => (
                 <div key={entry.label} className="rounded border border-line-2 p-3">
                   <div className="mb-1 font-sans text-text-dim">{entry.label}</div>
-                  <div className="break-all text-text">{entry.ref?.uri || 'N/A'}</div>
-                  <div className="mt-1 break-all text-text-faint">{entry.ref?.sha256 || 'No hash available'}</div>
+                  <div className="break-all text-text">{entry.ref?.sha256 || 'No hash available'}</div>
+                  <div className="mt-1 text-text-faint">{entry.ref?.kind || 'Content-addressed reference'}</div>
                 </div>
               ))}
             </div>

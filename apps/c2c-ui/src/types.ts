@@ -69,9 +69,14 @@ export interface RunSummary {
 export type GeneratedStatus = 'generated' | 'unsupported' | 'skipped' | 'incomplete';
 
 export interface OutputRef {
-  uri: string;
   sha256: string;
   byteSize?: number;
+  kind?: string;
+  path?: string;
+  name?: string;
+  mimeType?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export interface Diagnostic {
@@ -82,11 +87,11 @@ export interface Diagnostic {
 
 export interface GeneratedFileRef {
   path: string;
-  absolutePath?: string;
-  uri?: string;
   sha256?: string;
   byteSize?: number;
   mimeType?: string;
+  kind?: string;
+  name?: string;
 }
 
 export interface GeneratedTraceability {
@@ -137,12 +142,10 @@ export interface GeneratedFileContent {
   mode: RunMode;
   productMode?: ProductMode;
   path: string;
-  absolutePath: string;
   content: string;
   sha256: string;
   byteSize: number;
   mimeType: string;
-  uri: string;
   kind: string;
   orchestratorRunId?: string;
 }
@@ -194,13 +197,13 @@ export interface EvidenceView {
   productMode?: ProductMode;
   status: EvidenceStatus;
   packId: string;
-  manifestUri: string;
-  exportUri?: string;
   missingArtifacts: string[];
   note: string;
   manifestHash?: string;
   validationStatus?: ValidationStatus;
+  artifactRef?: OutputRef | null;
   exportRef?: OutputRef | null;
+  generatedArtifactRef?: OutputRef | null;
 }
 
 // Issue #96: pipeline progress contract for UI-started runs.

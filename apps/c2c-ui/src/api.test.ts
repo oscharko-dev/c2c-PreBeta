@@ -151,7 +151,7 @@ test('createBffApi.getGeneratedFiles requests the generated index endpoint', asy
         status: 'complete',
         fileCount: 1,
         entryFilePath: 'src/main/java/c2c/CASE01.java',
-        artifactRef: { uri: 'file:///m.json', sha256: 'a'.repeat(64), byteSize: 1 },
+        artifactRef: { sha256: 'a'.repeat(64), byteSize: 1 },
         missingArtifacts: [],
         files: [
           {
@@ -181,12 +181,10 @@ test('createBffApi.getGeneratedFile encodes path segments but preserves slashes'
         programId: 'CASE01',
         mode: 'live',
         path: 'src/main/java/c2c/CASE 01.java',
-        absolutePath: 'generated-project/src/main/java/c2c/CASE 01.java',
         content: 'class C {}',
         sha256: 'b'.repeat(64),
         byteSize: 10,
         mimeType: 'text/x-java-source',
-        uri: 'file:///CASE01.java',
         kind: 'generated-project-file',
       }),
     },

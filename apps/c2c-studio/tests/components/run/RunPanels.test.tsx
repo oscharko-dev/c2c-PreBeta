@@ -189,22 +189,19 @@ describe('Run Panels', () => {
           phase: 'completed',
           generated: {
             artifactRef: {
-              uri: 'air://generated',
               sha256: 'abc123'
             }
           },
           buildTest: {
             generatedArtifactRef: {
-              uri: 'air://build-test',
               sha256: 'abc123'
             }
           },
           evidence: {
             status: 'complete',
             packId: 'pack-123',
-            manifestUri: 'air://manifest',
+            manifestHash: 'manifest-sha-123',
             generatedArtifactRef: {
-              uri: 'air://evidence',
               sha256: 'abc123'
             }
           }
@@ -213,7 +210,7 @@ describe('Run Panels', () => {
       render(<EvidencePackPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
       expect(screen.getByText('Evidence Pack Complete')).toBeDefined();
       expect(screen.getByText('pack-123')).toBeDefined();
-      expect(screen.getByText('air://manifest')).toBeDefined();
+      expect(screen.getByText('manifest-sha-123')).toBeDefined();
       expect(screen.getByText('All required artifacts are present.')).toBeDefined();
       expect(screen.getByText('Displayed Java, build/test, and evidence all reference the same generated artifact.')).toBeDefined();
     });
