@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "v0",
+  "description": "W0.2 acceptance-fixture registry. Drives Issue #174 acceptance proof: a small user-pasteable COBOL program is transformed, compiled, executed, and behaviourally verified end-to-end. The HELLOW02 fixture is the canonical positive acceptance program (DISPLAY + WORKING-STORAGE + PERFORM VARYING + ADD); FILEIO-UNSUPPORTED proves the orchestrator blocks honestly with unsupported_cobol when source contains File I/O. Both fixtures are file-backed AND must work as paste-mode inputs through the BFF transform endpoint. Conforms to schemas/acceptance-fixture-v0.json.",
+  "fixtures": [
+    {
+      "fixtureId": "HELLOW02",
+      "title": "Hello W0.2",
+      "description": "Smallest user-pasteable W0.2 acceptance program. Exercises WORKING-STORAGE numeric fields, a bounded PERFORM VARYING loop, DISPLAY of literals concatenated with numeric variables, and ADD into an accumulator. Compiled by the build-test runner with cobc and executed with cobcrun; the generated Java is executed and its stdout compared against the cobol-runtime oracle.",
+      "sourceCobolArtifactRef": {
+        "uri": "fixture://corpus/synthetic/programs/hello-w02.cbl",
+        "path": "corpus/synthetic/programs/hello-w02.cbl",
+        "sha256": "061074d14470643e3a8333a742ff0f5d4ea6285048d3b88e31f6ae0170ba231e",
+        "byteSize": 588,
+        "mimeType": "text/x-cobol",
+        "kind": "source"
+      },
+      "expectedOutputArtifactRef": {
+        "uri": "fixture://corpus/synthetic/fixtures/hello-w02-output.txt",
+        "path": "corpus/synthetic/fixtures/hello-w02-output.txt",
+        "sha256": "ca1eb7d26d8bc74ac4e66257ef07d0bf26497c0aa9723e814cdf77ebd5576044",
+        "byteSize": 103,
+        "mimeType": "text/plain",
+        "kind": "golden-master"
+      },
+      "oracleGenerationMode": "cobol-runtime",
+      "supportedSubset": [
+        "WORKING-STORAGE",
+        "PERFORM-VARYING",
+        "DISPLAY",
+        "ADD",
+        "STOP-RUN"
+      ],
+      "unsupportedConstructs": [],
+      "targetLanguage": "java",
+      "expectedFinalClassification": "success",
+      "modes": ["file-backed", "paste-mode"],
+      "rationale": "Proves the W0.2 acceptance criterion: a small, user-provided COBOL program flows through the agentic workflow end-to-end, the generated Java compiles and runs, and its output matches a real GnuCOBOL-derived oracle. Output bytes were reproduced from corpus/synthetic/programs/hello-w02.cbl with `cobc -x -free hello-w02.cbl && ./hello-w02`."
+    },
+    {
+      "fixtureId": "FILEIO-UNSUPPORTED",
+      "title": "File I/O is outside the W0.2 subset",
+      "description": "Negative acceptance fixture. The program declares FILE SECTION, FD, OPEN, READ, and CLOSE — all outside the W0.2 supported subset. The orchestrator MUST block the run with finalClassification 'blocked' and failureCode 'unsupported_cobol', surfacing the parser diagnostics in the evidence pack. The run MUST NOT produce Java output.",
+      "sourceCobolArtifactRef": {
+        "uri": "fixture://corpus/synthetic/programs/file-io-unsupported.cbl",
+        "path": "corpus/synthetic/programs/file-io-unsupported.cbl",
+        "sha256": "cfc2de17b356688c022b39f8fc9056a52e8d2cc0dc37a08c198090e2d2d7d419",
+        "byteSize": 487,
+        "mimeType": "text/x-cobol",
+        "kind": "source"
+      },
+      "supportedSubset": [],
+      "unsupportedConstructs": [
+        {
+          "code": "unsupported-feature",
+          "construct": "FILE SECTION",
+          "line": 8,
+          "message": "FILE SECTION is not supported in the W0.2 subset."
+        },
+        {
+          "code": "unsupported-feature",
+          "construct": "FD",
+          "line": 9,
+          "message": "FD entries require File I/O, which is not supported in the W0.2 subset."
+        },
+        {
+          "code": "unsupported-feature",
+          "construct": "OPEN",
+          "line": 16,
+          "message": "OPEN requires File I/O, which is not supported in the W0.2 subset."
+        },
+        {
+          "code": "unsupported-feature",
+          "construct": "READ",
+          "line": 17,
+          "message": "READ requires File I/O, which is not supported in the W0.2 subset."
+        },
+        {
+          "code": "unsupported-feature",
+          "construct": "CLOSE",
+          "line": 18,
+          "message": "CLOSE requires File I/O, which is not supported in the W0.2 subset."
+        }
+      ],
+      "targetLanguage": "java",
+      "expectedFinalClassification": "blocked",
+      "expectedFailureCode": "unsupported_cobol",
+      "modes": ["file-backed", "paste-mode"],
+      "rationale": "Proves that programs outside the W0.2 supported subset are blocked honestly, with construct-level diagnostics, instead of producing misleading Java. Aligns with Issue #174 acceptance criterion: 'Unsupported programs are blocked honestly with construct-level explanation where possible.'"
+    }
+  ]
+}

@@ -81,6 +81,48 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/acceptance-fixtures:
+    get:
+      summary: List W0.2 acceptance fixtures (Issue #174)
+      description: |
+        W0.2 acceptance-fixture registry. Each entry declares a small,
+        user-pasteable COBOL program plus an oracle contract that the
+        end-to-end agentic workflow must satisfy: the generated Java
+        compiles, executes, and matches the declared expected output (for
+        success fixtures), or the orchestrator blocks honestly with
+        `unsupported_cobol` (for blocked fixtures). The registry is
+        validated against schemas/acceptance-fixture-v0.json at BFF boot.
+      operationId: listAcceptanceFixtures
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AcceptanceFixtureSummary" }
+
+  /api/v0/acceptance-fixtures/{fixtureId}:
+    get:
+      summary: Fetch a W0.2 acceptance fixture by id
+      operationId: getAcceptanceFixture
+      parameters:
+        - in: path
+          name: fixtureId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptanceFixtureDetail" }
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/transform:
     post:
       summary: Start a product-mode transform from COBOL source text
@@ -593,6 +635,117 @@ components:
             expectedOutput: { type: string }
             cobolSourcePath: { type: string }
             expectedOutputPath: { type: string }
+
+    AcceptanceArtifactReference:
+      type: object
+      required: [uri, path, sha256, byteSize]
+      additionalProperties: false
+      properties:
+        uri: { type: string }
+        path: { type: string }
+        sha256:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+
+    AcceptanceUnsupportedConstruct:
+      type: object
+      required: [code, construct]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+            - unsupported-feature
+            - unsupported-data-declaration
+            - unsupported-statement
+            - unterminated-block
+            - unmatched-block-end
+            - mismatched-block-end
+        construct: { type: string }
+        line: { type: integer, minimum: 1 }
+        message: { type: string }
+
+    AcceptanceFixtureSummary:
+      description: |
+        W0.2 acceptance fixture summary (Issue #174). Lightweight view used
+        by Studio to render the fixture catalog.
+      type: object
+      required:
+        - fixtureId
+        - title
+        - oracleGenerationMode
+        - supportedSubset
+        - unsupportedConstructsCount
+        - targetLanguage
+        - expectedFinalClassification
+        - expectedFailureCode
+        - modes
+      properties:
+        fixtureId: { type: string }
+        title: { type: string }
+        description: { type: string }
+        oracleGenerationMode:
+          oneOf:
+            - type: string
+              enum: [cobol-runtime, static-fixture, user-provided]
+            - type: "null"
+        supportedSubset:
+          type: array
+          items: { type: string }
+        unsupportedConstructsCount:
+          type: integer
+          minimum: 0
+        targetLanguage:
+          type: string
+          enum: [java]
+        expectedFinalClassification:
+          type: string
+          enum: [success, blocked]
+        expectedFailureCode:
+          oneOf:
+            - type: string
+              enum:
+                - unsupported_cobol
+                - parse_failed
+                - semantic_ir_failed
+                - java_generation_failed
+                - java_compile_failed
+                - java_runtime_failed
+                - oracle_mismatch
+                - evidence_incomplete
+                - cancelled
+            - type: "null"
+        modes:
+          type: array
+          items:
+            type: string
+            enum: [file-backed, paste-mode]
+
+    AcceptanceFixtureDetail:
+      allOf:
+        - $ref: "#/components/schemas/AcceptanceFixtureSummary"
+        - type: object
+          required:
+            - sourceCobolArtifactRef
+            - unsupportedConstructs
+            - rationale
+            - cobolSource
+            - expectedOutput
+          properties:
+            sourceCobolArtifactRef: { $ref: "#/components/schemas/AcceptanceArtifactReference" }
+            expectedOutputArtifactRef: { $ref: "#/components/schemas/AcceptanceArtifactReference" }
+            unsupportedConstructs:
+              type: array
+              items: { $ref: "#/components/schemas/AcceptanceUnsupportedConstruct" }
+            rationale: { type: string }
+            cobolSource: { type: string }
+            expectedOutput:
+              oneOf:
+                - type: string
+                - type: "null"
 
     RunStartInput:
       type: object
