@@ -21,6 +21,8 @@ Canonical concept and roadmap:
 - [Development workflow governance](docs/governance/development-workflow.md)
 - [W0 release gate](docs/release/w0-release-gate.md)
 - [W0.1 Studio closure evidence](docs/release/w0-studio-epic-118.md)
+- [W0.2 release gate](docs/release/w0-2-release-gate.md)
+- [W0.2 reference runbook](docs/showcase/w0-2-reference-runbook.md)
 
 ## W0 Repository Architecture
 
@@ -188,7 +190,7 @@ Launcher overrides are documented in `.env.example`:
 |------|--------|-----------------|
 | W0 | Done | Deterministic COBOL-to-Java enterprise kernel: parser, Semantic IR, Java generation, build/test, evidence, Harness, Experience Learning telemetry, and no required model call. |
 | W0.1 | Done | Next.js/Tailwind c2c Studio: editable COBOL, BFF-backed transformation run, generated Java artifact view, build/test, evidence, artifacts, and honest blocked states. |
-| W0.2 | Next | First productive AI transformation loop: orchestrator-steered agents on the Experience Learning Harness, Model Gateway/Foundry calls, bounded repair, first learning signals, and deterministic verification/evidence gate. |
+| W0.2 | Closing | First productive AI transformation loop on the Experience Learning Harness: orchestrator-steered Transformation and Verification/Repair Agents, Model Gateway/Foundry calls, bounded repair, first read-only learning signals, deterministic verification/evidence gate, and an executable release gate at [`scripts/w0-2-release-gate.sh`](scripts/w0-2-release-gate.sh). |
 
 The W0/W0.1 product can transform supported W0 COBOL programs and selected
 small custom sources that stay inside the implemented subset. It must not be
