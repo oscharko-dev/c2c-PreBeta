@@ -14,7 +14,7 @@ func TestDecodeJSONRejectsOversizedBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for oversized body, got %d", res.StatusCode)
 	}
@@ -31,7 +31,7 @@ func TestDecodeJSONRejectsNonJSONContentType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for non-json content-type, got %d", res.StatusCode)
 	}

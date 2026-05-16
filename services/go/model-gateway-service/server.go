@@ -391,13 +391,14 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	start := now
 	invocationID := newInvocationID(now)
 
+	//noinspection GoDfaErrorMayBeNotNil,GoDfaInspectionRunner
+	validated, err := s.validateInvocation(request, requestRef)
 	// validateInvocation always returns a fully populated validatedInvocation
 	// value (record pre-seeded) even on error, so accessing validated.record
 	// on the err != nil path is safe.
-	//goland:noinspection GoDfaErrorMayBeNotNil
-	validated, err := s.validateInvocation(request, requestRef)
+	//noinspection GoDfaErrorMayBeNotNil,GoDfaInspectionRunner
+	record := validated.record
 	if err != nil {
-		record := validated.record
 		record.InvocationID = invocationID
 		record.RunID = request.RunID
 		record.Provider = s.allowlist.Mode
@@ -531,7 +532,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	record := validated.record
+	record = validated.record
 	record.InvocationID = invocationID
 	record.RunID = request.RunID
 	record.Provider = validated.model.Provider

@@ -44,7 +44,7 @@ func TestRegenerateSampleEvidencePack(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	// Normalize non-deterministic fields so the fixture is stable on disk.
 	created.PackID = "epk-run-w0-hello-0001"

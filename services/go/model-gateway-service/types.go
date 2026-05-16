@@ -78,10 +78,9 @@ const (
 	// Error classes recorded on the ledger and propagated to clients via the
 	// `errorClass` field. These let consumers (Orchestrator, evidence-service)
 	// distinguish a policy denial from a provider outage or timeout.
-	errorClassValidation       = "validation"
-	errorClassProviderError    = "provider_error"
-	errorClassProviderTimeout  = "provider_timeout"
-	errorClassMissingCredential = "missing_credential"
+	errorClassValidation      = "validation"
+	errorClassProviderError   = "provider_error"
+	errorClassProviderTimeout = "provider_timeout"
 )
 
 const (
@@ -89,10 +88,9 @@ const (
 	// Harness map these to the W0.2 failure-code closed set:
 	//   policy_denied  -> FAILURE_MODEL_POLICY_DENIED
 	//   gateway_unavailable / provider_unavailable -> FAILURE_MODEL_GATEWAY_UNAVAILABLE
-	errorCodePolicyDenied        = "model_policy_denied"
-	errorCodeGatewayUnavailable  = "model_gateway_unavailable"
-	errorCodeProviderTimeout     = "model_provider_timeout"
-	errorCodeProviderError       = "model_provider_error"
+	errorCodePolicyDenied    = "model_policy_denied"
+	errorCodeProviderTimeout = "model_provider_timeout"
+	errorCodeProviderError   = "model_provider_error"
 )
 
 const (

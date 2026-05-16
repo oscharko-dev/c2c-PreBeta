@@ -21,39 +21,40 @@ const (
 	StatusIncomplete = "incomplete"
 	StatusInvalid    = "invalid"
 
-	// Issue #171 — W0.2 completenessStatus values. Decoupled from the legacy
-	// status field so the orchestrator can distinguish "missing required
+	// CompletenessStatusComplete and its siblings are the W0.2 completenessStatus values (Issue #171).
+	// Decoupled from the legacy status field so the orchestrator can distinguish "missing required
 	// evidence" (evidence_incomplete) from "upstream failure blocked the run"
-	// (blocked). A run is success-classifiable only when completenessStatus
-	// is "complete".
+	// (blocked). A run is success-classifiable only when completenessStatus is "complete".
 	CompletenessStatusComplete           = "complete"
 	CompletenessStatusEvidenceIncomplete = "evidence_incomplete"
 	CompletenessStatusBlocked            = "blocked"
 
-	// Issue #171 — final classification of the W0.2 run as observed from the
-	// evidence pack. A successful run REQUIRES completenessStatus=complete.
+	// ClassificationSuccess and its siblings are the final classification of the W0.2 run as
+	// observed from the evidence pack (Issue #171). A successful run REQUIRES completenessStatus=complete.
 	ClassificationSuccess            = "success"
 	ClassificationEvidenceIncomplete = "evidence_incomplete"
 	ClassificationBlocked            = "blocked"
 	ClassificationFailed             = "failed"
 
-	// Issue #171 — Java-candidate origin attribution.
+	// JavaCandidateOriginBaseline and its siblings are Java-candidate origin attributions (Issue #171).
 	JavaCandidateOriginBaseline               = "deterministic-baseline"
 	JavaCandidateOriginTransformationAgent    = "transformation-agent"
 	JavaCandidateOriginVerificationRepair     = "verification-repair-agent"
 
-	// Issue #171 — repair-attempt decision enum, mirrors agent-repair-decision-v0.
+	// RepairDecisionProposeCandidate and its siblings are repair-attempt decision values (Issue #171).
+	// Mirrors agent-repair-decision-v0.
 	RepairDecisionProposeCandidate = "propose_candidate"
 	RepairDecisionRefuse           = "refuse"
 	RepairDecisionEscalate         = "escalate"
 	RepairDecisionNoChange         = "no_change"
 
-	// Issue #171 — per-agent trajectory roles.
+	// AgentRoleOrchestrator and its siblings are per-agent trajectory roles (Issue #171).
 	AgentRoleOrchestrator       = "orchestrator"
 	AgentRoleTransformation     = "transformation"
 	AgentRoleVerificationRepair = "verification-repair"
 
-	// Issue #171 — oracle-kind enum mirrors build-test-result-v0.oracleComparison.
+	// OracleKindCobolRuntime and its siblings are oracle-kind enum values (Issue #171).
+	// Mirrors build-test-result-v0.oracleComparison.
 	OracleKindCobolRuntime      = "cobol-runtime"
 	OracleKindSynthetic         = "synthetic"
 	OracleKindTrueGoldenMaster  = "true-golden-master"

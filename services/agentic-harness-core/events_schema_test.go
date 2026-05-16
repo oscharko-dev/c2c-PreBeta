@@ -199,7 +199,7 @@ func TestEventsIngestionAndLedgerRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected run create 201, got %d", res.StatusCode)
 	}
@@ -239,7 +239,7 @@ func TestEventsIngestionAndLedgerRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emit event failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected event ingest 201, got %d", res.StatusCode)
 	}
@@ -260,7 +260,7 @@ func TestEventsRejectActorMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("expected run create 201, got %d", res.StatusCode)
 	}
@@ -296,7 +296,7 @@ func TestEventsRejectActorMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emit forged event failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected forged actor mismatch to return 403, got %d", res.StatusCode)
 	}
