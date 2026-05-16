@@ -98,7 +98,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     if (!generatedFiles) return 'pending';
     if (generatedFiles.status === 'incomplete') return 'incomplete';
     if (state.phase === 'incomplete') return 'incomplete';
-    if (state.phase === 'failed' || state.phase === 'unavailable' || state.phase === 'verification-blocked') {
+    if (state.phase === 'failed' || state.phase === 'unavailable') {
       return 'failed-verification';
     }
     

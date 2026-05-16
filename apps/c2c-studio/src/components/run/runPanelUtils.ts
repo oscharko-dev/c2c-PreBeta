@@ -274,16 +274,5 @@ export function deriveRunProblems(state: TransformationRunState): RunProblem[] {
     });
   }
 
-  if (
-    state.phase === 'verification-blocked' &&
-    alignment.distinctShas.length <= 1 &&
-    !state.artifactsError
-  ) {
-    problems.push({
-      type: 'Verification Blocked',
-      message: 'The run completed, but verification could not be completed from the available artifact views',
-    });
-  }
-
   return problems;
 }

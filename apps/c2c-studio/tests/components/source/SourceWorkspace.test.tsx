@@ -6,8 +6,13 @@ import { SourceWorkspaceProvider } from '@/stores/sourceWorkspace';
 import { TransformationRunProvider, useTransformationRun } from '@/stores/transformationRun';
 import { apiClient } from '@/lib/apiClient';
 import { AppTopBar } from '@/components/workbench/AppTopBar';
-import { TransformResponse } from '@/types/api';
+import { ApiResult, TransformResponse, RunSummary, RunProgressView } from '@/types/api';
+import { RunExperienceView, ModelGatewayHealth, HarnessReady } from '@/types/observability';
 import { useEffect } from 'react';
+
+function okResult<T>(data: T): ApiResult<T> {
+  return { ok: true, data };
+}
 
 vi.mock('@/lib/apiClient', () => ({
   apiClient: {
@@ -36,12 +41,20 @@ vi.mock('@/hooks/useC2cApi', () => ({
 
 describe('Source Workspace', () => {
   beforeEach(() => {
-    vi.mocked(apiClient.getRunProgress).mockResolvedValue({ ok: true, data: { runId: 'run-1', programId: 'P1', mode: 'live', productMode: 'live', status: 'complete', currentStep: null, failedStep: null, completedSteps: [], stepCount: 0, steps: [] } } as any);
-    vi.mocked(apiClient.getRunExperience).mockResolvedValue({ ok: true, data: { status: 'complete', summary: null } } as any);
-    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
-    vi.mocked(apiClient.getHarnessReady).mockResolvedValue({ ok: true, data: { status: 'ok' } } as any);
+    vi.mocked(apiClient.getRunProgress).mockResolvedValue(okResult<RunProgressView>({ runId: 'run-1', programId: 'P1', mode: 'live', productMode: 'live', status: 'complete', currentStep: null, failedStep: null, completedSteps: [], stepCount: 0, steps: [] }));
+    vi.mocked(apiClient.getRunExperience).mockResolvedValue(okResult<RunExperienceView>({ runId: 'run-1', programId: 'P1', mode: 'live', productMode: 'live', summary: undefined }));
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue(okResult<ModelGatewayHealth>({ status: 'ok' }));
+    vi.mocked(apiClient.getHarnessReady).mockResolvedValue(okResult<HarnessReady>({ status: 'ok' }));
     vi.clearAllMocks();
-    vi.mocked(apiClient.getRun).mockResolvedValue({ ok: true, data: { status: 'running' } } as any);
+    vi.mocked(apiClient.getRun).mockResolvedValue(okResult<RunSummary>({
+      runId: 'run-1',
+      programId: 'P1',
+      status: 'updating',
+      mode: 'live',
+      productMode: 'live',
+      createdAt: '2026-05-15T10:00:00Z',
+      updatedAt: '2026-05-15T10:00:01Z',
+    }));
   });
 
   function SetUnsupportedRunState() {

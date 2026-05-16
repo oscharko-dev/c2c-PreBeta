@@ -22,8 +22,7 @@ export type RunPhase =
   | 'completed'
   | 'failed'
   | 'unavailable'
-  | 'incomplete'
-  | 'verification-blocked';
+  | 'incomplete';
 
 export interface TransformationRunState {
   phase: RunPhase;
