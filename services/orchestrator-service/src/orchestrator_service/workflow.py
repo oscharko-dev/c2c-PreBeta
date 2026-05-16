@@ -639,7 +639,7 @@ class W0WorkflowRunner:
         config: OrchestratorConfig,
         gateway: HarnessGateway,
         artifact_store: RunArtifactStore | None = None,
-        experience_learning: Any | None = None,
+        experience_learning: ExperienceLearningGateway | NullExperienceLearningGateway | None = None,
         transformation_agent: TransformationAgent | None = None,
         transformation_agent_invoker: ModelGatewayInvoker | None = None,
         repair_agent: RepairAgent | None = None,
@@ -1131,7 +1131,7 @@ class W0WorkflowRunner:
         w02_failure_message: str | None = None
 
         # noinspection PyShadowingNames
-        def _record_artifact(meta: Any) -> None:
+        def _record_artifact(meta: ArtifactMetadata | None) -> None:
             if meta is None:
                 return
             try:
@@ -2547,7 +2547,7 @@ class W0WorkflowRunner:
         model_policy_skipped_meta: ArtifactMetadata | None,
         trajectory_payload: Mapping[str, JsonValue],
         generated_artifact_ref: Mapping[str, JsonValue] | None = None,
-        w02_contract: Any | None = None,
+        w02_contract: W02RunContract | None = None,
         w02_blocked: bool = False,
         baseline_generated_artifact_ref: Mapping[str, JsonValue] | None = None,
     ) -> JsonObject:
@@ -2693,7 +2693,7 @@ class W0WorkflowRunner:
     def _build_w02_java_history(
         self,
         *,
-        w02_contract: Any | None,
+        w02_contract: W02RunContract | None,
         baseline_artifact_ref: Mapping[str, JsonValue] | None,
         final_artifact_ref: Mapping[str, JsonValue] | None,
         generator_output: WorkflowStepResult,
@@ -2853,7 +2853,7 @@ class W0WorkflowRunner:
         *,
         context: W0RunContext,
         trajectory_ref: DataReference,
-        w02_contract: Any | None,
+        w02_contract: W02RunContract | None,
     ) -> list[JsonObject]:
         """Build the agentTrajectories[] array for the W0.2 evidence pack.
 
