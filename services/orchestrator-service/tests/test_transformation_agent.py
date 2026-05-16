@@ -500,6 +500,61 @@ class TransformationAgentGatewayFailureTests(unittest.TestCase):
             self.assertEqual(persisted["toolUseRecords"][0]["status"], "denied")
             guard_agent_response(persisted)
 
+    def test_gateway_failure_response_redacts_secret_like_message_without_reclassifying(self) -> None:
+        provider_prefix = "s" + "k"
+        leaked_token = provider_prefix + "-" + ("d" * 24)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RunArtifactStore(tmp)
+            store.init_run("run-1", "w0-migration-v0")
+            agent = TransformationAgent(
+                config=_config(),
+                artifact_store=store,
+                model_invoker=_StubInvoker(
+                    HarnessFailure(503, json.dumps({"error": leaked_token}))
+                ),
+            )
+            with self.assertRaises(ModelGatewayUnavailableError) as ctx:
+                agent.invoke(_request())
+            self.assertEqual(ctx.exception.failure_code, "model_gateway_unavailable")
+
+            response_path = Path(tmp) / "run-1" / TRANSFORMATION_AGENT_DIR / "attempt-01" / "agent-response.json"
+            persisted = json.loads(response_path.read_text("utf-8"))
+            self.assertEqual(persisted["status"], "failed")
+            self.assertEqual(persisted["failureCode"], "model_gateway_unavailable")
+            self.assertNotIn(leaked_token, json.dumps(persisted, sort_keys=True))
+            self.assertEqual(
+                persisted["failureMessage"],
+                "model_gateway_unavailable: failure details redacted by agent contract guard",
+            )
+            guard_agent_response(persisted)
+
+    def test_invalid_model_output_response_redacts_secret_like_message(self) -> None:
+        provider_prefix = "s" + "k"
+        leaked_token = provider_prefix + "-" + ("e" * 24)
+        bad_response = _ok_gateway_response()
+        bad_response["output"] = {"status": leaked_token}
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RunArtifactStore(tmp)
+            store.init_run("run-1", "w0-migration-v0")
+            agent = TransformationAgent(
+                config=_config(),
+                artifact_store=store,
+                model_invoker=_StubInvoker(bad_response),
+            )
+            with self.assertRaises(AgentContractInvalidAgentError):
+                agent.invoke(_request())
+
+            response_path = Path(tmp) / "run-1" / TRANSFORMATION_AGENT_DIR / "attempt-01" / "agent-response.json"
+            persisted = json.loads(response_path.read_text("utf-8"))
+            self.assertEqual(persisted["status"], "failed")
+            self.assertEqual(persisted["failureCode"], "agent_contract_invalid")
+            self.assertNotIn(leaked_token, json.dumps(persisted, sort_keys=True))
+            self.assertEqual(
+                persisted["failureMessage"],
+                "agent_contract_invalid: failure details redacted by agent contract guard",
+            )
+            guard_agent_response(persisted)
+
     def test_provider_timeout_raises_agent_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = RunArtifactStore(tmp)

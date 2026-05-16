@@ -732,7 +732,7 @@ class TransformationAgent:
             # Persist a synthetic failure response so the run timeline
             # always carries a structured artifact for the attempt.
             ended_at = self._iso_now()
-            failed_response = self._build_failure_response(
+            failed_response = self._build_contract_safe_failure_response(
                 request,
                 status="failed" if isinstance(exc, ModelGatewayUnavailableError)
                 else ("policy_denied" if isinstance(exc, ModelPolicyDeniedAgentError)
@@ -745,13 +745,6 @@ class TransformationAgent:
                 model_invocation_id=f"inv-{request.run_id}-{request.attempt_number:02d}-failed",
                 model_provider="foundry-development",
             )
-            try:
-                guard_agent_response(failed_response)
-            except AgentContractInvalidError as guard_exc:
-                raise AgentContractInvalidAgentError(
-                    "synthetic agent failure response failed contract validation: "
-                    f"{'; '.join(guard_exc.errors) or guard_exc}"
-                ) from guard_exc
             response_meta = self._artifact_store.write_json(
                 request.run_id,
                 request.workflow_id,
@@ -767,7 +760,7 @@ class TransformationAgent:
                 input_payload={"runId": request.run_id},
                 output_payload={
                     "failureCode": exc.failure_code,
-                    "failureMessage": str(exc),
+                    "failureMessage": str(failed_response["failureMessage"]),
                     "responseRef": self._meta_to_ref(response_meta),
                     "trajectoryRecord": dict(failed_response["trajectoryRecord"]),
                 },
@@ -817,7 +810,7 @@ class TransformationAgent:
                     inner_envelope, inner_status
                 )
         except AgentContractInvalidAgentError as exc:
-            failed_response = self._build_failure_response(
+            failed_response = self._build_contract_safe_failure_response(
                 request,
                 status="failed",
                 failure_code=exc.failure_code,
@@ -829,13 +822,6 @@ class TransformationAgent:
                 model_provider=str(gateway_response.get("provider") or "foundry-development"),
                 _latency_ms=latency_ms,
             )
-            try:
-                guard_agent_response(failed_response)
-            except AgentContractInvalidError as guard_exc:
-                raise AgentContractInvalidAgentError(
-                    "synthetic agent failure response failed contract validation: "
-                    f"{'; '.join(guard_exc.errors) or guard_exc}"
-                ) from guard_exc
             response_meta = self._artifact_store.write_json(
                 request.run_id,
                 request.workflow_id,
@@ -851,7 +837,7 @@ class TransformationAgent:
                 input_payload={"runId": request.run_id},
                 output_payload={
                     "failureCode": exc.failure_code,
-                    "failureMessage": str(exc),
+                    "failureMessage": str(failed_response["failureMessage"]),
                     "responseRef": self._meta_to_ref(response_meta),
                     "trajectoryRecord": dict(failed_response["trajectoryRecord"]),
                 },
@@ -1221,6 +1207,51 @@ class TransformationAgent:
         if request.trace_ref:
             payload["traceRef"] = request.trace_ref
         return payload
+
+    def _build_contract_safe_failure_response(
+        self,
+        request: TransformationAgentRequest,
+        *,
+        status: str,
+        failure_code: str,
+        failure_message: str,
+        started_at: str,
+        ended_at: str,
+        model_invocation_id: str,
+        model_provider: str,
+        _latency_ms: int = 0,
+    ) -> JsonObject:
+        """Build a failure response, redacting only if the contract guard trips."""
+        response = self._build_failure_response(
+            request,
+            status=status,
+            failure_code=failure_code,
+            failure_message=failure_message,
+            started_at=started_at,
+            ended_at=ended_at,
+            model_invocation_id=model_invocation_id,
+            model_provider=model_provider,
+            _latency_ms=_latency_ms,
+        )
+        try:
+            guard_agent_response(response)
+            return response
+        except AgentContractInvalidError:
+            redacted = self._build_failure_response(
+                request,
+                status=status,
+                failure_code=failure_code,
+                failure_message=(
+                    f"{failure_code}: failure details redacted by agent contract guard"
+                ),
+                started_at=started_at,
+                ended_at=ended_at,
+                model_invocation_id=model_invocation_id,
+                model_provider=model_provider,
+                _latency_ms=_latency_ms,
+            )
+            guard_agent_response(redacted)
+            return redacted
 
     def _call_model_gateway(
         self, request: TransformationAgentRequest
