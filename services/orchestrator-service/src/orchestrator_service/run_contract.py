@@ -485,6 +485,7 @@ class W02RunContract:
             "repairInputRef",
             "repairDecisionRef",
             "javaCandidateRef",
+            "buildTestResultRef",
             "rationale",
             "diffFromPreviousRef",
         ):

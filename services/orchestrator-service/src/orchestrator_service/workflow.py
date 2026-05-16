@@ -98,6 +98,7 @@ from .run_contract import (
     STATE_FINAL_JAVA_SELECTED,
     STATE_JAVA_CANDIDATE_PERSISTED,
     STATE_RUN_BLOCKED,
+    STATE_SEMANTIC_IR_BLOCKED,
     STATE_SEMANTIC_IR_READY,
     STATE_SOURCE_NORMALIZED,
     STATE_TRANSFORMATION_AGENT_INVOKED,
@@ -1360,19 +1361,30 @@ class W0WorkflowRunner:
                 message="cobol parser returned ok",
             )
 
-            ir_output = self._invoke_step(
-                context,
-                "generate-ir",
-                ir_capability,
-                DATA_CLASS_PARSER,
-                {
-                    "schemaVersion": "v0",
-                    "runId": context.run_id,
-                    "workflowId": context.workflow_id,
-                    "parseOutput": parse_output.payload,
-                },
-                parse_output.output_ref,
-            )
+            try:
+                ir_output = self._invoke_step(
+                    context,
+                    "generate-ir",
+                    ir_capability,
+                    DATA_CLASS_PARSER,
+                    {
+                        "schemaVersion": "v0",
+                        "runId": context.run_id,
+                        "workflowId": context.workflow_id,
+                        "parseOutput": parse_output.payload,
+                    },
+                    parse_output.output_ref,
+                )
+            except Exception:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_SEMANTIC_IR_BLOCKED,
+                    active_step=W02_STEP_GENERATE_IR,
+                    message="semantic IR generation failed",
+                    failure_code=w02.FAILURE_SEMANTIC_IR_FAILED,
+                )
+                raise
             step_results.append(ir_output)
             evidence_refs.append(ir_output.output_ref.uri)
 
@@ -1393,6 +1405,17 @@ class W0WorkflowRunner:
                     kind=KIND_SEMANTIC_IR_OUTPUT,
                 )
             )
+            ir_status = (_text(ir_output.payload.get("status")) or "").strip().lower()
+            if not ir_document or ir_status in {"failed", "error", "unsupported", "blocked"}:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_SEMANTIC_IR_BLOCKED,
+                    active_step=W02_STEP_GENERATE_IR,
+                    message="semantic IR was not produced",
+                    failure_code=w02.FAILURE_SEMANTIC_IR_FAILED,
+                )
+                raise StepExecutionError("step generate-ir failed: semantic IR was not produced")
             if ir_document:
                 _record_artifact(
                     self.artifact_store.write_json(
@@ -1923,6 +1946,7 @@ class W0WorkflowRunner:
                             "repairDecision": "refuse",
                             "failureCategory": build_failure_code,
                             "rationale": str(repair_exc),
+                            "buildTestResultRef": build_test_result_ref_payload,
                             "modelInvocationRef": {
                                 "invocationId": (
                                     f"inv-{context.run_id}-{attempt:02d}-repair-failed"
@@ -1965,6 +1989,7 @@ class W0WorkflowRunner:
                         "repairDecisionRef": dict(
                             repair_result.repair_decision_artifact_ref
                         ),
+                        "buildTestResultRef": build_test_result_ref_payload,
                         "javaCandidateRef": (
                             dict(repair_result.new_java_candidate_ref)
                             if repair_result.new_java_candidate_ref
@@ -2297,14 +2322,18 @@ class W0WorkflowRunner:
             )
             evidence_ref_payload = _as_reference_payload(evidence_output.output_ref)
             w02_contract.set_evidence_pack_ref(evidence_ref_payload)
-            if w02_blocked or not evidence_materialized:
+            if not evidence_materialized:
                 self._advance_w02(
                     context,
                     w02_contract,
                     STATE_EVIDENCE_INCOMPLETE,
                     active_step=W02_STEP_FINALIZE,
                     message="evidence pack incomplete",
-                    failure_code=(w02_failure_code or FAILURE_EVIDENCE_INCOMPLETE) if w02_blocked else FAILURE_EVIDENCE_INCOMPLETE,
+                    failure_code=(
+                        w02_failure_code
+                        if w02_blocked and w02_failure_code is not None
+                        else FAILURE_EVIDENCE_INCOMPLETE
+                    ),
                 )
                 if not w02_blocked:
                     # Evidence-write succeeded as a step but produced an
@@ -2319,7 +2348,11 @@ class W0WorkflowRunner:
                     w02_contract,
                     STATE_EVIDENCE_MATERIALIZED,
                     active_step=W02_STEP_FINALIZE,
-                    message="evidence pack materialised",
+                    message=(
+                        "blocked-run evidence pack materialised"
+                        if w02_blocked
+                        else "evidence pack materialised"
+                    ),
                 )
 
             if w02_blocked:
@@ -2448,46 +2481,49 @@ class W0WorkflowRunner:
             try:
                 exc_failure_code = self._failure_code_from_exception(exc)
                 # Drive the contract into ``run_blocked`` before finalising
-                # so the state-history reflects the workflow ordering. If we
-                # are already past ``final_java_selected`` the state machine
-                # will reject the transition; we silently fall back to a
-                # direct ``finalize`` call in that case.
+                # so the state-history reflects the workflow ordering. Evidence
+                # states are only recorded when the evidence step was actually
+                # reached or attempted.
                 current_state = w02_contract.state_machine.current
-                if current_state not in {
-                    w02.STATE_RUN_BLOCKED,
-                    w02.STATE_EVIDENCE_INCOMPLETE,
-                    w02.STATE_EVIDENCE_MATERIALIZED,
-                    w02.STATE_FINAL_CLASSIFICATION,
-                }:
+                if current_state != w02.STATE_FINAL_CLASSIFICATION:
+                    if failed_step == STEP_WRITE_EVIDENCE or current_state == w02.STATE_FINAL_JAVA_SELECTED:
+                        try:
+                            self._advance_w02(
+                                context,
+                                w02_contract,
+                                STATE_EVIDENCE_INCOMPLETE,
+                                active_step=None,
+                                message="evidence pack incomplete after workflow failure",
+                                failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
+                            )
+                        except IllegalTransitionError:
+                            pass
+                    elif current_state not in {
+                        w02.STATE_RUN_BLOCKED,
+                        w02.STATE_EVIDENCE_INCOMPLETE,
+                        w02.STATE_EVIDENCE_MATERIALIZED,
+                    }:
+                        try:
+                            self._advance_w02(
+                                context,
+                                w02_contract,
+                                STATE_RUN_BLOCKED,
+                                active_step=None,
+                                message=failure_message,
+                                failure_code=exc_failure_code,
+                            )
+                        except IllegalTransitionError:
+                            pass
                     try:
-                        self._advance_w02(
+                        self._finalize_w02(
                             context,
                             w02_contract,
-                            STATE_RUN_BLOCKED,
-                            active_step=None,
-                            message=failure_message,
-                            failure_code=exc_failure_code,
-                        )
-                    except IllegalTransitionError:
-                        pass
-                    try:
-                        self._advance_w02(
-                            context,
-                            w02_contract,
-                            STATE_EVIDENCE_INCOMPLETE,
-                            active_step=None,
-                            message="evidence pack incomplete after workflow failure",
+                            CLASSIFICATION_FAILED,
                             failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
+                            failure_message=failure_message,
                         )
                     except IllegalTransitionError:
                         pass
-                self._finalize_w02(
-                    context,
-                    w02_contract,
-                    CLASSIFICATION_FAILED,
-                    failure_code=exc_failure_code or FAILURE_EVIDENCE_INCOMPLETE,
-                    failure_message=failure_message,
-                )
             except Exception:
                 pass
             try:

@@ -30,6 +30,7 @@ from orchestrator_service.run_contract import (
     FAILURE_JAVA_COMPILE_FAILED,
     FAILURE_ORACLE_MISMATCH,
     FAILURE_PARSE_FAILED,
+    FAILURE_SEMANTIC_IR_FAILED,
     FINAL_CLASSIFICATIONS,
     IllegalTransitionError,
     RepairBudget,
@@ -43,6 +44,7 @@ from orchestrator_service.run_contract import (
     STATE_FINAL_JAVA_SELECTED,
     STATE_RUN_ACCEPTED,
     STATE_RUN_BLOCKED,
+    STATE_SEMANTIC_IR_BLOCKED,
     STATE_SEMANTIC_IR_READY,
     STATE_SOURCE_NORMALIZED,
     STATE_TRANSFORMATION_AGENT_INVOKED,
@@ -162,7 +164,7 @@ class WorkflowStateMachineTests(unittest.TestCase):
             STATE_SOURCE_NORMALIZED,
             STATE_COBOL_PARSE_ATTEMPTED,
             STATE_SEMANTIC_IR_READY,
-            "semantic_ir_blocked",
+            STATE_SEMANTIC_IR_BLOCKED,
             "baseline_generation_attempted",
             STATE_TRANSFORMATION_AGENT_INVOKED,
             "java_candidate_persisted",
@@ -403,6 +405,25 @@ class W02RunContractShapeTests(unittest.TestCase):
         }
         self.assertEqual(required, set(FAILURE_CODES))
 
+    def test_orchestrator_openapi_matches_runtime_failure_codes(self):
+        openapi_path = Path(__file__).resolve().parents[1] / "openapi.yaml"
+        openapi_text = openapi_path.read_text("utf-8")
+        contract_start = openapi_text.index("    W02RunContract:")
+        contract_end = openapi_text.index("    W02StateTransition:", contract_start)
+        contract_section = openapi_text[contract_start:contract_end]
+        failure_start = contract_section.index("        failureCode:")
+        failure_end = contract_section.index("        failureMessage:", failure_start)
+        failure_section = contract_section[failure_start:failure_end]
+
+        for failure_code in FAILURE_CODES:
+            self.assertIn(
+                f"- {failure_code}",
+                failure_section,
+                f"orchestrator OpenAPI is missing failureCode {failure_code!r}",
+            )
+        self.assertIn("        repairAttempts:", contract_section)
+        self.assertIn("    W02RepairAttempt:", contract_section)
+
     def test_final_classifications_match_issue_166_required_set(self):
         required = {"success", "blocked", "failed", "cancelled", "incomplete"}
         self.assertEqual(required, set(FINAL_CLASSIFICATIONS))
@@ -463,6 +484,16 @@ class _StubGatewayWithBuildOutcomes(StubGateway):
                 self._build_index += 1
                 return dict(outcome)
             return dict(self.responses["java.build-test"])
+        return super().invoke_capability(capability, payload)
+
+
+class _StubGatewayWithIrFailure(StubGateway):
+    """Stub gateway that fails Semantic IR generation after parse succeeds."""
+
+    def invoke_capability(self, capability, payload):
+        if capability["id"] == "cobol.ir":
+            self.calls.append(("invoke", "cobol.ir", dict(payload)))
+            raise RuntimeError("semantic IR unavailable")
         return super().invoke_capability(capability, payload)
 
 
@@ -682,7 +713,17 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
         states = [entry["state"] for entry in contract["stateHistory"]]
         self.assertIn(STATE_VERIFICATION_REPAIR_INVOKED, states)
         self.assertIn(STATE_RUN_BLOCKED, states)
+        self.assertIn(STATE_EVIDENCE_MATERIALIZED, states)
+        self.assertNotIn(STATE_EVIDENCE_INCOMPLETE, states)
         self.assertEqual(contract["currentState"], STATE_FINAL_CLASSIFICATION)
+        self.assertEqual(
+            contract["repairAttempts"][0]["buildTestResultRef"]["uri"],
+            "urn:orchestrator/run-1/build/attempt-1",
+        )
+        self.assertEqual(
+            contract["repairAttempts"][1]["buildTestResultRef"]["uri"],
+            "urn:orchestrator/run-1/build/attempt-2",
+        )
 
         # The runner must have actually invoked build-test three times
         # (initial + two repair attempts).
@@ -730,6 +771,50 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(contract)
         self.assertEqual(contract["finalClassification"], CLASSIFICATION_FAILED)
         self.assertEqual(contract["failureCode"], FAILURE_PARSE_FAILED)
+        states = [entry["state"] for entry in contract["stateHistory"]]
+        self.assertIn(STATE_RUN_BLOCKED, states)
+        self.assertNotIn(STATE_EVIDENCE_INCOMPLETE, states)
+
+    def test_semantic_ir_failure_emits_semantic_ir_blocked_state(self):
+        gateway = _StubGatewayWithIrFailure(
+            _BaseFixture._base_capabilities(),
+            _BaseFixture._base_responses(),
+        )
+        runner = self._runner(gateway)
+        with self.assertRaises(Exception):
+            runner.run(context=self._context(), input_ref=self._input_ref())
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_FAILED)
+        self.assertEqual(contract["failureCode"], FAILURE_SEMANTIC_IR_FAILED)
+        states = [entry["state"] for entry in contract["stateHistory"]]
+        self.assertIn(STATE_COBOL_PARSE_ATTEMPTED, states)
+        self.assertIn(STATE_SEMANTIC_IR_BLOCKED, states)
+        self.assertIn(STATE_RUN_BLOCKED, states)
+        self.assertNotIn(STATE_EVIDENCE_INCOMPLETE, states)
+
+    def test_unusable_semantic_ir_response_emits_semantic_ir_blocked_state(self):
+        responses = _BaseFixture._base_responses()
+        responses["cobol.ir"] = {
+            "schemaVersion": "v0",
+            "status": "failed",
+            "reason": "unsupported",
+            "runId": "run-1",
+            "workflowId": "w0-migration-v0",
+            "outputRef": {"uri": "urn:orchestrator/run-1/ir-failed"},
+        }
+        gateway = StubGateway(_BaseFixture._base_capabilities(), responses)
+        runner = self._runner(gateway)
+        with self.assertRaises(Exception):
+            runner.run(context=self._context(), input_ref=self._input_ref())
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_FAILED)
+        self.assertEqual(contract["failureCode"], FAILURE_SEMANTIC_IR_FAILED)
+        states = [entry["state"] for entry in contract["stateHistory"]]
+        self.assertIn(STATE_SEMANTIC_IR_BLOCKED, states)
+        self.assertIn(STATE_RUN_BLOCKED, states)
+        self.assertNotIn(STATE_EVIDENCE_INCOMPLETE, states)
 
     def test_contract_is_persisted_to_artifact_store(self):
         gateway = StubGateway(
