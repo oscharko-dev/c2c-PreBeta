@@ -207,12 +207,15 @@ paths:
     get:
       summary: Return generated Java for side-by-side display
       description: >
-        The response includes `artifactRef` (the SHA-256-anchored reference to
-        the generated-project manifest) and `traceability` (programId, irId,
-        sourceHash). The same `artifactRef.sha256` appears as
-        `generatedArtifactRef.sha256` on `/build-test` and `/evidence`, which
-        is how Issue #97 guarantees the UI is showing the exact Java the
-        build-test runner compiled and the Evidence Pack vouches for.
+        The response includes metadata only: `artifactRef` (the
+        SHA-256-anchored reference to the generated-project manifest) and
+        `traceability` (programId, irId, sourceHash). Java source content is
+        intentionally not inlined here; callers must fetch file bytes through
+        `/generated/files/{filePath}`, which enforces the artifact size limit.
+        The same `artifactRef.sha256` appears as `generatedArtifactRef.sha256`
+        on `/build-test` and `/evidence`, which is how Issue #97 guarantees
+        the UI is showing the exact Java the build-test runner compiled and
+        the Evidence Pack vouches for.
       operationId: getGenerated
       parameters:
         - in: path
@@ -855,7 +858,7 @@ components:
 
     RunLinks:
       type: object
-      required: [self, generated, generatedFiles, buildTest, evidence, events, progress, artifacts, learning, workflow]
+      required: [self, generated, generatedFiles, buildTest, evidence, events, progress, artifacts, learning, experience, workflow]
       properties:
         self: { type: string }
         generated: { type: string }
@@ -866,6 +869,7 @@ components:
         progress: { type: string }
         artifacts: { type: string }
         learning: { type: string }
+        experience: { type: string }
         workflow: { type: string }
 
     W02UiErrorCode:
@@ -1065,7 +1069,11 @@ components:
         fileCount: { type: integer, minimum: 0 }
         files:
           type: object
-          additionalProperties: { type: string }
+          deprecated: true
+          description: Always empty. Generated source content is served only
+            by `/generated/files/{filePath}` so the BFF can enforce the
+            artifact-content size cap.
+          additionalProperties: false
         fileRefs:
           type: array
           items: { $ref: "#/components/schemas/GeneratedFileRef" }
@@ -1081,7 +1089,7 @@ components:
         orchestratorRunId: { type: string }
         generationResponseRef:
           oneOf:
-            - $ref: "#/components/schemas/RunArtifactMetadata"
+            - $ref: "#/components/schemas/OutputRef"
             - type: 'null'
         artifactRef:
           oneOf:
@@ -1101,11 +1109,11 @@ components:
       required: [path]
       properties:
         path: { type: string }
-        absolutePath: { type: string }
-        uri: { type: string }
         sha256: { type: string }
         byteSize: { type: integer, minimum: 0 }
         mimeType: { type: string }
+        kind: { type: string }
+        name: { type: string }
 
     GeneratedTraceability:
       type: object
@@ -1117,11 +1125,16 @@ components:
 
     OutputRef:
       type: object
-      required: [uri, sha256]
+      required: [sha256]
       properties:
-        uri: { type: string }
         sha256: { type: string }
         byteSize: { type: integer, minimum: 0 }
+        kind: { type: string }
+        path: { type: string }
+        name: { type: string }
+        mimeType: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string }
 
     GeneratedFilesIndex:
       type: object
@@ -1156,12 +1169,10 @@ components:
         mode: { type: string, enum: [live, 'diagnostic-fixture'] }
         productMode: { type: string, enum: [live, unavailable] }
         path: { type: string }
-        absolutePath: { type: string }
         content: { type: string }
         sha256: { type: string }
         byteSize: { type: integer, minimum: 0 }
         mimeType: { type: string }
-        uri: { type: string }
         kind: { type: string }
         orchestratorRunId: { type: string }
 
@@ -1227,14 +1238,19 @@ components:
           type: string
           enum: [complete, incomplete, invalid]
         packId: { type: string }
-        manifestUri: { type: string }
+        manifestHash: { type: string }
+        validationStatus: { type: string, enum: [valid, invalid, incomplete, unknown] }
         missingArtifacts:
           type: array
           items: { type: string }
         orchestratorRunId: { type: string }
         artifactRef:
           oneOf:
-            - $ref: "#/components/schemas/RunArtifactMetadata"
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        exportRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
             - type: 'null'
         generatedArtifactRef:
           oneOf:
@@ -1247,17 +1263,14 @@ components:
 
     RunArtifactMetadata:
       type: object
-      required: [uri, sha256, byteSize, mimeType, kind, createdBy, createdAt, runId, workflowId, path, name]
+      required: [sha256, byteSize, mimeType, kind, createdBy, createdAt, path, name]
       properties:
-        uri: { type: string }
         sha256: { type: string }
         byteSize: { type: integer, minimum: 0 }
         mimeType: { type: string }
         kind: { type: string }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
-        runId: { type: string }
-        workflowId: { type: string }
         path: { type: string }
         name: { type: string }
 

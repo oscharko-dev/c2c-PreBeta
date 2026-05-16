@@ -264,7 +264,7 @@ function runSummary(stored: StoredRun): Record<string, unknown> {
     productMode: productModeOf(stored),
     message: stored.message,
     policyDecision: stored.policyDecision,
-    evidenceRefs: stored.evidenceRefs,
+    evidenceRefs: [],
     orchestratorRunId: stored.liveRunId ?? '',
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
@@ -291,6 +291,7 @@ function runLinks(runId: string): Record<string, string> {
     artifacts: `/api/v0/runs/${runId}/artifacts`,
     progress: `/api/v0/runs/${runId}/progress`,
     learning: `/api/v0/runs/${runId}/learning`,
+    experience: `/api/v0/runs/${runId}/experience`,
     workflow: `/api/v0/runs/${runId}/workflow`,
   };
 }
@@ -361,6 +362,10 @@ function diagnosticFixtureGeneratedView(stored: StoredRun): Record<string, unkno
     mode: 'diagnostic-fixture',
     productMode: 'unavailable',
     ...stored.fixture.generated,
+    files: {},
+    fileCount: Object.keys(stored.fixture.generated.files).length,
+    fileRefs: Object.keys(stored.fixture.generated.files).map((path) => ({ path })),
+    note: `${stored.fixture.generated.note} Generated source content is intentionally available only through the capped generated-file endpoint in product mode.`,
   };
 }
 
@@ -384,6 +389,8 @@ function diagnosticFixtureEvidenceView(stored: StoredRun): Record<string, unknow
     mode: 'diagnostic-fixture',
     productMode: 'unavailable',
     ...stored.fixture.evidence,
+    manifestUri: undefined,
+    exportUri: undefined,
   };
 }
 
@@ -578,23 +585,72 @@ function normalizeExperienceViewFromSummary(
 }
 
 interface OutputRef {
-  uri: string;
   sha256: string;
   byteSize?: number;
+  kind?: string;
+  path?: string;
+  name?: string;
+  mimeType?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 function normalizeOutputRef(raw: unknown): OutputRef | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const uri = asString(record.uri);
-  if (uri.length === 0) return null;
+  const sha256 = asString(record.sha256);
+  if (sha256.length === 0) return null;
   const ref: OutputRef = {
-    uri,
-    sha256: asString(record.sha256),
+    sha256,
   };
   const byteSize = asNumber(record.byteSize);
   if (byteSize !== undefined) ref.byteSize = byteSize;
+  for (const key of ['kind', 'path', 'name', 'mimeType', 'createdBy', 'createdAt'] as const) {
+    const value = asString(record[key]);
+    if (value.length > 0) ref[key] = value;
+  }
   return ref;
+}
+
+function normalizeGeneratedFileRef(raw: unknown): Record<string, unknown> | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const path = asString(record.path);
+  if (!isSafeGeneratedRelpath(path)) return null;
+  const ref: Record<string, unknown> = { path };
+  for (const key of ['sha256', 'mimeType', 'kind', 'name'] as const) {
+    const value = asString(record[key]);
+    if (value.length > 0) ref[key] = value;
+  }
+  const byteSize = asNumber(record.byteSize);
+  if (byteSize !== undefined) ref.byteSize = byteSize;
+  return ref;
+}
+
+function normalizeGeneratedFileRefs(raw: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => normalizeGeneratedFileRef(entry))
+    .filter((entry): entry is Record<string, unknown> => entry !== null);
+}
+
+function normalizeRunArtifact(raw: unknown): Record<string, unknown> | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const sha256 = asString(record.sha256);
+  if (sha256.length === 0) return null;
+  const artifact: Record<string, unknown> = { sha256 };
+  const byteSize = asNumber(record.byteSize);
+  if (byteSize !== undefined) artifact.byteSize = byteSize;
+  for (const key of ['kind', 'name', 'mimeType', 'createdBy', 'createdAt'] as const) {
+    const value = asString(record[key]);
+    if (value.length > 0) artifact[key] = value;
+  }
+  const path = asString(record.path);
+  if (path.length > 0 && isSafeGeneratedRelpath(path)) {
+    artifact.path = path;
+  }
+  return artifact;
 }
 
 interface Diagnostic {
@@ -669,6 +725,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
       entryClass: '',
       entryFilePath: '',
       files: {},
+      fileRefs: [],
       outputRef: null,
       diagnostics: [],
       unsupportedFeatures: [],
@@ -683,6 +740,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
         entryClass: '',
         entryFilePath: '',
         files: {},
+        fileRefs: [],
         outputRef: null,
         diagnostics: [],
         unsupportedFeatures: [],
@@ -718,9 +776,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
     }
     const artifactRef = normalizeOutputRef(envelope.artifactRef);
     const traceability = asRecord(envelope.traceability) ?? {};
-    const fileRefs = Array.isArray(envelope.fileRefs)
-      ? envelope.fileRefs.filter((entry) => asRecord(entry) !== undefined)
-      : [];
+    const fileRefs = normalizeGeneratedFileRefs(envelope.fileRefs);
     return {
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),
@@ -729,7 +785,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
       status,
       entryClass: asString(envelope.entryClass),
       entryFilePath,
-      files,
+      files: {},
       fileCount: asNumber(envelope.fileCount) ?? Object.keys(files).length,
       fileRefs,
       unsupportedFeatures: Array.isArray(envelope.unsupportedFeatures) ? envelope.unsupportedFeatures : [],
@@ -743,7 +799,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
         irId: asString(traceability.irId),
         sourceHash: asString(traceability.sourceHash),
       },
-      generationResponseRef: envelope.generationResponseRef ?? null,
+      generationResponseRef: outputRef,
       diagnostics,
       ...(placeholderViolation ? { placeholderViolation } : {}),
       ...(placeholderViolation
@@ -756,6 +812,7 @@ async function liveGeneratedView(stored: StoredRun, orchestrator: OrchestratorCl
       entryClass: '',
       entryFilePath: '',
       files: {},
+      fileRefs: [],
       outputRef: null,
       diagnostics: [],
       unsupportedFeatures: [],
@@ -858,7 +915,6 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
       diagnostics,
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
-      artifactRef: envelope.artifactRef ?? null,
       generatedArtifactRef: normalizeOutputRef(envelope.generatedArtifactRef),
     };
   } catch (err) {
@@ -922,7 +978,6 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
     return {
       ...incompleteEnvelope(stored, ['evidence-pack-manifest'], 'Live run id is unavailable; orchestrator has not yet accepted this run.'),
       packId: '',
-      manifestUri: '',
       manifestHash: '',
       validationStatus: 'unknown',
       exportRef: null,
@@ -934,7 +989,6 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
       return {
         ...incompleteEnvelope(stored, ['evidence-pack-manifest'], 'Orchestrator did not return an evidence pack manifest for this run.'),
         packId: '',
-        manifestUri: '',
         manifestHash: '',
         validationStatus: 'unknown',
         exportRef: null,
@@ -949,7 +1003,6 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
     const validationMissing = deriveMissingFromValidation(data);
     const missing = Array.from(new Set([...envelopeMissing, ...validationMissing]));
     const packId = asString(data?.packId);
-    const manifestUri = asString(artifactRef?.uri);
     const manifestHash = asString(artifactRef?.sha256);
     const exportRef = deriveExportRef(data);
     const validationStatus = deriveValidationStatus(data);
@@ -966,20 +1019,18 @@ async function liveEvidenceView(stored: StoredRun, orchestrator: OrchestratorCli
       productMode: status === 'complete' ? 'live' : 'unavailable',
       status,
       packId,
-      manifestUri,
       manifestHash,
       validationStatus,
       exportRef,
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
-      artifactRef: artifactRef ?? null,
+      artifactRef: normalizeOutputRef(artifactRef),
       generatedArtifactRef: normalizeOutputRef(envelope.generatedArtifactRef),
     };
   } catch (err) {
     return {
       ...incompleteEnvelope(stored, ['evidence-pack-manifest'], sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed')),
       packId: '',
-      manifestUri: '',
       manifestHash: '',
       validationStatus: 'unknown',
       exportRef: null,
@@ -1000,8 +1051,8 @@ interface PipelineStep {
   startedAt?: string;
   finishedAt?: string;
   diagnostic?: string;
-  inputRef?: { uri: string; sha256: string; byteSize?: number } | null;
-  outputRef?: { uri: string; sha256: string; byteSize?: number } | null;
+  inputRef?: OutputRef | null;
+  outputRef?: OutputRef | null;
   latencyMs?: number;
 }
 
@@ -1911,7 +1962,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const completed = runStore.update(stored.runId, {
           status: 'completed',
           message: 'diagnostic fixture run completed (C2C_ENABLE_DIAGNOSTIC_FIXTURES); not a product result',
-          evidenceRefs: [stored.fixture?.evidence.manifestUri ?? ''],
+          evidenceRefs: [],
         }) ?? stored;
         res.writeHead(201, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
         res.end(JSON.stringify(runSummary(completed)));
@@ -2042,8 +2093,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             missingArtifacts: Array.isArray(envelope.missingArtifacts)
               ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
               : [],
-            files: Array.isArray(envelope.files) ? envelope.files : [],
-            fileCount: asNumber(envelope.fileCount) ?? 0,
+            files: normalizeGeneratedFileRefs(envelope.files),
+            fileCount: asNumber(envelope.fileCount) ?? normalizeGeneratedFileRefs(envelope.files).length,
             entryFilePath: asString(envelope.entryFilePath),
             artifactRef: normalizeOutputRef(envelope.artifactRef),
             orchestratorRunId: liveRunId,
@@ -2149,12 +2200,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             mode: 'live',
             productMode: 'live',
             path: asString(envelope.path) || decodedPath,
-            absolutePath: asString(envelope.absolutePath),
             content,
             sha256: asString(envelope.sha256),
             byteSize,
             mimeType: asString(envelope.mimeType),
-            uri: asString(envelope.uri),
             kind: asString(envelope.kind),
             orchestratorRunId: liveRunId,
           });
@@ -2363,7 +2412,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             mode: 'live',
             productMode: 'live',
             orchestratorRunId: liveRunId,
-            artifacts: Array.isArray(envelope.artifacts) ? envelope.artifacts : [],
+            artifacts: Array.isArray(envelope.artifacts)
+              ? envelope.artifacts
+                .map((entry) => normalizeRunArtifact(entry))
+                .filter((entry): entry is Record<string, unknown> => entry !== null)
+              : [],
             summary: envelope.summary ?? null,
             createdAt: envelope.createdAt ?? null,
             updatedAt: envelope.updatedAt ?? null,

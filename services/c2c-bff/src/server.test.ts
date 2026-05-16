@@ -663,7 +663,7 @@ test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
     assert.equal(runBody.mode, 'diagnostic-fixture');
     assert.equal(runBody.productMode, 'unavailable');
     assert.equal(runBody.status, 'completed');
-    assert.ok(runBody.evidenceRefs.length > 0);
+    assert.deepEqual(runBody.evidenceRefs, []);
 
     const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/generated`);
     assert.equal(generated.status, 200);
@@ -672,12 +672,14 @@ test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
       productMode: string;
       status: string;
       files: Record<string, string>;
+      fileRefs: Array<{ path: string }>;
       unsupportedFeatures: string[];
     };
     assert.equal(genBody.mode, 'diagnostic-fixture');
     assert.equal(genBody.productMode, 'unavailable');
     assert.equal(genBody.status, 'generated');
-    assert.ok(Object.keys(genBody.files).length > 0);
+    assert.deepEqual(genBody.files, {});
+    assert.ok(genBody.fileRefs.some((entry) => entry.path.endsWith('.java')));
     assert.equal(genBody.unsupportedFeatures.length, 0);
 
     const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/build-test`);
@@ -691,11 +693,11 @@ test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
 
     const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/evidence`);
     assert.equal(evidence.status, 200);
-    const evBody = evidence.body as { mode: string; productMode: string; packId: string; manifestUri: string };
+    const evBody = evidence.body as { mode: string; productMode: string; packId: string; manifestUri?: string };
     assert.equal(evBody.mode, 'diagnostic-fixture');
     assert.equal(evBody.productMode, 'unavailable');
     assert.ok(evBody.packId.startsWith('epk-'));
-    assert.ok(evBody.manifestUri.length > 0);
+    assert.equal(evBody.manifestUri, undefined);
   } finally {
     await server.close();
   }
@@ -1019,7 +1021,7 @@ test('live generated/build-test/evidence endpoints return real artifact contents
     assert.equal(genBody.mode, 'live');
     assert.equal(genBody.status, 'generated');
     assert.equal(genBody.entryClass, 'CASE01');
-    assert.equal(genBody.files['src/main/java/c2c/CASE01.java'], generatedJava);
+    assert.deepEqual(genBody.files, {});
     assert.equal(calls.getGenerated, 1);
 
     const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
@@ -1032,11 +1034,12 @@ test('live generated/build-test/evidence endpoints return real artifact contents
 
     const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
     assert.equal(evidence.status, 200);
-    const evBody = evidence.body as { mode: string; status: string; packId: string; manifestUri: string; missingArtifacts: string[] };
+    const evBody = evidence.body as { mode: string; status: string; packId: string; manifestHash: string; missingArtifacts: string[]; manifestUri?: string };
     assert.equal(evBody.mode, 'live');
     assert.equal(evBody.status, 'complete');
     assert.equal(evBody.packId, 'epk-live-1');
-    assert.equal(evBody.manifestUri, 'file:///run/evidence-pack-manifest.json');
+    assert.equal(evBody.manifestUri, undefined);
+    assert.equal(evBody.manifestHash, 'd'.repeat(64));
     assert.deepEqual(evBody.missingArtifacts, []);
 
     const events = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/events`);
@@ -1107,21 +1110,87 @@ test('live generated endpoint exposes outputRef, diagnostics, and rejects placeh
     assert.equal(generated.status, 200);
     const body = generated.body as {
       status: string;
-      outputRef: { uri: string; sha256: string; byteSize?: number } | null;
+      outputRef: { sha256: string; byteSize?: number } | null;
       diagnostics: Array<{ code?: string }>;
       files: Record<string, string>;
     };
     assert.equal(body.status, 'generated');
     assert.ok(body.outputRef, 'outputRef must be present for successful runs');
-    assert.equal(body.outputRef?.uri, 'file:///run/generation-response.json');
     assert.equal(body.outputRef?.sha256, 'a'.repeat(64));
     assert.equal(body.diagnostics.length, 2);
     assert.equal(body.diagnostics[0]?.code, 'gen.start');
-    // Critical safeguard: successful runs must NOT contain placeholder markers.
-    for (const content of Object.values(body.files)) {
-      assert.doesNotMatch(content, /W0-STUB/, 'placeholder marker detected in generated Java for a successful run');
-      assert.doesNotMatch(content, /Synthetic W0/, 'placeholder marker detected in generated Java for a successful run');
-    }
+    assert.deepEqual(body.files, {});
+  } finally {
+    await server.close();
+  }
+});
+
+test('live generated endpoint never inlines upstream Java content', async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const oversizedJava = 'A'.repeat(1_200_000);
+  const { client: orch } = stubOrchestrator({
+    generated: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        programId: 'CASE01',
+        runStatus: 'completed',
+        status: 'complete',
+        missingArtifacts: [],
+        entryClass: 'CASE01',
+        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        fileCount: 1,
+        files: { 'src/main/java/c2c/CASE01.java': oversizedJava },
+        fileRefs: [
+          {
+            path: 'src/main/java/c2c/CASE01.java',
+            absolutePath: '/var/lib/orchestrator/generated/CASE01.java',
+            uri: 'https://storage.internal/generated/CASE01.java?token=secret',
+            sha256: 'b'.repeat(64),
+            byteSize: oversizedJava.length,
+          },
+        ],
+        unsupportedFeatures: [],
+        openAssumptions: [],
+        artifactRef: {
+          uri: 'https://storage.internal/generated-project-manifest.json?token=secret',
+          sha256: 'c'.repeat(64),
+          byteSize: 512,
+          kind: 'generated-project-manifest',
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream', artifactContentMaxBytes: 1024 },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    assert.equal(generated.status, 200);
+    const body = generated.body as {
+      files: Record<string, string>;
+      fileRefs: Array<{ path: string; absolutePath?: string; uri?: string }>;
+      artifactRef: { sha256: string; kind?: string } | null;
+    };
+    assert.deepEqual(body.files, {});
+    assert.equal(body.fileRefs[0]?.path, 'src/main/java/c2c/CASE01.java');
+    assert.equal(body.fileRefs[0]?.absolutePath, undefined);
+    assert.equal(body.fileRefs[0]?.uri, undefined);
+    assert.equal(body.artifactRef?.sha256, 'c'.repeat(64));
+    const serialized = JSON.stringify(generated.body);
+    assert.ok(!serialized.includes(oversizedJava.slice(0, 128)));
+    assert.doesNotMatch(serialized, /storage\.internal|\/var\/lib|token=secret/);
   } finally {
     await server.close();
   }
@@ -1250,7 +1319,7 @@ test('live build-test extracts execution.stdout, goldenMaster.expected, outputRe
       executionStatus: string;
       expectedOutput: string;
       actualOutput: string;
-      outputRef: { uri: string; sha256: string } | null;
+      outputRef: { sha256: string } | null;
       diagnostics: Array<{ code?: string }>;
     };
     assert.equal(body.status, 'ok');
@@ -1259,7 +1328,6 @@ test('live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     assert.equal(body.executionStatus, 'ok');
     assert.match(body.actualOutput, /APPROVED-COUNT=2/);
     assert.match(body.expectedOutput, /APPROVED-COUNT=2/);
-    assert.equal(body.outputRef?.uri, 'file:///run/build-test-result.json');
     assert.equal(body.outputRef?.sha256, 'c'.repeat(64));
     assert.equal(body.diagnostics.length, 2);
     assert.equal(body.diagnostics[0]?.code, 'compile.ok');
@@ -1381,19 +1449,18 @@ test('live evidence exposes manifestHash, validationStatus, exportRef, and aggre
     const body = evidence.body as {
       status: string;
       packId: string;
-      manifestUri: string;
+      manifestUri?: string;
       manifestHash: string;
       validationStatus: string;
       missingArtifacts: string[];
-      exportRef: { uri: string; sha256: string } | null;
+      exportRef: { sha256: string } | null;
     };
     assert.equal(body.status, 'incomplete');
     assert.equal(body.packId, 'epk-live-1');
-    assert.equal(body.manifestUri, 'file:///run/evidence-pack-manifest.json');
+    assert.equal(body.manifestUri, undefined);
     assert.equal(body.manifestHash, 'f'.repeat(64));
     assert.equal(body.validationStatus, 'incomplete');
     assert.deepEqual(body.missingArtifacts, ['semanticIr']);
-    assert.equal(body.exportRef?.uri, 'file:///run/evidence-pack.tar.gz');
     assert.equal(body.exportRef?.sha256, 'e'.repeat(64));
   } finally {
     await server.close();
@@ -1419,10 +1486,10 @@ test('live evidence with missing manifest reports incomplete status and zero pac
     });
     const startedBody = started.body as { runId: string };
     const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
-    const body = evidence.body as { status: string; packId: string; manifestUri: string; missingArtifacts: string[]; validationStatus: string };
+    const body = evidence.body as { status: string; packId: string; manifestUri?: string; missingArtifacts: string[]; validationStatus: string };
     assert.equal(body.status, 'incomplete');
     assert.equal(body.packId, '');
-    assert.equal(body.manifestUri, '');
+    assert.equal(body.manifestUri, undefined);
     assert.equal(body.validationStatus, 'unknown');
     assert.deepEqual(body.missingArtifacts, ['evidence-pack-manifest']);
   } finally {
@@ -1531,6 +1598,7 @@ test('transform derives program id, calls orchestrator, and returns the full tra
       artifacts: `/api/v0/runs/${body.runId}/artifacts`,
       progress: `/api/v0/runs/${body.runId}/progress`,
       learning: `/api/v0/runs/${body.runId}/learning`,
+      experience: `/api/v0/runs/${body.runId}/experience`,
       workflow: `/api/v0/runs/${body.runId}/workflow`,
     });
   } finally {
@@ -2518,6 +2586,11 @@ test('product-mode responses never advertise diagnostic-fixture mode or unavaila
         !serialized.includes('diagnostic-fixture'),
         `${endpoint} product-mode response must not contain the literal "diagnostic-fixture"`,
       );
+      assert.doesNotMatch(
+        serialized,
+        /file:\/\/|https?:\/\/|\/var\/lib|absolutePath|uri"/,
+        `${endpoint} product-mode response must not leak artifact locations`,
+      );
     }
   } finally {
     await server.close();
@@ -2594,6 +2667,8 @@ test('Issue #97: generated/files index proxies orchestrator response and exposes
     { path: 'pom.xml', sha256: 'a'.repeat(64), byteSize: 16, mimeType: 'application/xml' },
     {
       path: 'src/main/java/c2c/CASE01.java',
+      absolutePath: '/var/lib/orchestrator/generated/src/main/java/c2c/CASE01.java',
+      uri: 'https://storage.internal/generated/CASE01.java?token=secret',
       sha256: 'b'.repeat(64),
       byteSize: javaContent.length,
       mimeType: 'text/x-java-source',
@@ -2667,6 +2742,7 @@ test('Issue #97: generated/files index proxies orchestrator response and exposes
     assert.equal(indexBody.fileCount, 2);
     assert.equal(indexBody.entryFilePath, 'src/main/java/c2c/CASE01.java');
     assert.equal(indexBody.artifactRef?.sha256, 'c'.repeat(64));
+    assert.doesNotMatch(JSON.stringify(index.body), /storage\.internal|\/var\/lib|file:\/\//);
     assert.equal(calls.getGeneratedFiles, 1);
 
     const file = await fetchJson(
@@ -2677,6 +2753,7 @@ test('Issue #97: generated/files index proxies orchestrator response and exposes
     assert.equal(fileBody.path, 'src/main/java/c2c/CASE01.java');
     assert.equal(fileBody.content, javaContent);
     assert.equal(fileBody.byteSize, javaContent.length);
+    assert.doesNotMatch(JSON.stringify(file.body), /storage\.internal|\/var\/lib|file:\/\//);
     assert.equal(calls.getGeneratedFile.length, 1);
     assert.equal(calls.getGeneratedFile[0]?.path, 'src/main/java/c2c/CASE01.java');
 
@@ -2980,6 +3057,68 @@ test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary'
   }
 });
 
+test('GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source', async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: 'complete',
+        source: 'cached',
+        contract: {
+          currentState: 'final_classification',
+          activeStep: 'write-evidence',
+          agentAttemptCount: 1,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          repairAttempts: [],
+          finalClassification: 'success',
+          failureCode: null,
+          failureMessage: null,
+          generatedJavaRef: { uri: 'urn:c2c/gen/1', sha256: 'b'.repeat(64), byteSize: 1024, kind: 'generated-project-manifest' },
+          buildTestResultRef: { uri: 'urn:c2c/bt/1', sha256: 'c'.repeat(64), byteSize: 256, kind: 'build-test-result' },
+          evidencePackRef: { uri: 'urn:c2c/ev/1', sha256: 'd'.repeat(64), byteSize: 512, kind: 'evidence-pack-manifest' },
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    assert.equal(workflow.status, 200);
+    const body = workflow.body as {
+      source: string;
+      activeStep: string;
+      activeAgent: string;
+      finalClassification: string;
+      generatedJavaRef: { sha256: string; byteSize: number; kind: string } | null;
+    };
+    assert.equal(body.source, 'cached');
+    assert.equal(body.activeStep, 'write-evidence');
+    assert.equal(body.activeAgent, 'evidence_service');
+    assert.equal(body.finalClassification, 'success');
+    assert.deepEqual(body.generatedJavaRef, {
+      sha256: 'b'.repeat(64),
+      byteSize: 1024,
+      kind: 'generated-project-manifest',
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 test('GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable', async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
@@ -3165,6 +3304,54 @@ test('GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact 
         content: oversizedContent,
         sha256: 'a'.repeat(64),
         byteSize: oversizedContent.length,
+        mimeType: 'text/x-java',
+        uri: 'urn:c2c/gen/1',
+        kind: 'generated-project-file',
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream', artifactContentMaxBytes: 1024 },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/BRNCH01.java`,
+    );
+    assert.equal(response.status, 413);
+    const body = response.body as { error: string; limit: number; byteSize: number };
+    assert.equal(body.error, 'artifact_too_large');
+    assert.equal(body.limit, 1024);
+    assert.equal(body.byteSize, oversizedContent.length);
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/v0/runs/{runId}/generated/files/{path} measures content when upstream underreports byteSize', async () => {
+  const runStore = createRunStore();
+  const oversizedContent = 'A'.repeat(2048);
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    generatedFile: {
+      status: 200,
+      body: {
+        runId: 'live-run-1',
+        workflowId: 'w0-migration-v0',
+        programId: 'BRNCH01',
+        path: 'src/main/java/c2c/BRNCH01.java',
+        content: oversizedContent,
+        sha256: 'a'.repeat(64),
+        byteSize: 1,
         mimeType: 'text/x-java',
         uri: 'urn:c2c/gen/1',
         kind: 'generated-project-file',

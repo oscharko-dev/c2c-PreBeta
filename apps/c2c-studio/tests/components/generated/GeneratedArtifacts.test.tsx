@@ -45,6 +45,31 @@ function okResult<T>(data: T): ApiResult<T> {
   return { ok: true, data };
 }
 
+function mockGeneratedFileContents(files: Record<string, string>) {
+  vi.mocked(apiClient.getGeneratedFile).mockImplementation(async (runId, path) => {
+    const content = files[path];
+    if (content === undefined) {
+      return {
+        ok: false,
+        status: 404,
+        message: 'HTTP error 404',
+        details: { kind: 'http', body: { error: 'HTTP error 404' } },
+      };
+    }
+
+    return okResult<GeneratedFileContent>({
+      runId,
+      mode: 'live',
+      productMode: 'live',
+      path,
+      content,
+      sha256: 'a'.repeat(64),
+      byteSize: content.length,
+      mimeType: 'text/x-java-source',
+    });
+  });
+}
+
 describe('Generated Artifacts UI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -139,10 +164,7 @@ describe('Generated Artifacts UI', () => {
       runId: '123',
       generated: {
         status: 'generated',
-        files: {
-          'src/App.java': 'public class App {}',
-        },
-        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+        artifactRef: { sha256: 'aaa' },
       },
       generatedFiles: {
         status: 'complete',
@@ -152,14 +174,15 @@ describe('Generated Artifacts UI', () => {
       buildTest: {
         status: 'ok',
         classification: 'match',
-        generatedArtifactRef: { uri: 'air://build', sha256: 'aaa' },
+        generatedArtifactRef: { sha256: 'aaa' },
       },
       evidence: {
         status: 'incomplete',
         missingArtifacts: ['manifest.json'],
-        generatedArtifactRef: { uri: 'air://evidence', sha256: 'aaa' },
+        generatedArtifactRef: { sha256: 'aaa' },
       },
     });
+    mockGeneratedFileContents({ 'src/App.java': 'public class App {}' });
 
     renderArtifactsUi();
 
@@ -174,10 +197,7 @@ describe('Generated Artifacts UI', () => {
       runId: '123',
       generated: {
         status: 'generated',
-        files: {
-          'src/App.java': 'public class App {}',
-        },
-        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+        artifactRef: { sha256: 'aaa' },
       },
       generatedFiles: {
         status: 'complete',
@@ -187,13 +207,14 @@ describe('Generated Artifacts UI', () => {
       buildTest: {
         status: 'ok',
         classification: 'match',
-        generatedArtifactRef: { uri: 'air://build', sha256: 'bbb' },
+        generatedArtifactRef: { sha256: 'bbb' },
       },
       evidence: {
         status: 'complete',
-        generatedArtifactRef: { uri: 'air://evidence', sha256: 'aaa' },
+        generatedArtifactRef: { sha256: 'aaa' },
       },
     });
+    mockGeneratedFileContents({ 'src/App.java': 'public class App {}' });
 
     renderArtifactsUi();
 
@@ -210,10 +231,7 @@ describe('Generated Artifacts UI', () => {
       runId: '123',
       generated: {
         status: 'generated',
-        files: {
-          'src/App.java': largeFileContent,
-        },
-        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+        artifactRef: { sha256: 'aaa' },
       },
       generatedFiles: {
         status: 'complete',
@@ -223,13 +241,14 @@ describe('Generated Artifacts UI', () => {
       buildTest: {
         status: 'ok',
         classification: 'match',
-        generatedArtifactRef: { uri: 'air://build', sha256: 'aaa' },
+        generatedArtifactRef: { sha256: 'aaa' },
       },
       evidence: {
         status: 'complete',
-        generatedArtifactRef: { uri: 'air://evidence', sha256: 'aaa' },
+        generatedArtifactRef: { sha256: 'aaa' },
       },
     });
+    mockGeneratedFileContents({ 'src/App.java': largeFileContent });
 
     renderArtifactsUi();
 
@@ -274,7 +293,6 @@ describe('Generated Artifacts UI', () => {
       runId: '123',
       generated: {
         status: 'generated',
-        files: {} // no pre-loaded files
       },
       generatedFiles: {
         status: 'complete',
@@ -345,15 +363,17 @@ describe('Generated Artifacts UI', () => {
       runId: 'run-1',
       generated: {
         status: 'generated',
-        files: {
-          'src/OldEntry.java': 'public class OldEntry {}',
-        },
       },
       generatedFiles: {
         status: 'complete',
         entryFilePath: 'src/OldEntry.java',
         files: [{ path: 'src/OldEntry.java' }],
       },
+    });
+
+    mockGeneratedFileContents({
+      'src/OldEntry.java': 'public class OldEntry {}',
+      'src/NewEntry.java': 'public class NewEntry {}',
     });
 
     const { rerender } = renderArtifactsUi();
@@ -365,7 +385,6 @@ describe('Generated Artifacts UI', () => {
       runId: 'run-2',
       generated: {
         status: 'generated',
-        files: {},
       },
       generatedFiles: {
         status: 'complete',
@@ -373,19 +392,6 @@ describe('Generated Artifacts UI', () => {
         files: [{ path: 'src/NewEntry.java' }],
       },
     });
-
-    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue(
-      okResult<GeneratedFileContent>({
-        runId: 'run-2',
-        mode: 'live',
-        productMode: 'live',
-        path: 'src/NewEntry.java',
-        content: 'public class NewEntry {}',
-        sha256: 'a'.repeat(64),
-        byteSize: 24,
-        mimeType: 'text/x-java-source',
-      })
-    );
 
     rerender(
       <GeneratedArtifactsProvider>
@@ -406,10 +412,7 @@ describe('Generated Artifacts UI', () => {
       runId: '123',
       generated: {
         status: 'generated',
-        files: {
-          'src/App.java': 'public class App {}',
-        },
-        artifactRef: { uri: 'air://generated', sha256: 'aaa' },
+        artifactRef: { sha256: 'aaa' },
       },
       generatedFiles: {
         status: 'complete',
@@ -417,6 +420,7 @@ describe('Generated Artifacts UI', () => {
         files: [{ path: 'src/App.java' }],
       },
     });
+    mockGeneratedFileContents({ 'src/App.java': 'public class App {}' });
 
     renderArtifactsUi();
 
@@ -431,9 +435,6 @@ describe('Generated Artifacts UI', () => {
       runId: '123',
       generated: {
         status: 'generated',
-        files: {
-          'src/App.java': 'public class App {}',
-        },
       },
       generatedFiles: {
         status: 'complete',
@@ -442,18 +443,10 @@ describe('Generated Artifacts UI', () => {
       },
     });
 
-    vi.mocked(apiClient.getGeneratedFile).mockResolvedValue(
-      okResult<GeneratedFileContent>({
-        runId: '123',
-        mode: 'live',
-        productMode: 'live',
-        path: 'src/Helper.java',
-        content: 'public class Helper {}',
-        sha256: 'b'.repeat(64),
-        byteSize: 22,
-        mimeType: 'text/x-java-source',
-      })
-    );
+    mockGeneratedFileContents({
+      'src/App.java': 'public class App {}',
+      'src/Helper.java': 'public class Helper {}',
+    });
 
     renderArtifactsUi();
 

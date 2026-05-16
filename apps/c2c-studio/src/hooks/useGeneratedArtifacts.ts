@@ -156,18 +156,10 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
         return;
       }
 
-      // Entry-file content can arrive inline on the generated view and avoids an extra fetch.
-      if (generated?.files && generated.files[selectedFilePath]) {
-        setFileContent(generated.files[selectedFilePath]);
-        setFileFetchError(null);
-        setIsFetchingFile(false);
-        return;
-      }
-
       setIsFetchingFile(true);
       setFileFetchError(null);
 
-      // The apiClient will url-encode the entire filePath (meaning src/App.java becomes src%2FApp.java)
+      // Generated source content must pass through the capped file-content endpoint.
       const result = await apiClient.getGeneratedFile(state.runId, selectedFilePath);
 
       if (!active) return;
@@ -189,7 +181,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     fetchFile();
 
     return () => { active = false; };
-  }, [selectedFilePath, state.runId, generated?.files, unavailableFiles]);
+  }, [selectedFilePath, state.runId, unavailableFiles]);
 
   const selectFile = useCallback((path: string) => {
     if (path !== selectedFilePath) {

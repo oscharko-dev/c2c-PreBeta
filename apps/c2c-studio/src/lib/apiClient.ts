@@ -122,6 +122,7 @@ function isRunLinks(payload: unknown): payload is RunLinks {
     isString(payload.events) &&
     isString(payload.artifacts) &&
     (payload.learning === undefined || isString(payload.learning)) &&
+    (payload.experience === undefined || isString(payload.experience)) &&
     // Issue #172: W0.2 workflow contract endpoint may be absent for legacy
     // diagnostic-fixture responses, present for every live run.
     (payload.workflow === undefined || isString(payload.workflow))
@@ -134,15 +135,12 @@ function isRunArtifactMetadata(payload: unknown): payload is RunArtifactMetadata
   }
 
   return (
-    isString(payload.uri) &&
     isString(payload.sha256) &&
     isNonNegativeInteger(payload.byteSize) &&
     isString(payload.mimeType) &&
     isString(payload.kind) &&
     isString(payload.createdBy) &&
     isString(payload.createdAt) &&
-    isString(payload.runId) &&
-    isString(payload.workflowId) &&
     isString(payload.path) &&
     isString(payload.name)
   );
@@ -154,9 +152,14 @@ function isOutputRef(payload: unknown): payload is OutputRef {
   }
 
   return (
-    isString(payload.uri) &&
     isString(payload.sha256) &&
-    (payload.byteSize === undefined || isNonNegativeInteger(payload.byteSize))
+    (payload.byteSize === undefined || isNonNegativeInteger(payload.byteSize)) &&
+    (payload.kind === undefined || isString(payload.kind)) &&
+    (payload.path === undefined || isString(payload.path)) &&
+    (payload.name === undefined || isString(payload.name)) &&
+    (payload.mimeType === undefined || isString(payload.mimeType)) &&
+    (payload.createdBy === undefined || isString(payload.createdBy)) &&
+    (payload.createdAt === undefined || isString(payload.createdAt))
   );
 }
 
@@ -167,11 +170,11 @@ function isGeneratedFileRef(payload: unknown): payload is GeneratedFileRef {
 
   return (
     isString(payload.path) &&
-    (payload.absolutePath === undefined || isString(payload.absolutePath)) &&
-    (payload.uri === undefined || isString(payload.uri)) &&
     (payload.sha256 === undefined || isString(payload.sha256)) &&
     (payload.byteSize === undefined || isNonNegativeInteger(payload.byteSize)) &&
-    (payload.mimeType === undefined || isString(payload.mimeType))
+    (payload.mimeType === undefined || isString(payload.mimeType)) &&
+    (payload.kind === undefined || isString(payload.kind)) &&
+    (payload.name === undefined || isString(payload.name))
   );
 }
 
@@ -269,13 +272,12 @@ function isGeneratedViewPayload(payload: unknown): payload is GeneratedView {
     (payload.entryClass === undefined || isString(payload.entryClass)) &&
     (payload.entryFilePath === undefined || isString(payload.entryFilePath)) &&
     (payload.fileCount === undefined || isNonNegativeInteger(payload.fileCount)) &&
-    (payload.files === undefined || isRecord(payload.files)) &&
     (payload.fileRefs === undefined || (Array.isArray(payload.fileRefs) && payload.fileRefs.every(isGeneratedFileRef))) &&
     (payload.unsupportedFeatures === undefined || isStringArray(payload.unsupportedFeatures)) &&
     (payload.openAssumptions === undefined || isStringArray(payload.openAssumptions)) &&
     (payload.missingArtifacts === undefined || isStringArray(payload.missingArtifacts)) &&
     (payload.orchestratorRunId === undefined || isString(payload.orchestratorRunId)) &&
-    (payload.generationResponseRef === undefined || payload.generationResponseRef === null || isRunArtifactMetadata(payload.generationResponseRef)) &&
+    (payload.generationResponseRef === undefined || payload.generationResponseRef === null || isOutputRef(payload.generationResponseRef)) &&
     (payload.artifactRef === null || isOutputRef(payload.artifactRef)) &&
     (payload.note === undefined || isString(payload.note))
   );
@@ -314,12 +316,10 @@ function isGeneratedFileContentPayload(payload: unknown): payload is GeneratedFi
     isRunMode(payload.mode) &&
     isRunProductMode(payload.productMode) &&
     isString(payload.path) &&
-    (payload.absolutePath === undefined || isString(payload.absolutePath)) &&
     isString(payload.content) &&
     isString(payload.sha256) &&
     isNonNegativeInteger(payload.byteSize) &&
     isString(payload.mimeType) &&
-    (payload.uri === undefined || isString(payload.uri)) &&
     (payload.kind === undefined || isString(payload.kind)) &&
     (payload.orchestratorRunId === undefined || isString(payload.orchestratorRunId))
   );
@@ -357,10 +357,12 @@ function isEvidenceViewPayload(payload: unknown): payload is EvidenceView {
     isRunProductMode(payload.productMode) &&
     isEvidenceStatus(payload.status) &&
     (payload.packId === undefined || isString(payload.packId)) &&
-    (payload.manifestUri === undefined || isString(payload.manifestUri)) &&
+    (payload.manifestHash === undefined || isString(payload.manifestHash)) &&
+    (payload.validationStatus === undefined || payload.validationStatus === 'valid' || payload.validationStatus === 'invalid' || payload.validationStatus === 'incomplete' || payload.validationStatus === 'unknown') &&
     (payload.missingArtifacts === undefined || isStringArray(payload.missingArtifacts)) &&
     (payload.orchestratorRunId === undefined || isString(payload.orchestratorRunId)) &&
-    (payload.artifactRef === undefined || payload.artifactRef === null || isRunArtifactMetadata(payload.artifactRef)) &&
+    (payload.artifactRef === undefined || payload.artifactRef === null || isOutputRef(payload.artifactRef)) &&
+    (payload.exportRef === undefined || payload.exportRef === null || isOutputRef(payload.exportRef)) &&
     (payload.generatedArtifactRef === null || isOutputRef(payload.generatedArtifactRef)) &&
     (payload.note === undefined || isString(payload.note))
   );

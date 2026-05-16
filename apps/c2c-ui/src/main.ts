@@ -20,6 +20,7 @@ import {
 import type {
   BuildTestView,
   EvidenceView,
+  GeneratedFileRef,
   GeneratedView,
   LearningView,
   ModeResponse,
@@ -437,15 +438,6 @@ function renderEvidence(state: UiState): void {
   const headline = document.createElement('div');
   headline.textContent = summary.headline;
   node.appendChild(headline);
-  if (summary.manifestUri) {
-    const ref = document.createElement('div');
-    const label = document.createElement('span');
-    label.className = 'label';
-    label.textContent = 'manifest:';
-    ref.appendChild(label);
-    ref.appendChild(document.createTextNode(' ' + summary.manifestUri));
-    node.appendChild(ref);
-  }
   if (summary.manifestHash) {
     const ref = document.createElement('div');
     const label = document.createElement('span');
@@ -464,13 +456,13 @@ function renderEvidence(state: UiState): void {
     ref.appendChild(document.createTextNode(' ' + summary.validationStatus));
     node.appendChild(ref);
   }
-  if (summary.exportUri) {
+  if (summary.exportRef?.sha256) {
     const ref = document.createElement('div');
     const label = document.createElement('span');
     label.className = 'label';
-    label.textContent = 'export:';
+    label.textContent = 'export sha256:';
     ref.appendChild(label);
-    ref.appendChild(document.createTextNode(' ' + summary.exportUri));
+    ref.appendChild(document.createTextNode(' ' + summary.exportRef.sha256));
     node.appendChild(ref);
   }
   if (summary.missing.length > 0) {
@@ -548,9 +540,29 @@ function renderAll(state: UiState): void {
   renderLimitations(state);
 }
 
+async function hydrateGeneratedView(api: BffApi, runId: string): Promise<GeneratedView> {
+  const generated = await api.getGenerated(runId);
+  if (generated.mode !== 'live' || generated.status !== 'generated') return generated;
+  if (Object.keys(generated.files).length > 0) return generated;
+
+  let refs: GeneratedFileRef[] = generated.fileRefs ?? [];
+  if (refs.length === 0) {
+    const index = await api.getGeneratedFiles(runId);
+    refs = index.files;
+  }
+  if (refs.length === 0) return generated;
+
+  const files: Record<string, string> = {};
+  await Promise.all(refs.map(async (ref) => {
+    const content = await api.getGeneratedFile(runId, ref.path);
+    files[content.path || ref.path] = content.content;
+  }));
+  return { ...generated, fileRefs: refs, files };
+}
+
 async function refreshRunDetails(api: BffApi, state: UiState, runId: string): Promise<void> {
   const [generated, buildTest, evidence, progress, learning] = await Promise.all([
-    api.getGenerated(runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
+    hydrateGeneratedView(api, runId).then((value) => ({ value, error: undefined as string | undefined })).catch((err: unknown) => ({
       value: undefined as GeneratedView | undefined,
       error: err instanceof Error ? err.message : 'unknown error',
     })),

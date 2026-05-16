@@ -162,6 +162,30 @@ test('startTransformRun forwards W0.2 targetLanguage and oracle metadata on the 
   );
 });
 
+test('startTransformRun omits empty W0.2 oracle metadata from the inputRef', async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({ run: { runId: 'live-1', status: 'updating' }, status: 'started' });
+      res.writeHead(201, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      await orch.startTransformRun({
+        programId: 'HELLO01',
+        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        targetLanguage: 'java',
+        expectedOutput: '',
+        oracleInput: '',
+      });
+      const parsed = JSON.parse(captured[0]?.body ?? '{}');
+      assert.equal(parsed.inputRef.expectedOutput, undefined);
+      assert.equal(parsed.inputRef.oracleInput, undefined);
+    },
+  );
+});
+
 test('orchestrator client encodes workflow endpoint with the run id', async () => {
   const client = createNodeHttpClient();
   await withEchoServer(

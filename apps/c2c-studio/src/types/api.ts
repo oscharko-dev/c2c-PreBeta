@@ -33,6 +33,7 @@ export interface RunLinks {
   events: string;
   artifacts: string;
   learning?: string;
+  experience?: string;
   // Issue #172: W0.2 workflow contract endpoint.
   workflow?: string;
 }
@@ -108,11 +109,11 @@ export interface RunSummary extends W02RunContractFields {
 
 export interface GeneratedFileRef {
   path: string;
-  absolutePath?: string;
-  uri?: string;
   sha256?: string;
   byteSize?: number;
   mimeType?: string;
+  kind?: string;
+  name?: string;
 }
 
 export interface GeneratedTraceability {
@@ -122,21 +123,23 @@ export interface GeneratedTraceability {
 }
 
 export interface OutputRef {
-  uri: string;
   sha256: string;
   byteSize?: number;
+  kind?: string;
+  path?: string;
+  name?: string;
+  mimeType?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export interface RunArtifactMetadata {
-  uri: string;
   sha256: string;
   byteSize?: number;
   mimeType?: string;
   kind: string;
   createdBy: string;
   createdAt: string;
-  runId: string;
-  workflowId: string;
   path: string;
   name: string;
 }
@@ -150,13 +153,12 @@ export interface GeneratedView {
   entryClass?: string;
   entryFilePath?: string;
   fileCount?: number;
-  files?: Record<string, string>;
   fileRefs?: GeneratedFileRef[];
   unsupportedFeatures?: string[];
   openAssumptions?: string[];
   missingArtifacts?: string[];
   orchestratorRunId?: string;
-  generationResponseRef?: RunArtifactMetadata | null;
+  generationResponseRef?: OutputRef | null;
   artifactRef: OutputRef | null;
   traceability?: GeneratedTraceability;
   note?: string;
@@ -206,10 +208,12 @@ export interface EvidenceView {
   productMode: 'live' | 'unavailable';
   status: 'complete' | 'incomplete' | 'invalid';
   packId?: string;
-  manifestUri?: string;
+  manifestHash?: string;
+  validationStatus?: 'valid' | 'invalid' | 'incomplete' | 'unknown';
   missingArtifacts?: string[];
   orchestratorRunId?: string;
-  artifactRef?: RunArtifactMetadata | null;
+  artifactRef?: OutputRef | null;
+  exportRef?: OutputRef | null;
   generatedArtifactRef: OutputRef | null;
   note?: string;
 }
@@ -285,12 +289,10 @@ export interface GeneratedFileContent {
   mode: 'live' | 'diagnostic-fixture';
   productMode: 'live' | 'unavailable';
   path: string;
-  absolutePath?: string;
   content: string;
   sha256: string;
   byteSize: number;
   mimeType: string;
-  uri?: string;
   kind?: string;
   orchestratorRunId?: string;
 }
