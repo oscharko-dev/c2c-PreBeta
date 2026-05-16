@@ -93,7 +93,12 @@ def _config(**overrides: Any) -> OrchestratorConfig:
         evidence_capability_id="evidence.writer",
         model_gateway_capability_id="model-gateway",
         w0_capabilities=(
-            {"id": "model-gateway", "endpoint": "http://model", "owner": "model-gateway"},
+            {
+                "id": "model-gateway",
+                "endpoint": "http://model/v0/invoke",
+                "owner": "model-gateway-service",
+                "dataClass": "model-gateway",
+            },
         ),
         model_gateway_model_id="gpt-oss-120b",
         model_policy_version="v0",

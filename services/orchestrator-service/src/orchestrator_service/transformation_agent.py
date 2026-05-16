@@ -132,7 +132,7 @@ _JAVA_SHAPE_HINTS = re.compile(
     r"\b(class|interface|enum|record)\s+[A-Za-z_$][A-Za-z0-9_$]*",
     re.MULTILINE,
 )
-_JAVA_PACKAGE_LINE = re.compile(r"^\s*package\s+[A-Za-z_$][\w$.]*\s*;", re.MULTILINE)
+_JAVA_PACKAGE_LINE = re.compile(r"^\s*package\s+([A-Za-z_$][\w$.]*)\s*;", re.MULTILINE)
 _JAVA_IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 _JAVA_PACKAGE_PATTERN = re.compile(
     r"^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$"
@@ -190,6 +190,7 @@ class TransformationAgentRequest:
     capability_resolved_at: str
     model_id: str
     policy_version: str
+    source_program_id: str | None = None
     semantic_ir: Mapping[str, JsonValue] | None = None
     semantic_ir_ref: Mapping[str, JsonValue] | None = None
     baseline_java_ref: Mapping[str, JsonValue] | None = None
@@ -365,14 +366,27 @@ def _safe_relpath(raw: Any) -> str | None:
     if "\x00" in raw:
         return None
     normalized = raw.replace("\\", "/").strip()
-    normalized = normalized.lstrip("/")
-    if not normalized:
+    if not normalized or normalized.startswith("/"):
+        return None
+    if re.match(r"^[A-Za-z]:/", normalized):
         return None
     parts = PurePosixPath(normalized).parts
     for segment in parts:
         if segment in ("", ".", ".."):
             return None
     return "/".join(parts)
+
+
+def _source_program_id(request: TransformationAgentRequest) -> str:
+    explicit = str(request.source_program_id or "").strip()
+    if explicit:
+        return explicit
+    if isinstance(request.semantic_ir, Mapping):
+        for key in ("programId", "program_id"):
+            value = request.semantic_ir.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
 
 
 _MODEL_POLICY_DENY_MARKERS: tuple[str, ...] = (
@@ -428,6 +442,41 @@ def _tool_status_for_agent_status(status: str) -> str:
     return "failed"
 
 
+def _require_gateway_invocation_id(gateway_response: Mapping[str, JsonValue]) -> str:
+    invocation_id = str(gateway_response.get("invocationId") or "").strip()
+    if not invocation_id:
+        raise AgentContractInvalidAgentError(
+            "model gateway response missing invocationId; cannot build modelInvocationRef"
+        )
+    return invocation_id
+
+
+def _model_invocation_ref_from_gateway(
+    request: TransformationAgentRequest,
+    gateway_response: Mapping[str, JsonValue],
+) -> JsonObject:
+    invocation_id = _require_gateway_invocation_id(gateway_response)
+    model_id = str(gateway_response.get("modelId") or request.model_id)
+    provider_raw = str(gateway_response.get("provider") or "foundry-development")
+    provider = (
+        provider_raw
+        if provider_raw in {"foundry-development", "customer-internal-mock"}
+        else "foundry-development"
+    )
+    model_invocation_ref: JsonObject = {
+        "invocationId": invocation_id,
+        "modelId": model_id,
+        "provider": provider,
+    }
+    ledger_ref_raw = gateway_response.get("ledgerRef")
+    if not isinstance(ledger_ref_raw, Mapping) or not _looks_like_artifact_ref(ledger_ref_raw):
+        raise AgentContractInvalidAgentError(
+            "model gateway response missing ledgerRef; cannot reference model invocation ledger"
+        )
+    model_invocation_ref["ledgerRef"] = _coerce_artifact_ref(ledger_ref_raw)
+    return model_invocation_ref
+
+
 # ---------------------------------------------------------------------------
 # Harness-gateway-backed invoker
 # ---------------------------------------------------------------------------
@@ -442,11 +491,18 @@ class HarnessModelGatewayInvoker:
     the gateway, not at the agent boundary.
     """
 
-    def __init__(self, harness_gateway: Any, capability_id: str) -> None:
+    def __init__(
+        self,
+        harness_gateway: Any,
+        capability_id: str,
+        *,
+        expected_capability: Mapping[str, JsonValue] | None = None,
+    ) -> None:
         if not capability_id:
             raise ValueError("capability_id is required")
         self._harness_gateway = harness_gateway
         self._capability_id = capability_id
+        self._expected_capability = dict(expected_capability or {}) or None
         self._cached_capability: Mapping[str, JsonValue] | None = None
 
     def _capability(self) -> Mapping[str, JsonValue]:
@@ -456,6 +512,11 @@ class HarnessModelGatewayInvoker:
                 raise ModelGatewayUnavailableError(
                     f"model gateway capability {self._capability_id!r} unavailable"
                 )
+            _validate_model_gateway_capability(
+                capability,
+                self._capability_id,
+                expected_capability=self._expected_capability,
+            )
             self._cached_capability = capability
         return self._cached_capability
 
@@ -554,6 +615,59 @@ def _model_gateway_capabilities_url(endpoint: str) -> str | None:
     )
 
 
+def _normalised_model_gateway_endpoint(endpoint: str) -> str | None:
+    parsed = urllib.parse.urlparse(endpoint.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    path = parsed.path.rstrip("/")
+    if path != "/v0/invoke":
+        return None
+    return urllib.parse.urlunparse(
+        parsed._replace(path=path, params="", query="", fragment="")
+    )
+
+
+def _validate_model_gateway_capability(
+    capability: Mapping[str, JsonValue],
+    capability_id: str,
+    *,
+    expected_capability: Mapping[str, JsonValue] | None = None,
+) -> None:
+    """Fail closed before prompt-bearing agent traffic leaves the orchestrator."""
+    resolved_id = str(capability.get("id") or "").strip()
+    if resolved_id != capability_id:
+        raise ModelGatewayUnavailableError("model gateway capability id mismatch")
+
+    resolved_endpoint = _normalised_model_gateway_endpoint(
+        str(capability.get("endpoint") or "")
+    )
+    if resolved_endpoint is None:
+        raise ModelGatewayUnavailableError("model gateway capability endpoint is not approved")
+
+    if not expected_capability:
+        return
+
+    expected_id = str(expected_capability.get("id") or "").strip()
+    if expected_id and expected_id != resolved_id:
+        raise ModelGatewayUnavailableError("model gateway capability id does not match configured allowlist")
+
+    expected_owner = str(expected_capability.get("owner") or "").strip()
+    resolved_owner = str(capability.get("owner") or "").strip()
+    if expected_owner and resolved_owner != expected_owner:
+        raise ModelGatewayUnavailableError("model gateway capability owner is not approved")
+
+    expected_data_class = str(expected_capability.get("dataClass") or "").strip()
+    resolved_data_class = str(capability.get("dataClass") or "").strip()
+    if expected_data_class and resolved_data_class != expected_data_class:
+        raise ModelGatewayUnavailableError("model gateway capability dataClass is not approved")
+
+    expected_endpoint = _normalised_model_gateway_endpoint(
+        str(expected_capability.get("endpoint") or "")
+    )
+    if expected_endpoint is None or resolved_endpoint != expected_endpoint:
+        raise ModelGatewayUnavailableError("model gateway capability endpoint does not match configured allowlist")
+
+
 # ---------------------------------------------------------------------------
 # Inner Java-candidate contract
 # ---------------------------------------------------------------------------
@@ -601,6 +715,18 @@ def _validate_inner_status(status: Any) -> str:
 
 
 def _validate_inner_failure(envelope: Mapping[str, JsonValue], status: str) -> tuple[str, str]:
+    if status == "blocked":
+        unsupported_raw = envelope.get("unsupportedConstructs") or envelope.get("unsupported_constructs")
+        if isinstance(unsupported_raw, str):
+            has_unsupported = bool(unsupported_raw.strip())
+        elif isinstance(unsupported_raw, Sequence):
+            has_unsupported = any(str(item).strip() for item in unsupported_raw)
+        else:
+            has_unsupported = False
+        if not has_unsupported:
+            raise AgentContractInvalidAgentError(
+                "status=blocked must include non-empty unsupportedConstructs"
+            )
     failure_code = envelope.get("failureCode") or envelope.get("failure_code")
     failure_message = envelope.get("failureMessage") or envelope.get("failure_message")
     if status == "blocked":
@@ -699,12 +825,17 @@ def _decode_candidate(
 
     # The entry file must carry a package declaration that matches the
     # declared entry package. This catches cases where the model wrapped
-    # COBOL prose in a Java filename.
+    # COBOL prose in a Java filename or emitted inconsistent metadata.
     entry_content = files[entry_file_path]
     package_match = _JAVA_PACKAGE_LINE.search(entry_content)
     if package_match is None:
         raise AgentContractInvalidAgentError(
             f"entry file {entry_file_path!r} is missing a 'package' declaration"
+        )
+    declared_package = package_match.group(1)
+    if declared_package != entry_package:
+        raise AgentContractInvalidAgentError(
+            f"entryPackage {entry_package!r} does not match package declaration {declared_package!r}"
         )
 
     unsupported_raw = envelope.get("unsupportedConstructs") or envelope.get("unsupported_constructs") or ()
@@ -857,6 +988,7 @@ class TransformationAgent:
         # as AgentContractInvalidAgentError so the Orchestrator records
         # ``agent_contract_invalid``.
         try:
+            model_invocation_ref = _model_invocation_ref_from_gateway(request, gateway_response)
             inner_envelope = _parse_model_output_envelope(gateway_response.get("output"))
             inner_status = _validate_inner_status(inner_envelope.get("status"))
             candidate: GeneratedJavaCandidate | None = None
@@ -874,14 +1006,12 @@ class TransformationAgent:
                     )
                 else:
                     has_unsupported = bool(str(unsupported_constructs_raw).strip())
-                if has_unsupported and not (
-                    isinstance(inner_envelope.get("files"), Mapping)
-                    and inner_envelope.get("files")
-                ):
-                    # Unsupported COBOL without a Java candidate must be
-                    # reported as blocked, never success.
+                if has_unsupported:
+                    # Unsupported COBOL must be reported as blocked, never
+                    # success. Build/test cannot verify a candidate that the
+                    # model itself says came from unsupported source semantics.
                     raise AgentContractInvalidAgentError(
-                        "status=success but unsupportedConstructs present and no files; must be blocked"
+                        "status=success but unsupportedConstructs present; must be blocked"
                     )
                 candidate = _decode_candidate(
                     inner_envelope,
@@ -947,9 +1077,10 @@ class TransformationAgent:
                 "runId": request.run_id,
                 "workflowId": request.workflow_id,
                 "attemptNumber": request.attempt_number,
+                "sourceProgramId": _source_program_id(request),
                 "generationSource": "agent",
                 "targetLanguage": "java",
-                "modelInvocationRef": str(gateway_response.get("invocationId") or ""),
+                "modelInvocationRef": model_invocation_ref,
                 "semanticIrRef": (
                     _coerce_artifact_ref(request.semantic_ir_ref)
                     if request.semantic_ir_ref and _looks_like_artifact_ref(request.semantic_ir_ref)
@@ -1143,25 +1274,8 @@ class TransformationAgent:
         failure_message: str | None,
         _unsupported_constructs: Sequence[str],
     ) -> JsonObject:
-        invocation_id = (
-            str(gateway_response.get("invocationId") or "").strip()
-            or f"inv-{request.run_id}-{request.attempt_number:02d}-transformation"
-        )
-        model_id = str(gateway_response.get("modelId") or request.model_id)
-        provider_raw = str(gateway_response.get("provider") or "foundry-development")
-        provider = (
-            provider_raw
-            if provider_raw in {"foundry-development", "customer-internal-mock"}
-            else "foundry-development"
-        )
-        ledger_ref_raw = gateway_response.get("ledgerRef")
-        model_invocation_ref: JsonObject = {
-            "invocationId": invocation_id,
-            "modelId": model_id,
-            "provider": provider,
-        }
-        if isinstance(ledger_ref_raw, Mapping) and _looks_like_artifact_ref(ledger_ref_raw):
-            model_invocation_ref["ledgerRef"] = _coerce_artifact_ref(ledger_ref_raw)
+        model_invocation_ref = _model_invocation_ref_from_gateway(request, gateway_response)
+        invocation_id = str(model_invocation_ref["invocationId"])
 
         trajectory_record = {
             "ledgerEntryId": f"traj-{request.run_id}-{request.attempt_number:02d}-transformation",
@@ -1411,6 +1525,7 @@ class TransformationAgent:
             "targetPackageBase": self._config.transformation_agent_package_base,
             "targetRuntimeLibrary": self._config.transformation_agent_runtime_library,
             "supportedW0Subset": list(self._config.transformation_agent_w0_subset),
+            "sourceProgramId": _source_program_id(request),
             "sourceText": request.source_text,
             "sourceRef": _coerce_artifact_ref(request.source_ref),
             "semanticIrRef": (

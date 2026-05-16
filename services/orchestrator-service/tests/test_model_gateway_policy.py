@@ -52,7 +52,13 @@ def _config():
             {"id": "java.generator", "name": "Java Generator", "owner": "generator-service", "endpoint": "http://generator"},
             {"id": "java.build-test", "name": "Build Test", "owner": "build-service", "endpoint": "http://build-test"},
             {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "endpoint": "http://evidence"},
-            {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway", "endpoint": "http://model"},
+            {
+                "id": "model-gateway",
+                "name": "Model Gateway",
+                "owner": "model-gateway-service",
+                "endpoint": "http://model/v0/invoke",
+                "dataClass": "model-gateway",
+            },
         ),
         model_gateway_model_id="gpt-oss-120b",
     )
