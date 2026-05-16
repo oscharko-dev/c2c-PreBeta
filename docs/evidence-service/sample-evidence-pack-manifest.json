@@ -22,10 +22,24 @@
         "kind": "evidence-input"
       }
     ],
+    "sourceMetadata": {
+      "uri": "urn:c2c/source-ref/HELLO",
+      "sha256": "daf87d16851f1d42873bec5481031765280ab463bd5037bb5e402a2b362002a8",
+      "byteSize": 26,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
     "corpusMetadata": {
       "uri": "urn:c2c/corpus/index",
       "sha256": "7f40a91a684f87cae2ebb7f2b7ea1c3dd5097b674e122e0fd1fec9ab46a5e8c7",
       "byteSize": 14,
+      "mimeType": "application/json",
+      "kind": "evidence-input"
+    },
+    "parseOutput": {
+      "uri": "urn:c2c/parse-output/HELLO",
+      "sha256": "a29ee2b15c494311c52521766e44af56a3ad2248e7a8ab465e5206463c13d288",
+      "byteSize": 15,
       "mimeType": "application/json",
       "kind": "evidence-input"
     },

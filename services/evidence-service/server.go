@@ -212,7 +212,7 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// Re-evaluate against the latest artifact set; the orchestrator may
 		// have added evidence via PATCH between requests.
-		result := EvaluateValidation(&manifest.Artifacts)
+		result := EvaluateValidationForWave(&manifest.Artifacts, manifest.Wave)
 		statusCode := http.StatusOK
 		if !result.OK {
 			statusCode = http.StatusUnprocessableEntity

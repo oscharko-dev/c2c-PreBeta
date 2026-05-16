@@ -127,6 +127,7 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 	if err := manifest.Validate(); err != nil {
 		return nil, err
 	}
+	s.packs[packID] = manifest
 	return cloneManifest(manifest), nil
 }
 
@@ -192,23 +193,35 @@ func mergeArtifacts(dst, src *Artifacts) {
 	if len(src.SourceCobol) > 0 {
 		dst.SourceCobol = append(dst.SourceCobol, src.SourceCobol...)
 	}
+	if src.SourceMetadata != nil {
+		ref := *src.SourceMetadata
+		dst.SourceMetadata = &ref
+	}
 	if src.CorpusMetadata != nil {
-		dst.CorpusMetadata = src.CorpusMetadata
+		ref := *src.CorpusMetadata
+		dst.CorpusMetadata = &ref
+	}
+	if src.ParseOutput != nil {
+		ref := *src.ParseOutput
+		dst.ParseOutput = &ref
 	}
 	if src.SemanticIR != nil {
-		dst.SemanticIR = src.SemanticIR
+		ref := *src.SemanticIR
+		dst.SemanticIR = &ref
 	}
 	if len(src.TransformationPasses) > 0 {
 		dst.TransformationPasses = append(dst.TransformationPasses, src.TransformationPasses...)
 	}
 	if src.GeneratedJava != nil {
-		dst.GeneratedJava = src.GeneratedJava
+		ref := *src.GeneratedJava
+		dst.GeneratedJava = &ref
 	}
 	if len(src.GeneratedJavaArtifacts) > 0 {
 		dst.GeneratedJavaArtifacts = append(dst.GeneratedJavaArtifacts, src.GeneratedJavaArtifacts...)
 	}
 	if src.FinalJavaArtifact != nil {
-		dst.FinalJavaArtifact = src.FinalJavaArtifact
+		candidate := *src.FinalJavaArtifact
+		dst.FinalJavaArtifact = &candidate
 	}
 	if len(src.RepairAttempts) > 0 {
 		dst.RepairAttempts = append(dst.RepairAttempts, src.RepairAttempts...)
@@ -217,10 +230,28 @@ func mergeArtifacts(dst, src *Artifacts) {
 		dst.AgentTrajectories = append(dst.AgentTrajectories, src.AgentTrajectories...)
 	}
 	if src.OracleComparison != nil {
-		dst.OracleComparison = src.OracleComparison
+		comparison := *src.OracleComparison
+		if comparison.ExpectedRef != nil {
+			ref := *comparison.ExpectedRef
+			comparison.ExpectedRef = &ref
+		}
+		if comparison.ActualRef != nil {
+			ref := *comparison.ActualRef
+			comparison.ActualRef = &ref
+		}
+		if comparison.BuildTestResultRef != nil {
+			ref := *comparison.BuildTestResultRef
+			comparison.BuildTestResultRef = &ref
+		}
+		dst.OracleComparison = &comparison
 	}
 	if src.RuntimeVersion != nil {
-		dst.RuntimeVersion = src.RuntimeVersion
+		version := *src.RuntimeVersion
+		if version.Ref != nil {
+			ref := *version.Ref
+			version.Ref = &ref
+		}
+		dst.RuntimeVersion = &version
 	}
 	if len(src.ModelInvocations) > 0 {
 		dst.ModelInvocations = append(dst.ModelInvocations, src.ModelInvocations...)
@@ -235,10 +266,12 @@ func mergeArtifacts(dst, src *Artifacts) {
 		dst.LicenseReports = append(dst.LicenseReports, src.LicenseReports...)
 	}
 	if src.HarnessEvents != nil {
-		dst.HarnessEvents = src.HarnessEvents
+		ref := *src.HarnessEvents
+		dst.HarnessEvents = &ref
 	}
 	if src.TrajectoryLedger != nil {
-		dst.TrajectoryLedger = src.TrajectoryLedger
+		ref := *src.TrajectoryLedger
+		dst.TrajectoryLedger = &ref
 	}
 	if len(src.ExperienceEvents) > 0 {
 		dst.ExperienceEvents = append(dst.ExperienceEvents, src.ExperienceEvents...)
@@ -284,9 +317,17 @@ func cloneArtifacts(a Artifacts) Artifacts {
 	if a.SourceCobol != nil {
 		out.SourceCobol = append([]DataReference{}, a.SourceCobol...)
 	}
+	if a.SourceMetadata != nil {
+		ref := *a.SourceMetadata
+		out.SourceMetadata = &ref
+	}
 	if a.CorpusMetadata != nil {
 		ref := *a.CorpusMetadata
 		out.CorpusMetadata = &ref
+	}
+	if a.ParseOutput != nil {
+		ref := *a.ParseOutput
+		out.ParseOutput = &ref
 	}
 	if a.SemanticIR != nil {
 		ref := *a.SemanticIR

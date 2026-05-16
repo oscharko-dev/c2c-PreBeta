@@ -454,7 +454,16 @@ def _check_success_artifacts(
         return
 
     # Required artifact slots per the W0.2 success contract.
-    for key in ("sourceCobol", "semanticIr", "generatedJava", "buildTestResults", "harnessEvents", "modelInvocations"):
+    for key in (
+        "sourceCobol",
+        "sourceMetadata",
+        "parseOutput",
+        "semanticIr",
+        "generatedJava",
+        "buildTestResults",
+        "harnessEvents",
+        "modelInvocations",
+    ):
         if key in {"sourceCobol", "buildTestResults", "modelInvocations"}:
             value = artifacts.get(key)
             _require(
@@ -468,6 +477,15 @@ def _check_success_artifacts(
                 f"artifacts.{key} must reference a single artifact for a success run",
                 failures,
             )
+
+    runtime_version = artifacts.get("runtimeVersion")
+    _require(
+        _is_mapping(runtime_version)
+        and isinstance(runtime_version.get("id") if isinstance(runtime_version, Mapping) else None, str)
+        and bool((runtime_version.get("id") if isinstance(runtime_version, Mapping) else "").strip()),
+        f"artifacts.runtimeVersion must declare the Target-Java runtime/version for a success run, got {runtime_version!r}",
+        failures,
+    )
 
     invocations = artifacts.get("modelInvocations") or []
     if _is_seq(invocations):
@@ -508,6 +526,14 @@ def _check_success_artifacts(
         _emit_failure(
             failures,
             "artifacts.generatedJavaArtifacts must be a list for a W0.2 success run",
+        )
+    legacy_generated = artifacts.get("generatedJava")
+    if _is_mapping(legacy_generated) and _is_mapping(final_java):
+        _require(
+            legacy_generated.get("sha256") == final_java.get("sha256")
+            and legacy_generated.get("uri") == final_java.get("uri"),
+            "artifacts.generatedJava must match finalJavaArtifact by uri and sha256",
+            failures,
         )
 
     oracle = artifacts.get("oracleComparison")

@@ -39,8 +39,18 @@ GOOD_SUCCESS_MANIFEST: dict[str, Any] = {
         "sourceCobol": [
             {"uri": "file:///tmp/source.cbl", "sha256": _hex("a"), "byteSize": 100}
         ],
+        "sourceMetadata": {
+            "uri": "file:///tmp/source-ref.json",
+            "sha256": _hex("4"),
+            "byteSize": 100,
+        },
+        "parseOutput": {
+            "uri": "file:///tmp/parse-output.json",
+            "sha256": _hex("5"),
+            "byteSize": 100,
+        },
         "semanticIr": {"uri": "file:///tmp/ir.json", "sha256": _hex("b"), "byteSize": 100},
-        "generatedJava": {"uri": "file:///tmp/gen.json", "sha256": _hex("c"), "byteSize": 100},
+        "generatedJava": {"uri": "file:///tmp/Hello.java", "sha256": _hex("d"), "byteSize": 200},
         "generatedJavaArtifacts": [
             {
                 "uri": "file:///tmp/Hello.java",
@@ -82,6 +92,10 @@ GOOD_SUCCESS_MANIFEST: dict[str, Any] = {
             "oracleKind": "cobol-runtime",
             "expectedSha256": _hex("2"),
             "actualSha256": _hex("2"),
+        },
+        "runtimeVersion": {
+            "id": "c2c-target-java-runtime:21",
+            "ref": {"uri": "file:///tmp/runtime.json", "sha256": _hex("6"), "byteSize": 50},
         },
     },
     "validation": {
@@ -148,6 +162,27 @@ class CheckW02EvidenceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
         self.assertIn("finalJavaArtifact", result.stderr)
 
+    def test_missing_source_metadata_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("sourceMetadata")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("sourceMetadata", result.stderr)
+
+    def test_missing_parse_output_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("parseOutput")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("parseOutput", result.stderr)
+
+    def test_missing_runtime_version_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("runtimeVersion")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("runtimeVersion", result.stderr)
+
     def test_legacy_singular_trajectory_ledger_fails(self) -> None:
         manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
         manifest["artifacts"].pop("agentTrajectories")
@@ -185,6 +220,13 @@ class CheckW02EvidenceTest(unittest.TestCase):
         result = self._run(manifest, "--success", "--expect-policy-skipped")
         self.assertEqual(result.returncode, 3)
         self.assertIn("finalJavaArtifact", result.stderr)
+
+    def test_legacy_generated_java_mismatch_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["generatedJava"]["sha256"] = _hex("e")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("generatedJava", result.stderr)
 
     # ----- blocked-path acceptance --------------------------------------
 

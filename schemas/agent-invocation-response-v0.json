@@ -182,6 +182,17 @@
           "type": "string",
           "enum": ["foundry-development", "customer-internal-mock"]
         },
+        "promptTemplateVersion": { "type": "string", "minLength": 1 },
+        "promptTemplateId": { "type": "string", "minLength": 1 },
+        "policyDecision": { "type": "string", "minLength": 1 },
+        "policyVersion": { "type": "string", "minLength": 1 },
+        "policyId": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "agentRole": { "type": "string", "minLength": 1 },
+        "latencyMs": { "type": "integer", "minimum": 0 },
+        "errorCode": { "type": "string", "minLength": 1 },
+        "errorClass": { "type": "string", "minLength": 1 },
+        "timestamp": { "type": "string", "format": "date-time" },
         "ledgerRef": { "$ref": "#/$defs/artifactReference" }
       },
       "additionalProperties": false

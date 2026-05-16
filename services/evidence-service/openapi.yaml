@@ -183,10 +183,17 @@ components:
       type: object
       properties:
         sourceCobol: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+        sourceMetadata: { $ref: "#/components/schemas/DataReference" }
         corpusMetadata: { $ref: "#/components/schemas/DataReference" }
+        parseOutput: { $ref: "#/components/schemas/DataReference" }
         semanticIr: { $ref: "#/components/schemas/DataReference" }
         transformationPasses: { type: array, items: { $ref: "#/components/schemas/TransformationPass" } }
         generatedJava: { $ref: "#/components/schemas/DataReference" }
+        generatedJavaArtifacts: { type: array, items: { $ref: "#/components/schemas/JavaCandidateRef" } }
+        finalJavaArtifact: { $ref: "#/components/schemas/JavaCandidateRef" }
+        repairAttempts: { type: array, items: { $ref: "#/components/schemas/RepairAttempt" } }
+        agentTrajectories: { type: array, items: { $ref: "#/components/schemas/AgentTrajectoryRef" } }
+        oracleComparison: { $ref: "#/components/schemas/OracleComparison" }
         runtimeVersion: { $ref: "#/components/schemas/RuntimeVersion" }
         modelInvocations: { type: array, items: { $ref: "#/components/schemas/ModelInvocationRef" } }
         buildTestResults: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
@@ -213,6 +220,61 @@ components:
         id: { type: string }
         ref: { $ref: "#/components/schemas/DataReference" }
 
+    JavaCandidateRef:
+      type: object
+      required: [uri, sha256, byteSize, origin, attemptNumber]
+      properties:
+        uri: { type: string }
+        sha256: { type: string }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+        origin:
+          type: string
+          enum: [deterministic-baseline, transformation-agent, verification-repair-agent]
+        attemptNumber: { type: integer, minimum: 0 }
+        selected: { type: boolean }
+
+    RepairAttempt:
+      type: object
+      required: [attemptNumber, decision, buildTestResultRef]
+      properties:
+        attemptNumber: { type: integer, minimum: 1 }
+        decision:
+          type: string
+          enum: [propose_candidate, refuse, escalate, no_change]
+        decisionRef: { $ref: "#/components/schemas/DataReference" }
+        modelInvocationRef: { $ref: "#/components/schemas/ModelInvocationRef" }
+        newJavaCandidateRef: { $ref: "#/components/schemas/JavaCandidateRef" }
+        buildTestResultRef: { $ref: "#/components/schemas/DataReference" }
+        refusalCode: { type: string }
+        noChange: { type: boolean }
+
+    AgentTrajectoryRef:
+      type: object
+      required: [agentRole, ledgerRef]
+      properties:
+        agentRole:
+          type: string
+          enum: [orchestrator, transformation, verification-repair]
+        ledgerRef: { $ref: "#/components/schemas/DataReference" }
+
+    OracleComparison:
+      type: object
+      required: [matched, oracleKind]
+      properties:
+        matched: { type: boolean }
+        oracleKind:
+          type: string
+          enum: [cobol-runtime, synthetic, true-golden-master, absent]
+        expectedRef: { $ref: "#/components/schemas/DataReference" }
+        actualRef: { $ref: "#/components/schemas/DataReference" }
+        expectedSha256: { type: string }
+        actualSha256: { type: string }
+        buildTestResultRef: { $ref: "#/components/schemas/DataReference" }
+        classification: { type: string }
+        summary: { type: string }
+
     ModelInvocationRef:
       type: object
       required: [invocationId, modelId, ledgerRef]
@@ -221,10 +283,16 @@ components:
         modelId: { type: string }
         provider: { type: string }
         promptTemplateVersion: { type: string }
+        promptTemplateId: { type: string }
         policyDecision: { type: string }
         status: { type: string }
         reason: { type: string }
         policyVersion: { type: string }
+        policyId: { type: string }
+        agentRole: { type: string }
+        latencyMs: { type: integer, minimum: 0 }
+        errorCode: { type: string }
+        errorClass: { type: string }
         timestamp: { type: string, format: date-time }
         ledgerRef: { $ref: "#/components/schemas/DataReference" }
 

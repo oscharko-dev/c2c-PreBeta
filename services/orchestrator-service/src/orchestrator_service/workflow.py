@@ -437,6 +437,22 @@ def _as_reference_payload(ref: DataReference) -> Mapping[str, JsonValue]:
     }
 
 
+def _reference_payload_from_metadata(raw: Mapping[str, JsonValue] | None) -> JsonObject | None:
+    if not isinstance(raw, Mapping):
+        return None
+    ref = _data_reference_from_mapping(raw)
+    if ref is None:
+        return None
+    payload = dict(_as_reference_payload(ref))
+    mime_type = _text(raw.get("mimeType"))
+    if mime_type:
+        payload["mimeType"] = mime_type
+    kind = _text(raw.get("kind"))
+    if kind:
+        payload["kind"] = kind
+    return payload
+
+
 def _data_reference_from_mapping(raw: Any) -> DataReference | None:
     if not isinstance(raw, Mapping):
         return None
@@ -2768,6 +2784,7 @@ class W0WorkflowRunner:
         build_test_refs: list[JsonObject] = []
         if build_test_output is not None:
             build_test_refs.append(_as_reference_payload(build_test_output.output_ref))
+
         artifacts: JsonObject = {
             "sourceCobol": [_as_reference_payload(input_ref)],
             "semanticIr": _as_reference_payload(_coerce_output_ref(ir_output.payload, generator_output.output_ref.uri, ir_output.payload)),
@@ -2798,6 +2815,34 @@ class W0WorkflowRunner:
         # candidate, repair attempt, agent trajectory, and oracle comparison.
         wave = "w0.2" if is_w02 else "w0"
         if is_w02:
+            source_metadata_ref = _reference_payload_from_metadata(
+                self.artifact_store.find_metadata(context.run_id, "source-ref.json")
+            )
+            if source_metadata_ref is None:
+                source_metadata_ref = _as_reference_payload(
+                    _build_reference(
+                        f"urn:orchestrator/{context.run_id}/source-ref",
+                        {
+                            "runId": context.run_id,
+                            "workflowId": context.workflow_id,
+                            "inputRef": _as_reference_payload(input_ref),
+                        },
+                    )
+                )
+
+            parse_output_ref = _reference_payload_from_metadata(
+                self.artifact_store.find_metadata(context.run_id, "parse-output.json")
+            )
+            if parse_output_ref is None:
+                parse_output_ref = _as_reference_payload(
+                    _build_reference(
+                        f"urn:orchestrator/{context.run_id}/parse-output",
+                        parse_output.payload,
+                    )
+                )
+
+            artifacts["sourceMetadata"] = source_metadata_ref
+            artifacts["parseOutput"] = parse_output_ref
             (
                 generated_java_artifacts,
                 final_java_artifact,
@@ -2827,6 +2872,18 @@ class W0WorkflowRunner:
             )
             if oracle is not None:
                 artifacts["oracleComparison"] = oracle
+            artifacts["runtimeVersion"] = {
+                "id": f"{self.config.transformation_agent_runtime_library}:{self.config.transformation_agent_java_version}",
+                "ref": _as_reference_payload(
+                    _build_reference(
+                        f"urn:orchestrator/{context.run_id}/runtime-version",
+                        {
+                            "runtimeLibrary": self.config.transformation_agent_runtime_library,
+                            "javaVersion": self.config.transformation_agent_java_version,
+                        },
+                    )
+                ),
+            }
 
         payload: JsonObject = {
             "runId": context.run_id,

@@ -17,6 +17,8 @@ func completeW02Artifacts(t *testing.T) Artifacts {
 	javaRef := mustRef(t, "urn:c2c/generated/HELLO.java", "Hello")
 	repairCandidateRef := mustRef(t, "urn:c2c/generated/HELLO-repair-1.java", "HelloRepaired")
 	repairDecisionRef := mustRef(t, "urn:c2c/agent/repair-decision/HELLO/1", map[string]string{"decision": "propose_candidate"})
+	sourceMetadataRef := mustRef(t, "urn:c2c/source-ref/HELLO", map[string]string{"sourceRef": "normalized"})
+	parseOutputRef := mustRef(t, "urn:c2c/parse-output/HELLO", map[string]string{"status": "ok"})
 	transformationLedgerRef := mustRef(t, "urn:c2c/trajectory/run-1/transformation", map[string]string{"role": "transformation"})
 	verificationLedgerRef := mustRef(t, "urn:c2c/trajectory/run-1/verification", map[string]string{"role": "verification-repair"})
 	transformationModelLedgerRef := mustRef(t, "urn:c2c/model-invocation/inv-run-1-transformation", map[string]string{"role": "transformation"})
@@ -62,7 +64,16 @@ func completeW02Artifacts(t *testing.T) Artifacts {
 		},
 	}
 	final := base.GeneratedJavaArtifacts[1]
+	base.GeneratedJava = &DataReference{
+		URI:      final.URI,
+		SHA256:   final.SHA256,
+		ByteSize: final.ByteSize,
+		MIMEType: final.MIMEType,
+		Kind:     final.Kind,
+	}
 	base.FinalJavaArtifact = &final
+	base.SourceMetadata = &sourceMetadataRef
+	base.ParseOutput = &parseOutputRef
 	base.RepairAttempts = []RepairAttempt{{
 		AttemptNumber:       1,
 		Decision:            RepairDecisionProposeCandidate,
@@ -104,10 +115,13 @@ func TestEvaluateValidationW02Complete(t *testing.T) {
 	// Spot-check the required set covers every named W0.2 contract field.
 	want := map[string]bool{
 		"sourceCobol":            true,
+		"sourceMetadata":         true,
+		"parseOutput":            true,
 		"semanticIr":             true,
 		"generatedJava":          true,
 		"generatedJavaArtifacts": true,
 		"finalJavaArtifact":      true,
+		"runtimeVersion":         true,
 		"buildTestResults":       true,
 		"oracleComparison":       true,
 		"harnessEvents":          true,
@@ -138,6 +152,77 @@ func TestEvaluateValidationW02FailsClosedOnMissingFinalJava(t *testing.T) {
 	}
 	if !containsString(v.MissingArtifacts, "finalJavaArtifact") {
 		t.Fatalf("missingArtifacts must call out finalJavaArtifact; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedOnMissingGeneratedJava(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.GeneratedJava = nil
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when generatedJava is missing")
+	}
+	if v.CompletenessStatus != CompletenessStatusEvidenceIncomplete {
+		t.Fatalf("expected completenessStatus=evidence_incomplete; got %s", v.CompletenessStatus)
+	}
+	if !containsString(v.MissingArtifacts, "generatedJava") {
+		t.Fatalf("missingArtifacts must call out generatedJava; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedOnMissingSourceMetadataParseOutputRuntimeVersion(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*Artifacts)
+		missing string
+	}{
+		{
+			name:    "sourceMetadata",
+			mutate:  func(a *Artifacts) { a.SourceMetadata = nil },
+			missing: "sourceMetadata",
+		},
+		{
+			name:    "parseOutput",
+			mutate:  func(a *Artifacts) { a.ParseOutput = nil },
+			missing: "parseOutput",
+		},
+		{
+			name:    "runtimeVersion",
+			mutate:  func(a *Artifacts) { a.RuntimeVersion = nil },
+			missing: "runtimeVersion",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := completeW02Artifacts(t)
+			tc.mutate(&a)
+
+			v := EvaluateValidationForWave(&a, WaveW02)
+			if v.OK {
+				t.Fatalf("expected validation to fail when %s is missing", tc.missing)
+			}
+			if v.CompletenessStatus != CompletenessStatusEvidenceIncomplete {
+				t.Fatalf("expected completenessStatus=evidence_incomplete; got %s", v.CompletenessStatus)
+			}
+			if !containsString(v.MissingArtifacts, tc.missing) {
+				t.Fatalf("missingArtifacts must call out %s; got %v", tc.missing, v.MissingArtifacts)
+			}
+		})
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedWhenLegacyGeneratedJavaDivergesFromFinal(t *testing.T) {
+	a := completeW02Artifacts(t)
+	mismatched := mustRef(t, "urn:c2c/generated/legacy-divergent.java", "legacy-divergent")
+	a.GeneratedJava = &mismatched
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when generatedJava diverges from finalJavaArtifact")
+	}
+	if !containsString(v.MissingArtifacts, "generatedJava.finalJavaArtifact") {
+		t.Fatalf("missingArtifacts must call out generated/final mismatch; got %v", v.MissingArtifacts)
 	}
 }
 
@@ -360,6 +445,23 @@ func TestCreatePackW02BlockedRunClassifiedAsBlocked(t *testing.T) {
 	}
 }
 
+func TestCreatePackW02RejectsMissingModelInvocationMetadata(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	artifacts.ModelInvocations[0].InvocationID = ""
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-missing-model-invocation",
+		Wave:      WaveW02,
+		CreatedBy: "orchestrator",
+		Artifacts: artifacts,
+	})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 on missing model invocation metadata; got %d", res.StatusCode)
+	}
+	_ = res.Body.Close()
+}
+
 func TestSecretScrubRejectsAPIKeyInModelInvocation(t *testing.T) {
 	srv, _ := newTestServer(t)
 	artifacts := completeW02Artifacts(t)
@@ -385,6 +487,18 @@ func TestSecretScrubRejectsAPIKeyInModelInvocation(t *testing.T) {
 	errStr, _ := body["error"].(string)
 	if !strings.Contains(errStr, "secret") {
 		t.Fatalf("expected error to mention secret; got %q", errStr)
+	}
+}
+
+func TestSecretScrubRejectsEnvDerivedValueInModelInvocation(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.ModelInvocations[0].PolicyID = "AWS_SECRET_ACCESS_KEY=" + strings.Repeat("A", 24)
+	err := a.ModelInvocations[0].Validate("artifacts.modelInvocations[0]")
+	if err == nil {
+		t.Fatalf("expected validation to reject env-derived credential-shaped value")
+	}
+	if !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected secret-rejection message; got %v", err)
 	}
 }
 

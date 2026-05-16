@@ -33,7 +33,9 @@ present alongside any pack.
 | `classification` | yes (W0.2) | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed). |
 | `createdAt` | yes | UTC RFC 3339 timestamp. |
 | `artifacts.sourceCobol` | **yes** | One or more references to ingested COBOL source files. |
+| `artifacts.sourceMetadata` | **yes (W0.2)** | Normalized source metadata captured after input intake, usually the persisted `source-ref.json` artifact. |
 | `artifacts.corpusMetadata` | optional | Pointer to the corpus index entry used for the run. |
+| `artifacts.parseOutput` | **yes (W0.2)** | COBOL parser output reference used to produce Semantic IR. |
 | `artifacts.semanticIr` | **yes** | Reference to the Semantic IR document. |
 | `artifacts.transformationPasses` | optional | Ordered list of transformation pass outputs. |
 | `artifacts.generatedJava` | **yes** | Reference to the final generated Java project bundle (legacy single-ref field). For W0.2 runs the same artifact is mirrored as the selected entry of `generatedJavaArtifacts[]`. |
@@ -42,7 +44,7 @@ present alongside any pack.
 | `artifacts.repairAttempts` | **yes when ≥1 attempt ran** | One entry per Verification/Repair Agent invocation. Captures `attemptNumber`, `decision`, `decisionRef`, `modelInvocationRef`, optional `newJavaCandidateRef`, `buildTestResultRef`, and `refusalCode`/`noChange` when applicable. |
 | `artifacts.agentTrajectories` | **yes (W0.2)** | Per-agent trajectory ledger references (`orchestrator`, `transformation`, `verification-repair`). Replaces the singular `trajectoryLedger` for W0.2 runs; both fields are populated for backwards compatibility. |
 | `artifacts.oracleComparison` | **yes (W0.2)** | Flat envelope summarising the comparison between the Java output and the COBOL oracle / golden master. Carries `matched`, `oracleKind`, `actualSha256`, `expectedSha256`, `classification`, and a pointer to the build/test result. `oracleKind=absent` when no oracle was available. |
-| `artifacts.runtimeVersion` | optional | Target Java runtime coordinate plus optional reference. |
+| `artifacts.runtimeVersion` | **yes (W0.2)** | Target Java runtime/contract coordinate plus optional reference. |
 | `artifacts.modelInvocations` | **yes** | One entry per model invocation; W0.2 packs must include productive Transformation and Verification/Repair Agent ledgers when those agent trajectories are present. The ledger holds the structured request/response references — the evidence pack never embeds raw prompts or completions. |
 | `artifacts.buildTestResults` | **yes** | References to `build-test-runner-service` results. |
 | `artifacts.sbom` | optional | SBOM document references (CycloneDX, SPDX). |
@@ -80,10 +82,13 @@ Issue #171 extends the required set for productive-agent runs. A
 `completenessStatus=complete` requires every entry below:
 
 - `sourceCobol`
+- `sourceMetadata`
+- `parseOutput`
 - `semanticIr`
 - `generatedJava` *(legacy single ref preserved for backwards compatibility)*
 - `generatedJavaArtifacts` *(every persisted candidate)*
 - `finalJavaArtifact` *(the selected candidate)*
+- `runtimeVersion`
 - `buildTestResults`
 - `oracleComparison`
 - `harnessEvents`
@@ -101,13 +106,14 @@ so consumers never receive a half-bundle that looks complete.
 ### Secret scrubbing
 
 Evidence packs are reviewer-visible and MUST NOT contain raw secrets. The
-service rejects creates/updates whose `modelInvocations[]` entries embed
-values matching well-known credential patterns (OpenAI `sk-...`, AWS
-`AKIA...`, GitHub `ghp_.../ghs_...`, Hugging Face `hf_...`, JWT
-triplets, PEM `-----BEGIN ... PRIVATE KEY-----` blocks, bearer-token
-strings, `api_key=...` assignments). Callers must pre-redact before
-posting; evidence-service fails closed with `400 Bad Request` if any field
-on a model-invocation reference appears credential-shaped.
+service rejects creates/updates whose artifact URIs or `modelInvocations[]`
+entries embed values matching well-known credential patterns (OpenAI
+`sk-...`, AWS `AKIA...`, GitHub `ghp_.../ghs_...`, Hugging Face `hf_...`,
+JWT triplets, PEM `-----BEGIN ... PRIVATE KEY-----` blocks, bearer-token
+strings, `api_key=...` assignments). HTTP(S) artifact URIs with query strings
+are also rejected because presigned URLs and access tokens commonly ride in
+query parameters. Callers must pre-redact before posting; evidence-service
+fails closed with `400 Bad Request` if any reference appears credential-shaped.
 
 ## Export contract
 

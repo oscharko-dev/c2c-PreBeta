@@ -468,6 +468,27 @@ def _model_invocation_ref_from_gateway(
         "modelId": model_id,
         "provider": provider,
     }
+    for key in (
+        "promptTemplateVersion",
+        "promptTemplateId",
+        "policyDecision",
+        "policyVersion",
+        "policyId",
+        "status",
+        "agentRole",
+        "errorCode",
+        "errorClass",
+        "timestamp",
+    ):
+        value = str(gateway_response.get(key) or "").strip()
+        if value:
+            model_invocation_ref[key] = value
+    try:
+        latency_ms = int(gateway_response.get("latencyMs"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        latency_ms = None
+    if latency_ms is not None and latency_ms >= 0:
+        model_invocation_ref["latencyMs"] = latency_ms
     ledger_ref_raw = gateway_response.get("ledgerRef")
     if not isinstance(ledger_ref_raw, Mapping) or not _looks_like_artifact_ref(ledger_ref_raw):
         raise AgentContractInvalidAgentError(

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -88,10 +90,13 @@ var requiredArtifactsW0 = []string{
 // classification.
 var requiredArtifactsW02 = []string{
 	"sourceCobol",
+	"sourceMetadata",
+	"parseOutput",
 	"semanticIr",
 	"generatedJava",
 	"generatedJavaArtifacts",
 	"finalJavaArtifact",
+	"runtimeVersion",
 	"buildTestResults",
 	"oracleComparison",
 	"harnessEvents",
@@ -118,6 +123,15 @@ func (r DataReference) IsZero() bool {
 func (r DataReference) Validate(path string) error {
 	if r.URI == "" {
 		return fieldError(path+".uri", "uri is required")
+	}
+	if ContainsSecretLike(r.URI) {
+		return fieldError(path+".uri", "uri appears to contain a secret or credential and was rejected by evidence-service")
+	}
+	if parsed, err := url.Parse(r.URI); err == nil {
+		scheme := strings.ToLower(parsed.Scheme)
+		if (scheme == "http" || scheme == "https") && parsed.RawQuery != "" {
+			return fieldError(path+".uri", "http artifact uri must not contain query parameters")
+		}
 	}
 	if r.SHA256 == "" {
 		return fieldError(path+".sha256", "sha256 is required")
@@ -419,7 +433,9 @@ func (rv RuntimeVersion) IsZero() bool {
 
 type Artifacts struct {
 	SourceCobol            []DataReference      `json:"sourceCobol,omitempty"`
+	SourceMetadata         *DataReference       `json:"sourceMetadata,omitempty"`
 	CorpusMetadata         *DataReference       `json:"corpusMetadata,omitempty"`
+	ParseOutput            *DataReference       `json:"parseOutput,omitempty"`
 	SemanticIR             *DataReference       `json:"semanticIr,omitempty"`
 	TransformationPasses   []TransformationPass `json:"transformationPasses,omitempty"`
 	GeneratedJava          *DataReference       `json:"generatedJava,omitempty"`
@@ -568,8 +584,18 @@ func validateArtifactsShape(a *Artifacts) error {
 			return err
 		}
 	}
+	if a.SourceMetadata != nil {
+		if err := a.SourceMetadata.Validate("artifacts.sourceMetadata"); err != nil {
+			return err
+		}
+	}
 	if a.CorpusMetadata != nil {
 		if err := a.CorpusMetadata.Validate("artifacts.corpusMetadata"); err != nil {
+			return err
+		}
+	}
+	if a.ParseOutput != nil {
+		if err := a.ParseOutput.Validate("artifacts.parseOutput"); err != nil {
 			return err
 		}
 	}
@@ -682,6 +708,12 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		if len(a.SourceCobol) == 0 {
 			missing = append(missing, "sourceCobol")
 		}
+		if a.SourceMetadata == nil || a.SourceMetadata.IsZero() {
+			missing = append(missing, "sourceMetadata")
+		}
+		if a.ParseOutput == nil || a.ParseOutput.IsZero() {
+			missing = append(missing, "parseOutput")
+		}
 		if a.SemanticIR == nil || a.SemanticIR.IsZero() {
 			missing = append(missing, "semanticIr")
 		}
@@ -705,6 +737,9 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		}
 		if a.OracleComparison == nil || a.OracleComparison.IsZero() {
 			missing = append(missing, "oracleComparison")
+		}
+		if a.RuntimeVersion == nil || a.RuntimeVersion.IsZero() {
+			missing = append(missing, "runtimeVersion")
 		}
 		if a.HarnessEvents == nil || a.HarnessEvents.IsZero() {
 			missing = append(missing, "harnessEvents")
@@ -802,6 +837,11 @@ func validateW02ReferentialIntegrity(a *Artifacts) []string {
 		}
 		if matchCount == 1 && selectedMatchCount != 1 {
 			missing = append(missing, "generatedJavaArtifacts.selected")
+		}
+	}
+	if a.GeneratedJava != nil && !a.GeneratedJava.IsZero() && a.FinalJavaArtifact != nil && !a.FinalJavaArtifact.IsZero() {
+		if a.GeneratedJava.URI != a.FinalJavaArtifact.URI || a.GeneratedJava.SHA256 != a.FinalJavaArtifact.SHA256 {
+			missing = append(missing, "generatedJava.finalJavaArtifact")
 		}
 	}
 

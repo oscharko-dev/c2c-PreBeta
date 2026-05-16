@@ -78,6 +78,30 @@ func TestDataReferenceValidateRejectsMissingURI(t *testing.T) {
 	}
 }
 
+func TestDataReferenceValidateRejectsSecretOrQueryBearingURI(t *testing.T) {
+	ref := DataReference{
+		URI:      "https://artifacts.example/object?token=" + "s" + "k-" + strings.Repeat("A", 20),
+		SHA256:   strings.Repeat("0", 64),
+		ByteSize: 1,
+	}
+	err := ref.Validate("ref")
+	if err == nil {
+		t.Fatalf("expected validation error for secret-bearing uri")
+	}
+	if !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected secret rejection; got %v", err)
+	}
+
+	ref.URI = "https://artifacts.example/object?signature=abc"
+	err = ref.Validate("ref")
+	if err == nil {
+		t.Fatalf("expected validation error for query-bearing http uri")
+	}
+	if !strings.Contains(err.Error(), "query") {
+		t.Fatalf("expected query rejection; got %v", err)
+	}
+}
+
 func TestManifestRoundTripsJSON(t *testing.T) {
 	m := newCompleteManifest(t)
 	m.Artifacts.ModelInvocations[0].PolicyDecision = "policy allow"
@@ -138,6 +162,8 @@ func completeArtifacts(t *testing.T) Artifacts {
 	t.Helper()
 	cobolRef := mustRef(t, "urn:c2c/cobol/HELLO.cob", "HELLO")
 	corpusRef := mustRef(t, "urn:c2c/corpus/index", map[string]string{"index": "v0"})
+	sourceMetadataRef := mustRef(t, "urn:c2c/source-ref/HELLO", map[string]string{"sourceRef": "normalized"})
+	parseOutputRef := mustRef(t, "urn:c2c/parse-output/HELLO", map[string]string{"status": "ok"})
 	semanticRef := mustRef(t, "urn:c2c/semantic-ir/HELLO", map[string]string{"ir": "v0"})
 	transformRef := mustRef(t, "urn:c2c/transform/HELLO/lower", map[string]string{"lower": "v0"})
 	javaRef := mustRef(t, "urn:c2c/generated/HELLO.java", "Hello")
@@ -152,7 +178,9 @@ func completeArtifacts(t *testing.T) Artifacts {
 
 	return Artifacts{
 		SourceCobol:    []DataReference{cobolRef},
+		SourceMetadata: &sourceMetadataRef,
 		CorpusMetadata: &corpusRef,
+		ParseOutput:    &parseOutputRef,
 		SemanticIR:     &semanticRef,
 		TransformationPasses: []TransformationPass{{
 			Name:      "lower",

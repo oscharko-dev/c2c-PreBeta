@@ -145,8 +145,9 @@ must be re-derivable from the artifact path in the right column.
 
 - [x] The manifest carries `completenessStatus == "complete"` and
       `status == "complete"`, every required slot
-      (`sourceCobol`, `semanticIr`, `generatedJava`,
-      `buildTestResults`, `harnessEvents`, `modelInvocations`) is
+      (`sourceCobol`, `sourceMetadata`, `parseOutput`, `semanticIr`,
+      `generatedJava`, `runtimeVersion`, `buildTestResults`,
+      `harnessEvents`, `modelInvocations`) is
       populated, and the W0.2-specific slots
       (`generatedJavaArtifacts`, `finalJavaArtifact`, `oracleComparison`,
       `agentTrajectories`) are present.
