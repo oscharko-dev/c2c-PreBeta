@@ -174,6 +174,10 @@ FAILURE_JAVA_RUNTIME_FAILED = "java_runtime_failed"
 FAILURE_ORACLE_MISMATCH = "oracle_mismatch"
 FAILURE_EVIDENCE_INCOMPLETE = "evidence_incomplete"
 FAILURE_CANCELLED = "cancelled"
+# Issue #167: invalid agent I/O — missing/oversized/malformed payload, missing
+# model invocation reference, missing generated Java artifact reference, or
+# unapproved artifact references.
+FAILURE_AGENT_CONTRACT_INVALID = "agent_contract_invalid"
 
 FAILURE_CODES: Tuple[str, ...] = (
     FAILURE_UNSUPPORTED_COBOL,
@@ -182,6 +186,7 @@ FAILURE_CODES: Tuple[str, ...] = (
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
     FAILURE_AGENT_TIMEOUT,
+    FAILURE_AGENT_CONTRACT_INVALID,
     FAILURE_JAVA_GENERATION_FAILED,
     FAILURE_JAVA_COMPILE_FAILED,
     FAILURE_JAVA_RUNTIME_FAILED,

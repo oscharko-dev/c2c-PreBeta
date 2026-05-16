@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/agent-invocation-response-v0.json",
+  "title": "Agent Invocation Response v0",
+  "description": "Structured response a W0.2 productive agent returns to the Orchestrator. The schema is the only contract the Orchestrator trusts: free-form text blobs are not accepted. Every output artifact (Java candidate, repair decision) MUST be referenced as a content-addressed artifact written to the run artifact store. Issue #167.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "attemptNumber",
+    "agentRole",
+    "status",
+    "modelInvocationRef",
+    "promptTemplateId",
+    "startedAt",
+    "endedAt",
+    "trajectoryRecord"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attemptNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "agentRole": {
+      "type": "string",
+      "enum": [
+        "transformation-agent",
+        "verification-repair-agent"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "blocked", "failed", "timeout", "policy_denied"]
+    },
+    "failureCode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Required when status != success. MUST match one of the failure codes the Orchestrator accepts (see orchestrator-w02-workflow.md)."
+    },
+    "failureMessage": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outputArtifactRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifactReference" },
+      "description": "References to artifacts the agent produced (e.g. generated Java project manifest, repair decision). For status=success and agentRole=transformation-agent at least one entry MUST point at the Java candidate."
+    },
+    "javaCandidateRef": {
+      "$ref": "#/$defs/artifactReference",
+      "description": "Convenience pointer to the Java candidate the build-test runner should pick up. MUST also appear in outputArtifactRefs when present."
+    },
+    "repairDecisionRef": {
+      "$ref": "#/$defs/artifactReference",
+      "description": "Reference to an Agent Repair Decision artifact (agent-repair-decision-v0). Required when agentRole == verification-repair-agent."
+    },
+    "modelInvocationRef": { "$ref": "#/$defs/modelInvocationReference" },
+    "promptTemplateId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "promptTemplateVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capabilityRef": { "$ref": "#/$defs/capabilityResolutionRecord" },
+    "toolUseRecords": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/toolUseRecord" }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "riskClassification": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "unknown"]
+    },
+    "trajectoryRecord": { "$ref": "#/$defs/agentTrajectoryRecord" },
+    "traceRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "success" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "outputArtifactRefs": {
+            "type": "array",
+            "minItems": 1
+          }
+        },
+        "required": ["outputArtifactRefs"],
+        "not": { "required": ["failureCode"] }
+      },
+      "else": {
+        "required": ["failureCode", "failureMessage"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agentRole": { "const": "transformation-agent" },
+          "status": { "const": "success" }
+        },
+        "required": ["agentRole", "status"]
+      },
+      "then": {
+        "required": ["javaCandidateRef"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agentRole": { "const": "verification-repair-agent" }
+        },
+        "required": ["agentRole"]
+      },
+      "then": {
+        "required": ["repairDecisionRef"]
+      }
+    }
+  ],
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "capabilityResolutionRecord": {
+      "type": "object",
+      "required": ["capabilityId", "resolvedAt"],
+      "properties": {
+        "capabilityId": { "type": "string", "minLength": 1 },
+        "capabilityVersion": { "type": "string", "minLength": 1 },
+        "providerService": { "type": "string", "minLength": 1 },
+        "resolvedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "modelInvocationReference": {
+      "type": "object",
+      "required": ["invocationId", "modelId"],
+      "properties": {
+        "invocationId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "provider": {
+          "type": "string",
+          "enum": ["foundry-development", "customer-internal-mock"]
+        },
+        "ledgerRef": { "$ref": "#/$defs/artifactReference" }
+      },
+      "additionalProperties": false
+    },
+    "toolUseRecord": {
+      "type": "object",
+      "required": ["toolId", "invokedAt", "status"],
+      "properties": {
+        "toolId": { "type": "string", "minLength": 1 },
+        "toolVersion": { "type": "string", "minLength": 1 },
+        "surface": {
+          "type": "string",
+          "enum": ["mcp", "harness", "model-gateway", "rag", "graph", "other"]
+        },
+        "invokedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "status": {
+          "type": "string",
+          "enum": ["success", "failed", "denied", "timeout"]
+        },
+        "inputRef": { "$ref": "#/$defs/artifactReference" },
+        "outputRef": { "$ref": "#/$defs/artifactReference" },
+        "errorClass": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "agentTrajectoryRecord": {
+      "type": "object",
+      "description": "Per-attempt trajectory record. Composes with agent-trajectory-ledger-v0 (steps[]) via the ledgerEntryId field. MUST NOT contain raw prompt text, secrets, or credentials.",
+      "required": ["ledgerEntryId", "actor", "dataClass", "stateTransition", "createdAt"],
+      "properties": {
+        "ledgerEntryId": { "type": "string", "minLength": 1 },
+        "actor": { "type": "string", "minLength": 1 },
+        "dataClass": {
+          "type": "string",
+          "enum": ["model", "evidence", "rag", "graph", "parser", "generator", "build-test", "test", "model-gateway", "other"]
+        },
+        "stateTransition": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "relatedRecords": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

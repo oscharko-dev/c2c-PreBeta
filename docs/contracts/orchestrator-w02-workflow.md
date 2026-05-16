@@ -75,6 +75,7 @@ A non-success run MUST carry exactly one failure code from this closed set:
 | `model_gateway_unavailable` | Model gateway endpoint unreachable or returned 5xx after retries. |
 | `model_policy_denied` | Model invocation rejected by policy (`policyDecision != "policy allow"`). |
 | `agent_timeout` | A productive agent exceeded its allotted time. |
+| `agent_contract_invalid` | A productive agent returned a payload that fails the W0.2 agent I/O contract — missing model-invocation or Java-candidate reference, malformed JSON, oversized output, unapproved artifact reference, invalid role/status, or other schema violation. See [Agent I/O Contracts](agent-io-contracts.md). |
 | `java_generation_failed` | Generator capability returned a non-success outcome. |
 | `java_compile_failed` | Build-test reported `compile_failed` (or unstructured failure). |
 | `java_runtime_failed` | Build-test reported a runtime failure of the generated Java. |

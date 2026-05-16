@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/agent-repair-decision-v0.json",
+  "title": "Agent Repair Decision v0",
+  "description": "Decision a Verification/Repair Agent emits after inspecting an agent-repair-input-v0. The agent MUST pick exactly one of three outcomes: propose a corrected Java candidate, refuse the repair with a precise reason, or escalate (e.g. requires human review or out-of-scope construct). The Orchestrator advances or blocks the run based on this decision. Issue #167.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "attemptNumber",
+    "decision",
+    "rationale",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attemptNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["propose_candidate", "refuse", "escalate"]
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "newJavaCandidateRef": {
+      "$ref": "#/$defs/artifactReference",
+      "description": "Required when decision == propose_candidate."
+    },
+    "diffFromPreviousRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "refusalCode": {
+      "type": "string",
+      "enum": [
+        "no_safe_repair",
+        "unsupported_construct",
+        "policy_denied",
+        "insufficient_context"
+      ]
+    },
+    "escalationCode": {
+      "type": "string",
+      "enum": [
+        "needs_human_review",
+        "needs_capability_expansion",
+        "out_of_scope_for_w0_2"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "decision": { "const": "propose_candidate" } },
+        "required": ["decision"]
+      },
+      "then": {
+        "required": ["newJavaCandidateRef"],
+        "not": {
+          "anyOf": [
+            { "required": ["refusalCode"] },
+            { "required": ["escalationCode"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "decision": { "const": "refuse" } },
+        "required": ["decision"]
+      },
+      "then": {
+        "required": ["refusalCode"],
+        "not": {
+          "anyOf": [
+            { "required": ["newJavaCandidateRef"] },
+            { "required": ["escalationCode"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "decision": { "const": "escalate" } },
+        "required": ["decision"]
+      },
+      "then": {
+        "required": ["escalationCode"],
+        "not": {
+          "anyOf": [
+            { "required": ["newJavaCandidateRef"] },
+            { "required": ["refusalCode"] }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}
