@@ -64,10 +64,25 @@ jobs:
           cache: maven
 
       - name: Set up Go
-        if: hashFiles('services/agentic-harness-core/go.mod') != ''
+        if: hashFiles('services/agentic-harness-core/go.mod') != '' || hashFiles('services/evidence-service/go.mod') != ''
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.0'
+
+      - name: Run evidence-service Go tests
+        if: hashFiles('services/evidence-service/go.mod') != ''
+        working-directory: services/evidence-service
+        run: go test ./...
+
+      - name: Run orchestrator-service Python tests
+        if: hashFiles('services/orchestrator-service/pyproject.toml') != ''
+        working-directory: services/orchestrator-service
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet pytest
+          .venv/bin/python -m pytest tests/ -q --no-header
 
       - name: Set up Node.js
         if: hashFiles('apps/c2c-studio/package.json') != ''

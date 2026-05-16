@@ -42,11 +42,21 @@
     },
     "wave": {
       "type": "string",
-      "const": "w0"
+      "enum": ["w0", "w0.2"]
     },
     "status": {
       "type": "string",
       "enum": ["complete", "incomplete", "invalid"]
+    },
+    "completenessStatus": {
+      "type": "string",
+      "enum": ["complete", "evidence_incomplete", "blocked"],
+      "description": "W0.2 completeness classification independent of the legacy status field. \"complete\" means every required W0.2 artifact for a successful run is referenced; \"evidence_incomplete\" means the run looked successful but is missing required evidence (fail-closed); \"blocked\" means an upstream failure prevents the pack from being completed."
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["success", "evidence_incomplete", "blocked", "failed"],
+      "description": "Final classification of the W0.2 run as observed from the evidence pack. Successful runs require completenessStatus=complete; any missing required artifact forces classification to evidence_incomplete or blocked."
     },
     "summary": {
       "type": "string"
@@ -81,6 +91,29 @@
           "items": { "$ref": "#/$defs/transformationPass" }
         },
         "generatedJava": { "$ref": "#/$defs/dataReference" },
+        "generatedJavaArtifacts": {
+          "type": "array",
+          "description": "W0.2 — every Java candidate persisted during the run, including the deterministic baseline, the productive Transformation Agent's candidate, and every Verification/Repair Agent candidate. Each entry is content-addressed so reviewers can recompile any candidate.",
+          "items": { "$ref": "#/$defs/javaCandidateRef" }
+        },
+        "finalJavaArtifact": {
+          "$ref": "#/$defs/javaCandidateRef",
+          "description": "W0.2 — the Java candidate that passed the deterministic build/test gate (or the final attempt before the repair budget was exhausted). Required for completenessStatus=complete."
+        },
+        "repairAttempts": {
+          "type": "array",
+          "description": "W0.2 — one entry per Verification/Repair Agent invocation. Captures the agent's decision, the resulting candidate ref, and the build/test outcome that triggered the call.",
+          "items": { "$ref": "#/$defs/repairAttempt" }
+        },
+        "agentTrajectories": {
+          "type": "array",
+          "description": "W0.2 — references to per-agent trajectory ledgers. Replaces the singular trajectoryLedger with a list so the Transformation Agent and Verification/Repair Agent each retain a distinct ledger reference.",
+          "items": { "$ref": "#/$defs/agentTrajectoryRef" }
+        },
+        "oracleComparison": {
+          "$ref": "#/$defs/oracleComparison",
+          "description": "W0.2 — comparison between the run's actual Java output and the COBOL oracle / golden master. Required when an oracle was available for the program."
+        },
         "runtimeVersion": {
           "type": "object",
           "required": ["id"],
@@ -157,6 +190,11 @@
         "messages": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "completenessStatus": {
+          "type": "string",
+          "enum": ["complete", "evidence_incomplete", "blocked"],
+          "description": "Mirror of the top-level completenessStatus for consumers that read the validation block first."
         }
       },
       "additionalProperties": false
@@ -224,8 +262,132 @@
         "status": { "type": "string" },
         "reason": { "type": "string" },
         "policyVersion": { "type": "string", "minLength": 1 },
+        "policyId": { "type": "string" },
+        "agentRole": { "type": "string" },
+        "promptTemplateId": { "type": "string" },
+        "latencyMs": { "type": "integer", "minimum": 0 },
+        "errorCode": { "type": "string" },
+        "errorClass": { "type": "string" },
         "timestamp": { "type": "string", "format": "date-time" },
         "ledgerRef": { "$ref": "#/$defs/dataReference" }
+      },
+      "additionalProperties": false
+    },
+    "javaCandidateRef": {
+      "type": "object",
+      "description": "Reference to a single Java candidate persisted during a W0.2 run, with enough metadata to attribute the candidate to a specific agent and repair attempt.",
+      "required": ["uri", "sha256", "byteSize", "origin", "attemptNumber"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "deterministic-baseline",
+            "transformation-agent",
+            "verification-repair-agent"
+          ]
+        },
+        "attemptNumber": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 for the deterministic baseline / first transformation-agent candidate; 1..N for each repair attempt."
+        },
+        "selected": {
+          "type": "boolean",
+          "description": "True iff this candidate is the one referenced by finalJavaArtifact."
+        }
+      },
+      "additionalProperties": false
+    },
+    "repairAttempt": {
+      "type": "object",
+      "description": "Outcome of one Verification/Repair Agent invocation in the bounded repair loop.",
+      "required": [
+        "attemptNumber",
+        "decision",
+        "buildTestResultRef"
+      ],
+      "properties": {
+        "attemptNumber": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "propose_candidate",
+            "refuse",
+            "escalate",
+            "no_change"
+          ]
+        },
+        "decisionRef": {
+          "$ref": "#/$defs/dataReference",
+          "description": "Reference to the persisted agent-repair-decision-v0 envelope."
+        },
+        "newJavaCandidateRef": {
+          "$ref": "#/$defs/javaCandidateRef",
+          "description": "Set when decision=propose_candidate. Points to the Java candidate the agent emitted for re-verification."
+        },
+        "buildTestResultRef": {
+          "$ref": "#/$defs/dataReference",
+          "description": "Reference to the build/test result that triggered this repair attempt."
+        },
+        "refusalCode": {
+          "type": "string",
+          "description": "Set when decision=refuse or escalate; matches the W0.2 refusal/escalation code stamped by the repair agent."
+        },
+        "noChange": {
+          "type": "boolean",
+          "description": "Set true when the orchestrator broke out of the loop because the proposed candidate hashed identically to the prior one."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agentTrajectoryRef": {
+      "type": "object",
+      "description": "Reference to one agent's trajectory ledger for the run. agentRole disambiguates Transformation vs Verification/Repair entries.",
+      "required": ["agentRole", "ledgerRef"],
+      "properties": {
+        "agentRole": {
+          "type": "string",
+          "enum": [
+            "orchestrator",
+            "transformation",
+            "verification-repair"
+          ]
+        },
+        "ledgerRef": { "$ref": "#/$defs/dataReference" }
+      },
+      "additionalProperties": false
+    },
+    "oracleComparison": {
+      "type": "object",
+      "description": "Captures the comparison performed by build-test-runner-service between the run's actual Java output and the COBOL oracle (or other golden master).",
+      "required": ["matched"],
+      "properties": {
+        "matched": { "type": "boolean" },
+        "oracleKind": {
+          "type": "string",
+          "enum": ["cobol-runtime", "synthetic", "true-golden-master", "absent"]
+        },
+        "expectedRef": { "$ref": "#/$defs/dataReference" },
+        "actualRef": { "$ref": "#/$defs/dataReference" },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "actualSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "buildTestResultRef": { "$ref": "#/$defs/dataReference" },
+        "classification": { "type": "string" },
+        "summary": { "type": "string" }
       },
       "additionalProperties": false
     }
