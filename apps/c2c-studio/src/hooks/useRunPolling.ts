@@ -10,10 +10,15 @@ async function hydrateRunObservability(
   setState: SetTransformationRunState,
   isActive?: () => boolean
 ) {
-  const [progress, evts, exp] = await Promise.all([
+  // Issue #173: workflow contract is polled alongside progress/events so the
+  // Studio always reflects the orchestrator-side agentic state (activeAgent,
+  // repairBudget, repairAttempts, failureCode) without waiting for the
+  // terminal hydrate.
+  const [progress, evts, exp, workflow] = await Promise.all([
     apiClient.getRunProgress(runId),
     apiClient.getRunEvents(runId),
     apiClient.getRunExperience(runId),
+    apiClient.getRunWorkflow(runId),
   ]);
 
   if (isActive && !isActive()) return;
@@ -26,6 +31,7 @@ async function hydrateRunObservability(
       progress: progress?.ok ? progress.data : prev.progress,
       events: evts?.ok ? evts.data : prev.events,
       experience: exp?.ok ? exp.data : prev.experience,
+      workflow: workflow?.ok ? workflow.data : prev.workflow,
     };
   });
 }
@@ -58,7 +64,7 @@ export async function hydrateRunArtifacts(
   terminalStatus?: 'completed' | 'failed',
   isActive?: () => boolean
 ) {
-  const [gen, genFiles, bt, ev, progress, evts, arts, exp] = await Promise.all([
+  const [gen, genFiles, bt, ev, progress, evts, arts, exp, workflow] = await Promise.all([
     apiClient.getGenerated(runId),
     apiClient.getGeneratedFiles(runId),
     apiClient.getBuildTest(runId),
@@ -66,7 +72,8 @@ export async function hydrateRunArtifacts(
     apiClient.getRunProgress(runId),
     apiClient.getRunEvents(runId),
     apiClient.getRunArtifacts(runId),
-    apiClient.getRunExperience(runId)
+    apiClient.getRunExperience(runId),
+    apiClient.getRunWorkflow(runId)
   ]);
 
   if (isActive && !isActive()) return;
@@ -85,6 +92,7 @@ export async function hydrateRunArtifacts(
       artifacts: arts.ok ? arts.data : null,
       artifactsError: arts.ok ? null : arts.message,
       experience: exp.ok ? exp.data : null,
+      workflow: workflow?.ok ? workflow.data : prev.workflow,
     };
 
     if (terminalStatus === 'failed' || prev.summary?.status === 'failed') {

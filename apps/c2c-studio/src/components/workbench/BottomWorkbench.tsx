@@ -5,6 +5,7 @@ import { useWorkbench } from '../../stores/workbench';
 import { Tabs } from '../ui/Tabs';
 import { bottomWorkbenchTabs } from './workbenchModels';
 import { RunLifecyclePanel } from '../run/RunLifecyclePanel';
+import { AgentActivityPanel } from '../run/AgentActivityPanel';
 import { BuildTestPanel } from '../run/BuildTestPanel';
 import { EvidencePackPanel } from '../run/EvidencePackPanel';
 import { ProblemsPanel } from '../run/ProblemsPanel';
@@ -80,6 +81,7 @@ export function BottomWorkbench() {
         className="flex-1 overflow-auto bg-bg-1"
       >
         {activeTab.id === 'run' && <RunLifecyclePanel emptyState={activeTab.emptyState} />}
+        {activeTab.id === 'agent' && <AgentActivityPanel emptyState={activeTab.emptyState} />}
         {activeTab.id === 'build-test' && <BuildTestPanel emptyState={activeTab.emptyState} />}
         {activeTab.id === 'artifacts' && (
           state.phase === 'idle' ? (

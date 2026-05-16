@@ -1,13 +1,27 @@
 import { TransformationRunState } from './run';
+import { W02UiErrorCode } from './api';
 
+// Issue #173: W0.2 Studio state machine. Lifecycle states (submitting,
+// awaiting-agent, repairing, verifying, cancelled) drive in-progress UI;
+// terminal states (success, blocked, failed, ...) drive verdict UI.
+// Artifact-level states (generated-*, build-failed, ...) remain so the
+// existing artifact-driven panels keep their semantics for runs that
+// predate the W0.2 workflow contract.
 export type ProductState =
   | 'empty'
+  | 'submitting'
+  | 'running'
+  | 'awaiting-agent'
+  | 'repairing'
+  | 'verifying'
+  | 'success'
   | 'ready'
+  | 'blocked'
+  | 'cancelled'
   | 'backend-unavailable'
   | 'upstream-unavailable'
   | 'unsupported'
   | 'validation-error'
-  | 'running'
   | 'failed'
   | 'generated-pending'
   | 'generated-incomplete'
@@ -23,6 +37,9 @@ export interface StateContext {
   missingArtifacts?: string[];
   unsupportedFeatures?: string[];
   mismatchedHashes?: { expected: string; actual: string; context: string }[];
+  // Issue #173: W0.2 failure code surfaced to the UI when the BFF/orchestrator
+  // classifies the run failure. Present on blocked/failed verdict states only.
+  failureCode?: W02UiErrorCode;
 }
 
 function hasUnavailableProductMode(runState: TransformationRunState): boolean {
@@ -60,6 +77,50 @@ function collectHashMismatches(
   return mismatches;
 }
 
+function failureCodeToState(code: W02UiErrorCode): ProductState {
+  switch (code) {
+    case 'unsupported_cobol':
+      return 'unsupported';
+    case 'parse_failed':
+    case 'semantic_ir_failed':
+    case 'agent_timeout':
+    case 'agent_contract_invalid':
+    case 'java_generation_failed':
+    case 'internal_error':
+      return 'failed';
+    case 'model_gateway_unavailable':
+    case 'model_policy_denied':
+      return 'blocked';
+    case 'java_compile_failed':
+    case 'java_runtime_failed':
+      return 'build-failed';
+    case 'oracle_mismatch':
+      return 'equivalence-mismatch';
+    case 'evidence_incomplete':
+      return 'evidence-incomplete';
+    case 'cancelled':
+      return 'cancelled';
+    case 'service_unavailable':
+      return 'backend-unavailable';
+  }
+}
+
+// Issue #173: map BFF active agent identifier to the in-progress product
+// state the UI shows during that step.
+function activeAgentToState(activeAgent: string | null | undefined): ProductState | null {
+  switch (activeAgent) {
+    case 'transformation_agent':
+      return 'awaiting-agent';
+    case 'verification_repair_agent':
+      return 'repairing';
+    case 'build_test_runner':
+    case 'evidence_service':
+      return 'verifying';
+    default:
+      return null;
+  }
+}
+
 export function deriveProductState(runState: TransformationRunState): StateContext {
   if (runState.error === 'Backend unavailable. Try again shortly.' || runState.error?.includes('503')) {
     return { state: 'backend-unavailable', message: runState.error };
@@ -79,8 +140,32 @@ export function deriveProductState(runState: TransformationRunState): StateConte
       message: runState.summary?.message ?? runState.generated?.note ?? runState.evidence?.note,
     };
   }
+
+  // Issue #173: terminal verdicts driven by the W0.2 finalClassification.
+  // The orchestrator-side classification is authoritative — if BFF says
+  // "blocked" / "cancelled" we render that verdict even when artifact
+  // views look complete.
+  const workflow = runState.workflow;
+  const finalClassification =
+    workflow?.finalClassification ?? runState.summary?.finalClassification ?? null;
+  const failureCode = workflow?.failureCode ?? runState.summary?.failureCode ?? null;
+  const failureMessage =
+    workflow?.failureMessage ?? runState.summary?.failureMessage ?? null;
+
+  if (finalClassification === 'cancelled' || failureCode === 'cancelled') {
+    return { state: 'cancelled', message: failureMessage ?? 'Run was cancelled.' };
+  }
+
   if (runState.phase === 'starting' || runState.phase === 'running') {
-    return { state: 'running' };
+    // Issue #173: when workflow contract is available, refine the running
+    // phase into awaiting-agent / repairing / verifying based on the active
+    // agent. Otherwise: 'starting' phase = submitting (request acknowledged,
+    // no orchestrator state yet); 'running' phase = generic running.
+    const fromAgent = activeAgentToState(workflow?.activeAgent);
+    if (fromAgent) {
+      return { state: fromAgent };
+    }
+    return { state: runState.phase === 'starting' ? 'submitting' : 'running' };
   }
 
   const generated = runState.generated;
@@ -154,11 +239,39 @@ export function deriveProductState(runState: TransformationRunState): StateConte
     return { state: 'hash-mismatch', mismatchedHashes: mismatches };
   }
 
+  // Issue #173: BFF-classified failures take precedence over the generic
+  // "failed" phase, and the code becomes the user-facing failure code.
+  if (finalClassification === 'failed' || finalClassification === 'blocked') {
+    const code = failureCode ?? undefined;
+    const derived = code ? failureCodeToState(code) : finalClassification === 'blocked' ? 'blocked' : 'failed';
+    return {
+      state: derived,
+      message: failureMessage ?? runState.error ?? runState.summary?.message ?? undefined,
+      failureCode: code,
+    };
+  }
+
   if (runState.phase === 'failed' || runState.summary?.status === 'failed') {
-    return { state: 'failed', message: runState.error || runState.summary?.message };
+    const code = failureCode ?? undefined;
+    return {
+      state: code ? failureCodeToState(code) : 'failed',
+      message: failureMessage ?? runState.error ?? runState.summary?.message ?? undefined,
+      failureCode: code,
+    };
   }
 
   if (runState.phase === 'completed') {
+    // Issue #173: distinct "success" verdict — requires the BFF to classify
+    // the run as success, with the build/test and evidence panels agreeing.
+    // We keep the legacy "ready" state for runs that predate the workflow
+    // contract (e.g. diagnostic-fixture runs) so existing behavior holds.
+    if (
+      finalClassification === 'success' &&
+      buildTest?.status === 'ok' &&
+      evidence?.status === 'complete'
+    ) {
+      return { state: 'success' };
+    }
     return { state: 'ready' };
   }
 

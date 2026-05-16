@@ -37,6 +37,7 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
     experience: null,
     modelGatewayHealth: null,
     harnessReady: null,
+    workflow: null,
   });
 
   const productState = useMemo(() => deriveProductState(state), [state]);
@@ -65,6 +66,7 @@ export function TransformationRunProvider({ children }: { children: ReactNode })
       experience: null,
       modelGatewayHealth: state.modelGatewayHealth,
       harnessReady: state.harnessReady,
+      workflow: null,
     });
 
     const result = await apiClient.transform(request);

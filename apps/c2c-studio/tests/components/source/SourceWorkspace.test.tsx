@@ -23,6 +23,7 @@ vi.mock('@/lib/apiClient', () => ({
     getRunProgress: vi.fn(),
     getRunArtifacts: vi.fn(),
     getRunExperience: vi.fn(),
+    getRunWorkflow: vi.fn(),
     getModelGatewayHealth: vi.fn(),
     getModelGatewayModels: vi.fn(),
     getHarnessReady: vi.fn(),

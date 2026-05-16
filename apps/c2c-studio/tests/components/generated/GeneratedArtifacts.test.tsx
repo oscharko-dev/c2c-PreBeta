@@ -68,6 +68,9 @@ describe('Generated Artifacts UI', () => {
   }
 
   it('renders pending state distinctly', () => {
+    // Issue #173: phase=starting now drives the submitting state with its
+    // own progress label so the user can tell "request just sent" apart
+    // from "agents working".
     mockTransformationState.mockReturnValue({
       phase: 'starting',
       runId: '123',
@@ -80,7 +83,23 @@ describe('Generated Artifacts UI', () => {
         <GeneratedJavaEditorPane />
       </GeneratedArtifactsProvider>,
     );
-    expect(screen.getByText(/Generating Java artifacts/i)).toBeInTheDocument();
+    expect(screen.getByTestId('generated-pane-progress').textContent).toMatch(/Submitting transformation request/i);
+  });
+
+  it('renders the generic running label when phase is running with no workflow', () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'running',
+      runId: '123',
+      generated: null,
+      generatedFiles: null,
+    });
+
+    render(
+      <GeneratedArtifactsProvider>
+        <GeneratedJavaEditorPane />
+      </GeneratedArtifactsProvider>,
+    );
+    expect(screen.getByTestId('generated-pane-progress').textContent).toMatch(/Generating Java artifacts/i);
   });
 
   it('renders unsupported and incomplete states distinctly', () => {
