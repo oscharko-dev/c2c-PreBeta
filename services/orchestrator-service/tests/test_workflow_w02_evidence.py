@@ -279,16 +279,17 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         # When the run is blocked we MUST NOT auto-mark a candidate as
         # selected unless the orchestrator handed us one explicitly.
         history = artifacts.get("generatedJavaArtifacts") or []
-        _selected = [e for e in history if e.get("selected")]
+        selected = [e for e in history if e.get("selected")]
         # The baseline matched the final_artifact_ref so it shows up selected;
         # the repair attempt did not propose so no extra candidate exists.
         # But the contract on blocked runs is "do not claim success" — the
         # classification handled at evidence-service derives that.
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["origin"], "deterministic-baseline")
-        # Selected status is allowed when an explicit final_artifact_ref
-        # is present; the evidence-service uses blocked=True to override
-        # to classification=blocked regardless.
+        # An explicit generated_artifact_ref was passed, so exactly one
+        # candidate is selected; blocked=True still overrides classification.
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["origin"], "deterministic-baseline")
         # Oracle comparison surfaces matched=False.
         self.assertFalse(artifacts["oracleComparison"]["matched"])
 
