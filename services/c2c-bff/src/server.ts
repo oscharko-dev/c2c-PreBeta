@@ -15,6 +15,7 @@ import {
   type HarnessClient,
   createNodeHttpClient,
   createOrchestratorClient,
+  UpstreamResponseTooLargeError,
   type EvidenceClient,
   type ExperienceLearningClient,
   type HttpClient,
@@ -1966,9 +1967,25 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         try {
-          const upstream = await orchestrator.getGeneratedFile(liveRunId, decodedPath);
+          const upstream = await orchestrator.getGeneratedFile(
+            liveRunId,
+            decodedPath,
+            config.artifactContentMaxBytes,
+          );
           if (!upstream) {
             jsonResponse(res, 502, { error: 'orchestrator request failed' });
+            return;
+          }
+          // Issue #172 follow-up: the streaming reader aborted because the
+          // upstream payload exceeded the cap. Refuse before any further
+          // processing so a malicious orchestrator cannot smuggle oversized
+          // content through the JSON envelope.
+          if (upstream.truncated) {
+            jsonResponse(res, 413, {
+              error: 'artifact_too_large',
+              path: decodedPath,
+              limit: config.artifactContentMaxBytes,
+            });
             return;
           }
           if (upstream.status === 404) {
@@ -1985,11 +2002,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           }
           const envelope = asRecord(upstream.body) ?? {};
           const content = asString(envelope.content);
-          const byteSize = asNumber(envelope.byteSize) ?? Buffer.byteLength(content, 'utf-8');
-          // Issue #172: large text artifacts must be rejected with a
-          // documented size-limit response so the browser tab and the BFF
-          // process stay healthy. The upstream's byteSize is trusted when
-          // present; otherwise we recompute from the served content.
+          // Issue #172: trust the upstream's declared byteSize *only* when
+          // it agrees with the served content. A malicious orchestrator
+          // could otherwise report ``byteSize: 1`` and still smuggle a
+          // larger payload through ``content``. We compare both and take
+          // the maximum so the cap cannot be bypassed.
+          const declaredByteSize = asNumber(envelope.byteSize);
+          const measuredByteSize = Buffer.byteLength(content, 'utf-8');
+          const byteSize = declaredByteSize === undefined
+            ? measuredByteSize
+            : Math.max(declaredByteSize, measuredByteSize);
           if (byteSize > config.artifactContentMaxBytes) {
             jsonResponse(res, 413, {
               error: 'artifact_too_large',
@@ -2016,6 +2038,15 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         } catch (err) {
+          if (err instanceof UpstreamResponseTooLargeError) {
+            jsonResponse(res, 413, {
+              error: 'artifact_too_large',
+              path: decodedPath,
+              byteSize: err.declaredByteSize,
+              limit: err.limit,
+            });
+            return;
+          }
           jsonResponse(res, 502, {
             error: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
           });

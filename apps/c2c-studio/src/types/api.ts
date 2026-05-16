@@ -33,9 +33,52 @@ export interface RunLinks {
   events: string;
   artifacts: string;
   learning?: string;
+  // Issue #172: W0.2 workflow contract endpoint.
+  workflow?: string;
 }
 
-export interface TransformResponse {
+// Issue #172: closed set of UI-safe failure codes the BFF exposes.
+export type W02UiErrorCode =
+  | 'unsupported_cobol'
+  | 'parse_failed'
+  | 'semantic_ir_failed'
+  | 'model_gateway_unavailable'
+  | 'model_policy_denied'
+  | 'agent_timeout'
+  | 'agent_contract_invalid'
+  | 'java_generation_failed'
+  | 'java_compile_failed'
+  | 'java_runtime_failed'
+  | 'oracle_mismatch'
+  | 'evidence_incomplete'
+  | 'cancelled'
+  | 'service_unavailable'
+  | 'internal_error';
+
+export type RunFinalClassification =
+  | 'success'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled'
+  | 'incomplete';
+
+export interface RepairBudget {
+  limit: number;
+  used: number;
+  remaining: number;
+}
+
+export interface W02RunContractFields {
+  // Always present on the BFF response; null/zero when no contract exists yet.
+  activeStep?: string | null;
+  agentAttemptCount?: number;
+  repairBudget?: RepairBudget | null;
+  finalClassification?: RunFinalClassification | null;
+  failureCode?: W02UiErrorCode | null;
+  failureMessage?: string | null;
+}
+
+export interface TransformResponse extends W02RunContractFields {
   runId: string;
   orchestratorRunId: string;
   programId: string;
@@ -50,7 +93,7 @@ export interface TransformResponse {
   links: RunLinks;
 }
 
-export interface RunSummary {
+export interface RunSummary extends W02RunContractFields {
   runId: string;
   programId: string;
   status: 'starting' | 'updating' | 'completed' | 'failed';
@@ -250,4 +293,56 @@ export interface GeneratedFileContent {
   uri?: string;
   kind?: string;
   orchestratorRunId?: string;
+}
+
+// Issue #172: W0.2 workflow contract product-level view.
+export type W02ActiveAgent =
+  | 'transformation_agent'
+  | 'verification_repair_agent'
+  | 'cobol_parser'
+  | 'semantic_ir'
+  | 'java_generator'
+  | 'build_test_runner'
+  | 'evidence_service';
+
+export type W02RepairDecision =
+  | 'propose_candidate'
+  | 'refuse'
+  | 'escalate'
+  | 'no_change';
+
+export interface RepairAttemptSummary {
+  attemptNumber: number;
+  repairDecision: W02RepairDecision;
+  failureCategory: string | null;
+  hasModelInvocation: boolean;
+  hasRepairInput: boolean;
+  hasJavaCandidate: boolean;
+  rationale?: string;
+}
+
+export interface WorkflowArtifactRef {
+  sha256: string;
+  byteSize: number;
+  kind: string;
+}
+
+export interface RunWorkflowView {
+  runId: string;
+  programId: string;
+  mode: 'live' | 'diagnostic-fixture';
+  productMode: 'live' | 'unavailable';
+  source: 'live' | 'cached' | 'unavailable';
+  state: string | null;
+  activeStep: string | null;
+  activeAgent: W02ActiveAgent | null;
+  agentAttemptCount: number;
+  repairBudget: RepairBudget | null;
+  repairAttempts: RepairAttemptSummary[];
+  finalClassification: RunFinalClassification | null;
+  failureCode: W02UiErrorCode | null;
+  failureMessage: string | null;
+  generatedJavaRef: WorkflowArtifactRef | null;
+  buildTestResultRef: WorkflowArtifactRef | null;
+  evidencePackRef: WorkflowArtifactRef | null;
 }

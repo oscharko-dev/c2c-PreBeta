@@ -256,8 +256,17 @@ paths:
         "413":
           description: |
             Issue #172. The requested artifact exceeds
-            ``C2C_ARTIFACT_CONTENT_MAX_BYTES`` (defaults to 1 MiB). The
-            response carries the observed ``byteSize`` and the active
+            ``C2C_ARTIFACT_CONTENT_MAX_BYTES`` (defaults to 1 MiB). The BFF
+            enforces the cap in three layers so an oversized upstream
+            cannot pin the BFF process or the browser tab:
+            1. The HTTP client rejects on declared ``content-length``
+               larger than the cap before any body bytes are consumed.
+            2. The HTTP client aborts the request as soon as the streamed
+               body crosses the cap.
+            3. The handler re-checks both the declared and measured
+               byteSize after the envelope is parsed and never trusts the
+               smaller of the two.
+            The response carries ``byteSize`` (when known) and the active
             ``limit`` so the UI can render a meaningful diagnostic.
           content:
             application/json:
@@ -601,9 +610,12 @@ components:
         sourceName: { type: string }
         # Issue #172: W0.2 transform contract. ``targetLanguage`` defaults
         # to ``java`` and is the only supported value for W0.2; anything
-        # else is rejected with 400. ``expectedOutput`` and ``oracleInput``
-        # are optional strings that the orchestrator forwards to the
-        # verification/repair agent for oracle-mode comparisons.
+        # else is rejected with 400. ``expectedOutput`` (golden master) and
+        # ``oracleInput`` (oracle stdin) are forwarded onto the orchestrator
+        # inputRef so the build/test runner and verification/repair agent
+        # can compare against the exact bytes the user supplied. Empty
+        # strings are treated as "not supplied" and fall back to the
+        # deterministic W0/W0.1 oracle path.
         targetLanguage:
           type: string
           enum: [java]
@@ -827,10 +839,13 @@ components:
 
     ArtifactTooLargeError:
       type: object
-      required: [error, byteSize, limit]
+      required: [error, limit]
       properties:
         error: { type: string, enum: [artifact_too_large] }
         path: { type: string }
+        # Optional because the streaming-cap path can abort before the
+        # upstream byteSize is observable (no content-length header and
+        # the response was cut off mid-stream).
         byteSize: { type: integer, minimum: 0 }
         limit: { type: integer, minimum: 1 }
 

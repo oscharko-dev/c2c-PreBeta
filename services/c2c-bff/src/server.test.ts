@@ -3153,5 +3153,124 @@ test('transform 502 response carries a UI-safe failureCode and never leaks orche
   }
 });
 
+test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached W0.2 snapshot', async () => {
+  // Issue #172 follow-up: every poll of /api/v0/runs/{runId} also fetches
+  // the workflow contract and writes it back into the run store. The Node
+  // event loop is single-threaded but async tasks can interleave: while
+  // one poll awaits the upstream response, another poll can start. This
+  // test fires multiple concurrent polls against a stub orchestrator that
+  // returns a stable contract under artificial delay, and asserts that
+  // every cached field on the run store matches the upstream snapshot
+  // when all polls settle — i.e. there is no torn write.
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  let workflowCallCount = 0;
+  const failureCode = 'java_compile_failed';
+  const contract = {
+    currentState: 'final_classification',
+    activeStep: 'verification_repair_agent',
+    agentAttemptCount: 3,
+    repairBudget: { limit: 2, used: 2, remaining: 0 },
+    repairAttempts: [
+      { attemptNumber: 1, repairDecision: 'propose_candidate', createdAt: '2026-05-16T12:00:00Z' },
+      { attemptNumber: 2, repairDecision: 'no_change', createdAt: '2026-05-16T12:01:00Z' },
+    ],
+    finalClassification: 'blocked',
+    failureCode,
+    failureMessage: 'compile error',
+  };
+  const orch: OrchestratorClient = {
+    enabled: true,
+    async startRun() {
+      return {
+        status: 201,
+        body: { run: { runId: 'live-run-1', status: 'updating' } },
+      };
+    },
+    async startTransformRun() {
+      return undefined;
+    },
+    async getRun() {
+      // tiny delay so concurrent polls interleave around it
+      await new Promise((r) => setTimeout(r, 1));
+      return {
+        status: 200,
+        body: {
+          runId: 'live-run-1',
+          status: 'completed',
+          message: 'orchestrator completed',
+        },
+      };
+    },
+    async getArtifacts() { return undefined; },
+    async getGenerated() { return undefined; },
+    async getGeneratedFiles() { return undefined; },
+    async getGeneratedFile() { return undefined; },
+    async getBuildTest() { return undefined; },
+    async getEvidence() { return undefined; },
+    async getEvents() { return undefined; },
+    async getProgress() { return undefined; },
+    async getLearning() { return undefined; },
+    async getWorkflow() {
+      workflowCallCount += 1;
+      // jitter to maximize interleave between concurrent polls
+      await new Promise((r) => setTimeout(r, 1 + (workflowCallCount % 3)));
+      return {
+        status: 200,
+        body: { status: 'complete', source: 'live', contract },
+      };
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+
+    // Fire 12 concurrent polls. Each one runs getRun -> applyLiveRunPayload
+    // -> fetchWorkflowSnapshot -> applyWorkflowSnapshotToStore. The final
+    // cached state must reflect the upstream contract exactly, with no
+    // half-applied patch.
+    const polls = await Promise.all(
+      Array.from({ length: 12 }, () => fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`)),
+    );
+    for (const poll of polls) {
+      const body = poll.body as {
+        activeStep: string;
+        agentAttemptCount: number;
+        repairBudget: { limit: number; used: number; remaining: number };
+        finalClassification: string;
+        failureCode: string;
+      };
+      assert.equal(body.activeStep, 'verification_repair_agent');
+      assert.equal(body.agentAttemptCount, 3);
+      assert.deepEqual(body.repairBudget, { limit: 2, used: 2, remaining: 0 });
+      assert.equal(body.finalClassification, 'blocked');
+      assert.equal(body.failureCode, failureCode);
+    }
+    // Each poll triggered exactly one workflow fetch.
+    assert.equal(workflowCallCount, 12);
+    // The run store retains the latest snapshot deterministically.
+    const stored = runStore.get(startedBody.runId);
+    assert.ok(stored);
+    assert.equal(stored?.activeStep, 'verification_repair_agent');
+    assert.equal(stored?.agentAttemptCount, 3);
+    assert.deepEqual(stored?.repairBudget, { limit: 2, used: 2, remaining: 0 });
+    assert.equal(stored?.finalClassification, 'blocked');
+    assert.equal(stored?.failureCode, failureCode);
+  } finally {
+    await server.close();
+  }
+});
+
 // Silence unused-import warnings under strict mode
 void net;

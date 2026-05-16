@@ -6,6 +6,11 @@ import { URL } from 'node:url';
 export interface UpstreamResponse {
   status: number;
   body: unknown;
+  // Issue #172 follow-up: ``true`` when the streaming reader stopped because
+  // the response exceeded the per-request byte cap. The body is still the
+  // partial JSON / text the BFF was able to read, but callers must treat the
+  // response as untrustworthy and return 413 to the browser.
+  truncated?: boolean;
 }
 
 export interface HttpRequestOptions {
@@ -13,6 +18,29 @@ export interface HttpRequestOptions {
   headers?: Record<string, string>;
   body?: unknown;
   timeoutMs: number;
+  // Issue #172 follow-up: hard cap on the upstream response body. When set,
+  // the client aborts the request as soon as cumulative bytes received
+  // exceed the cap, and the resolved response carries ``truncated: true``.
+  // A declared ``content-length`` larger than the cap is rejected before
+  // any body bytes are consumed.
+  maxResponseBytes?: number;
+}
+
+// Distinguishable error type so callers can map an oversize upstream to the
+// 413/``artifact_too_large`` BFF response without parsing message strings.
+export class UpstreamResponseTooLargeError extends Error {
+  readonly limit: number;
+  readonly declaredByteSize?: number;
+  constructor(limit: number, declaredByteSize?: number) {
+    super(
+      declaredByteSize !== undefined
+        ? `upstream response too large: declared ${declaredByteSize} bytes exceeds limit ${limit}`
+        : `upstream response too large: exceeded limit ${limit} bytes`,
+    );
+    this.name = 'UpstreamResponseTooLargeError';
+    this.limit = limit;
+    this.declaredByteSize = declaredByteSize;
+  }
 }
 
 export interface HttpClient {
@@ -23,11 +51,26 @@ export function createNodeHttpClient(): HttpClient {
   return {
     request(targetUrl, options) {
       return new Promise<UpstreamResponse>((resolve, reject) => {
+        // Issue #172 follow-up: the streaming cap can resolve the promise
+        // mid-flight (when the upstream over-runs the byte limit). Guarding
+        // with ``settled`` prevents the subsequent ``req.on('error')`` from
+        // turning the resolved response into a spurious unhandled rejection.
+        let settled = false;
+        const safeResolve = (response: UpstreamResponse) => {
+          if (settled) return;
+          settled = true;
+          resolve(response);
+        };
+        const safeReject = (err: Error) => {
+          if (settled) return;
+          settled = true;
+          reject(err);
+        };
         let parsed: URL;
         try {
           parsed = new URL(targetUrl);
         } catch (err) {
-          reject(err instanceof Error ? err : new Error('invalid url'));
+          safeReject(err instanceof Error ? err : new Error('invalid url'));
           return;
         }
 
@@ -45,6 +88,8 @@ export function createNodeHttpClient(): HttpClient {
           headers['content-length'] = String(bodyBytes.length);
         }
 
+        const maxResponseBytes = options.maxResponseBytes;
+
         const req = transport.request(
           {
             method: options.method ?? 'GET',
@@ -54,9 +99,38 @@ export function createNodeHttpClient(): HttpClient {
             headers,
           },
           (res) => {
+            // Issue #172 follow-up: early reject on a declared
+            // ``content-length`` that already exceeds the cap. Refusing
+            // before reading any body bytes is the cheapest defence
+            // against an upstream that tries to ship a multi-GB payload.
+            if (maxResponseBytes !== undefined) {
+              const rawLen = res.headers['content-length'];
+              if (typeof rawLen === 'string') {
+                const declared = Number(rawLen);
+                if (Number.isFinite(declared) && declared > maxResponseBytes) {
+                  res.resume();
+                  req.destroy();
+                  safeReject(new UpstreamResponseTooLargeError(maxResponseBytes, declared));
+                  return;
+                }
+              }
+            }
             const chunks: Buffer[] = [];
-            res.on('data', (chunk: Buffer) => chunks.push(chunk));
+            let received = 0;
+            let truncated = false;
+            res.on('data', (chunk: Buffer) => {
+              if (truncated) return;
+              received += chunk.length;
+              if (maxResponseBytes !== undefined && received > maxResponseBytes) {
+                truncated = true;
+                req.destroy();
+                safeResolve({ status: res.statusCode ?? 0, body: null, truncated: true });
+                return;
+              }
+              chunks.push(chunk);
+            });
             res.on('end', () => {
+              if (truncated) return;
               const raw = Buffer.concat(chunks).toString('utf-8');
               let body: unknown;
               if (raw.length > 0) {
@@ -68,16 +142,19 @@ export function createNodeHttpClient(): HttpClient {
               } else {
                 body = null;
               }
-              resolve({ status: res.statusCode ?? 0, body });
+              safeResolve({ status: res.statusCode ?? 0, body });
             });
-            res.on('error', reject);
+            res.on('error', (err) => {
+              if (truncated) return;
+              safeReject(err);
+            });
           },
         );
 
         req.setTimeout(options.timeoutMs, () => {
           req.destroy(new Error(`upstream request timed out after ${options.timeoutMs}ms`));
         });
-        req.on('error', reject);
+        req.on('error', safeReject);
         if (bodyBytes) req.write(bodyBytes);
         req.end();
       });
@@ -102,7 +179,7 @@ export interface OrchestratorClient {
   getArtifacts(runId: string): Promise<UpstreamResponse | undefined>;
   getGenerated(runId: string): Promise<UpstreamResponse | undefined>;
   getGeneratedFiles(runId: string): Promise<UpstreamResponse | undefined>;
-  getGeneratedFile(runId: string, filePath: string): Promise<UpstreamResponse | undefined>;
+  getGeneratedFile(runId: string, filePath: string, maxResponseBytes?: number): Promise<UpstreamResponse | undefined>;
   getBuildTest(runId: string): Promise<UpstreamResponse | undefined>;
   getEvidence(runId: string): Promise<UpstreamResponse | undefined>;
   getEvents(runId: string): Promise<UpstreamResponse | undefined>;
@@ -265,16 +342,24 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
         timeoutMs,
       });
     },
-    async getGeneratedFile(runId: string, filePath: string) {
+    async getGeneratedFile(runId: string, filePath: string, maxResponseBytes?: number) {
       const safeRun = encodeURIComponent(runId);
       const encodedPath = filePath
         .split('/')
         .filter((segment) => segment.length > 0)
         .map((segment) => encodeURIComponent(segment))
         .join('/');
+      // Issue #172 follow-up: the artifact-content path is the only response
+      // that can carry arbitrarily large user-controlled bytes (a generated
+      // Java file). The streaming cap stops a malicious orchestrator from
+      // pinning the BFF process before the per-file 413 check runs.
+      // The cap is the per-file limit plus a small JSON-envelope budget so a
+      // valid file exactly at the limit still round-trips.
+      const responseCap = maxResponseBytes === undefined ? undefined : maxResponseBytes + 4096;
       return http.request(`${baseUrl}/v0/runs/${safeRun}/generated/files/${encodedPath}`, {
         method: 'GET',
         timeoutMs,
+        maxResponseBytes: responseCap,
       });
     },
     async getBuildTest(runId: string) {
