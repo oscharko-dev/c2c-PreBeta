@@ -75,6 +75,27 @@ const (
 )
 
 const (
+	// Error classes recorded on the ledger and propagated to clients via the
+	// `errorClass` field. These let consumers (Orchestrator, evidence-service)
+	// distinguish a policy denial from a provider outage or timeout.
+	errorClassValidation       = "validation"
+	errorClassProviderError    = "provider_error"
+	errorClassProviderTimeout  = "provider_timeout"
+	errorClassMissingCredential = "missing_credential"
+)
+
+const (
+	// Error codes returned on non-2xx responses. The Orchestrator and the
+	// Harness map these to the W0.2 failure-code closed set:
+	//   policy_denied  -> FAILURE_MODEL_POLICY_DENIED
+	//   gateway_unavailable / provider_unavailable -> FAILURE_MODEL_GATEWAY_UNAVAILABLE
+	errorCodePolicyDenied        = "model_policy_denied"
+	errorCodeGatewayUnavailable  = "model_gateway_unavailable"
+	errorCodeProviderTimeout     = "model_provider_timeout"
+	errorCodeProviderError       = "model_provider_error"
+)
+
+const (
 	policyDecisionAllow = "policy allow"
 	policyDecisionDeny  = "policy deny"
 )
@@ -210,6 +231,7 @@ type ModelInvocationRequest struct {
 	RunID                  string         `json:"runId"`
 	ModelID                string         `json:"modelId"`
 	Actor                  string         `json:"actor"`
+	AgentRole              string         `json:"agentRole,omitempty"`
 	DataClass              string         `json:"dataClass"`
 	PromptTemplateVersion  string         `json:"promptTemplateVersion"`
 	Prompt                 string         `json:"prompt"`
@@ -224,12 +246,17 @@ type ModelInvocationResponse struct {
 	RunID                 string         `json:"runId"`
 	ModelID               string         `json:"modelId"`
 	Provider              string         `json:"provider"`
+	PolicyID              string         `json:"policyId"`
+	AgentRole             string         `json:"agentRole,omitempty"`
 	PromptTemplateVersion string         `json:"promptTemplateVersion"`
 	PolicyDecision        string         `json:"policyDecision"`
 	Status                string         `json:"status"`
 	LatencyMs             int64          `json:"latencyMs"`
+	Usage                 map[string]any `json:"usage,omitempty"`
 	LedgerRef             DataReference  `json:"ledgerRef"`
 	Output                map[string]any `json:"output"`
+	ErrorCode             string         `json:"errorCode,omitempty"`
+	ErrorClass            string         `json:"errorClass,omitempty"`
 }
 
 type ModelInvocationOutput struct {
@@ -244,13 +271,17 @@ type ModelInvocationLedgerV0 struct {
 	RunID            string         `json:"runId"`
 	ModelID          string         `json:"modelId"`
 	Provider         string         `json:"provider"`
+	PolicyID         string         `json:"policyId"`
+	AgentRole        string         `json:"agentRole,omitempty"`
 	DataClass        string         `json:"dataClass"`
 	PromptTemplate   string         `json:"promptTemplateVersion"`
 	PolicyDecision   string         `json:"policyDecision"`
 	Status           string         `json:"status"`
 	LatencyMs        int64          `json:"latencyMs"`
+	Usage            map[string]any `json:"usage,omitempty"`
 	RequestRef       DataReference  `json:"requestRef"`
 	OutputRef        DataReference  `json:"outputRef"`
+	ErrorCode        string         `json:"errorCode,omitempty"`
 	ErrorClass       string         `json:"errorClass,omitempty"`
 	ErrorMessage     string         `json:"errorMessage,omitempty"`
 	Parameters       map[string]any `json:"parameters"`
@@ -270,6 +301,9 @@ func (l ModelInvocationLedgerV0) Validate() error {
 	}
 	if strings.TrimSpace(l.Provider) == "" {
 		return SchemaValidationError{Path: "provider", Reason: "required"}
+	}
+	if strings.TrimSpace(l.PolicyID) == "" {
+		return SchemaValidationError{Path: "policyId", Reason: "required"}
 	}
 	if strings.TrimSpace(l.DataClass) == "" {
 		return SchemaValidationError{Path: "dataClass", Reason: "required"}
@@ -309,7 +343,31 @@ type ModelGatewayHealthResponse struct {
 	Schema      string            `json:"schema"`
 	Providers   []string          `json:"providers"`
 	ActiveModel int               `json:"activeModels"`
+	PolicyID    string            `json:"policyId"`
 	Configured  map[string]string `json:"configured"`
+}
+
+// RoleAvailability summarises which models are usable for a given W0.2 agent
+// role. The Orchestrator consults this view before invoking the gateway so it
+// can fail early with model_gateway_unavailable when no approved model is
+// reachable for the requested role.
+type RoleAvailability struct {
+	Role            string   `json:"role"`
+	Status          string   `json:"status"`
+	PolicyID        string   `json:"policyId"`
+	AvailableModels []string `json:"availableModels"`
+	ConfiguredModels []string `json:"configuredModels"`
+	Reason          string   `json:"reason,omitempty"`
+}
+
+// ModelGatewayCapabilitiesResponse is the body of GET /v0/capabilities.
+type ModelGatewayCapabilitiesResponse struct {
+	Schema   string             `json:"schema"`
+	Service  string             `json:"service"`
+	Status   string             `json:"status"`
+	Provider string             `json:"provider"`
+	PolicyID string             `json:"policyId"`
+	Roles    []RoleAvailability `json:"roles"`
 }
 
 func ComputeSHA256Ref(payload any) (DataReference, error) {

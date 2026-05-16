@@ -12,7 +12,15 @@ import (
 
 const (
 	defaultTemplateVersion = "v1"
+	defaultPolicyID        = "foundry-development-v0"
 )
+
+const (
+	AgentRoleTransformation      = "transformation"
+	AgentRoleVerificationRepair  = "verification-repair"
+)
+
+var w02AgentRoles = []string{AgentRoleTransformation, AgentRoleVerificationRepair}
 
 type ModelRegistry struct {
 	Models []ModelMetadata `yaml:"models"`
@@ -89,7 +97,9 @@ func (m ModelMetadata) IsDataClassAllowed(dataClass string) bool {
 
 type FoundryDevelopmentAllowlist struct {
 	Mode             string                 `yaml:"mode"`
+	PolicyID         string                 `yaml:"policyId"`
 	AllowedModelIDs  []string               `yaml:"allowedModelIds"`
+	Roles            map[string][]string    `yaml:"roles"`
 	Foundry          ProviderFoundryConfig  `yaml:"foundry"`
 	CustomerInternal CustomerInternalConfig `yaml:"customerInternalMock"`
 }
@@ -142,6 +152,9 @@ func LoadFoundryAllowlist(path string) (FoundryDevelopmentAllowlist, error) {
 	if cfg.Mode == "" {
 		cfg.Mode = ModelProviderFoundryDevelopment
 	}
+	if strings.TrimSpace(cfg.PolicyID) == "" {
+		cfg.PolicyID = defaultPolicyID
+	}
 	return cfg, nil
 }
 
@@ -157,6 +170,59 @@ func (c FoundryDevelopmentAllowlist) IsModelAllowed(modelID string) bool {
 	return false
 }
 
+// IsRoleConfigured reports whether the role appears in the role-to-model policy.
+// An unconfigured role is treated as "no role-specific restriction": invocations
+// without an explicit role bypass the role check.
+func (c FoundryDevelopmentAllowlist) IsRoleConfigured(role string) bool {
+	if c.Roles == nil {
+		return false
+	}
+	_, ok := c.Roles[role]
+	return ok
+}
+
+// IsRoleAllowed reports whether the role may invoke the given modelID.
+// If no role is configured, all models that pass the general allowlist are allowed.
+func (c FoundryDevelopmentAllowlist) IsRoleAllowed(role, modelID string) bool {
+	if strings.TrimSpace(role) == "" {
+		return true
+	}
+	models, ok := c.Roles[role]
+	if !ok {
+		return true
+	}
+	for _, id := range models {
+		if id == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+// AllowedModelsForRole returns the models configured for the role, or nil if
+// the role is not configured. Callers must treat nil as "no role restriction".
+func (c FoundryDevelopmentAllowlist) AllowedModelsForRole(role string) []string {
+	if c.Roles == nil {
+		return nil
+	}
+	models, ok := c.Roles[role]
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(models))
+	copy(out, models)
+	return out
+}
+
+// ResolvedPolicyID returns the configured policy id or the default.
+func (c FoundryDevelopmentAllowlist) ResolvedPolicyID() string {
+	id := strings.TrimSpace(c.PolicyID)
+	if id == "" {
+		return defaultPolicyID
+	}
+	return id
+}
+
 func (c FoundryDevelopmentAllowlist) Validate() error {
 	if strings.TrimSpace(c.Mode) == "" {
 		return errors.New("allowlist mode is required")
@@ -168,6 +234,19 @@ func (c FoundryDevelopmentAllowlist) Validate() error {
 	}
 	if c.Mode == ModelProviderFoundryDevelopment && len(c.AllowedModelIDs) == 0 {
 		return errors.New("allowedModelIds must contain at least one model in foundry-development mode")
+	}
+	for role, models := range c.Roles {
+		if strings.TrimSpace(role) == "" {
+			return errors.New("role name must not be empty in roles map")
+		}
+		if len(models) == 0 {
+			return fmt.Errorf("role %q must list at least one model", role)
+		}
+		for _, modelID := range models {
+			if !c.IsModelAllowed(modelID) {
+				return fmt.Errorf("role %q references model %q which is not in allowedModelIds", role, modelID)
+			}
+		}
 	}
 	return nil
 }

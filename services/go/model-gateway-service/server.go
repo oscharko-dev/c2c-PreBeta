@@ -32,6 +32,7 @@ type ModelGatewayService struct {
 	harnessEventEmissionEnabled bool
 	modelProvider               string
 	azureAPIVersion             string
+	policyID                    string
 }
 
 type gatewayConfig struct {
@@ -45,6 +46,7 @@ type gatewayConfig struct {
 	fallbackModelDeployments     []string
 	allowedModelDeployments      []string
 	dataPolicy                   string
+	policyID                     string
 	invocationLedgerEnabled      bool
 	harnessEventEmissionEnabled  bool
 	azureFoundryEndpoint         string
@@ -140,6 +142,11 @@ func (s *ModelGatewayService) applyGatewayRuntimeConfig(cfg gatewayConfig) error
 		s.dataPolicy = "public_synthetic_only"
 	}
 
+	s.policyID = strings.TrimSpace(cfg.policyID)
+	if s.policyID == "" {
+		s.policyID = s.allowlist.ResolvedPolicyID()
+	}
+
 	if err := validateDeploymentPolicyActive(s.registry, s.now, s.allowedModelDeployments); err != nil {
 		return err
 	}
@@ -158,8 +165,18 @@ func (s *ModelGatewayService) Routes() *http.ServeMux {
 	mux.HandleFunc("/v0/health", s.healthHandler)
 	mux.HandleFunc("/v0/models", s.modelsHandler)
 	mux.HandleFunc("/v0/models/", s.modelsHandler)
+	mux.HandleFunc("/v0/capabilities", s.capabilitiesHandler)
 	mux.HandleFunc("/v0/invoke", s.invokeHandler)
 	return mux
+}
+
+// resolvedPolicyID returns the active policy id, preferring the runtime
+// override applied via gatewayConfig and falling back to the allowlist value.
+func (s *ModelGatewayService) resolvedPolicyID() string {
+	if strings.TrimSpace(s.policyID) != "" {
+		return s.policyID
+	}
+	return s.allowlist.ResolvedPolicyID()
 }
 
 func (s *ModelGatewayService) closeSinks() {
@@ -186,9 +203,11 @@ func (s *ModelGatewayService) healthHandler(w http.ResponseWriter, r *http.Reque
 		Schema:      gatewayEventSchemaVersion,
 		Providers:   providers,
 		ActiveModel: len(s.activeModels()),
+		PolicyID:    s.resolvedPolicyID(),
 		Configured: map[string]string{
 			"mode":                        s.allowlist.Mode,
 			"modelProvider":               s.modelProvider,
+			"policyId":                    s.resolvedPolicyID(),
 			"defaultModelDeployment":      s.defaultModelDeployment,
 			"fallbackModelDeployments":    strings.Join(s.fallbackModelDeployments, ","),
 			"allowedModelDeployments":     strings.Join(s.allowedModelDeployments, ","),
@@ -198,6 +217,118 @@ func (s *ModelGatewayService) healthHandler(w http.ResponseWriter, r *http.Reque
 			"azureAPIVersion":             s.azureAPIVersion,
 		},
 	})
+}
+
+// capabilitiesHandler reports which W0.2 agent roles have an approved, active,
+// allowlisted model available. The Orchestrator consults this view before
+// invoking the gateway so it can fail early with model_gateway_unavailable
+// when no approved model is reachable for the requested role. The endpoint
+// always returns the configured roles (transformation, verification-repair)
+// plus any additional roles defined in the allowlist.
+func (s *ModelGatewayService) capabilitiesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	roleSet := make(map[string]struct{})
+	for _, role := range w02AgentRoles {
+		roleSet[role] = struct{}{}
+	}
+	for role := range s.allowlist.Roles {
+		if strings.TrimSpace(role) != "" {
+			roleSet[role] = struct{}{}
+		}
+	}
+	roles := make([]string, 0, len(roleSet))
+	for role := range roleSet {
+		roles = append(roles, role)
+	}
+	sortStrings(roles)
+
+	availabilities := make([]RoleAvailability, 0, len(roles))
+	overallStatus := "ok"
+	for _, role := range roles {
+		availabilities = append(availabilities, s.roleAvailability(role))
+	}
+	for _, role := range availabilities {
+		if role.Status != "ok" {
+			overallStatus = "degraded"
+			break
+		}
+	}
+
+	writeJSON(w, http.StatusOK, ModelGatewayCapabilitiesResponse{
+		Schema:   gatewayEventSchemaVersion,
+		Service:  eventServiceName,
+		Status:   overallStatus,
+		Provider: s.allowlist.Mode,
+		PolicyID: s.resolvedPolicyID(),
+		Roles:    availabilities,
+	})
+}
+
+func (s *ModelGatewayService) roleAvailability(role string) RoleAvailability {
+	configured := s.allowlist.AllowedModelsForRole(role)
+	now := s.now()
+	available := make([]string, 0)
+	if configured == nil {
+		for _, model := range s.activeModels() {
+			if s.isModelDeploymentAllowed(model.ID) && model.Provider == s.allowlist.Mode {
+				available = append(available, model.ID)
+			}
+		}
+		return RoleAvailability{
+			Role:             role,
+			Status:           "ok",
+			PolicyID:         s.resolvedPolicyID(),
+			AvailableModels:  available,
+			ConfiguredModels: nil,
+			Reason:           "no role-specific allowlist; falls back to general allowlist",
+		}
+	}
+	configuredCopy := append([]string{}, configured...)
+	for _, modelID := range configured {
+		model, ok := s.registry.Get(modelID)
+		if !ok {
+			continue
+		}
+		if !model.IsActive(now) {
+			continue
+		}
+		if !s.isModelDeploymentAllowed(modelID) {
+			continue
+		}
+		if model.Provider != s.allowlist.Mode {
+			continue
+		}
+		if _, providerReady := s.providers[model.Provider]; !providerReady {
+			continue
+		}
+		available = append(available, modelID)
+	}
+	status := "ok"
+	reason := ""
+	if len(available) == 0 {
+		status = "unavailable"
+		reason = "no approved active model for role"
+	}
+	return RoleAvailability{
+		Role:             role,
+		Status:           status,
+		PolicyID:         s.resolvedPolicyID(),
+		AvailableModels:  available,
+		ConfiguredModels: configuredCopy,
+		Reason:           reason,
+	}
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		for j := i; j > 0 && values[j-1] > values[j]; j-- {
+			values[j-1], values[j] = values[j], values[j-1]
+		}
+	}
 }
 
 func (s *ModelGatewayService) modelsHandler(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +401,9 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		record.InvocationID = invocationID
 		record.RunID = request.RunID
 		record.Provider = s.allowlist.Mode
+		if strings.TrimSpace(record.PolicyID) == "" {
+			record.PolicyID = s.resolvedPolicyID()
+		}
 		if strings.TrimSpace(record.RunID) == "" {
 			record.RunID = "unknown-run"
 		}
@@ -284,11 +418,19 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		}
 		record.PolicyDecision = policyDecisionDeny
 		record.Status = statusRejected
-		record.ErrorClass = "validation"
+		record.ErrorClass = errorClassValidation
 		record.ErrorMessage = err.Error()
+		var validationErr ModelGatewayValidationError
+		_ = errors.As(err, &validationErr)
+		errorCode := validationErr.Code
+		if isPolicyValidationCode(validationErr.Code) {
+			errorCode = errorCodePolicyDenied
+		}
+		record.ErrorCode = errorCode
 		outputRef, outputRefErr := ComputeSHA256Ref(map[string]any{
 			"invocationId": invocationID,
 			"error":        err.Error(),
+			"errorCode":    errorCode,
 			"status":       statusRejected,
 		})
 		if outputRefErr != nil {
@@ -318,18 +460,27 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 			StateTransition:  "validate.rejected",
 			InputRef:         requestRef,
 			OutputRef:        outputRef,
-			ErrorClass:       "validation",
+			ErrorClass:       errorClassValidation,
 			LatencyMs:        int64(time.Since(start) / time.Millisecond),
 			CreatedAt:        now,
 			Payload: map[string]any{
 				"invocationId": invocationID,
 				"modelId":      request.ModelID,
+				"agentRole":    strings.TrimSpace(request.AgentRole),
+				"policyId":     s.resolvedPolicyID(),
+				"errorCode":    errorCode,
 				"mode":         s.allowlist.Mode,
 				"reason":       err.Error(),
 			},
 			RelatedRecords: []string{fmt.Sprintf("run:%s", request.RunID)},
 		})
-		writeJSON(w, statusForValidationErr(err), map[string]string{"error": err.Error()})
+		writeJSON(w, statusForValidationErr(err), map[string]any{
+			"error":        err.Error(),
+			"errorCode":    errorCode,
+			"validationCode": validationErr.Code,
+			"invocationId": invocationID,
+			"policyId":     s.resolvedPolicyID(),
+		})
 		return
 	}
 
@@ -344,11 +495,20 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	}
 	outputStatus := statusCompleted
 	errorClass := ""
+	errorCode := ""
 	errorMessage := ""
+	var usage map[string]any
 	if invokeErr != nil {
 		outputStatus = statusFailed
-		errorClass = "provider"
 		errorMessage = invokeErr.Error()
+		switch {
+		case errors.Is(invokeErr, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded):
+			errorClass = errorClassProviderTimeout
+			errorCode = errorCodeProviderTimeout
+		default:
+			errorClass = errorClassProviderError
+			errorCode = errorCodeProviderError
+		}
 	} else {
 		outputStatus = normalizeInvocationStatus(output.Status)
 		if output.Data != nil {
@@ -358,6 +518,11 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 			outputData["status"] = outputStatus
 		}
 		outputData["invocationId"] = invocationID
+		if output.Metadata != nil {
+			if rawUsage, ok := output.Metadata["usage"].(map[string]any); ok && len(rawUsage) > 0 {
+				usage = rawUsage
+			}
+		}
 	}
 
 	outputRef, outErr := ComputeSHA256Ref(outputData)
@@ -373,9 +538,14 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	record.OutputRef = outputRef
 	record.Status = outputStatus
 	record.LatencyMs = latencyMs
+	record.Usage = usage
 	record.ErrorClass = errorClass
+	record.ErrorCode = errorCode
 	record.ErrorMessage = errorMessage
 	record.CreatedAt = now
+	if strings.TrimSpace(record.PolicyID) == "" {
+		record.PolicyID = s.resolvedPolicyID()
+	}
 
 	ledgerRef, refErr := ComputeSHA256RefWithURI(fmt.Sprintf("urn:model-gateway/invocations/%s", invocationID), record)
 	if refErr != nil {
@@ -417,15 +587,26 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 			"invocationId": invocationID,
 			"modelId":      request.ModelID,
 			"provider":     validated.model.Provider,
+			"agentRole":    strings.TrimSpace(request.AgentRole),
+			"policyId":     record.PolicyID,
+			"errorCode":    errorCode,
 			"mode":         s.allowlist.Mode,
+			"usage":        usage,
 		},
 		RelatedRecords: []string{fmt.Sprintf("run:%s", request.RunID)},
 	})
 
 	if invokeErr != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		statusCode := http.StatusBadGateway
+		if errorClass == errorClassProviderTimeout {
+			statusCode = http.StatusGatewayTimeout
+		}
+		writeJSON(w, statusCode, map[string]any{
 			"error":        invokeErr.Error(),
+			"errorCode":    errorCode,
+			"errorClass":   errorClass,
 			"invocationId": invocationID,
+			"policyId":     record.PolicyID,
 		})
 		return
 	}
@@ -434,10 +615,13 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 		RunID:                 request.RunID,
 		ModelID:               request.ModelID,
 		Provider:              validated.model.Provider,
+		PolicyID:              record.PolicyID,
+		AgentRole:             strings.TrimSpace(request.AgentRole),
 		PromptTemplateVersion: request.PromptTemplateVersion,
 		PolicyDecision:        validated.policyDecision,
 		Status:                outputStatus,
 		LatencyMs:             latencyMs,
+		Usage:                 usage,
 		LedgerRef:             ledgerRef,
 		Output:                outputData,
 	})
@@ -462,6 +646,8 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 			PromptTemplate:   request.PromptTemplateVersion,
 			Parameters:       request.Parameters,
 			StructuredOutput: request.StructuredOutput,
+			PolicyID:         s.resolvedPolicyID(),
+			AgentRole:        strings.TrimSpace(request.AgentRole),
 		},
 	}
 
@@ -521,6 +707,12 @@ func (s *ModelGatewayService) validateInvocation(request ModelInvocationRequest,
 		return result, ModelGatewayValidationError{
 			Code:    "forbidden_model",
 			Message: "modelId is not in allowlist",
+		}
+	}
+	if !s.allowlist.IsRoleAllowed(result.request.AgentRole, model.ID) {
+		return result, ModelGatewayValidationError{
+			Code:    "forbidden_role",
+			Message: fmt.Sprintf("modelId %q is not allowed for agentRole %q", model.ID, result.request.AgentRole),
 		}
 	}
 	if _, ok := allowedDataClasses[result.request.DataClass]; !ok {
@@ -633,11 +825,26 @@ func statusForValidationErr(err error) int {
 	var typedErr ModelGatewayValidationError
 	if errors.As(err, &typedErr) {
 		switch typedErr.Code {
-		case "forbidden_model", "forbidden_data_class", "disallowed_model_endpoint", "inactive_model", "timeout_exceeded_provider", "timeout_exceeded_model_default":
+		case "forbidden_model", "forbidden_data_class", "forbidden_role", "disallowed_model_endpoint", "inactive_model", "timeout_exceeded_provider", "timeout_exceeded_model_default":
 			return http.StatusForbidden
 		}
 	}
 	return http.StatusBadRequest
+}
+
+// isPolicyValidationCode reports whether the validation code represents a
+// policy denial (as opposed to a malformed request). Policy denials surface
+// the model_policy_denied error code so the Orchestrator can map them to
+// FAILURE_MODEL_POLICY_DENIED.
+func isPolicyValidationCode(code string) bool {
+	switch code {
+	case "forbidden_model", "forbidden_data_class", "forbidden_role",
+		"disallowed_model_endpoint", "inactive_model",
+		"timeout_exceeded_provider", "timeout_exceeded_model_default",
+		"unsupported_structured_output":
+		return true
+	}
+	return false
 }
 
 func newInvocationID(now time.Time) string {
@@ -695,6 +902,7 @@ func resolveGatewayConfigFromEnv() (gatewayConfig, error) {
 	cfg.fallbackModelDeployments = parseCommaSeparatedIDs(firstNonEmptyEnv("C2C_MODEL_FALLBACK_DEPLOYMENTS"))
 	cfg.allowedModelDeployments = parseCommaSeparatedIDs(firstNonEmptyEnv("C2C_MODEL_ALLOWED_DEPLOYMENTS"))
 	cfg.dataPolicy = firstNonEmptyEnv("C2C_MODEL_DATA_POLICY")
+	cfg.policyID = firstNonEmptyEnv("C2C_MODEL_POLICY_ID", "MODEL_GATEWAY_POLICY_ID")
 
 	invocationLedgerEnabled, hasInvocationLedgerFlag, err := parseBoolEnv("C2C_MODEL_INVOCATION_LEDGER_ENABLED", "MODEL_GATEWAY_INVOCATION_LEDGER_ENABLED")
 	if err != nil {

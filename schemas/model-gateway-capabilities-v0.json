@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/model-gateway-capabilities-v0.json",
+  "title": "Model Gateway Capabilities v0",
+  "description": "Response body returned by GET /v0/capabilities on the Model Gateway service. The Orchestrator reads this view before invoking the gateway so it can fail early with model_gateway_unavailable when no approved model is reachable for the requested W0.2 agent role (Issue #168).",
+  "type": "object",
+  "required": [
+    "schema",
+    "service",
+    "status",
+    "provider",
+    "policyId",
+    "roles"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "v0"
+    },
+    "service": {
+      "type": "string",
+      "const": "model-gateway-service"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "degraded"]
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["foundry-development", "customer-internal-mock"]
+    },
+    "policyId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "roles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/roleAvailability" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "roleAvailability": {
+      "type": "object",
+      "required": [
+        "role",
+        "status",
+        "policyId",
+        "availableModels"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "unavailable"]
+        },
+        "policyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "availableModels": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "configuredModels": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
