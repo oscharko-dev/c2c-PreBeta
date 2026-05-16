@@ -3,38 +3,97 @@
 import { type StudioApiState } from '../../hooks/useC2cApi';
 import { useTransformationRun } from '../../stores/transformationRun';
 import { getWorkbenchReadiness } from './workbenchReadiness';
+import { ProductState } from '../../types/state';
+import { ACTIVE_AGENT_LABELS, W02_ERROR_LABELS } from '../run/agentActivity';
 
 interface StatusBarProps {
   apiState: StudioApiState;
 }
 
+// Issue #173: status-bar label is derived from the BFF-classified product
+// state so the user sees "Awaiting transformation agent" / "Repairing" /
+// "Run verified" rather than only "Run active".
+function runLabelFromProductState(productState: ProductState, programId: string | null): string {
+  switch (productState) {
+    case 'empty':
+      return 'No run active';
+    case 'submitting':
+      return 'Transformation requested';
+    case 'running':
+      return `Run active${programId ? ` · ${programId}` : ''}`;
+    case 'awaiting-agent':
+      return `Awaiting ${ACTIVE_AGENT_LABELS.transformation_agent}`;
+    case 'repairing':
+      return 'Repair attempt in progress';
+    case 'verifying':
+      return 'Verifying generated Java';
+    case 'success':
+      return 'Run verified by BFF';
+    case 'ready':
+      return 'Run verified';
+    case 'blocked':
+      return 'Run blocked';
+    case 'cancelled':
+      return 'Run cancelled';
+    case 'generated-pending':
+      return 'Generated Java pending';
+    case 'generated-incomplete':
+      return 'Generated artifacts incomplete';
+    case 'build-failed':
+      return 'Build / test failed';
+    case 'equivalence-mismatch':
+      return 'Equivalence mismatch';
+    case 'evidence-incomplete':
+      return 'Evidence incomplete';
+    case 'hash-mismatch':
+      return 'Artifact hash mismatch';
+    case 'unsupported':
+      return 'Unsupported COBOL';
+    case 'validation-error':
+      return 'Request rejected';
+    case 'failed':
+      return 'Run failed';
+    case 'backend-unavailable':
+    case 'upstream-unavailable':
+      return 'Backend unavailable';
+    case 'stale-ignored':
+      return 'Stale result ignored';
+  }
+}
+
 export function StatusBar({ apiState }: StatusBarProps) {
   const { error, loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
-  const { state } = useTransformationRun();
+  const { state, productState } = useTransformationRun();
 
-  const runLabel =
-    state.phase === 'idle'
-      ? 'No run active'
-      : state.phase === 'starting'
-        ? 'Transformation requested'
-        : state.phase === 'running'
-          ? `Run active${state.programId ? ` · ${state.programId}` : ''}`
-          : state.phase === 'completed'
-            ? 'Run verified'
-            : state.phase === 'verification-blocked'
-              ? 'Verification blocked'
-              : state.phase === 'incomplete'
-                ? 'Run incomplete'
-                : state.phase === 'failed'
-                  ? 'Run failed'
-                  : 'Backend unavailable';
+  const runLabel = runLabelFromProductState(productState.state, state.programId);
+  const isSuccess = productState.state === 'success';
+  const failureCode = productState.failureCode;
 
   return (
     <footer className="flex min-h-6 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line bg-accent-dim px-3 py-1 text-xs text-text-bright shrink-0" aria-label="Status Bar">
       <div className="flex min-w-0 items-center gap-4">
         <span>c2c Studio</span>
-        <span className="opacity-75">{runLabel}</span>
+        <span className="opacity-75" data-testid="status-bar-run-label">
+          {runLabel}
+        </span>
+        {isSuccess ? (
+          <span
+            className="inline-flex items-center gap-1 rounded bg-success px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-bright"
+            data-testid="status-bar-success-badge"
+          >
+            ✓ Verified
+          </span>
+        ) : null}
+        {failureCode ? (
+          <span
+            className="inline-flex items-center gap-1 rounded bg-error px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-text-bright"
+            data-testid="status-bar-failure-code"
+            title={W02_ERROR_LABELS[failureCode]}
+          >
+            {failureCode}
+          </span>
+        ) : null}
       </div>
       <div className="flex min-w-0 items-center gap-4">
         <span className="opacity-75">Ln 1, Col 1</span>

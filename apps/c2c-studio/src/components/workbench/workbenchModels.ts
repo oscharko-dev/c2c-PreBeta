@@ -1,4 +1,4 @@
-export type BottomWorkbenchTabId = 'run' | 'build-test' | 'artifacts' | 'evidence' | 'learning' | 'problems';
+export type BottomWorkbenchTabId = 'run' | 'agent' | 'build-test' | 'artifacts' | 'evidence' | 'learning' | 'problems';
 
 export interface BottomWorkbenchTabModel {
   id: BottomWorkbenchTabId;
@@ -26,6 +26,14 @@ export const bottomWorkbenchTabs: BottomWorkbenchTabModel[] = [
     emptyState: {
       title: 'No run active',
       message: 'Run output will appear here after the backend reports an active transformation.',
+    },
+  },
+  {
+    id: 'agent',
+    label: 'Agent',
+    emptyState: {
+      title: 'No agent activity yet',
+      message: 'Active agent, repair attempts, and model invocation metadata will appear here once a W0.2 run is in progress.',
     },
   },
   {

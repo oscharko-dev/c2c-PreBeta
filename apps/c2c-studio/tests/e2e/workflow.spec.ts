@@ -981,6 +981,261 @@ test.describe('c2c Studio browser acceptance', () => {
     await expect(page.getByText('Verified', { exact: true })).toHaveCount(0);
   });
 
+  // Issue #173: W0.2 agent activity panel surfaces activeAgent, repair budget,
+  // repair attempts, and the closed-set failure code returned by the BFF.
+  test('renders W0.2 workflow contract in the Agent panel with closed-set failure code', async ({ page }) => {
+    const runId = 'run-agent-activity-browser';
+    const runLinks = {
+      self: `/api/v0/runs/${runId}`,
+      generated: `/api/v0/runs/${runId}/generated`,
+      generatedFiles: `/api/v0/runs/${runId}/generated/files`,
+      buildTest: `/api/v0/runs/${runId}/build-test`,
+      evidence: `/api/v0/runs/${runId}/evidence`,
+      events: `/api/v0/runs/${runId}/events`,
+      artifacts: `/api/v0/runs/${runId}/artifacts`,
+      progress: `/api/v0/runs/${runId}/progress`,
+      learning: `/api/v0/runs/${runId}/learning`,
+      workflow: `/api/v0/runs/${runId}/workflow`,
+    };
+
+    await page.route('**/api/v0/transform', async route => {
+      if (route.request().method() === 'OPTIONS') {
+        await route.fulfill({ status: 204, headers: MOCK_CORS_HEADERS });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          orchestratorRunId: runId,
+          programId: 'AGENT01',
+          status: 'starting',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-16T00:00:00Z',
+          updatedAt: '2026-05-16T00:00:00Z',
+          activeStep: null,
+          agentAttemptCount: 0,
+          repairBudget: null,
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+          links: runLinks,
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          orchestratorRunId: runId,
+          programId: 'AGENT01',
+          status: 'failed',
+          mode: 'live',
+          productMode: 'live',
+          createdAt: '2026-05-16T00:00:00Z',
+          updatedAt: '2026-05-16T00:00:02Z',
+          activeStep: 'generate-java',
+          agentAttemptCount: 2,
+          repairBudget: { limit: 3, used: 2, remaining: 1 },
+          finalClassification: 'blocked',
+          failureCode: 'model_policy_denied',
+          failureMessage: 'policy gateway refused invocation',
+          links: runLinks,
+        }),
+      });
+    });
+
+    const blockedGenerated = {
+      runId,
+      programId: 'AGENT01',
+      mode: 'live',
+      productMode: 'live',
+      status: 'incomplete',
+      missingArtifacts: ['generatedJava'],
+      artifactRef: null,
+      note: 'Generation blocked by model policy denial.',
+    };
+    await page.route(`**/api/v0/runs/${runId}/generated`, async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: MOCK_CORS_HEADERS, body: JSON.stringify(blockedGenerated) });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/generated/files`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'AGENT01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'incomplete',
+          files: [],
+          fileCount: 0,
+          artifactRef: null,
+          missingArtifacts: ['generatedJava'],
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/build-test`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'AGENT01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'skipped',
+          classification: 'skipped-no-execution',
+          generatedArtifactRef: null,
+          note: 'Build skipped because generation was blocked.',
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/evidence`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'AGENT01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'incomplete',
+          generatedArtifactRef: null,
+          missingArtifacts: ['generatedJava'],
+          note: 'Evidence incomplete (no generated Java).',
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/events`, async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: MOCK_CORS_HEADERS, body: JSON.stringify({ runId, programId: 'AGENT01', mode: 'live', productMode: 'live', events: [] }) });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/progress`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'AGENT01',
+          mode: 'live',
+          productMode: 'live',
+          status: 'incomplete',
+          runStatus: 'failed',
+          currentStep: null,
+          failedStep: 'generate-java',
+          completedSteps: ['accepted', 'parse-cobol', 'generate-ir'],
+          stepCount: 4,
+          steps: [],
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/experience`, async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: MOCK_CORS_HEADERS, body: JSON.stringify({ runId, programId: 'AGENT01', mode: 'live', productMode: 'live' }) });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/artifacts`, async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: MOCK_CORS_HEADERS, body: JSON.stringify({ runId, programId: 'AGENT01', mode: 'live', productMode: 'live', artifacts: [], missingArtifacts: ['generatedJava'] }) });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/workflow`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'AGENT01',
+          mode: 'live',
+          productMode: 'live',
+          source: 'live',
+          state: 'blocked_policy',
+          activeStep: 'generate-java',
+          activeAgent: 'verification_repair_agent',
+          agentAttemptCount: 2,
+          repairBudget: { limit: 3, used: 2, remaining: 1 },
+          repairAttempts: [
+            {
+              attemptNumber: 1,
+              repairDecision: 'propose_candidate',
+              failureCategory: 'java_compile_failed',
+              hasModelInvocation: true,
+              hasRepairInput: true,
+              hasJavaCandidate: true,
+              rationale: 'Adjusted accumulator semantics.',
+            },
+            {
+              attemptNumber: 2,
+              repairDecision: 'refuse',
+              failureCategory: 'model_policy_denied',
+              hasModelInvocation: false,
+              hasRepairInput: true,
+              hasJavaCandidate: false,
+              rationale: 'Policy gateway refused the candidate model.',
+            },
+          ],
+          finalClassification: 'blocked',
+          failureCode: 'model_policy_denied',
+          failureMessage: 'policy gateway refused invocation',
+          generatedJavaRef: null,
+          buildTestResultRef: null,
+          evidencePackRef: null,
+        }),
+      });
+    });
+
+    await expectReadyWorkbench(page);
+    await page.getByRole('button', { name: 'Start Typing' }).click();
+
+    const editor = page.getByRole('textbox', { name: COBOL_EDITOR_LABEL });
+    await editor.fill(`       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AGENT01.
+       PROCEDURE DIVISION.
+           DISPLAY 'AGENT'.
+           STOP RUN.`);
+
+    await topBarStartButton(page).click();
+
+    // Open the Agent tab in the bottom workbench.
+    await page.getByRole('tab', { name: 'Agent' }).click();
+
+    const agentPanel = page.getByTestId('agent-activity-panel');
+    await expect(agentPanel).toBeVisible();
+    await expect(agentPanel.getByText('Verification & Repair Agent')).toBeVisible();
+    const attempt1 = agentPanel.getByTestId('agent-activity-repair-attempt-1');
+    const attempt2 = agentPanel.getByTestId('agent-activity-repair-attempt-2');
+    await expect(attempt1).toContainText('Attempt #1');
+    await expect(attempt1).toContainText('Proposed candidate');
+    await expect(attempt2).toContainText('Attempt #2');
+    await expect(attempt2).toContainText('Refused');
+    await expect(agentPanel.getByTestId('agent-activity-repair-budget')).toContainText('2 / 3 attempts used');
+
+    const failure = agentPanel.getByTestId('agent-activity-final-failure');
+    await expect(failure).toContainText('Model invocation denied by policy');
+
+    // Status bar surfaces the closed-set failure code.
+    await expect(page.getByTestId('status-bar-failure-code')).toHaveText(/model_policy_denied/);
+
+    // No success badge for a blocked run.
+    await expect(page.getByTestId('status-bar-success-badge')).toHaveCount(0);
+  });
+
   test('@visual captures the main workbench desktop baseline', async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Visual baseline is maintained only for Chromium.');
     test.skip(process.platform !== 'darwin', 'Visual baseline is pinned from the primary local macOS environment.');

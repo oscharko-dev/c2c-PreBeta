@@ -29,11 +29,28 @@ export function GeneratedJavaEditorPane() {
     );
   }
 
-  if (productState.state === 'running' || productState.state === 'generated-pending') {
+  if (
+    productState.state === 'running' ||
+    productState.state === 'submitting' ||
+    productState.state === 'awaiting-agent' ||
+    productState.state === 'repairing' ||
+    productState.state === 'verifying' ||
+    productState.state === 'generated-pending'
+  ) {
+    const inProgressMessage =
+      productState.state === 'submitting'
+        ? 'Submitting transformation request...'
+        : productState.state === 'awaiting-agent'
+          ? 'Awaiting transformation agent...'
+          : productState.state === 'repairing'
+            ? 'Verification & Repair Agent is proposing a candidate...'
+            : productState.state === 'verifying'
+              ? 'Verifying generated Java...'
+              : 'Generating Java artifacts...';
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-text-dim flex-col gap-4">
         <Loader2 className="animate-spin text-accent" size={32} />
-        <p>Generating Java artifacts...</p>
+        <p data-testid="generated-pane-progress">{inProgressMessage}</p>
       </div>
     );
   }
@@ -80,6 +97,8 @@ export function GeneratedJavaEditorPane() {
 
   const showVerificationNotice =
     productState.state === 'failed' ||
+    productState.state === 'blocked' ||
+    productState.state === 'cancelled' ||
     productState.state === 'build-failed' ||
     productState.state === 'equivalence-mismatch' ||
     productState.state === 'evidence-incomplete' ||
@@ -98,7 +117,11 @@ export function GeneratedJavaEditorPane() {
             ? productState.message || 'Build or test execution failed.'
             : productState.state === 'failed'
               ? productState.message || 'The transformation run failed before verification completed.'
-              : productState.message;
+              : productState.state === 'cancelled'
+                ? productState.message || 'The run was cancelled before verification completed.'
+                : productState.state === 'blocked'
+                  ? productState.message || 'The run is blocked by a precondition and cannot proceed.'
+                  : productState.message;
 
   // Displaying actual content
   return (
@@ -138,9 +161,24 @@ export function GeneratedJavaEditorPane() {
               Artifact Mismatch
             </Badge>
           )}
+          {productState.state === 'success' && (
+            <Badge variant="success" icon={true}>
+              Verified
+            </Badge>
+          )}
           {productState.state === 'ready' && (
             <Badge variant="success" icon={true}>
               Verified
+            </Badge>
+          )}
+          {productState.state === 'blocked' && (
+            <Badge variant="error" icon={true}>
+              Blocked
+            </Badge>
+          )}
+          {productState.state === 'cancelled' && (
+            <Badge variant="incomplete" icon={true}>
+              Cancelled
             </Badge>
           )}
         </div>
@@ -148,7 +186,7 @@ export function GeneratedJavaEditorPane() {
 
       {showVerificationNotice && verificationNoticeMessage ? (
         <div className="shrink-0 px-4 py-3 border-b border-line bg-bg-1/40 space-y-3">
-          <ErrorNotice message={verificationNoticeMessage} />
+          <ErrorNotice message={verificationNoticeMessage} failureCode={productState.failureCode ?? null} />
           {productState.state === 'evidence-incomplete' ? (
             <MissingArtifactsPanel artifacts={productState.missingArtifacts || []} />
           ) : null}

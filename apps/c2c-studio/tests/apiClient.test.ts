@@ -444,4 +444,80 @@ describe('apiClient', () => {
 
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  // Issue #173: contract round-trip for the W0.2 workflow view.
+  it('fetches /workflow and accepts a valid RunWorkflowView payload', async () => {
+    const payload = {
+      runId: 'run-1',
+      programId: 'PROG01',
+      mode: 'live',
+      productMode: 'live',
+      source: 'live',
+      state: 'agent_running',
+      activeStep: 'generate-java',
+      activeAgent: 'transformation_agent',
+      agentAttemptCount: 1,
+      repairBudget: { limit: 3, used: 1, remaining: 2 },
+      repairAttempts: [
+        {
+          attemptNumber: 1,
+          repairDecision: 'propose_candidate',
+          failureCategory: 'oracle_mismatch',
+          hasModelInvocation: true,
+          hasRepairInput: true,
+          hasJavaCandidate: true,
+          rationale: 'first repair attempt',
+        },
+      ],
+      finalClassification: null,
+      failureCode: null,
+      failureMessage: null,
+      generatedJavaRef: { sha256: 'abc', byteSize: 100, kind: 'generated-project-manifest' },
+      buildTestResultRef: null,
+      evidencePackRef: null,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+
+    const result = await apiClient.getRunWorkflow('run-1');
+
+    expect(fetch).toHaveBeenCalledWith('/api/v0/runs/run-1/workflow', undefined);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.activeAgent).toBe('transformation_agent');
+      expect(result.data.repairAttempts).toHaveLength(1);
+      expect(result.data.repairBudget?.remaining).toBe(2);
+    }
+  });
+
+  it('rejects unknown W02 failure codes from /workflow', async () => {
+    const payload = {
+      runId: 'run-2',
+      programId: 'P',
+      mode: 'live',
+      productMode: 'live',
+      source: 'live',
+      state: null,
+      activeStep: null,
+      activeAgent: null,
+      agentAttemptCount: 0,
+      repairBudget: null,
+      repairAttempts: [],
+      finalClassification: 'failed',
+      failureCode: 'totally_unknown_code',
+      failureMessage: 'nope',
+      generatedJavaRef: null,
+      buildTestResultRef: null,
+      evidencePackRef: null,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+
+    const result = await apiClient.getRunWorkflow('run-2');
+    expect(result).toMatchObject({ ok: false, details: { kind: 'contract' } });
+  });
 });

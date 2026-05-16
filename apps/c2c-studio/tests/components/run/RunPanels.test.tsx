@@ -24,6 +24,7 @@ const mockState = {
   experience: null,
   modelGatewayHealth: null,
   harnessReady: null,
+  workflow: null,
 };
 
 vi.mock('../../../src/stores/transformationRun', () => ({
