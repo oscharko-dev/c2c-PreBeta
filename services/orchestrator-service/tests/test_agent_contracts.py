@@ -17,7 +17,6 @@ Covers:
 
 from __future__ import annotations
 
-import copy
 import json
 import tempfile
 import unittest
@@ -35,14 +34,13 @@ from orchestrator_service.agent_contracts import (
     validate_invocation_response,
     validate_repair_decision,
     validate_repair_input,
-    _utcnow_iso,
 )
 from orchestrator_service.artifacts import RunArtifactStore
 from orchestrator_service.run_contract import (
     CLASSIFICATION_BLOCKED,
-    CLASSIFICATION_FAILED,
     FAILURE_AGENT_CONTRACT_INVALID,
     FAILURE_CODES,
+    STATE_RUN_BLOCKED,
 )
 from orchestrator_service.workflow import (
     AgentContractInvalidStepError,
@@ -123,6 +121,7 @@ def _valid_invocation_request(role: str = "transformation-agent", *, attempt: in
 
 
 def _valid_invocation_response(role: str = "transformation-agent") -> dict:
+    java_candidate_ref = _artifact_ref("urn:run-1/java-candidate-1", kind="generated-project-manifest")
     payload = {
         "schemaVersion": "v0",
         "runId": "run-1",
@@ -130,8 +129,8 @@ def _valid_invocation_response(role: str = "transformation-agent") -> dict:
         "attemptNumber": 1,
         "agentRole": role,
         "status": "success",
-        "outputArtifactRefs": [_artifact_ref("urn:run-1/java-candidate-1", kind="generated-project-manifest")],
-        "javaCandidateRef": _artifact_ref("urn:run-1/java-candidate-1", kind="generated-project-manifest"),
+        "outputArtifactRefs": [java_candidate_ref],
+        "javaCandidateRef": java_candidate_ref,
         "modelInvocationRef": _model_invocation_ref(),
         "promptTemplateId": "transformation/v1",
         "promptTemplateVersion": "v1",
@@ -141,9 +140,11 @@ def _valid_invocation_response(role: str = "transformation-agent") -> dict:
         "endedAt": _NOW,
     }
     if role == "verification-repair-agent":
-        payload["repairDecisionRef"] = _artifact_ref(
+        repair_decision_ref = _artifact_ref(
             "urn:run-1/repair-decision-1", kind="agent-repair-decision"
         )
+        payload["repairDecisionRef"] = repair_decision_ref
+        payload["outputArtifactRefs"].append(repair_decision_ref)
     return payload
 
 
@@ -336,6 +337,24 @@ class InvocationResponseNegativeTests(unittest.TestCase):
             validate_invocation_response(payload)
         self.assertTrue(any("trajectoryRecord" in e for e in ctx.exception.errors))
 
+    def test_java_candidate_ref_must_match_output_artifact_refs(self) -> None:
+        payload = _valid_invocation_response()
+        payload["javaCandidateRef"] = _artifact_ref(
+            "urn:run-1/java-candidate-2", kind="generated-project-manifest"
+        )
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            guard_agent_response(payload)
+        self.assertTrue(any("javaCandidateRef" in e for e in ctx.exception.errors))
+
+    def test_repair_decision_ref_must_match_output_artifact_refs(self) -> None:
+        payload = _valid_invocation_response("verification-repair-agent")
+        payload["repairDecisionRef"] = _artifact_ref(
+            "urn:run-1/repair-decision-2", kind="agent-repair-decision"
+        )
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            guard_agent_response(payload)
+        self.assertTrue(any("repairDecisionRef" in e for e in ctx.exception.errors))
+
 
 class InvocationRequestNegativeTests(unittest.TestCase):
     def test_verification_repair_attempt_two_without_repair_context_rejected(self) -> None:
@@ -357,6 +376,13 @@ class InvocationRequestNegativeTests(unittest.TestCase):
         with self.assertRaises(AgentContractInvalidError):
             validate_invocation_request(payload)
 
+    def test_missing_model_invocation_reference_rejected(self) -> None:
+        payload = _valid_invocation_request()
+        del payload["modelInvocationRef"]
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            validate_invocation_request(payload)
+        self.assertTrue(any("modelInvocationRef" in e for e in ctx.exception.errors))
+
 
 class RepairInputNegativeTests(unittest.TestCase):
     def test_unknown_failure_category_rejected(self) -> None:
@@ -370,6 +396,13 @@ class RepairInputNegativeTests(unittest.TestCase):
         del payload["buildTestResultRef"]
         with self.assertRaises(AgentContractInvalidError):
             validate_repair_input(payload)
+
+    def test_missing_previous_java_candidate_ref_rejected(self) -> None:
+        payload = _valid_repair_input()
+        del payload["previousJavaCandidateRef"]
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            validate_repair_input(payload)
+        self.assertTrue(any("previousJavaCandidateRef" in e for e in ctx.exception.errors))
 
 
 class RepairDecisionNegativeTests(unittest.TestCase):
@@ -416,6 +449,18 @@ class RepairDecisionNegativeTests(unittest.TestCase):
         with self.assertRaises(AgentContractInvalidError):
             validate_repair_decision(payload)
 
+    def test_propose_decision_with_refusal_code_rejected(self) -> None:
+        payload = _valid_repair_decision_propose()
+        payload["refusalCode"] = "no_safe_repair"
+        with self.assertRaises(AgentContractInvalidError):
+            validate_repair_decision(payload)
+
+    def test_propose_decision_with_escalation_code_rejected(self) -> None:
+        payload = _valid_repair_decision_propose()
+        payload["escalationCode"] = "needs_human_review"
+        with self.assertRaises(AgentContractInvalidError):
+            validate_repair_decision(payload)
+
     def test_rationale_too_long_rejected(self) -> None:
         payload = _valid_repair_decision_propose()
         payload["rationale"] = "x" * 4001
@@ -438,25 +483,39 @@ class SecretLeakGuardTests(unittest.TestCase):
         payload["trajectoryRecord"]["relatedRecords"] = ["evt-2"]
         # Try to smuggle a key in the (top-level open) `relatedRecords` would
         # be caught by schema. Try it nested in a permissive map instead:
-        payload["modelInvocationRef"]["apiKey"] = "sk-bad"  # noqa: PIE804 - intentional violation
+        payload["modelInvocationRef"]["apiKey"] = "not-a-real-secret"
         with self.assertRaises(AgentContractInvalidError) as ctx:
             assert_no_secret_leak(payload)
         self.assertTrue(any("apiKey" in e for e in ctx.exception.errors))
 
-    def test_guard_agent_response_rejects_apikey(self) -> None:
+    def test_mixed_case_secret_field_rejected(self) -> None:
         payload = _valid_invocation_response()
-        # The schema rejects unknown top-level keys, but a key on a nested
-        # object whose schema allows additionalProperties: false would be
-        # rejected by schema validation directly. The leak guard provides a
-        # belt-and-braces safety net by walking the entire tree.
-        payload_with_secret = copy.deepcopy(payload)
-        # Inject the secret in a place the schema *would* permit if
-        # additionalProperties were ever loosened; the walker still rejects it.
-        payload_with_secret["trajectoryRecord"]["actor"] = "agent"
-        # Force-route through assert_no_secret_leak with a smuggled key.
-        payload_with_secret["password"] = "hunter2"
-        with self.assertRaises(AgentContractInvalidError):
-            assert_no_secret_leak(payload_with_secret)
+        payload["modelInvocationRef"]["Access_Token"] = "not-a-real-secret"
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            assert_no_secret_leak(payload)
+        self.assertTrue(any("Access_Token" in e for e in ctx.exception.errors))
+
+    def test_secret_like_value_rejected(self) -> None:
+        payload = _valid_invocation_response()
+        provider_prefix = "s" + "k"
+        payload["trajectoryRecord"]["relatedRecords"] = [
+            f"{provider_prefix}-" + ("a" * 24)
+        ]
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            assert_no_secret_leak(payload)
+        self.assertTrue(any("secret-like value" in e for e in ctx.exception.errors))
+
+    def test_guard_agent_response_rejects_secret_like_failure_message(self) -> None:
+        payload = _valid_invocation_response()
+        payload["status"] = "failed"
+        del payload["javaCandidateRef"]
+        payload["outputArtifactRefs"] = []
+        payload["failureCode"] = "agent_contract_invalid"
+        provider_prefix = "s" + "k"
+        payload["failureMessage"] = "provider returned " + provider_prefix + "-" + ("b" * 24)
+        with self.assertRaises(AgentContractInvalidError) as ctx:
+            guard_agent_response(payload)
+        self.assertTrue(any("secret-like value" in e for e in ctx.exception.errors))
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +597,13 @@ class OrchestratorGuardIntegrationTests(unittest.TestCase):
         statuses = [entry[1] for entry in gateway.updated_runs]
         self.assertIn("failed", statuses)
         self.assertNotIn("completed", statuses)
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["failureCode"], FAILURE_AGENT_CONTRACT_INVALID)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertIn(
+            STATE_RUN_BLOCKED,
+            [entry["state"] for entry in contract["stateHistory"]],
+        )
 
     def test_agent_payload_with_bad_role_blocks_run(self) -> None:
         bad_payload = _valid_invocation_response()

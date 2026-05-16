@@ -485,6 +485,16 @@ class RepairLoopMalformedResponseTests(_BaseRepairLoopFixture):
 
         contract = runner.workflow_contract_payload("run-1")
         self.assertEqual(contract["failureCode"], FAILURE_AGENT_CONTRACT_INVALID)
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        self.assertIn(
+            STATE_RUN_BLOCKED,
+            [entry["state"] for entry in contract["stateHistory"]],
+        )
+        build_calls = [
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == "java.build-test"
+        ]
+        self.assertEqual(len(build_calls), 1)
 
 
 class RepairLoopBudgetExhaustionTests(_BaseRepairLoopFixture):

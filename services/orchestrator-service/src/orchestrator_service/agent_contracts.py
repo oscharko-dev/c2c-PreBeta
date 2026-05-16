@@ -462,27 +462,42 @@ def validate_repair_decision(payload: Any) -> None:
 # in nested objects whose schema permits open extension.
 _FORBIDDEN_FIELD_NAMES = frozenset(
     {
-        "apiKey",
-        "api_key",
         "apikey",
         "authorization",
         "secret",
-        "secretKey",
-        "secret_key",
+        "secretkey",
         "password",
         "passwd",
-        "providerCredentials",
-        "providerToken",
-        "providerSecret",
-        "bearerToken",
-        "accessToken",
-        "refreshToken",
+        "providercredentials",
+        "providertoken",
+        "providersecret",
+        "bearertoken",
+        "accesstoken",
+        "refreshtoken",
     }
+)
+
+_SECRET_VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("bearer token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}")),
+    ("provider secret token", re.compile(r"\bsk[-_](?:live|test)?[-_A-Za-z0-9]{16,}\b")),
+    ("aws access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("github token", re.compile(r"\b(?:gh[pous]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")),
+    ("huggingface token", re.compile(r"\bhf_[A-Za-z0-9]{20,}\b")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+    ("private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    (
+        "credential assignment",
+        re.compile(
+            r"(?i)\b(?:api[_-]?key|secret[_-]?access[_-]?key|access[_-]?token|"
+            r"refresh[_-]?token|password|authorization)\s*[:=]\s*['\"]?"
+            r"[A-Za-z0-9._~+/=-]{12,}"
+        ),
+    ),
 )
 
 
 def assert_no_secret_leak(payload: Any, *, path: str = "") -> None:
-    """Walk ``payload`` and reject any key whose name looks like a credential.
+    """Walk ``payload`` and reject credential-like keys or secret-like values.
 
     Raises :class:`AgentContractInvalidError` if such a key is found.
     """
@@ -499,12 +514,62 @@ def _walk_for_secrets(payload: Any, path: str, findings: list[str]) -> None:
     if isinstance(payload, dict):
         for key, value in payload.items():
             sub_path = f"{path}.{key}" if path else key
-            if key in _FORBIDDEN_FIELD_NAMES:
+            if _normalise_secret_field_name(key) in _FORBIDDEN_FIELD_NAMES:
                 findings.append(f"{sub_path}: forbidden credential-like field name")
             _walk_for_secrets(value, sub_path, findings)
     elif isinstance(payload, list):
         for idx, item in enumerate(payload):
             _walk_for_secrets(item, f"{path}[{idx}]", findings)
+    elif isinstance(payload, str):
+        for description, pattern in _SECRET_VALUE_PATTERNS:
+            if pattern.search(payload):
+                findings.append(
+                    f"{path or '$'}: forbidden secret-like value ({description})"
+                )
+                break
+
+
+def _normalise_secret_field_name(key: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
+def _artifact_refs_equal(left: Mapping[str, JsonValue], right: Mapping[str, JsonValue]) -> bool:
+    """Compare artifact identity fields that must bind response cross-refs."""
+    identity_fields = ("uri", "sha256", "byteSize")
+    return all(left.get(field) == right.get(field) for field in identity_fields)
+
+
+def _contains_artifact_ref(
+    artifact_refs: Any,
+    expected_ref: Any,
+) -> bool:
+    if not isinstance(expected_ref, Mapping) or not isinstance(artifact_refs, Sequence):
+        return False
+    for item in artifact_refs:
+        if isinstance(item, Mapping) and _artifact_refs_equal(item, expected_ref):
+            return True
+    return False
+
+
+def _assert_response_reference_integrity(payload: Mapping[str, JsonValue]) -> None:
+    """Enforce semantic reference constraints the JSON Schema cannot express."""
+    errors: list[str] = []
+    output_refs = payload.get("outputArtifactRefs") or []
+
+    java_candidate_ref = payload.get("javaCandidateRef")
+    if java_candidate_ref is not None and not _contains_artifact_ref(output_refs, java_candidate_ref):
+        errors.append(
+            "javaCandidateRef: must match one entry in outputArtifactRefs by uri, sha256, and byteSize"
+        )
+
+    repair_decision_ref = payload.get("repairDecisionRef")
+    if repair_decision_ref is not None and not _contains_artifact_ref(output_refs, repair_decision_ref):
+        errors.append(
+            "repairDecisionRef: must match one entry in outputArtifactRefs by uri, sha256, and byteSize"
+        )
+
+    if errors:
+        raise AgentContractInvalidError("agent-invocation-response-reference-integrity", errors)
 
 
 # ---------------------------------------------------------------------------
@@ -515,17 +580,19 @@ def _walk_for_secrets(payload: Any, path: str, findings: list[str]) -> None:
 def guard_agent_response(payload: Any) -> None:
     """Validate an agent invocation response end-to-end.
 
-    Combines schema validation and the secret-leak guard. Raises
-    :class:`AgentContractInvalidError` on failure.
+    Combines schema validation, reference-integrity checks, and the
+    secret-leak guard. Raises :class:`AgentContractInvalidError` on failure.
     """
-    validate_invocation_response(payload)
     assert_no_secret_leak(payload)
+    validate_invocation_response(payload)
+    if isinstance(payload, Mapping):
+        _assert_response_reference_integrity(payload)
 
 
 def guard_repair_decision(payload: Any) -> None:
     """Validate a repair-agent decision artifact end-to-end."""
-    validate_repair_decision(payload)
     assert_no_secret_leak(payload)
+    validate_repair_decision(payload)
 
 
 __all__ = [

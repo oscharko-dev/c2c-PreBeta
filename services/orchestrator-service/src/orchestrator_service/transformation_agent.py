@@ -46,6 +46,7 @@ from typing import Any, Protocol, Sequence
 
 from .agent_contracts import (
     AgentContractInvalidError,
+    assert_no_secret_leak,
     guard_agent_response,
     validate_invocation_request,
 )
@@ -416,6 +417,16 @@ def _canonical_json_bytes(payload: Any) -> bytes:
     ).encode("utf-8")
 
 
+def _tool_status_for_agent_status(status: str) -> str:
+    if status == "success":
+        return "success"
+    if status == "timeout":
+        return "timeout"
+    if status == "policy_denied":
+        return "denied"
+    return "failed"
+
+
 # ---------------------------------------------------------------------------
 # Harness-gateway-backed invoker
 # ---------------------------------------------------------------------------
@@ -682,7 +693,13 @@ class TransformationAgent:
 
         # 1. Build, validate, persist the agent-invocation-request artifact.
         request_payload = self._build_invocation_request_payload(request, started_at)
-        validate_invocation_request(request_payload)
+        try:
+            assert_no_secret_leak(request_payload)
+            validate_invocation_request(request_payload)
+        except AgentContractInvalidError as exc:
+            raise AgentContractInvalidAgentError(
+                f"agent-invocation-request failed contract validation: {'; '.join(exc.errors) or exc}"
+            ) from exc
         request_meta = self._artifact_store.write_json(
             request.run_id,
             request.workflow_id,
@@ -715,7 +732,7 @@ class TransformationAgent:
             # Persist a synthetic failure response so the run timeline
             # always carries a structured artifact for the attempt.
             ended_at = self._iso_now()
-            failed_response = self._build_failure_response(
+            failed_response = self._build_contract_safe_failure_response(
                 request,
                 status="failed" if isinstance(exc, ModelGatewayUnavailableError)
                 else ("policy_denied" if isinstance(exc, ModelPolicyDeniedAgentError)
@@ -743,8 +760,9 @@ class TransformationAgent:
                 input_payload={"runId": request.run_id},
                 output_payload={
                     "failureCode": exc.failure_code,
-                    "failureMessage": str(exc),
+                    "failureMessage": str(failed_response["failureMessage"]),
                     "responseRef": self._meta_to_ref(response_meta),
+                    "trajectoryRecord": dict(failed_response["trajectoryRecord"]),
                 },
             )
             raise
@@ -792,7 +810,7 @@ class TransformationAgent:
                     inner_envelope, inner_status
                 )
         except AgentContractInvalidAgentError as exc:
-            failed_response = self._build_failure_response(
+            failed_response = self._build_contract_safe_failure_response(
                 request,
                 status="failed",
                 failure_code=exc.failure_code,
@@ -819,8 +837,9 @@ class TransformationAgent:
                 input_payload={"runId": request.run_id},
                 output_payload={
                     "failureCode": exc.failure_code,
-                    "failureMessage": str(exc),
+                    "failureMessage": str(failed_response["failureMessage"]),
                     "responseRef": self._meta_to_ref(response_meta),
+                    "trajectoryRecord": dict(failed_response["trajectoryRecord"]),
                 },
             )
             raise
@@ -929,6 +948,7 @@ class TransformationAgent:
                 "responseRef": self._meta_to_ref(response_meta),
                 "javaCandidateRef": java_candidate_ref,
                 "failureCode": failure_code,
+                "trajectoryRecord": dict(response_payload["trajectoryRecord"]),
             },
             latency_ms=latency_ms,
         )
@@ -1083,6 +1103,16 @@ class TransformationAgent:
             "endedAt": ended_at,
             "trajectoryRecord": trajectory_record,
             "outputArtifactRefs": [dict(ref) for ref in output_artifact_refs],
+            "toolUseRecords": [
+                {
+                    "toolId": "model-gateway",
+                    "toolVersion": request.capability_version or "v0",
+                    "surface": "model-gateway",
+                    "invokedAt": started_at,
+                    "endedAt": ended_at,
+                    "status": _tool_status_for_agent_status(inner_status),
+                }
+            ],
             "capabilityRef": {
                 "capabilityId": request.capability_id,
                 "capabilityVersion": request.capability_version or "v0",
@@ -1156,6 +1186,17 @@ class TransformationAgent:
             "endedAt": ended_at,
             "trajectoryRecord": trajectory_record,
             "outputArtifactRefs": [],
+            "toolUseRecords": [
+                {
+                    "toolId": "model-gateway",
+                    "toolVersion": request.capability_version or "v0",
+                    "surface": "model-gateway",
+                    "invokedAt": started_at,
+                    "endedAt": ended_at,
+                    "status": _tool_status_for_agent_status(status),
+                    "errorClass": failure_code,
+                }
+            ],
             "capabilityRef": {
                 "capabilityId": request.capability_id,
                 "capabilityVersion": request.capability_version or "v0",
@@ -1166,6 +1207,51 @@ class TransformationAgent:
         if request.trace_ref:
             payload["traceRef"] = request.trace_ref
         return payload
+
+    def _build_contract_safe_failure_response(
+        self,
+        request: TransformationAgentRequest,
+        *,
+        status: str,
+        failure_code: str,
+        failure_message: str,
+        started_at: str,
+        ended_at: str,
+        model_invocation_id: str,
+        model_provider: str,
+        _latency_ms: int = 0,
+    ) -> JsonObject:
+        """Build a failure response, redacting only if the contract guard trips."""
+        response = self._build_failure_response(
+            request,
+            status=status,
+            failure_code=failure_code,
+            failure_message=failure_message,
+            started_at=started_at,
+            ended_at=ended_at,
+            model_invocation_id=model_invocation_id,
+            model_provider=model_provider,
+            _latency_ms=_latency_ms,
+        )
+        try:
+            guard_agent_response(response)
+            return response
+        except AgentContractInvalidError:
+            redacted = self._build_failure_response(
+                request,
+                status=status,
+                failure_code=failure_code,
+                failure_message=(
+                    f"{failure_code}: failure details redacted by agent contract guard"
+                ),
+                started_at=started_at,
+                ended_at=ended_at,
+                model_invocation_id=model_invocation_id,
+                model_provider=model_provider,
+                _latency_ms=_latency_ms,
+            )
+            guard_agent_response(redacted)
+            return redacted
 
     def _call_model_gateway(
         self, request: TransformationAgentRequest
