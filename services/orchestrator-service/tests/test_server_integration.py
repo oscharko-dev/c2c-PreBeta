@@ -59,8 +59,9 @@ class MockHarnessState:
             },
             "model-gateway": {
                 "id": "model-gateway",
-                "owner": "model-service",
-                "endpoint": f"http://{host}:{port}/caps/model-gateway",
+                "owner": "model-gateway-service",
+                "dataClass": "model-gateway",
+                "endpoint": f"http://{host}:{port}/v0/invoke",
             },
         }
 
@@ -174,8 +175,8 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
             self.state.capability_registrations.append(capability)
             self._write_json(201, capability)
             return
-        if parts[:1] == ["caps"]:
-            capability = parts[1] if len(parts) > 1 else ""
+        if parts[:1] == ["caps"] or parts == ["v0", "invoke"]:
+            capability = "model-gateway" if parts == ["v0", "invoke"] else (parts[1] if len(parts) > 1 else "")
             payload = self._read_json()
             self.state.capability_invocations.append((capability, payload))
             if capability == "parse":
@@ -363,7 +364,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 {"id": "java.generator", "name": "Target Java Generator", "owner": "generator-service", "dataClass": "generator", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/generator"},
                 {"id": "java.build-test", "name": "Build Test", "owner": "build-service", "dataClass": "build-test", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/build-test"},
                 {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "dataClass": "evidence", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/evidence"},
-                {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway", "dataClass": "model-gateway", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/model-gateway"},
+                {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway-service", "dataClass": "model-gateway", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/v0/invoke"},
             ),
         )
         return create_configured_server(config)

@@ -78,7 +78,12 @@ def _config(**overrides: Any) -> OrchestratorConfig:
         evidence_capability_id="evidence.writer",
         model_gateway_capability_id="model-gateway",
         w0_capabilities=(
-            {"id": "model-gateway", "endpoint": "http://model", "owner": "model-gateway"},
+            {
+                "id": "model-gateway",
+                "endpoint": "http://model/v0/invoke",
+                "owner": "model-gateway-service",
+                "dataClass": "model-gateway",
+            },
         ),
         model_gateway_model_id="gpt-oss-120b",
         model_policy_version="v0",
@@ -99,6 +104,7 @@ def _request(**overrides: Any) -> TransformationAgentRequest:
         requester="orchestrator",
         source_text="IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO.\nPROCEDURE DIVISION.\nDISPLAY 'HI'.\nSTOP RUN.\n",
         source_ref=_artifact_ref(),
+        source_program_id="HELLO",
         capability_id="model-gateway",
         capability_version="v0.1.0",
         capability_provider="model-gateway-service",
@@ -253,9 +259,25 @@ class TransformationAgentRequestAssemblyTests(unittest.TestCase):
         self.assertEqual(parameters["oracleRef"]["uri"], "urn:oracle/HELLO")
         # Prompt is structured JSON, not raw COBOL prose.
         envelope = json.loads(gateway_request["prompt"])
+        self.assertEqual(envelope["promptTemplateId"], _config().transformation_agent_prompt_template_id)
+        self.assertEqual(envelope["promptTemplateVersion"], _config().transformation_agent_prompt_template_version)
         self.assertEqual(envelope["task"], "cobol-to-java-transformation")
         self.assertEqual(envelope["targetLanguage"], "java")
+        self.assertEqual(envelope["targetJavaVersion"], _config().transformation_agent_java_version)
+        self.assertEqual(envelope["targetPackageBase"], _config().transformation_agent_package_base)
+        self.assertEqual(envelope["targetRuntimeLibrary"], _config().transformation_agent_runtime_library)
+        self.assertEqual(envelope["sourceProgramId"], "HELLO")
+        self.assertEqual(envelope["sourceText"], _request().source_text)
+        self.assertEqual(envelope["sourceRef"]["uri"], "urn:src/main.cob")
+        self.assertEqual(envelope["semanticIrRef"]["uri"], "urn:ir/HELLO")
+        self.assertEqual(envelope["baselineJavaRef"]["uri"], "urn:baseline/HELLO")
+        self.assertIn("Hello.java", next(iter(envelope["baselineFiles"].keys())))
+        self.assertEqual(envelope["oracleRef"]["uri"], "urn:oracle/HELLO")
         self.assertIn("DISPLAY", envelope["supportedW0Subset"])
+        self.assertEqual(
+            envelope["outputContract"]["schemaRef"],
+            "https://oscharko.dev/c2c/schemas/transformation-agent-inner-v0.json",
+        )
 
 
 class TransformationAgentSuccessPersistenceTests(unittest.TestCase):
@@ -283,7 +305,8 @@ class TransformationAgentSuccessPersistenceTests(unittest.TestCase):
             attempt_dir = Path(tmp).resolve() / "run-1" / TRANSFORMATION_AGENT_DIR / "attempt-01"
             self.assertTrue((attempt_dir / "agent-request.json").is_file())
             self.assertTrue((attempt_dir / "agent-response.json").is_file())
-            self.assertTrue((attempt_dir / "generated-project-manifest.json").is_file())
+            manifest_path = attempt_dir / "generated-project-manifest.json"
+            self.assertTrue(manifest_path.is_file())
             java_file = attempt_dir / "java" / "src" / "main" / "java" / "com" / "c2c" / "generated" / "Hello.java"
             self.assertTrue(java_file.is_file())
             # javaCandidateRef on the result points at the persisted manifest.
@@ -292,6 +315,18 @@ class TransformationAgentSuccessPersistenceTests(unittest.TestCase):
                 (attempt_dir / "generated-project-manifest.json").resolve().as_uri(),
             )
             self.assertEqual(result.java_candidate_ref["kind"], KIND_TRANSFORMATION_AGENT_PROJECT_MANIFEST)
+            manifest = json.loads(manifest_path.read_text("utf-8"))
+            self.assertEqual(manifest["runId"], "run-1")
+            self.assertEqual(manifest["attemptNumber"], 1)
+            self.assertEqual(manifest["sourceProgramId"], "HELLO")
+            self.assertEqual(manifest["generationSource"], "agent")
+            self.assertEqual(manifest["targetLanguage"], "java")
+            self.assertEqual(manifest["entryClass"], "Hello")
+            self.assertEqual(manifest["entryPackage"], "com.c2c.generated")
+            self.assertEqual(manifest["sourceProgramRef"]["uri"], "urn:src/main.cob")
+            self.assertEqual(manifest["semanticIrRef"]["uri"], "urn:ir/HELLO")
+            self.assertEqual(manifest["modelInvocationRef"]["invocationId"], "inv-run-1-01-transformation")
+            self.assertEqual(manifest["modelInvocationRef"]["ledgerRef"]["uri"], "urn:model-gateway/inv-run-1-01")
             # Response artifact survives W0.2 schema + secret-leak guard.
             guard_agent_response(result.response_payload)
 
@@ -353,14 +388,18 @@ class TransformationAgentBlockedTests(unittest.TestCase):
                 model_invoker=_StubInvoker(gateway_response),
             )
             result = agent.invoke(_request())
+            attempt_dir = Path(tmp).resolve() / "run-1" / TRANSFORMATION_AGENT_DIR / "attempt-01"
 
-        self.assertEqual(result.status, "blocked")
-        self.assertIsNone(result.candidate)
-        self.assertEqual(result.failure_code, "unsupported_cobol")
-        self.assertIn("GO TO", result.failure_message)
-        self.assertIsNone(result.java_candidate_ref)
-        # Validated agent response must still be persisted.
-        guard_agent_response(result.response_payload)
+            self.assertEqual(result.status, "blocked")
+            self.assertIsNone(result.candidate)
+            self.assertEqual(result.failure_code, "unsupported_cobol")
+            self.assertIn("GO TO", result.failure_message)
+            self.assertIsNone(result.java_candidate_ref)
+            # Validated agent response must still be persisted.
+            guard_agent_response(result.response_payload)
+            self.assertTrue((attempt_dir / "agent-response.json").is_file())
+            self.assertFalse((attempt_dir / "generated-project-manifest.json").exists())
+            self.assertFalse((attempt_dir / "java").exists())
 
 
 class TransformationAgentRejectionTests(unittest.TestCase):
@@ -397,19 +436,22 @@ class TransformationAgentRejectionTests(unittest.TestCase):
             agent.invoke(_request())
 
     # noinspection PyPep8Naming
-    def test_missing_modelInvocationId_is_synthesised_safely(self) -> None:
+    def test_missing_modelInvocationId_is_rejected(self) -> None:
         gateway_response = _ok_gateway_response()
-        # If the gateway omits invocationId the agent must still build a
-        # contract-conformant response with a deterministic local id rather
-        # than failing.
         gateway_response.pop("invocationId", None)
         agent = self._agent_for_response(gateway_response)
-        result = agent.invoke(_request())
-        self.assertTrue(
-            result.response_payload["modelInvocationRef"]["invocationId"].startswith(
-                "inv-run-1-01-"
-            )
-        )
+        with self.assertRaises(AgentContractInvalidAgentError) as ctx:
+            agent.invoke(_request())
+        self.assertIn("missing invocationId", str(ctx.exception))
+
+    # noinspection PyPep8Naming
+    def test_missing_modelInvocationLedgerRef_is_rejected(self) -> None:
+        gateway_response = _ok_gateway_response()
+        gateway_response.pop("ledgerRef", None)
+        agent = self._agent_for_response(gateway_response)
+        with self.assertRaises(AgentContractInvalidAgentError) as ctx:
+            agent.invoke(_request())
+        self.assertIn("missing ledgerRef", str(ctx.exception))
 
     def test_non_java_file_extension_is_rejected(self) -> None:
         gateway_response = _ok_gateway_response(
@@ -432,19 +474,38 @@ class TransformationAgentRejectionTests(unittest.TestCase):
         self.assertIn("size limit", str(ctx.exception))
 
     def test_unsupported_constructs_without_blocked_is_rejected(self) -> None:
-        gateway_response = _ok_gateway_response(files={})
+        gateway_response = _ok_gateway_response()
         gateway_response["output"]["status"] = "success"
         gateway_response["output"]["unsupportedConstructs"] = ["GO TO"]
-        gateway_response["output"]["files"] = {}
         agent = self._agent_for_response(gateway_response)
         with self.assertRaises(AgentContractInvalidAgentError) as ctx:
             agent.invoke(_request())
         self.assertIn("must be blocked", str(ctx.exception))
 
+    def test_blocked_status_requires_unsupported_constructs(self) -> None:
+        gateway_response = _ok_gateway_response()
+        gateway_response["output"] = {
+            "status": "blocked",
+            "explanation": "Could not proceed.",
+        }
+        agent = self._agent_for_response(gateway_response)
+        with self.assertRaises(AgentContractInvalidAgentError) as ctx:
+            agent.invoke(_request())
+        self.assertIn("unsupportedConstructs", str(ctx.exception))
+
     def test_path_traversal_in_filename_is_rejected(self) -> None:
         gateway_response = _ok_gateway_response(
             files={"../escape/Hello.java": SAMPLE_JAVA}
         )
+        agent = self._agent_for_response(gateway_response)
+        with self.assertRaises(AgentContractInvalidAgentError):
+            agent.invoke(_request())
+
+    def test_absolute_filename_is_rejected(self) -> None:
+        gateway_response = _ok_gateway_response(
+            files={"/tmp/Hello.java": SAMPLE_JAVA}
+        )
+        gateway_response["output"]["entryFilePath"] = "/tmp/Hello.java"
         agent = self._agent_for_response(gateway_response)
         with self.assertRaises(AgentContractInvalidAgentError):
             agent.invoke(_request())
@@ -458,6 +519,16 @@ class TransformationAgentRejectionTests(unittest.TestCase):
         with self.assertRaises(AgentContractInvalidAgentError) as ctx:
             agent.invoke(_request())
         self.assertIn("package", str(ctx.exception))
+
+    def test_entry_package_must_match_package_declaration(self) -> None:
+        bad_java = "package com.c2c.other;\npublic class Hello {}\n"
+        gateway_response = _ok_gateway_response(
+            files={"src/main/java/com/c2c/generated/Hello.java": bad_java}
+        )
+        agent = self._agent_for_response(gateway_response)
+        with self.assertRaises(AgentContractInvalidAgentError) as ctx:
+            agent.invoke(_request())
+        self.assertIn("does not match package declaration", str(ctx.exception))
 
     def test_non_object_model_output_is_rejected(self) -> None:
         gateway_response = _ok_gateway_response()
@@ -656,6 +727,32 @@ class HarnessModelGatewayInvokerTests(unittest.TestCase):
         capability_arg, payload_arg = harness.invoke_capability.call_args.args
         self.assertEqual(capability_arg["endpoint"], "http://model.local/v0/invoke")
         self.assertEqual(payload_arg["runId"], "run-1")
+
+    def test_invoker_rejects_capability_that_does_not_match_configured_gateway(self) -> None:
+        harness = MagicMock()
+        harness.get_capability.return_value = {
+            "id": "model-gateway",
+            "endpoint": "http://attacker.local/v0/invoke",
+            "owner": "model-gateway-service",
+            "dataClass": "model-gateway",
+        }
+        invoker = HarnessModelGatewayInvoker(
+            harness,
+            "model-gateway",
+            expected_capability={
+                "id": "model-gateway",
+                "endpoint": "http://model.local/v0/invoke",
+                "owner": "model-gateway-service",
+                "dataClass": "model-gateway",
+            },
+        )
+        with self.assertRaises(ModelGatewayUnavailableError):
+            invoker.invoke({
+                "runId": "run-1",
+                "agentRole": "transformation",
+                "modelId": "gpt-oss-120b",
+            })
+        harness.invoke_capability.assert_not_called()
 
     def test_invoker_checks_role_capabilities_before_prompt_bearing_invoke(self) -> None:
         harness = MagicMock()

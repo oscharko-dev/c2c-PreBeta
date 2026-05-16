@@ -66,6 +66,7 @@ from .transformation_agent import (
     TransformationAgent,
     TransformationAgentRequest,
     TransformationAgentResult,
+    _validate_model_gateway_capability,
 )
 from . import run_contract as w02
 from .run_contract import (
@@ -831,6 +832,9 @@ class W0WorkflowRunner:
             invoker = HarnessModelGatewayInvoker(
                 self.gateway,
                 self.config.model_gateway_capability_id,
+                expected_capability=self._configured_capability(
+                    self.config.model_gateway_capability_id
+                ),
             )
             self._transformation_agent_invoker = invoker
         self._transformation_agent = TransformationAgent(
@@ -848,6 +852,7 @@ class W0WorkflowRunner:
         *,
         source_text: str,
         source_reference: DataReference,
+        source_program_id: str | None,
         ir_document: Mapping[str, JsonValue] | None,
         ir_output_ref: DataReference | None,
         baseline_artifact_ref: Mapping[str, JsonValue] | None,
@@ -891,6 +896,7 @@ class W0WorkflowRunner:
             model_id=getattr(self.config, "model_gateway_model_id", DEFAULT_MODEL_ID)
             or DEFAULT_MODEL_ID,
             policy_version=getattr(self.config, "model_policy_version", None) or "v0",
+            source_program_id=source_program_id,
             semantic_ir=dict(ir_document) if isinstance(ir_document, Mapping) and ir_document else None,
             semantic_ir_ref=ir_ref_payload,
             baseline_java_ref=dict(baseline_artifact_ref) if baseline_artifact_ref else None,
@@ -930,6 +936,9 @@ class W0WorkflowRunner:
             invoker = HarnessModelGatewayInvoker(
                 self.gateway,
                 self.config.model_gateway_capability_id,
+                expected_capability=self._configured_capability(
+                    self.config.model_gateway_capability_id
+                ),
             )
             self._transformation_agent_invoker = invoker
         self._repair_agent_invoker = invoker
@@ -1121,6 +1130,12 @@ class W0WorkflowRunner:
         step_name = step_by_capability.get(capability_id)
         failure_code = self._failure_code_for_step_name(step_name)
         return step_name, failure_code or FAILURE_JAVA_GENERATION_FAILED
+
+    def _configured_capability(self, capability_id: str) -> JsonObject | None:
+        for capability in getattr(self.config, "w0_capabilities", ()) or ():
+            if isinstance(capability, Mapping) and str(capability.get("id") or "") == capability_id:
+                return dict(capability)
+        return None
 
     @staticmethod
     def _fallback_failure_code_for_state(current_state: str | None) -> str:
@@ -1661,6 +1676,7 @@ class W0WorkflowRunner:
                         w02_contract,
                         source_text=source_text,
                         source_reference=input_reference,
+                        source_program_id=program_id,
                         ir_document=ir_document,
                         ir_output_ref=ir_output.output_ref,
                         baseline_artifact_ref=baseline_artifact_ref,
@@ -2869,6 +2885,7 @@ class W0WorkflowRunner:
         final_uri = str((final_artifact_ref or {}).get("uri") or "").strip()
         final_sha = str((final_artifact_ref or {}).get("sha256") or "").strip()
 
+        repair_attempts_have_required_refs = True
         if w02_contract is not None:
             for entry in getattr(w02_contract, "repair_attempts", []) or []:
                 attempt_number = int(entry.get("attemptNumber") or 0)
@@ -2889,36 +2906,21 @@ class W0WorkflowRunner:
                 if candidate_entry is not None:
                     history.append(candidate_entry)
 
-                # Resolve the build-test ref. When the agent's run did not
-                # surface one we fall back to the most recently stamped
-                # build_test_result_ref on the contract.
-                btr = (
-                    build_test_ref
-                    if isinstance(build_test_ref, Mapping) and build_test_ref.get("uri")
-                    else (getattr(w02_contract, "build_test_result_ref", None) or {})
-                )
+                # Every repair attempt must point at the concrete build/test
+                # result that triggered it. Do not substitute another run-level
+                # reference; evidence-service will mark the pack incomplete if
+                # repair ran but no attempt evidence can be emitted.
+                btr = build_test_ref if isinstance(build_test_ref, Mapping) else {}
                 btr_uri = str((btr or {}).get("uri") or "").strip()
                 btr_sha = str((btr or {}).get("sha256") or "").strip()
                 if not btr_uri or not btr_sha:
-                    # Defensive: a repair attempt without an associated
-                    # build/test outcome cannot satisfy the schema's
-                    # buildTestResultRef requirement. We synthesise a
-                    # deterministic placeholder reference to keep the
-                    # contract valid while flagging the gap in summary.
-                    placeholder = _build_reference(
-                        f"urn:orchestrator/{getattr(w02_contract, 'run_id', 'unknown')}/repair-{attempt_number:02d}/no-build-test",
-                        {
-                            "attemptNumber": attempt_number,
-                            "note": "no associated build/test ref available",
-                        },
-                    )
-                    btr_payload = _as_reference_payload(placeholder)
-                else:
-                    btr_payload = {
-                        "uri": btr_uri,
-                        "sha256": btr_sha,
-                        "byteSize": int((btr or {}).get("byteSize") or 0),
-                    }
+                    repair_attempts_have_required_refs = False
+                    continue
+                btr_payload = {
+                    "uri": btr_uri,
+                    "sha256": btr_sha,
+                    "byteSize": int((btr or {}).get("byteSize") or 0),
+                }
 
                 attempt_payload: JsonObject = {
                     "attemptNumber": attempt_number,
@@ -2938,6 +2940,8 @@ class W0WorkflowRunner:
                 if decision == "no_change":
                     attempt_payload["noChange"] = True
                 repair_attempts.append(attempt_payload)
+            if not repair_attempts_have_required_refs:
+                repair_attempts = []
 
         # Mark the selected candidate inside history (if it matches).
         selected_entry: JsonObject | None = None
@@ -2947,36 +2951,6 @@ class W0WorkflowRunner:
                     entry["selected"] = True
                     selected_entry = dict(entry)
                     break
-            if selected_entry is None and final_artifact_ref:
-                # The final ref does not match any persisted candidate
-                # (defensive). Emit it as a standalone selected entry so
-                # the schema requirement is satisfied.
-                origin = (
-                    "verification-repair-agent"
-                    if repair_attempts
-                    else baseline_origin
-                )
-                attempt_idx = max(
-                    (a["attemptNumber"] for a in repair_attempts if a.get("attemptNumber") is not None),
-                    default=0,
-                )
-                selected_entry = self._java_candidate_ref(
-                    ref=final_artifact_ref,
-                    origin=origin,
-                    attempt_number=attempt_idx,
-                    selected=True,
-                )
-                if selected_entry is not None:
-                    history.append(selected_entry)
-
-        # When the run is not blocked we ALWAYS pick a selected candidate:
-        # on a successful run that is the final_artifact_ref; if for any
-        # reason that did not match a history entry we default to the
-        # latest candidate, so completeness can be enforced downstream.
-        if not blocked and selected_entry is None and history:
-            history[-1]["selected"] = True
-            selected_entry = dict(history[-1])
-
         return history, selected_entry, repair_attempts
 
     @staticmethod
@@ -3433,6 +3407,19 @@ class W0WorkflowRunner:
                 step_name=step_name,
                 failure_code=failure_code,
             )
+        if capability_id == self.config.model_gateway_capability_id:
+            try:
+                _validate_model_gateway_capability(
+                    capability,
+                    capability_id,
+                    expected_capability=self._configured_capability(capability_id),
+                )
+            except ModelGatewayUnavailableError as exc:
+                raise CapabilityMissingError(
+                    "model gateway capability failed allowlist validation",
+                    step_name=step_name,
+                    failure_code=FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+                ) from exc
         self._capability_cache[capability_id] = capability
         self._post_event(
             run_id,

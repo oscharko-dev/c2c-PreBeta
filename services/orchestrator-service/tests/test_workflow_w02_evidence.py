@@ -291,6 +291,53 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         # Oracle comparison surfaces matched=False.
         self.assertFalse(artifacts["oracleComparison"]["matched"])
 
+    def test_repair_attempt_without_build_ref_is_not_fabricated(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        contract.set_build_test_result_ref({"uri": "urn:run/build-final", "sha256": "c" * 64, "byteSize": 1})
+        contract.record_repair_attempt({
+            "attemptNumber": 1,
+            "repairDecision": "propose_candidate",
+            "failureCategory": "java_compile_failed",
+            "javaCandidateRef": {"uri": "urn:run/repair-1", "sha256": "d" * 64, "byteSize": 10},
+            "repairDecisionRef": {"uri": "urn:run/repair-decision-1", "sha256": "e" * 64, "byteSize": 6},
+            "rationale": "missing build-test ref must not be substituted",
+        })
+
+        final_ref = {"uri": "urn:run/repair-1", "sha256": "d" * 64, "byteSize": 10}
+        baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12}
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "ok",
+                "classification": "match",
+                "comparison": {"matched": True},
+                "goldenMaster": {"classification": "true"},
+            },
+            output_uri="urn:run/build-final",
+        )
+
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/baseline"),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            generated_artifact_ref=final_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=False,
+        )
+
+        artifacts = payload["artifacts"]
+        self.assertNotIn("repairAttempts", artifacts)
+        roles = sorted(entry["agentRole"] for entry in artifacts["agentTrajectories"])
+        self.assertEqual(roles, ["orchestrator", "transformation", "verification-repair"])
+
     def test_missing_oracle_classified_as_absent(self) -> None:
         context = self._w0_context(use_transformation_agent=True)
         contract = self._w02_contract()

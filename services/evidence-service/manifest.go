@@ -37,9 +37,9 @@ const (
 	ClassificationFailed             = "failed"
 
 	// JavaCandidateOriginBaseline and its siblings are Java-candidate origin attributions (Issue #171).
-	JavaCandidateOriginBaseline               = "deterministic-baseline"
-	JavaCandidateOriginTransformationAgent    = "transformation-agent"
-	JavaCandidateOriginVerificationRepair     = "verification-repair-agent"
+	JavaCandidateOriginBaseline            = "deterministic-baseline"
+	JavaCandidateOriginTransformationAgent = "transformation-agent"
+	JavaCandidateOriginVerificationRepair  = "verification-repair-agent"
 
 	// RepairDecisionProposeCandidate and its siblings are repair-attempt decision values (Issue #171).
 	// Mirrors agent-repair-decision-v0.
@@ -55,10 +55,10 @@ const (
 
 	// OracleKindCobolRuntime and its siblings are oracle-kind enum values (Issue #171).
 	// Mirrors build-test-result-v0.oracleComparison.
-	OracleKindCobolRuntime      = "cobol-runtime"
-	OracleKindSynthetic         = "synthetic"
-	OracleKindTrueGoldenMaster  = "true-golden-master"
-	OracleKindAbsent            = "absent"
+	OracleKindCobolRuntime     = "cobol-runtime"
+	OracleKindSynthetic        = "synthetic"
+	OracleKindTrueGoldenMaster = "true-golden-master"
+	OracleKindAbsent           = "absent"
 
 	ExportFormatDirectory = "directory"
 	ExportFormatTar       = "tar"
@@ -709,6 +709,7 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		if len(a.AgentTrajectories) == 0 {
 			missing = append(missing, "agentTrajectories")
 		}
+		missing = append(missing, validateW02ReferentialIntegrity(a)...)
 	default:
 		required = append([]string{}, requiredArtifactsW0...)
 		if len(a.SourceCobol) == 0 {
@@ -750,6 +751,74 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		Messages:           messages,
 		CompletenessStatus: completenessStatus,
 	}
+}
+
+func validateW02ReferentialIntegrity(a *Artifacts) []string {
+	missing := make([]string, 0)
+	if hasAgentTrajectoryRole(a.AgentTrajectories, AgentRoleVerificationRepair) && len(a.RepairAttempts) == 0 {
+		missing = append(missing, "repairAttempts")
+	}
+	if a.FinalJavaArtifact != nil && !a.FinalJavaArtifact.IsZero() && len(a.GeneratedJavaArtifacts) > 0 {
+		matchCount := 0
+		selectedMatchCount := 0
+		for _, candidate := range a.GeneratedJavaArtifacts {
+			if sameJavaCandidate(candidate, *a.FinalJavaArtifact) {
+				matchCount++
+				if candidate.Selected {
+					selectedMatchCount++
+				}
+			} else if candidate.Selected {
+				missing = append(missing, "generatedJavaArtifacts.selected")
+			}
+		}
+		if matchCount != 1 {
+			missing = append(missing, "finalJavaArtifact.generatedJavaArtifacts")
+		}
+		if matchCount == 1 && selectedMatchCount != 1 {
+			missing = append(missing, "generatedJavaArtifacts.selected")
+		}
+	}
+
+	buildTestRefs := make(map[string]struct{}, len(a.BuildTestResults))
+	for _, ref := range a.BuildTestResults {
+		buildTestRefs[dataReferenceKey(ref)] = struct{}{}
+	}
+	candidateRefs := make(map[string]struct{}, len(a.GeneratedJavaArtifacts))
+	for _, candidate := range a.GeneratedJavaArtifacts {
+		candidateRefs[javaCandidateKey(candidate)] = struct{}{}
+	}
+	for i, attempt := range a.RepairAttempts {
+		if _, ok := buildTestRefs[dataReferenceKey(attempt.BuildTestResultRef)]; !ok {
+			missing = append(missing, fmt.Sprintf("repairAttempts[%d].buildTestResultRef", i))
+		}
+		if attempt.NewJavaCandidateRef != nil {
+			if _, ok := candidateRefs[javaCandidateKey(*attempt.NewJavaCandidateRef)]; !ok {
+				missing = append(missing, fmt.Sprintf("repairAttempts[%d].newJavaCandidateRef", i))
+			}
+		}
+	}
+	return missing
+}
+
+func hasAgentTrajectoryRole(trajectories []AgentTrajectoryRef, role string) bool {
+	for _, trajectory := range trajectories {
+		if trajectory.AgentRole == role {
+			return true
+		}
+	}
+	return false
+}
+
+func sameJavaCandidate(left, right JavaCandidateRef) bool {
+	return left.URI == right.URI && left.SHA256 == right.SHA256
+}
+
+func dataReferenceKey(ref DataReference) string {
+	return ref.URI + "\x00" + ref.SHA256
+}
+
+func javaCandidateKey(ref JavaCandidateRef) string {
+	return ref.URI + "\x00" + ref.SHA256
 }
 
 // deriveClassification (Issue #171) projects the validation result into the

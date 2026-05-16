@@ -71,8 +71,13 @@ before the agent does anything else; an invalid request raises
 ## Model Gateway invocation
 
 The agent never imports a provider SDK. It calls the Model Gateway through
-the `model-gateway` capability registered on the Harness, with this
-payload shape (already established by Issue #168):
+the `model-gateway` capability registered on the Harness. Before prompt
+content is sent, the Orchestrator validates that the resolved capability
+matches the configured allowlist for id, owner, data class, and exact
+`/v0/invoke` endpoint. A registry entry that points somewhere else fails
+closed as `model_gateway_unavailable`.
+
+The payload shape is:
 
 ```jsonc
 {
@@ -148,9 +153,13 @@ Applied **before** the orchestrator persists or builds:
 - For `blocked`: `unsupportedConstructs` non-empty; `failureCode` defaults
   to `unsupported_cobol`.
 - For `failed`: `failureCode` defaults to `java_generation_failed`.
-- A `success` response that includes `unsupportedConstructs` but **no**
-  files is rejected as `agent_contract_invalid` — unsupported COBOL must
-  be reported as `blocked`, never `success`.
+- A `success` response that includes any `unsupportedConstructs` is
+  rejected as `agent_contract_invalid` — unsupported COBOL must be
+  reported as `blocked`, never `success`.
+- A `blocked` response must include non-empty `unsupportedConstructs`.
+- A gateway response without both `invocationId` and `ledgerRef` is
+  rejected as `agent_contract_invalid`; the agent must not synthesize
+  successful model lineage.
 - A response whose serialised form exceeds the global 256 KiB agent-I/O
   limit (Issue #167) is rejected as `agent_contract_invalid` regardless
   of the inner status.
@@ -172,12 +181,19 @@ Every attempt writes the following artifacts under
 |------|------|----------|
 | `agent-request.json` | `transformation-agent-request` | validated `agent-invocation-request-v0` |
 | `agent-response.json` | `transformation-agent-response` | validated `agent-invocation-response-v0` |
-| `generated-project-manifest.json` | `transformation-agent-project-manifest` | manifest with `runId`, `attemptNumber`, `generationSource = "agent"`, `targetLanguage = "java"`, `modelInvocationRef`, `semanticIrRef`, `sourceProgramRef`, per-file sha256/byteSize, `entryClass`, `entryPackage`, `entryFilePath`, `unsupportedConstructs` |
+| `generated-project-manifest.json` | `transformation-agent-project-manifest` | manifest with `runId`, `attemptNumber`, `sourceProgramId`, `generationSource = "agent"`, `targetLanguage = "java"`, structured `modelInvocationRef` including ledger reference, `semanticIrRef`, `sourceProgramRef`, per-file sha256/byteSize, `entryClass`, `entryPackage`, `entryFilePath`, `unsupportedConstructs` |
 | `java/<path>.java` (each generated file) | `transformation-agent-java-file` | UTF-8 Java source |
 
 The manifest's URI/sha256/byteSize is the value used as `javaCandidateRef`
 on the agent response and as `generatedJavaRef` on the W0.2 run contract
 when the agent path replaces the baseline.
+
+W0.2 evidence packs must preserve real lineage only. Repair attempts are
+included only when the attempt carries its concrete `buildTestResultRef`; the
+orchestrator never substitutes a run-level build/test result or synthetic
+reference. If verification-repair ran but attempt evidence is missing, the
+evidence-service marks the pack `evidence_incomplete` instead of promoting it
+to success.
 
 ## Workflow integration
 

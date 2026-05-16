@@ -118,7 +118,13 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 {"id": "java.generator", "name": "Java Generator", "owner": "generator-service", "endpoint": "http://generator"},
                 {"id": "java.build-test", "name": "Build Test", "owner": "build-service", "endpoint": "http://build-test"},
                 {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "endpoint": "http://evidence"},
-                {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway", "endpoint": "http://model"},
+                {
+                    "id": "model-gateway",
+                    "name": "Model Gateway",
+                    "owner": "model-gateway-service",
+                    "endpoint": "http://model/v0/invoke",
+                    "dataClass": "model-gateway",
+                },
             ),
             model_gateway_model_id=model_gateway_model_id,
         )
@@ -131,7 +137,12 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             "java.generator": {"id": "java.generator", "owner": "gen-service", "endpoint": "http://gen"},
             "java.build-test": {"id": "java.build-test", "owner": "build-service", "endpoint": "http://build"},
             "evidence.writer": {"id": "evidence.writer", "owner": "evidence", "endpoint": "http://evidence"},
-            "model-gateway": {"id": "model-gateway", "owner": "model", "endpoint": "http://model"},
+            "model-gateway": {
+                "id": "model-gateway",
+                "owner": "model-gateway-service",
+                "endpoint": "http://model/v0/invoke",
+                "dataClass": "model-gateway",
+            },
         }
 
     @staticmethod

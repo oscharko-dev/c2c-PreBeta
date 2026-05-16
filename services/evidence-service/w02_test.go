@@ -118,6 +118,58 @@ func TestEvaluateValidationW02FailsClosedOnMissingFinalJava(t *testing.T) {
 	}
 }
 
+func TestEvaluateValidationW02FailsClosedWhenFinalJavaDoesNotMatchCandidateHistory(t *testing.T) {
+	a := completeW02Artifacts(t)
+	mismatched := mustRef(t, "urn:c2c/generated/untracked.java", "untracked")
+	a.FinalJavaArtifact = &JavaCandidateRef{
+		URI:           mismatched.URI,
+		SHA256:        mismatched.SHA256,
+		ByteSize:      mismatched.ByteSize,
+		MIMEType:      mismatched.MIMEType,
+		Kind:          mismatched.Kind,
+		Origin:        JavaCandidateOriginVerificationRepair,
+		AttemptNumber: 1,
+		Selected:      true,
+	}
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when finalJavaArtifact is not in generatedJavaArtifacts")
+	}
+	if !containsString(v.MissingArtifacts, "finalJavaArtifact.generatedJavaArtifacts") {
+		t.Fatalf("missingArtifacts must call out final/candidate mismatch; got %v", v.MissingArtifacts)
+	}
+	if v.CompletenessStatus != CompletenessStatusEvidenceIncomplete {
+		t.Fatalf("expected completenessStatus=evidence_incomplete; got %s", v.CompletenessStatus)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedWhenRepairBuildTestRefIsNotReal(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.RepairAttempts[0].BuildTestResultRef = mustRef(t, "urn:c2c/build-test/fabricated", "fabricated")
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when repair buildTestResultRef is not in buildTestResults")
+	}
+	if !containsString(v.MissingArtifacts, "repairAttempts[0].buildTestResultRef") {
+		t.Fatalf("missingArtifacts must call out repair build-test mismatch; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedWhenVerificationRepairHasNoAttempts(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.RepairAttempts = nil
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when verification-repair trajectory has no repairAttempts")
+	}
+	if !containsString(v.MissingArtifacts, "repairAttempts") {
+		t.Fatalf("missingArtifacts must call out repairAttempts; got %v", v.MissingArtifacts)
+	}
+}
+
 func TestEvaluateValidationW02FailsClosedOnMissingModelInvocations(t *testing.T) {
 	a := completeW02Artifacts(t)
 	a.ModelInvocations = nil
@@ -414,4 +466,3 @@ func containsString(haystack []string, needle string) bool {
 	}
 	return false
 }
-
