@@ -442,9 +442,11 @@ paths:
     get:
       summary: List persisted artifacts and metadata for the run
       description: >
-        Proxies the orchestrator artifact index. Each artifact entry includes
-        uri, sha256, byteSize, mimeType, kind, createdBy, createdAt, runId,
-        workflowId, path, name. Missing artifacts are reported as
+        Proxies the orchestrator artifact index through browser-safe metadata.
+        Each artifact entry includes sha256, byteSize, mimeType, kind,
+        createdBy, createdAt, path, and name when available. Internal artifact
+        locations, backend run IDs, and workflow IDs are not exposed through
+        this browser-facing contract. Missing artifacts are reported as
         `missingArtifacts`; the BFF never fabricates a successful response.
       operationId: getRunArtifacts
       parameters:

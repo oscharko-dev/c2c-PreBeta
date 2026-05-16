@@ -144,7 +144,7 @@ function makeArtifactFixtures(
       mode: 'live',
       productMode: 'live',
       status: 'generated',
-      artifactRef: { uri: `file:///runs/${runId}/generated.json`, sha256 },
+      artifactRef: { sha256 },
     }),
     generatedFiles: okResult<GeneratedFilesIndex>({
       runId,
@@ -154,7 +154,7 @@ function makeArtifactFixtures(
       status: 'complete',
       files: [],
       fileCount: 0,
-      artifactRef: { uri: `file:///runs/${runId}/generated-files.json`, sha256 },
+      artifactRef: { sha256 },
     }),
     buildTest: okResult<BuildTestView>({
       runId,
@@ -163,7 +163,7 @@ function makeArtifactFixtures(
       productMode: 'live',
       status: 'ok',
       classification: 'match',
-      generatedArtifactRef: { uri: `file:///runs/${runId}/build-test.json`, sha256 },
+      generatedArtifactRef: { sha256 },
     }),
     evidence: okResult<EvidenceView>({
       runId,
@@ -171,7 +171,7 @@ function makeArtifactFixtures(
       mode: 'live',
       productMode: 'live',
       status: 'complete',
-      generatedArtifactRef: { uri: `file:///runs/${runId}/evidence.json`, sha256 },
+      generatedArtifactRef: { sha256 },
     }),
     events: okResult<RunEventsView>({
       runId,
@@ -187,13 +187,10 @@ function makeArtifactFixtures(
       productMode: 'live',
       artifacts: [
         {
-          uri: `file:///runs/${runId}/artifact.json`,
           sha256,
           kind: 'generated',
           createdBy: 'orchestrator',
           createdAt: '2026-05-15T10:00:02Z',
-          runId,
-          workflowId: `${runId}-workflow`,
           path: 'artifact.json',
           name: 'artifact.json',
         },

@@ -39,8 +39,6 @@ export interface DiagnosticFixtureOutcome {
   evidence: {
     status: 'complete' | 'incomplete';
     packId: string;
-    manifestUri: string;
-    exportUri: string;
     missingArtifacts: string[];
     note: string;
   };
@@ -120,8 +118,6 @@ export function diagnosticFixtureOutcomeFor(sample: SampleDetail, runId: string)
   const evidence: DiagnosticFixtureOutcome['evidence'] = {
     status: 'incomplete',
     packId: `epk-${runId}-1`,
-    manifestUri: `urn:c2c-bff/diagnostic-fixture-evidence-pack/${runId}`,
-    exportUri: `urn:c2c-bff/diagnostic-fixture-evidence-export/${runId}`,
     missingArtifacts: ['sourceCobol', 'semanticIr', 'harnessEvents', 'modelInvocations'],
     note: 'Diagnostic fixture Evidence Pack reference; not a product Evidence Pack. Product exports come from evidence-service /v0/packs.',
   };
