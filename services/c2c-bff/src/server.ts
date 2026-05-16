@@ -389,8 +389,6 @@ function diagnosticFixtureEvidenceView(stored: StoredRun): Record<string, unknow
     mode: 'diagnostic-fixture',
     productMode: 'unavailable',
     ...stored.fixture.evidence,
-    manifestUri: undefined,
-    exportUri: undefined,
   };
 }
 

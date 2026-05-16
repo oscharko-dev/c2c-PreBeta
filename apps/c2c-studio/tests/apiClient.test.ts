@@ -162,15 +162,12 @@ describe('apiClient', () => {
           productMode: 'live',
           artifacts: [
             {
-              uri: 'file:///run/source.cbl',
               sha256: 'a'.repeat(64),
               byteSize: -1,
               mimeType: 'text/plain',
               kind: 'source',
               createdBy: 'orchestrator',
               createdAt: '2026-05-15T10:00:00Z',
-              runId: 'run-1',
-              workflowId: 'w0',
               path: 'source.cbl',
               name: 'source.cbl',
             },
@@ -196,7 +193,7 @@ describe('apiClient', () => {
           mode: 'live',
           productMode: 'live',
           status: 'invalid',
-          generatedArtifactRef: { uri: 'file:///runs/run-1/generated.json', sha256: 'a'.repeat(64) },
+          generatedArtifactRef: { sha256: 'a'.repeat(64) },
         }),
     } as Response);
 
@@ -210,7 +207,7 @@ describe('apiClient', () => {
         mode: 'live',
         productMode: 'live',
         status: 'invalid',
-        generatedArtifactRef: { uri: 'file:///runs/run-1/generated.json', sha256: 'a'.repeat(64) },
+        generatedArtifactRef: { sha256: 'a'.repeat(64) },
       },
     });
   });
@@ -227,12 +224,10 @@ describe('apiClient', () => {
           status: 'ok',
           classification: 'match',
           outputRef: {
-            uri: 'file:///runs/run-1/build-test-result.json',
             sha256: 'b'.repeat(64),
             byteSize: 256,
           },
           generatedArtifactRef: {
-            uri: 'file:///runs/run-1/generated.json',
             sha256: 'a'.repeat(64),
             byteSize: 128,
           },
@@ -251,12 +246,10 @@ describe('apiClient', () => {
         status: 'ok',
         classification: 'match',
         outputRef: {
-          uri: 'file:///runs/run-1/build-test-result.json',
           sha256: 'b'.repeat(64),
           byteSize: 256,
         },
         generatedArtifactRef: {
-          uri: 'file:///runs/run-1/generated.json',
           sha256: 'a'.repeat(64),
           byteSize: 128,
         },
@@ -331,7 +324,6 @@ describe('apiClient', () => {
           status: 'run-failed',
           classification: 'definitely-not-a-valid-classification',
           generatedArtifactRef: {
-            uri: 'file:///runs/run-1/generated.json',
             sha256: 'a'.repeat(64),
             byteSize: 128,
           },

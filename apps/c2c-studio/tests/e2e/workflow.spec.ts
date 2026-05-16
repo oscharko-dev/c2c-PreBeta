@@ -574,11 +574,9 @@ test.describe('c2c Studio browser acceptance', () => {
           entryClass: 'EvidenceGate',
           entryFilePath: 'src/main/java/EvidenceGate.java',
           fileCount: 1,
-          files: {
-            'src/main/java/EvidenceGate.java': generatedJava,
-          },
+          files: {},
+          fileRefs: [{ path: 'src/main/java/EvidenceGate.java', sha256: artifactSha, byteSize: generatedJava.length }],
           artifactRef: {
-            uri: 'urn:c2c/generated/EVIDENCE01',
             sha256: artifactSha,
             byteSize: generatedJava.length,
           },
@@ -608,10 +606,28 @@ test.describe('c2c Studio browser acceptance', () => {
           fileCount: 1,
           entryFilePath: 'src/main/java/EvidenceGate.java',
           artifactRef: {
-            uri: 'urn:c2c/generated/EVIDENCE01',
             sha256: artifactSha,
             byteSize: generatedJava.length,
           },
+        }),
+      });
+    });
+
+    await page.route(`**/api/v0/runs/${runId}/generated/files/src/main/java/EvidenceGate.java`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          programId: 'EVIDENCE01',
+          mode: 'live',
+          productMode: 'live',
+          path: 'src/main/java/EvidenceGate.java',
+          content: generatedJava,
+          sha256: artifactSha,
+          byteSize: generatedJava.length,
+          mimeType: 'text/x-java-source',
         }),
       });
     });
@@ -629,7 +645,6 @@ test.describe('c2c Studio browser acceptance', () => {
           status: 'ok',
           classification: 'match',
           generatedArtifactRef: {
-            uri: 'urn:c2c/generated/EVIDENCE01',
             sha256: artifactSha,
           },
         }),
@@ -648,9 +663,8 @@ test.describe('c2c Studio browser acceptance', () => {
           productMode: 'live',
           status: 'incomplete',
           packId: 'pack-evidence01',
-          manifestUri: 'urn:c2c/evidence/EVIDENCE01',
+          manifestHash: 'evidence-manifest-sha',
           generatedArtifactRef: {
-            uri: 'urn:c2c/generated/EVIDENCE01',
             sha256: artifactSha,
           },
           missingArtifacts: ['harnessEvents'],
@@ -700,15 +714,12 @@ test.describe('c2c Studio browser acceptance', () => {
           productMode: 'live',
           artifacts: [
             {
-              uri: 'urn:c2c/generated/EVIDENCE01',
               sha256: artifactSha,
               byteSize: generatedJava.length,
               mimeType: 'text/x-java-source',
               kind: 'generatedJava',
               createdBy: 'target-java-generation-service',
               createdAt: '2026-05-15T00:00:00Z',
-              runId,
-              workflowId: 'wf-evidence01',
               path: 'src/main/java/EvidenceGate.java',
               name: 'EvidenceGate.java',
             },
@@ -822,9 +833,9 @@ test.describe('c2c Studio browser acceptance', () => {
           entryClass: 'MismatchGate',
           entryFilePath,
           fileCount: 1,
-          files: { [entryFilePath]: generatedJava },
+          files: {},
+          fileRefs: [{ path: entryFilePath, sha256: 'file-sha', byteSize: generatedJava.length }],
           artifactRef: {
-            uri: 'urn:c2c/generated/MISMATCH01',
             sha256: generatedSha,
             byteSize: generatedJava.length,
           },
@@ -847,7 +858,6 @@ test.describe('c2c Studio browser acceptance', () => {
           fileCount: 1,
           entryFilePath,
           artifactRef: {
-            uri: 'urn:c2c/generated/MISMATCH01',
             sha256: generatedSha,
             byteSize: generatedJava.length,
           },
@@ -887,7 +897,6 @@ test.describe('c2c Studio browser acceptance', () => {
           status: 'ok',
           classification: 'match',
           generatedArtifactRef: {
-            uri: 'urn:c2c/generated/MISMATCH01-build',
             sha256: buildSha,
           },
         }),
@@ -906,9 +915,8 @@ test.describe('c2c Studio browser acceptance', () => {
           productMode: 'live',
           status: 'complete',
           packId: 'pack-mismatch01',
-          manifestUri: 'urn:c2c/evidence/MISMATCH01',
+          manifestHash: 'mismatch-manifest-sha',
           generatedArtifactRef: {
-            uri: 'urn:c2c/generated/MISMATCH01-evidence',
             sha256: evidenceSha,
           },
         }),
@@ -969,15 +977,12 @@ test.describe('c2c Studio browser acceptance', () => {
           productMode: 'live',
           artifacts: [
             {
-              uri: 'urn:c2c/generated/MISMATCH01',
               sha256: generatedSha,
               byteSize: generatedJava.length,
               mimeType: 'application/json',
               kind: 'generated-project-manifest',
               createdBy: 'target-java-generation-service',
               createdAt: '2026-05-15T00:00:00Z',
-              runId,
-              workflowId: 'wf-mismatch01',
               path: 'generated-project-manifest.json',
               name: 'generated-project-manifest.json',
             },
