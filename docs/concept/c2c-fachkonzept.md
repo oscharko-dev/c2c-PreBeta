@@ -1,8 +1,9 @@
 # c2c Fachkonzept
 
 **Status**: Canonical working concept
-**Last updated**: 2026-05-15
+**Last updated**: 2026-05-16
 **Governing issue**: [#164](https://github.com/oscharko-dev/c2c-PreBeta/issues/164)
+**Related issues**: [#165](https://github.com/oscharko-dev/c2c-PreBeta/issues/165)
 
 This document is the canonical product and architecture concept for c2c. It is
 the first reference point for scope, wave planning, architecture decisions, and
@@ -255,7 +256,91 @@ W0.2 explicitly does **not** need to deliver:
 - customer production readiness;
 - multi-tenant authentication or customer onboarding;
 - support for all paragraph, copybook, file I/O, DB2, CICS, JCL, or VSAM
-  semantics.
+  semantics;
+- multiple agent teams or multiple orchestrators in production. The platform
+  architecture must keep that future open (see Role Model), but W0.2 ships
+  exactly one Orchestrator and one agent team;
+- additional target languages beyond Java. The COBOL-to-Java path remains the
+  only target in W0.2.
+
+### W0.2 Failure States
+
+Product-mode runs must surface real failure states. The Studio, BFF,
+Orchestrator, and Evidence Pack must never invent a successful output to hide
+a problem. The following failure states are first-class and must be
+representable end-to-end in the W0.2 implementation:
+
+- **parse failure**: the deterministic COBOL parser cannot complete on the
+  input;
+- **unsupported COBOL**: input is parseable but uses constructs outside the
+  documented W0/W0.2 subset;
+- **model gateway unavailable**: model-gateway-service or the configured
+  Foundry endpoint cannot serve a model call;
+- **model policy denial**: a model invocation is rejected by Model Gateway
+  policy (model, provider, prompt template, or content policy);
+- **agent timeout**: an agent step exceeds its bounded execution budget;
+- **compile failure**: generated Java does not compile under the target
+  Java runtime;
+- **runtime failure**: generated Java compiles but fails at runtime under the
+  build/test runner;
+- **oracle mismatch**: generated Java runs but the equivalence check against
+  the Golden Master diverges;
+- **incomplete evidence**: Evidence Pack v0 cannot be assembled because a
+  required artifact, ledger record, or verification result is missing;
+- **cancellation**: the Orchestrator aborts a run because of a user cancel,
+  policy abort, or hard repair-loop limit.
+
+Each failure state must be visible in the Studio, recorded in the run
+artifacts and Evidence Pack, and distinguishable from a verified-success run.
+
+### W0.2 API and Artifact Contracts
+
+W0.2 does not introduce a breaking change to the existing BFF
+`/api/v0/*` surface. It does, however, name the contracts that subsequent
+implementation issues will design, version, and enforce:
+
+- **Orchestrator run contract**: how the BFF starts a run, how run state is
+  observed, how cancellation is requested, and how final classification is
+  reported.
+- **Agent input/output contract**: the schema each agent role must accept and
+  produce, including references to source artifacts, prior agent outputs, and
+  verification feedback.
+- **Model Gateway invocation contract**: how the Orchestrator and agents call
+  the Model Gateway, including prompt template id, model selection inputs,
+  policy decision outputs, latency, and audit fields.
+- **Harness event contract**: the canonical event envelope written to the
+  Harness event ledger, including run id, agent id, capability id, model
+  invocation id, policy decision id, and trajectory pointers.
+- **Evidence Pack v0 extension**: additional sections in Evidence Pack v0
+  that capture agent trajectories, model invocation summaries, repair-loop
+  history, and Harness experience signals for the run.
+
+These contracts must be designed so the Harness can later add capabilities
+(for example RAG, graph, or domain database services) without changing the
+Orchestrator/agent surface or rewriting existing runs.
+
+### Future Harness Infrastructure Readiness
+
+W0.2 must not implement full RAG, graph, or database-backed reasoning. It
+must, however, keep the Harness boundary ready for those capabilities so that
+future waves can introduce them without rewriting agents or orchestrators.
+
+Concretely, W0.2 implementations must:
+
+- expose agent capabilities through the Harness Capability and Tool registries
+  rather than hard-coding tool selection inside an agent or a single workflow
+  module;
+- treat MCP, model, and future RAG/graph/database surfaces as Harness-provided
+  capabilities behind stable contracts, not as private agent dependencies;
+- keep run, event, and trajectory records expressive enough that later
+  Experience Learning consumers can analyze them across multiple orchestrators
+  and agent teams;
+- avoid coupling Orchestrator logic to the internal shape of any single
+  capability provider, so providers can be replaced or extended later.
+
+This keeps the platform open for additional orchestrators, additional agent
+teams, additional target languages, and additional Harness-backed capability
+providers in later waves, without retroactively rewriting W0.2 work.
 
 W0.2 should be demonstrated on a small, bounded COBOL program. The preferred
 next acceptance candidate is a Hello World style program that exposes the
