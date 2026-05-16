@@ -12,7 +12,8 @@ acceptable.
 > W0.2 workflow contract: [orchestrator-w02-workflow.md](../contracts/orchestrator-w02-workflow.md) ·
 > W0.2 BFF contract: [w0.2-api-contract.md](../c2c-bff/w0.2-api-contract.md) ·
 > W0.2 acceptance fixtures: [w02-acceptance.md](../corpus/w02-acceptance.md) ·
-> Runbook companion: [w0-2-reference-runbook.md](../showcase/w0-2-reference-runbook.md).
+> Runbook companion: [w0-2-reference-runbook.md](../showcase/w0-2-reference-runbook.md) ·
+> W0.2 epic #164 closure evidence: [w0-2-epic-164.md](w0-2-epic-164.md).
 
 ## Decision contract
 
