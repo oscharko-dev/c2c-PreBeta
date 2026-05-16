@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 
 def _iso_now() -> str:
@@ -97,6 +97,21 @@ class AgentContractInvalidStepError(StepExecutionError):
     """Raised when a productive agent returned a payload that fails W0.2
     Agent I/O contract validation (Issue #167). Surfaces as the
     ``agent_contract_invalid`` failure code on the run contract.
+    """
+
+
+class ModelPolicyDeniedStepError(StepExecutionError):
+    """Raised when the Model Gateway rejected a productive model invocation
+    on policy grounds (Issue #168). Surfaces as the ``model_policy_denied``
+    failure code on the run contract.
+
+    The gateway signals policy denial with either an HTTP 403 response that
+    carries ``errorCode: "model_policy_denied"`` or a validation failure code
+    in the policy set (``forbidden_model``, ``forbidden_role``,
+    ``forbidden_data_class``, ``disallowed_model_endpoint``, ``inactive_model``,
+    ``timeout_exceeded_*``). The Orchestrator's ``_invoke_step`` translates
+    those signals into this exception type so the W0.2 contract can finalise
+    the run as ``blocked`` with the precise failure code.
     """
 
 
@@ -478,6 +493,38 @@ def _failed_step_from_exception(exc: BaseException) -> Optional[str]:
     return None
 
 
+# Markers that the Model Gateway emits when a request is denied on policy
+# grounds (Issue #168). The gateway returns these in the JSON response body
+# alongside HTTP 403; the HarnessFailure exception thrown by the gateway
+# client stringifies the body into ``details``.
+_MODEL_POLICY_DENY_MARKERS: Tuple[str, ...] = (
+    "model_policy_denied",
+    "forbidden_model",
+    "forbidden_role",
+    "forbidden_data_class",
+    "disallowed_model_endpoint",
+    "inactive_model",
+    "timeout_exceeded_provider",
+    "timeout_exceeded_model_default",
+    "unsupported_structured_output",
+)
+
+
+def _is_model_policy_denial(exc: BaseException) -> bool:
+    """Return True when the exception's string form contains a recognisable
+    Model Gateway policy-denial marker. Used by ``_invoke_step`` to route
+    model-guidance failures to ``ModelPolicyDeniedStepError`` rather than
+    the generic ``StepExecutionError``.
+    """
+    text = str(exc).lower()
+    if "policy deny" in text:
+        return True
+    for marker in _MODEL_POLICY_DENY_MARKERS:
+        if marker in text:
+            return True
+    return False
+
+
 def _build_cobol_oracle_payload(
     source_text: Optional[str],
     input_reference: DataReference,
@@ -719,6 +766,8 @@ class W0WorkflowRunner:
 
     @staticmethod
     def _failure_code_from_exception(exc: BaseException) -> Optional[str]:
+        if isinstance(exc, ModelPolicyDeniedStepError):
+            return FAILURE_MODEL_POLICY_DENIED
         if isinstance(exc, AgentContractInvalidStepError):
             return FAILURE_AGENT_CONTRACT_INVALID
         if isinstance(exc, CapabilityMissingError):
@@ -809,6 +858,14 @@ class W0WorkflowRunner:
             request_ref: DataReference,
             response_payload: Mapping[str, Any],
         ) -> ArtifactMetadata:
+            # Issue #168: persist the policyId and agentRole returned by the
+            # Model Gateway. policyId is required by the v0 ledger schema;
+            # agentRole and usage are recorded when present so evidence and
+            # learning consumers can read them without a second HTTP round-
+            # trip to the gateway.
+            policy_version = _text(
+                getattr(self.config, "model_policy_version", None)
+            ) or "v0"
             ledger_payload = {
                 "schemaVersion": "v0",
                 "invocationId": _text(response_payload.get("invocationId")) or f"inv-{context.run_id}-00",
@@ -817,6 +874,8 @@ class W0WorkflowRunner:
                 or _text(request_payload.get("modelId"))
                 or DEFAULT_MODEL_ID,
                 "provider": _text(response_payload.get("provider")) or "unknown",
+                "policyId": _text(response_payload.get("policyId"))
+                or f"foundry-development-{policy_version}",
                 "dataClass": _text(request_payload.get("dataClass")) or DATA_CLASS_MODEL,
                 "promptTemplateVersion": _text(response_payload.get("promptTemplateVersion"))
                 or _text(request_payload.get("promptTemplateVersion"))
@@ -835,6 +894,17 @@ class W0WorkflowRunner:
                 "structuredOutput": bool(request_payload.get("structuredOutput")),
                 "createdAt": _iso_now(),
             }
+            agent_role = _text(response_payload.get("agentRole")) or _text(
+                request_payload.get("agentRole")
+            )
+            if agent_role:
+                ledger_payload["agentRole"] = agent_role
+            usage = response_payload.get("usage")
+            if isinstance(usage, Mapping) and usage:
+                ledger_payload["usage"] = dict(usage)
+            error_code = _text(response_payload.get("errorCode"))
+            if error_code:
+                ledger_payload["errorCode"] = error_code
             return self.artifact_store.write_json(
                 context.run_id,
                 context.workflow_id,
@@ -1292,11 +1362,18 @@ class W0WorkflowRunner:
                     self.config.model_gateway_capability_id,
                 )
                 model_id = _text(getattr(self.config, "model_gateway_model_id", None)) or DEFAULT_MODEL_ID
+                # Issue #168: tag the invocation with the W0.2 agent role so
+                # the Model Gateway applies the role-to-model policy and
+                # records the role on the Model Invocation Ledger. The
+                # productive transformation agent is the caller in product
+                # mode; in the deterministic W0 path the orchestrator stands
+                # in for it.
                 model_invocation_request = {
                     "schemaVersion": "v0",
                     "runId": context.run_id,
                     "workflowId": context.workflow_id,
                     "actor": self.config.service_name,
+                    "agentRole": "transformation",
                     "modelId": model_id,
                     "dataClass": DATA_CLASS_MODEL,
                     "promptTemplateVersion": DEFAULT_PROMPT_TEMPLATE_VERSION,
@@ -1972,6 +2049,10 @@ class W0WorkflowRunner:
                     run_status="failed",
                     failed_step=step_name,
                 )
+                if data_class == DATA_CLASS_MODEL and _is_model_policy_denial(exc):
+                    raise ModelPolicyDeniedStepError(
+                        f"step {step_name} blocked by model gateway policy: {exc}"
+                    ) from exc
                 raise StepExecutionError(f"step {step_name} failed: {exc}") from exc
             except Exception as exc:
                 failure_ref = _build_reference(
@@ -2004,6 +2085,10 @@ class W0WorkflowRunner:
                     run_status="failed",
                     failed_step=step_name,
                 )
+                if data_class == DATA_CLASS_MODEL and _is_model_policy_denial(exc):
+                    raise ModelPolicyDeniedStepError(
+                        f"step {step_name} blocked by model gateway policy: {exc}"
+                    ) from exc
                 raise StepExecutionError(f"step {step_name} failed: {exc}") from exc
 
         raise StepExecutionError(f"step {step_name} retry loop exited without resolution")

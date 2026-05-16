@@ -9,6 +9,7 @@
     "runId",
     "modelId",
     "provider",
+    "policyId",
     "dataClass",
     "promptTemplateVersion",
     "policyDecision",
@@ -38,6 +39,31 @@
     "provider": {
       "type": "string",
       "enum": ["foundry-development", "customer-internal-mock"]
+    },
+    "policyId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Active gateway policy version, e.g. foundry-development-v0. Recorded by the gateway on every invocation (Issue #168)."
+    },
+    "agentRole": {
+      "type": "string",
+      "minLength": 1,
+      "description": "W0.2 agent role attributed to the invocation, e.g. \"transformation\" or \"verification-repair\". Omitted when the caller did not stamp a role."
+    },
+    "usage": {
+      "type": "object",
+      "description": "Token usage reported by the upstream provider. Optional because not every provider returns usage counts.",
+      "properties": {
+        "prompt_tokens": { "type": ["integer", "number"], "minimum": 0 },
+        "completion_tokens": { "type": ["integer", "number"], "minimum": 0 },
+        "total_tokens": { "type": ["integer", "number"], "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "errorCode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Structured error code (Issue #168). Set to model_policy_denied / model_provider_timeout / model_provider_error when the request fails; absent on success."
     },
     "dataClass": {
       "type": "string",

@@ -107,6 +107,10 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 
 	resp, err := f.Client.Do(req)
 	if err != nil {
+		// Preserve context.DeadlineExceeded through errors.Is so the gateway
+		// can surface model_provider_timeout instead of a generic provider
+		// error. The Go http client wraps DeadlineExceeded inside *url.Error
+		// but errors.Is unwraps correctly.
 		return ModelInvocationOutput{}, fmt.Errorf("call foundry endpoint failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -129,7 +133,32 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 	if text := firstChatCompletionText(parsed); text != "" {
 		output["text"] = text
 	}
-	return ModelInvocationOutput{Data: output, Status: status, Metadata: map[string]any{"provider": f.Name()}}, nil
+	metadata := map[string]any{"provider": f.Name()}
+	if usage := extractChatCompletionUsage(parsed); len(usage) > 0 {
+		metadata["usage"] = usage
+	}
+	return ModelInvocationOutput{Data: output, Status: status, Metadata: metadata}, nil
+}
+
+// extractChatCompletionUsage normalises the optional `usage` object returned by
+// the OpenAI-compatible chat-completions endpoint. The gateway records token
+// counts on the Model Invocation Ledger when they are present, never persists
+// raw prompt or completion content here.
+func extractChatCompletionUsage(payload map[string]any) map[string]any {
+	rawUsage, ok := payload["usage"].(map[string]any)
+	if !ok || len(rawUsage) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(rawUsage))
+	for _, key := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
+		if value, present := rawUsage[key]; present {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (f *FoundryAdapter) invokeURL(model ModelMetadata) (string, error) {
