@@ -232,7 +232,7 @@ test.describe('c2c Studio browser acceptance', () => {
     await expect(generatedJavaPane).toContainText(new RegExp(`class\\s+${generatedClassName}`));
     await expect(page.getByText('Verified', { exact: true })).toBeVisible();
 
-    // Issue #173: live happy path must surface the W0.2 workflow contract.
+    // Issue #173: live success path must surface the W0.2 workflow contract.
     // We fetch /workflow directly to assert the contract shape, then verify
     // the Agent tab renders without a failure verdict.
     const workflowBody = await fetchJsonFromPage(

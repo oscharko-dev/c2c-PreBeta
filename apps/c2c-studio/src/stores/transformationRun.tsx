@@ -4,7 +4,7 @@ import { createContext, useContext, useRef, useState, ReactNode, useMemo } from 
 import { TransformationRunState, RunPhase } from '../types/run';
 import { deriveProductState, StateContext } from '../types/state';
 import { apiClient } from '../lib/apiClient';
-import { TransformRequest } from '../types/reference-program';
+import { TransformRequest } from '../types/transform-request';
 import { hydrateRunArtifacts, useRunPolling, useGlobalObservabilityPolling } from '../hooks/useRunPolling';
 import { ApiResult, TransformResponse } from '../types/api';
 

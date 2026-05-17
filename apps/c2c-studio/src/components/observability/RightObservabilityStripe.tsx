@@ -30,7 +30,7 @@ export function RightObservabilityStripe() {
   ];
 
   return (
-    <aside className="flex w-12 flex-col items-center border-l border-line bg-bg-0 py-4 shrink-0 h-full" aria-label="Observability Shortcuts">
+    <aside className="flex w-12 shrink-0 self-stretch flex-col items-center border-l border-line bg-bg-0 py-4" aria-label="Observability Shortcuts">
       <div className="flex flex-col items-center gap-4">
         {items.map(item => {
           const Icon = item.icon;

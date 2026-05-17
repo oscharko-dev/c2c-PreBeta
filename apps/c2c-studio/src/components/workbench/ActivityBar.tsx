@@ -21,7 +21,7 @@ export function ActivityBar() {
   };
 
   return (
-    <nav className="flex w-12 flex-col items-center justify-between border-r border-line bg-bg-0 py-4 shrink-0 h-full" aria-label="Activity Bar">
+    <nav className="flex w-12 shrink-0 self-stretch flex-col items-center justify-between border-r border-line bg-bg-0 py-4" aria-label="Activity Bar">
       <div className="flex flex-col items-center gap-4">
         <button 
           type="button"

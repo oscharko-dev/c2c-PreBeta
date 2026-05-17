@@ -3,7 +3,7 @@
 // The existing workflow.spec.ts covers the W0/W0.1 deterministic Studio
 // path using BRNCH01 and already asserts the W0.2 workflow contract surface
 // (workflow, repairAttempts, finalClassification) on the deterministic
-// happy path. This file complements it with the *real* (un-mocked)
+// success path. This file complements it with the *real* (un-mocked)
 // browser-visible proof for the W0.2 negative acceptance fixture
 // (FILEIO-UNSUPPORTED): the orchestrator MUST honestly reject unsupported
 // source through the W0.2 workflow contract without producing Java

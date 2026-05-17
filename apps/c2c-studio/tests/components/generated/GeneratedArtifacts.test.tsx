@@ -281,7 +281,7 @@ describe('Generated Artifacts UI', () => {
       </GeneratedArtifactsProvider>,
     );
 
-    expect(screen.getByText('Target Java Inspector')).toBeInTheDocument();
+    expect(screen.getByText('Java Project Explorer')).toBeInTheDocument();
     expect(screen.getByText(/abc123def456/i)).toBeInTheDocument();
     expect(screen.getByText('App.java')).toBeInTheDocument();
     expect(screen.getByText('config.properties')).toBeInTheDocument();
@@ -391,7 +391,7 @@ describe('Generated Artifacts UI', () => {
 
     expect(await screen.findByText('public class App {}')).toBeInTheDocument();
     expect(screen.getByText('Verified')).toBeInTheDocument();
-    expect(screen.getByText('Target Java Inspector')).toBeInTheDocument();
+    expect(screen.getByText('Java Project Explorer')).toBeInTheDocument();
   });
 
   it('resets selection when a new run starts and loads the new entry file', async () => {
@@ -463,7 +463,7 @@ describe('Generated Artifacts UI', () => {
 
     expect(await screen.findByText('public class App {}')).toBeInTheDocument();
     expect(screen.getByText('Run Failed')).toBeInTheDocument();
-    expect(screen.getByText('Target Java Inspector')).toBeInTheDocument();
+    expect(screen.getByText('Java Project Explorer')).toBeInTheDocument();
   });
 
   it('selecting a different file in the inspector updates the editor content', async () => {

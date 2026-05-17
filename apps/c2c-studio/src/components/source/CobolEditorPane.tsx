@@ -22,7 +22,6 @@ export function CobolEditorPane() {
     setOracleInput,
     isDirty,
     sourceName,
-    loadedProgramId,
     transformError,
     isTransforming,
     canSubmitTransform,
@@ -45,7 +44,7 @@ export function CobolEditorPane() {
     () => Array.from({ length: gutterEndLine - gutterStartLine }, (_, index) => gutterStartLine + index + 1),
     [gutterEndLine, gutterStartLine]
   );
-  const detectedProgramId = deriveDetectedProgramId(sourceText) ?? loadedProgramId;
+  const detectedProgramId = deriveDetectedProgramId(sourceText);
   const lineEnding = deriveDisplayedLineEnding(sourceText);
 
   useEffect(() => {
@@ -90,11 +89,11 @@ export function CobolEditorPane() {
         <div className="max-w-sm space-y-4">
           <p className="text-sm font-medium text-text">No source file selected</p>
           <p className="text-sm text-text-dim">
-            Load a reference program from the Source Workspace or paste COBOL code here.
+            Open a COBOL file from the Explorer or paste your own COBOL code here.
           </p>
           <button
             type="button"
-            onClick={() => setSourceText('       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n')}
+            onClick={() => setSourceText('')}
             className="rounded bg-bg-2 px-4 py-2 text-sm text-text hover:bg-bg-3"
           >
             Start Typing

@@ -7,14 +7,6 @@ vi.mock('../src/hooks/useC2cApi', () => ({
   useC2cApi: vi.fn(),
 }));
 
-vi.mock('../src/hooks/useReferencePrograms', () => ({
-  useReferencePrograms: vi.fn(() => ({
-    programs: [],
-    isLoading: false,
-    error: null,
-  })),
-}));
-
 import { useC2cApi } from '../src/hooks/useC2cApi';
 
 vi.mock('@/hooks/useC2cApi', () => ({
@@ -72,9 +64,9 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     expect(screen.getByLabelText('c2c brand')).toBeInTheDocument();
     expect(screen.getByLabelText('Activity Bar')).toBeInTheDocument();
     expect(screen.getByLabelText('Secondary Stripe')).toBeInTheDocument();
-    expect(screen.getByLabelText('Source Workspace')).toBeInTheDocument();
+    expect(screen.getByText('COBOL Explorer')).toBeInTheDocument();
     expect(screen.getByLabelText('Split Editor Area')).toBeInTheDocument();
-    expect(screen.getByLabelText('Target Java Inspector')).toBeInTheDocument();
+    expect(screen.getByLabelText('Java Project Explorer')).toBeInTheDocument();
     expect(screen.getByLabelText('Bottom Workbench')).toBeInTheDocument();
     expect(screen.getByLabelText('Status Bar')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('No run active');
