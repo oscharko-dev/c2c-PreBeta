@@ -23,7 +23,10 @@ export function WorkbenchShell() {
       <TransformationRunProvider>
         <SourceWorkspaceProvider>
           <GeneratedArtifactsProvider>
-            <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg-0 text-text font-ui" role="application" aria-label="c2c Studio Workbench">
+            <div
+              className="flex min-h-screen w-full flex-col overflow-hidden bg-bg-0 text-text font-ui"
+              data-testid="studio-workbench-shell"
+            >
               <a
                 href="#studio-main-workbench"
                 className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded focus:border focus:border-accent focus:bg-bg-1 focus:px-3 focus:py-2 focus:text-sm focus:text-text-bright"

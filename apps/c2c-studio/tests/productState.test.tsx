@@ -13,7 +13,7 @@ function makeGenerated(overrides: Partial<GeneratedView> = {}): GeneratedView {
     mode: 'live',
     productMode: 'live',
     status: 'generated',
-    artifactRef: { uri: '', sha256: 'a' },
+    artifactRef: { sha256: 'a' },
     ...overrides,
   };
 }
@@ -26,7 +26,7 @@ function makeBuildTest(overrides: Partial<BuildTestView> = {}): BuildTestView {
     productMode: 'live',
     status: 'ok',
     classification: 'match',
-    generatedArtifactRef: { uri: '', sha256: 'a' },
+    generatedArtifactRef: { sha256: 'a' },
     ...overrides,
   };
 }
@@ -38,7 +38,7 @@ function makeEvidence(overrides: Partial<EvidenceView> = {}): EvidenceView {
     mode: 'live',
     productMode: 'live',
     status: 'complete',
-    generatedArtifactRef: { uri: '', sha256: 'a' },
+    generatedArtifactRef: { sha256: 'a' },
     ...overrides,
   };
 }
@@ -150,7 +150,7 @@ describe('Product State Derivation', () => {
         mode: 'live',
         productMode: 'live',
         status: 'generated',
-        artifactRef: { uri: 'file:///runs/123/generated.json', sha256: 'a' },
+        artifactRef: { sha256: 'a', path: 'artifacts/generated.json' },
       },
       generatedFiles: {
         runId: '123',
@@ -178,7 +178,7 @@ describe('Product State Derivation', () => {
         mode: 'live',
         productMode: 'live',
         status: 'generated',
-        artifactRef: { uri: 'file:///runs/123/generated.json', sha256: 'a' },
+        artifactRef: { sha256: 'a', path: 'artifacts/generated.json' },
       },
     });
 
@@ -228,7 +228,7 @@ describe('Product State Derivation', () => {
         mode: 'live',
         productMode: 'live',
         status: 'generated',
-        artifactRef: { uri: 'abc', sha256: 'hash1' }
+        artifactRef: { sha256: 'hash1', path: 'artifacts/generated.json' }
       },
       buildTest: {
         runId: '123',
@@ -237,7 +237,7 @@ describe('Product State Derivation', () => {
         productMode: 'live',
         status: 'ok',
         classification: 'match',
-        generatedArtifactRef: { uri: 'def', sha256: 'hash2' }
+        generatedArtifactRef: { sha256: 'hash2', path: 'artifacts/build-test.json' }
       }
     });
     const result = deriveProductState(state);
@@ -257,7 +257,7 @@ describe('Product State Derivation', () => {
         mode: 'live',
         productMode: 'live',
         status: 'generated',
-        artifactRef: { uri: 'abc', sha256: 'hash1' },
+        artifactRef: { sha256: 'hash1', path: 'artifacts/generated.json' },
       },
       buildTest: {
         runId: '123',
@@ -266,7 +266,7 @@ describe('Product State Derivation', () => {
         productMode: 'live',
         status: 'output-divergence',
         classification: 'divergence-unknown',
-        generatedArtifactRef: { uri: 'abc', sha256: 'hash1' },
+        generatedArtifactRef: { sha256: 'hash1', path: 'artifacts/build-test.json' },
       },
     });
 
@@ -411,14 +411,16 @@ describe('Product State Derivation', () => {
       expect(deriveProductState(state).state).toBe('success');
     });
 
-    it('accepts artifact-level agreement as success when finalClassification is absent (diagnostic-fixture path)', () => {
+    it('refuses to claim success when finalClassification is absent despite artifact agreement', () => {
       const state = makeState({
         phase: 'completed',
         generated: makeGenerated(),
         buildTest: makeBuildTest(),
         evidence: makeEvidence(),
       });
-      expect(deriveProductState(state).state).toBe('success');
+      const result = deriveProductState(state);
+      expect(result.state).toBe('failed');
+      expect(result.message).toContain('BFF final classification is unavailable');
     });
 
     it('refuses to claim success when BFF says failed even if artifacts look aligned', () => {

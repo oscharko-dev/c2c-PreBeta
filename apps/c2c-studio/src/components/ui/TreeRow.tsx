@@ -14,6 +14,7 @@ export interface TreeRowProps extends React.HTMLAttributes<HTMLDivElement> {
   statusVariant?: StatusVariant;
   active?: boolean;
   disabled?: boolean;
+  description?: string;
 }
 
 export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
@@ -29,6 +30,7 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
       statusVariant,
       active,
       disabled = false,
+      description,
       onClick,
       onKeyDown,
       ...props
@@ -99,7 +101,14 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
           )}
         </div>
         
-        <span className="truncate flex-1" title={label}>{label}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="truncate" title={label}>{label}</span>
+          {description ? (
+            <span className="truncate text-xs text-text-dim" title={description}>
+              {description}
+            </span>
+          ) : null}
+        </span>
         
         {statusVariant && (
           <div className="ml-2 shrink-0">

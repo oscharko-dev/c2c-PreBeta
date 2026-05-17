@@ -27,7 +27,9 @@ export function SecondaryStripe() {
         {activeActivityTab === 'explorer' && (
           <div className="flex flex-1 items-center justify-center p-4 text-center">
             <div className="max-w-xs space-y-2">
-              <TreeRow label="Workspace tree pending" type="folder" isOpen={false} />
+              <div role="tree" aria-label="Workspace placeholder">
+                <TreeRow label="Workspace tree pending" type="folder" isOpen={false} />
+              </div>
               <p className="text-sm font-medium text-text">No workspace tree loaded</p>
               <p className="text-sm text-text-dim">
                 The source explorer will populate when the Studio session is connected to project files.

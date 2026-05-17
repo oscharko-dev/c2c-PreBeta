@@ -22,4 +22,20 @@ describe('ErrorNotice', () => {
     expect(notice.textContent).toContain('Output differs from the COBOL oracle');
     expect(notice.textContent).toContain('case01 fixture diverged');
   });
+
+  it('renders unsupported-source failure copy from the closed set', () => {
+    render(<ErrorNotice failureCode="unsupported_cobol" />);
+    const notice = screen.getByTestId('error-notice');
+    expect(notice.textContent).toContain('Unsupported COBOL');
+    expect(notice.textContent).toContain('COBOL constructs outside the W0 subset');
+    expect(notice.textContent).toContain('code: unsupported_cobol');
+  });
+
+  it('renders verification failure copy from the closed set', () => {
+    render(<ErrorNotice failureCode="java_compile_failed" />);
+    const notice = screen.getByTestId('error-notice');
+    expect(notice.textContent).toContain('Generated Java did not compile');
+    expect(notice.textContent).toContain('project did not compile');
+    expect(notice.textContent).toContain('code: java_compile_failed');
+  });
 });

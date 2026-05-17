@@ -16,7 +16,8 @@ export function GeneratedJavaEditorPane() {
     fileContent, 
     isFetchingFile, 
     fileFetchError,
-    artifactDetails
+    artifactDetails,
+    unavailableFiles,
   } = useGeneratedArtifacts();
   
   const { state, productState } = useTransformationRun();
@@ -50,7 +51,9 @@ export function GeneratedJavaEditorPane() {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-text-dim flex-col gap-4">
         <Loader2 className="animate-spin text-accent" size={32} />
-        <p data-testid="generated-pane-progress">{inProgressMessage}</p>
+        <p data-testid="generated-pane-progress" role="status" aria-live="polite" aria-atomic="true">
+          {inProgressMessage}
+        </p>
       </div>
     );
   }
@@ -204,7 +207,7 @@ export function GeneratedJavaEditorPane() {
 
       <div className="flex-1 overflow-auto bg-bg-0">
         {isFetchingFile ? (
-          <div className="flex h-full items-center justify-center text-text-dim">
+          <div className="flex h-full items-center justify-center text-text-dim" role="status" aria-live="polite">
             <Loader2 className="animate-spin text-accent mr-2" size={16} />
             <span>Loading file content...</span>
           </div>
@@ -215,6 +218,14 @@ export function GeneratedJavaEditorPane() {
         ) : !selectedFilePath ? (
           <div className="flex h-full items-center justify-center p-6 text-center text-text-dim">
             <p>Select a file from the Target Java Inspector to view its content.</p>
+          </div>
+        ) : unavailableFiles.has(selectedFilePath) ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-text-dim">
+            <BlockedState
+              reason="Generated file unavailable"
+              details="The BFF listed this generated Java file, but its content endpoint did not return the artifact. Verified state cannot be claimed from missing content."
+            />
+            <MissingArtifactsPanel artifacts={[selectedFilePath]} />
           </div>
         ) : fileContent === null ? (
           <div className="flex h-full items-center justify-center p-6 text-center text-text-dim">

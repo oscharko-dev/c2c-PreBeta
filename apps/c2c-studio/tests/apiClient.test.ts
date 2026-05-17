@@ -257,6 +257,74 @@ describe('apiClient', () => {
     });
   });
 
+  it('fetches generated view and generated file index contract payloads', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            runId: 'run-1',
+            programId: 'P1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'generated',
+            entryClass: 'P1',
+            artifactRef: {
+              sha256: 'a'.repeat(64),
+              byteSize: 128,
+              kind: 'generated-project-manifest',
+            },
+          }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            runId: 'run-1',
+            programId: 'P1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'complete',
+            entryFilePath: 'src/main/java/P1.java',
+            files: [
+              {
+                path: 'src/main/java/P1.java',
+                sha256: 'b'.repeat(64),
+                byteSize: 512,
+                mimeType: 'text/x-java-source',
+              },
+            ],
+            fileCount: 1,
+            artifactRef: {
+              sha256: 'a'.repeat(64),
+              byteSize: 128,
+              kind: 'generated-project-manifest',
+            },
+          }),
+      } as Response);
+
+    const generated = await apiClient.getGenerated('run-1');
+    const generatedFiles = await apiClient.getGeneratedFiles('run-1');
+
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v0/runs/run-1/generated', undefined);
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v0/runs/run-1/generated/files', undefined);
+    expect(generated).toMatchObject({
+      ok: true,
+      data: {
+        status: 'generated',
+        artifactRef: { sha256: 'a'.repeat(64) },
+      },
+    });
+    expect(generatedFiles).toMatchObject({
+      ok: true,
+      data: {
+        status: 'complete',
+        entryFilePath: 'src/main/java/P1.java',
+        artifactRef: { sha256: 'a'.repeat(64) },
+      },
+    });
+  });
+
   it('accepts live run progress payloads from the BFF progress endpoint', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

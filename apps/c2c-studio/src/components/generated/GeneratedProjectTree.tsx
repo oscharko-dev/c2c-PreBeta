@@ -197,7 +197,7 @@ function TreeNode({
   };
 
   return (
-    <div className="text-sm">
+    <div className="text-sm" role="none">
       <button
         type="button"
         className={`flex w-full items-center gap-1.5 py-1 px-2 text-left hover:bg-bg-3 ${isSelected ? 'bg-accent/10 text-accent' : 'text-text'} ${isUnavailable ? 'opacity-50 cursor-not-allowed' : ''}`}

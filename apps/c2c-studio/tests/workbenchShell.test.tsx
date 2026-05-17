@@ -67,6 +67,8 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
 
     render(<WorkbenchShell />);
 
+    expect(screen.getByTestId('studio-workbench-shell')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'c2c Studio Workbench', level: 1 })).toBeInTheDocument();
     expect(screen.getByLabelText('c2c brand')).toBeInTheDocument();
     expect(screen.getByLabelText('Activity Bar')).toBeInTheDocument();
     expect(screen.getByLabelText('Secondary Stripe')).toBeInTheDocument();
@@ -75,6 +77,7 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     expect(screen.getByLabelText('Target Java Inspector')).toBeInTheDocument();
     expect(screen.getByLabelText('Bottom Workbench')).toBeInTheDocument();
     expect(screen.getByLabelText('Status Bar')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('No run active');
   });
 
   it('allows workbench tabs to be selected through pointer interaction', () => {

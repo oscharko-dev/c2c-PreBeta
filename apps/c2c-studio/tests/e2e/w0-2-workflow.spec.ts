@@ -63,7 +63,7 @@ async function fetchJsonFromPage<T>(page: Page, requestPath: string): Promise<T>
 
 async function expectReadyWorkbench(page: Page) {
   await page.goto('/');
-  await expect(page.getByRole('application', { name: 'c2c Studio Workbench' })).toBeVisible();
+  await expect(page.getByTestId('studio-workbench-shell')).toBeVisible();
   await expect(page.getByLabel('Product readiness')).toContainText('Ready');
 }
 
@@ -141,6 +141,21 @@ test.describe('W0.2 release-gate browser acceptance', () => {
 
     // The Studio must not present any "Verified" affordance.
     await expect(page.getByText('Verified', { exact: true })).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Agent' }).click();
+    const agentPanel = page.getByTestId('agent-activity-panel');
+    await expect(agentPanel).toBeVisible();
+    await expect(agentPanel).toContainText(/Unsupported COBOL|COBOL parsing failed/);
+    await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('Final Java');
+    await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('not published');
+
+    await page.getByRole('tab', { name: 'Build & Test' }).click();
+    await expect(page.getByText('Pipeline Stages')).toBeVisible();
+    await expect(page.getByText('Equivalence Analysis')).toBeVisible();
+    await expect(page.getByText('Match (Equivalent)')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Evidence Pack' }).click();
+    await expect(page.getByText(/Evidence Pack (Incomplete|Invalid|Mismatch Detected)|Waiting for evidence pack/)).toBeVisible();
 
     // The Generated view must honestly report unsupported source — never
     // an empty success.

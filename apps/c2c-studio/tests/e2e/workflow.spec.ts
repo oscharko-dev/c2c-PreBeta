@@ -37,7 +37,7 @@ interface GeneratedFileContentResponse {
 
 async function expectReadyWorkbench(page: Page) {
   await page.goto('/');
-  await expect(page.getByRole('application', { name: 'c2c Studio Workbench' })).toBeVisible();
+  await expect(page.getByTestId('studio-workbench-shell')).toBeVisible();
   await expect(page.getByLabel('Product readiness')).toContainText('Ready');
 }
 
@@ -217,6 +217,7 @@ test.describe('c2c Studio browser acceptance', () => {
 
     const generatedArtifactSha = generatedBody.artifactRef?.sha256;
     expect(generatedArtifactSha).toBeTruthy();
+    expect(generatedFilesBody.artifactRef?.sha256).toBe(generatedArtifactSha);
     expect(buildTestBody.generatedArtifactRef?.sha256).toBe(generatedArtifactSha);
     expect(evidenceBody.generatedArtifactRef?.sha256).toBe(generatedArtifactSha);
 
@@ -224,6 +225,7 @@ test.describe('c2c Studio browser acceptance', () => {
     await expect(generatedJavaPane).toBeVisible();
     await expect(generatedJavaPane).toHaveAttribute('data-file-path', String(entryFilePath));
     await expect(generatedJavaPane).toHaveAttribute('data-file-sha256', generatedFileBody.sha256);
+    await expect(generatedJavaPane).toHaveAttribute('data-artifact-sha256', String(generatedArtifactSha));
     const generatedClass = generatedFileBody.content.match(/\bpublic\s+(?:final\s+)?class\s+([A-Za-z_$][\w$]*)/);
     const generatedClassName = generatedClass?.[1];
     expect(generatedClassName).toBeTruthy();
@@ -284,7 +286,7 @@ test.describe('c2c Studio browser acceptance', () => {
 
     await page.goto('/');
 
-    await expect(page.getByRole('application', { name: 'c2c Studio Workbench' })).toBeVisible();
+    await expect(page.getByTestId('studio-workbench-shell')).toBeVisible();
     await expect(page.getByLabel('Product readiness')).toContainText('Blocked');
     await expect(topBarStartButton(page)).toBeDisabled();
     await expect(page.getByLabel('Status Bar')).toContainText('Blocked');
@@ -1244,6 +1246,10 @@ test.describe('c2c Studio browser acceptance', () => {
 
     const agentPanel = page.getByTestId('agent-activity-panel');
     await expect(agentPanel).toBeVisible();
+    await expect(agentPanel.getByTestId('agent-activity-workflow-status')).toContainText('blocked_policy');
+    await expect(agentPanel.getByTestId('agent-activity-workflow-status')).toContainText('1 invocation observed');
+    await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('Final Java');
+    await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('not published');
     await expect(agentPanel.getByText('Verification & Repair Agent')).toBeVisible();
     const attempt1 = agentPanel.getByTestId('agent-activity-repair-attempt-1');
     const attempt2 = agentPanel.getByTestId('agent-activity-repair-attempt-2');
@@ -1261,6 +1267,10 @@ test.describe('c2c Studio browser acceptance', () => {
 
     // No success badge for a blocked run.
     await expect(page.getByTestId('status-bar-success-badge')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Artifacts' }).click();
+    await expect(page.getByText('Missing artifact records')).toBeVisible();
+    await expect(page.getByText('generatedJava')).toBeVisible();
   });
 
   test('@visual captures the main workbench desktop baseline', async ({ page, browserName }) => {
