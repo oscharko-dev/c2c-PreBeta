@@ -808,6 +808,143 @@ class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):
         self.assertNotIn("assistDecision", artifacts)
         self.assertNotIn("budgetSummary", artifacts)
 
+    # ------------------------------------------------------------------
+    # Issue #217 follow-up: guard the cross-service invariant that
+    # evidence-service's runReachedAssistGate inference can rely on.
+    # ------------------------------------------------------------------
+    #
+    # evidence-service infers "did the assist-decision gate fire?" from the
+    # PRESENCE of post-gate signals in the pack (transformation /
+    # verification-repair agent trajectories, repair attempts, or
+    # productive model invocations). It uses that inference to decide
+    # whether a blocked W0.2 pack may legitimately omit ``assistDecision``.
+    #
+    # The orchestrator is the upstream contract owner: whenever it emits an
+    # ``assistDecision`` into the evidence pack, the same pack MUST also
+    # carry at least one of those signals. A future refactor that records a
+    # decision without writing a trajectory would silently cause
+    # evidence-service to relax the requirement on blocked packs that
+    # actually reached the gate — exactly the regression the post-review
+    # tightening was meant to prevent.
+    #
+    # The tests below lock the invariant for both blocked and non-blocked
+    # runs across the assist outcomes the gate may emit. Adding any new
+    # outcome / agent role must update this guard.
+    def _assert_pack_satisfies_assist_gate_inference(self, artifacts: dict) -> None:
+        """Mirror of evidence-service's runReachedAssistGate inference."""
+        trajectories = artifacts.get("agentTrajectories") or []
+        repair_attempts = artifacts.get("repairAttempts") or []
+        model_invocations = artifacts.get("modelInvocations") or []
+        post_gate_trajectory_roles = {
+            entry.get("agentRole")
+            for entry in trajectories
+            if isinstance(entry, dict)
+        } & {"transformation", "verification-repair"}
+        post_gate_invocation_roles = {
+            entry.get("agentRole")
+            for entry in model_invocations
+            if isinstance(entry, dict)
+        } & {"transformation", "verification-repair"}
+        self.assertTrue(
+            bool(post_gate_trajectory_roles)
+            or bool(repair_attempts)
+            or bool(post_gate_invocation_roles),
+            "orchestrator emitted assistDecision but no post-gate signal "
+            "(transformation/verification-repair trajectory, repair attempt, "
+            "or productive model invocation). evidence-service would silently "
+            "relax the assistDecision requirement on a blocked pack with this "
+            "shape — Issue #217 guard.",
+        )
+
+    def test_guard_emitted_assist_decision_always_carries_gate_fired_signal_unblocked(
+        self,
+    ) -> None:
+        payload = self._baseline_payload(blocked=False, with_assist=True)
+        artifacts = payload["artifacts"]
+        self.assertIn("assistDecision", artifacts)
+        self._assert_pack_satisfies_assist_gate_inference(artifacts)
+
+    def test_guard_emitted_assist_decision_always_carries_gate_fired_signal_blocked(
+        self,
+    ) -> None:
+        payload = self._baseline_payload(blocked=True, with_assist=True)
+        artifacts = payload["artifacts"]
+        self.assertIn("assistDecision", artifacts)
+        self._assert_pack_satisfies_assist_gate_inference(artifacts)
+
+    def test_guard_emitted_assist_decision_carries_signal_for_assist_not_required(
+        self,
+    ) -> None:
+        # The assist gate may decide ``assist_not_required`` (caller_did_not_opt_in,
+        # baseline already complete, etc.). For those runs the productive
+        # Transformation Agent does NOT run, so no transformation trajectory
+        # is emitted — but the orchestrator still routes the deterministic
+        # baseline through the productive path's evidence assembly because
+        # ``use_transformation_agent=True`` was set on the context. Verify
+        # that whenever an assist_not_required decision lands in the pack,
+        # at least the inference signal that evidence-service falls back to
+        # for blocked packs is present, OR the pack is non-blocked (in
+        # which case assistDecision is required regardless of the
+        # inference and the guard is satisfied vacuously).
+        context = self._w0_context(use_transformation_agent=True)
+        W02ProductiveEvidenceTests._write_source_and_parse_metadata(self, context)  # type: ignore[arg-type]
+        contract = self._w02_contract()
+        # Record an assist_not_required decision (caller did not opt in).
+        decision = AssistDecision(
+            outcome="assist_not_required",
+            reason_code="caller_did_not_opt_in",
+            decided_at="2026-05-17T00:00:00Z",
+            selected_agent_role=None,
+            assist_budget_snapshot={"limit": 1, "used": 0, "remaining": 1},
+            repair_budget_snapshot={"limit": 2, "used": 0, "remaining": 2},
+            model_invocation_budget_snapshot={"limit": 6, "used": 0, "remaining": 6},
+            rationale="caller did not opt in",
+        )
+        contract.record_assist_decision(decision)
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12}
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "ok",
+                "classification": "match",
+                "comparison": {"matched": True},
+                "goldenMaster": {"classification": "true"},
+            },
+            output_uri="urn:run/build-1",
+        )
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/baseline"),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            generated_artifact_ref=baseline_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=False,
+            productive_model_invocations=[transformation_model_ref],
+        )
+        artifacts = payload["artifacts"]
+        self.assertIn("assistDecision", artifacts)
+        self.assertEqual(artifacts["assistDecision"]["outcome"], "assist_not_required")
+        # The orchestrator's W0.2 evidence assembly always emits a
+        # transformation trajectory whenever use_transformation_agent=True,
+        # regardless of the decision outcome. That trajectory IS the signal
+        # evidence-service looks for; locking it here means a future
+        # refactor that stops emitting trajectories for assist_not_required
+        # runs would break this test before it could silently weaken the
+        # blocked-pack relaxation rule downstream.
+        self._assert_pack_satisfies_assist_gate_inference(artifacts)
+
 
 if __name__ == "__main__":
     unittest.main()
