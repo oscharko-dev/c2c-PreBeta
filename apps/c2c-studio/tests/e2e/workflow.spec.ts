@@ -1437,6 +1437,24 @@ test.describe("c2c Studio browser acceptance", () => {
               rationale: "Policy gateway refused the candidate model.",
             },
           ],
+          // Issue #218 (W0.3-7): the existing failure-path acceptance now
+          // also asserts the AI-assisted assist-decision the gate would
+          // have published before the run was blocked downstream.
+          assistDecision: {
+            outcome: "assist_required",
+            reasonCode: "caller_explicit_opt_in",
+            decidedAt: "2026-05-16T00:00:01Z",
+            selectedAgentRole: "transformation_agent",
+            affectedArtifactRefs: [],
+            repairBudgetSnapshot: { limit: 3, used: 0, remaining: 3 },
+            assistBudgetSnapshot: { limit: 1, used: 1, remaining: 0 },
+            modelInvocationBudgetSnapshot: {
+              limit: 6,
+              used: 1,
+              remaining: 5,
+            },
+            rationale: "Caller opted in.",
+          },
           finalClassification: "blocked",
           failureCode: "model_policy_denied",
           failureMessage: "policy gateway refused invocation",
@@ -1499,6 +1517,23 @@ test.describe("c2c Studio browser acceptance", () => {
 
     // No success badge for a blocked run.
     await expect(page.getByTestId("status-bar-success-badge")).toHaveCount(0);
+
+    // Issue #218 (W0.3-7): the assist-decision row must surface as
+    // AI-assisted because the orchestrator fired the assist gate before
+    // the policy denial blocked the run downstream.
+    const assistDecision = agentPanel.getByTestId(
+      "agent-activity-assist-decision",
+    );
+    await expect(assistDecision).toHaveAttribute(
+      "data-assist-mode",
+      "ai-assisted",
+    );
+    await expect(
+      agentPanel.getByTestId("agent-activity-assist-mode-badge"),
+    ).toContainText("AI-assisted run");
+    await expect(
+      agentPanel.getByTestId("agent-activity-assist-agent-role"),
+    ).toContainText("Transformation Agent");
 
     await page.getByRole("tab", { name: "Artifacts" }).click();
     await expect(page.getByText("Missing artifact records")).toBeVisible();

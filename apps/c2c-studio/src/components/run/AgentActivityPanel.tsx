@@ -5,6 +5,11 @@ import { StatusChip } from "../ui/StatusChip";
 import {
   ACTIVE_AGENT_DESCRIPTIONS,
   ACTIVE_AGENT_LABELS,
+  ASSIST_DECISION_AGENT_ROLE_LABELS,
+  ASSIST_DECISION_OUTCOME_DESCRIPTIONS,
+  ASSIST_DECISION_OUTCOME_LABELS,
+  ASSIST_DECISION_REASON_DESCRIPTIONS,
+  ASSIST_DECISION_REASON_LABELS,
   REPAIR_DECISION_LABELS,
   W02_ERROR_DESCRIPTIONS,
   W02_ERROR_LABELS,
@@ -12,6 +17,7 @@ import {
 } from "./agentActivity";
 import type {
   AssistBudget,
+  AssistDecisionSummary,
   ModelInvocationBudget,
   RepairAttemptSummary,
   RepairBudget,
@@ -56,6 +62,7 @@ export function AgentActivityPanel({ emptyState }: AgentActivityPanelProps) {
     assistBudget,
     modelInvocationBudget,
     repairAttempts,
+    assistDecision,
     finalClassification,
     failureCode,
     failureMessage,
@@ -73,6 +80,7 @@ export function AgentActivityPanel({ emptyState }: AgentActivityPanelProps) {
       aria-label="Agent activity"
       data-testid="agent-activity-panel"
     >
+      <AssistDecisionRow assistDecision={assistDecision} />
       <WorkflowStatusRow
         state={workflow.state}
         mode={workflow.mode}
@@ -99,6 +107,108 @@ export function AgentActivityPanel({ emptyState }: AgentActivityPanelProps) {
         failureMessage={failureMessage}
       />
     </section>
+  );
+}
+
+// Issue #218 (W0.3-7): causal assist-decision row. Renders the explicit
+// orchestrator-owned gate result so the Studio distinguishes
+// deterministic-only runs from AI-assisted runs and surfaces the closed
+// reason code that justified the decision. The row never claims success;
+// the deterministic build/test + evidence-completeness invariants
+// continue to gate the verified-success affordance independently.
+function AssistDecisionRow({
+  assistDecision,
+}: {
+  assistDecision: AssistDecisionSummary | null;
+}) {
+  if (!assistDecision) {
+    return (
+      <div
+        className="rounded border border-line-2 bg-bg-2 p-3 text-xs"
+        data-testid="agent-activity-assist-decision"
+        data-assist-mode="pending"
+      >
+        <div className="text-xs font-medium uppercase tracking-wide text-text-dim">
+          Assist gate
+        </div>
+        <p className="mt-1 text-text-dim">
+          The orchestrator has not yet evaluated the assist-decision gate
+          for this run.
+        </p>
+      </div>
+    );
+  }
+
+  const outcomeLabel = ASSIST_DECISION_OUTCOME_LABELS[assistDecision.outcome];
+  const outcomeDescription =
+    ASSIST_DECISION_OUTCOME_DESCRIPTIONS[assistDecision.outcome];
+  const reasonLabel =
+    ASSIST_DECISION_REASON_LABELS[assistDecision.reasonCode];
+  const reasonDescription =
+    ASSIST_DECISION_REASON_DESCRIPTIONS[assistDecision.reasonCode];
+  const isAssistRequired = assistDecision.outcome === "assist_required";
+  const badgeClass = isAssistRequired
+    ? "bg-warn/10 text-warn border-warn/40"
+    : "bg-success/10 text-success border-success/40";
+
+  return (
+    <div
+      className="rounded border border-line-2 bg-bg-2 p-3"
+      data-testid="agent-activity-assist-decision"
+      data-assist-mode={
+        isAssistRequired ? "ai-assisted" : "deterministic-only"
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-text-dim">
+          Assist gate
+        </span>
+        <span
+          className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${badgeClass}`}
+          data-testid="agent-activity-assist-mode-badge"
+        >
+          {outcomeLabel}
+        </span>
+        {isAssistRequired && assistDecision.selectedAgentRole ? (
+          <span
+            className="rounded bg-bg-3 px-1.5 py-0.5 font-mono text-[10px] text-text-dim"
+            data-testid="agent-activity-assist-agent-role"
+          >
+            {ASSIST_DECISION_AGENT_ROLE_LABELS[assistDecision.selectedAgentRole]}
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 text-xs text-text-dim">{outcomeDescription}</p>
+      <dl className="mt-3 grid gap-2 text-xs md:grid-cols-2">
+        <div>
+          <dt className="text-text-dim">Reason</dt>
+          <dd
+            className="mt-0.5 font-medium text-text"
+            data-testid="agent-activity-assist-reason"
+          >
+            {reasonLabel}
+          </dd>
+          <p className="mt-1 text-text-dim">{reasonDescription}</p>
+        </div>
+        <div>
+          <dt className="text-text-dim">Decided at</dt>
+          <dd
+            className="mt-0.5 font-mono text-text"
+            data-testid="agent-activity-assist-decided-at"
+          >
+            {assistDecision.decidedAt}
+          </dd>
+        </div>
+      </dl>
+      {assistDecision.rationale ? (
+        <p
+          className="mt-2 text-xs italic text-text-dim"
+          data-testid="agent-activity-assist-rationale"
+        >
+          {assistDecision.rationale}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -45,6 +45,7 @@ function makeWorkflow(
     assistBudget: { limit: 1, used: 0, remaining: 1 },
     modelInvocationBudget: { limit: 6, used: 0, remaining: 6 },
     repairAttempts: [],
+    assistDecision: null,
     finalClassification: null,
     failureCode: null,
     failureMessage: null,
@@ -274,5 +275,171 @@ describe("AgentActivityPanel", () => {
       <AgentActivityPanel emptyState={{ title: "Empty", message: "Empty" }} />,
     );
     expect(screen.getByTestId("agent-activity-final-success")).toBeDefined();
+  });
+
+  // Issue #218 (W0.3-7): the assist-decision row is the causal hinge of
+  // the Agent panel. The Studio must distinguish the three observable
+  // states (pending, deterministic-only, AI-assisted) and never invent
+  // an outcome the BFF did not publish.
+  it("renders the assist-decision pending row when the gate has not fired", () => {
+    useTransformationRunMock.mockReturnValue({
+      state: {
+        ...baseState,
+        phase: "running",
+        workflow: makeWorkflow({ assistDecision: null }),
+      },
+    });
+    render(
+      <AgentActivityPanel emptyState={{ title: "Empty", message: "Empty" }} />,
+    );
+    const row = screen.getByTestId("agent-activity-assist-decision");
+    expect(row.getAttribute("data-assist-mode")).toBe("pending");
+    expect(row.textContent).toContain(
+      "has not yet evaluated the assist-decision gate",
+    );
+    expect(
+      screen.queryByTestId("agent-activity-assist-mode-badge"),
+    ).toBeNull();
+  });
+
+  it("renders the deterministic-only badge when assist is not required", () => {
+    useTransformationRunMock.mockReturnValue({
+      state: {
+        ...baseState,
+        phase: "completed",
+        workflow: makeWorkflow({
+          finalClassification: "success",
+          assistDecision: {
+            outcome: "assist_not_required",
+            reasonCode: "caller_did_not_opt_in",
+            decidedAt: "2026-05-17T12:00:00Z",
+            selectedAgentRole: null,
+            affectedArtifactRefs: [],
+            repairBudgetSnapshot: { limit: 3, used: 0, remaining: 3 },
+            assistBudgetSnapshot: { limit: 1, used: 0, remaining: 1 },
+            modelInvocationBudgetSnapshot: {
+              limit: 6,
+              used: 0,
+              remaining: 6,
+            },
+            rationale: null,
+          },
+        }),
+      },
+    });
+    render(
+      <AgentActivityPanel emptyState={{ title: "Empty", message: "Empty" }} />,
+    );
+    const row = screen.getByTestId("agent-activity-assist-decision");
+    expect(row.getAttribute("data-assist-mode")).toBe("deterministic-only");
+    expect(
+      screen.getByTestId("agent-activity-assist-mode-badge").textContent,
+    ).toContain("Deterministic-only run");
+    expect(
+      screen.getByTestId("agent-activity-assist-reason").textContent,
+    ).toBe("Caller did not opt in");
+    expect(
+      screen.getByTestId("agent-activity-assist-decided-at").textContent,
+    ).toBe("2026-05-17T12:00:00Z");
+    // No agent-role chip when assist was not required.
+    expect(
+      screen.queryByTestId("agent-activity-assist-agent-role"),
+    ).toBeNull();
+    // The deterministic-only badge must never imply success on its own —
+    // the success row only appears when finalClassification is success.
+    expect(
+      screen.getByTestId("agent-activity-final-success"),
+    ).toBeDefined();
+  });
+
+  it("renders the AI-assisted badge with reason, agent role, and rationale", () => {
+    useTransformationRunMock.mockReturnValue({
+      state: {
+        ...baseState,
+        phase: "running",
+        workflow: makeWorkflow({
+          activeAgent: "transformation_agent",
+          assistBudget: { limit: 1, used: 1, remaining: 0 },
+          modelInvocationBudget: { limit: 6, used: 1, remaining: 5 },
+          assistDecision: {
+            outcome: "assist_required",
+            reasonCode: "semantic_ir_bounded_ambiguity",
+            decidedAt: "2026-05-17T12:34:56Z",
+            selectedAgentRole: "transformation_agent",
+            affectedArtifactRefs: [
+              {
+                sha256: "a".repeat(64),
+                byteSize: 64,
+                kind: "semantic-ir",
+              },
+            ],
+            repairBudgetSnapshot: { limit: 3, used: 0, remaining: 3 },
+            assistBudgetSnapshot: { limit: 1, used: 1, remaining: 0 },
+            modelInvocationBudgetSnapshot: {
+              limit: 6,
+              used: 1,
+              remaining: 5,
+            },
+            rationale: "Bounded ambiguity in OCCURS-resolution.",
+          },
+        }),
+      },
+    });
+    render(
+      <AgentActivityPanel emptyState={{ title: "Empty", message: "Empty" }} />,
+    );
+    const row = screen.getByTestId("agent-activity-assist-decision");
+    expect(row.getAttribute("data-assist-mode")).toBe("ai-assisted");
+    expect(
+      screen.getByTestId("agent-activity-assist-mode-badge").textContent,
+    ).toContain("AI-assisted run");
+    expect(
+      screen.getByTestId("agent-activity-assist-agent-role").textContent,
+    ).toContain("Transformation Agent");
+    expect(
+      screen.getByTestId("agent-activity-assist-reason").textContent,
+    ).toBe("Semantic IR bounded ambiguity");
+    expect(
+      screen.getByTestId("agent-activity-assist-rationale").textContent,
+    ).toContain("Bounded ambiguity in OCCURS-resolution.");
+    // Even on an AI-assisted run the verified-success affordance must
+    // remain absent until the deterministic gates publish success.
+    expect(
+      screen.queryByTestId("agent-activity-final-success"),
+    ).toBeNull();
+  });
+
+  it("renders the assist-budget-exhausted reason as AI assist did not activate", () => {
+    useTransformationRunMock.mockReturnValue({
+      state: {
+        ...baseState,
+        phase: "completed",
+        workflow: makeWorkflow({
+          assistDecision: {
+            outcome: "assist_not_required",
+            reasonCode: "assist_budget_exhausted",
+            decidedAt: "2026-05-17T13:00:00Z",
+            selectedAgentRole: null,
+            affectedArtifactRefs: [],
+            repairBudgetSnapshot: { limit: 3, used: 0, remaining: 3 },
+            assistBudgetSnapshot: { limit: 1, used: 1, remaining: 0 },
+            modelInvocationBudgetSnapshot: {
+              limit: 6,
+              used: 0,
+              remaining: 6,
+            },
+            rationale: null,
+          },
+        }),
+      },
+    });
+    render(
+      <AgentActivityPanel emptyState={{ title: "Empty", message: "Empty" }} />,
+    );
+    const row = screen.getByTestId("agent-activity-assist-decision");
+    expect(row.getAttribute("data-assist-mode")).toBe("deterministic-only");
+    expect(
+      screen.getByTestId("agent-activity-assist-reason").textContent,
+    ).toBe("Assist budget exhausted");
   });
 });

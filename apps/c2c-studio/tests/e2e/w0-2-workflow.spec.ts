@@ -34,6 +34,9 @@ interface WorkflowView {
   agentAttemptCount: number;
   repairBudget: { limit: number; used: number; remaining: number } | null;
   repairAttempts: unknown[];
+  // Issue #218 (W0.3-7): the assist-decision gate result. ``null`` on
+  // FILEIO-UNSUPPORTED because the run terminates before the gate fires.
+  assistDecision: unknown | null;
   finalClassification: 'success' | 'blocked' | 'failed' | 'cancelled' | 'incomplete' | null;
   failureCode: string | null;
   generatedJavaRef: { sha256: string; byteSize: number; kind: string } | null;
@@ -127,6 +130,11 @@ test.describe('W0.2 release-gate browser acceptance', () => {
     expect(workflow.failureCode).toBe('unsupported_cobol');
     expect(workflow.generatedJavaRef).toBeNull();
     expect(workflow.state).toBe('final_classification');
+    // Issue #218 (W0.3-7): unsupported source terminates the run before
+    // the assist-decision gate fires. The contract MUST surface a null
+    // assistDecision so the UI can honestly render the pending state
+    // rather than fabricating an outcome.
+    expect(workflow.assistDecision).toBeNull();
 
     // The Studio must not present any "Verified" affordance.
     await expect(page.getByText('Verified', { exact: true })).toHaveCount(0);

@@ -1,4 +1,11 @@
-import { W02ActiveAgent, W02RepairDecision, W02UiErrorCode } from '../../types/api';
+import {
+  AssistDecisionAgentRole,
+  AssistDecisionOutcome,
+  AssistDecisionReasonCode,
+  W02ActiveAgent,
+  W02RepairDecision,
+  W02UiErrorCode,
+} from '../../types/api';
 
 // Issue #173: human-readable labels for the W0.2 workflow contract enums.
 // Centralized here so all panels render consistent copy when the UI surfaces
@@ -88,3 +95,51 @@ export const W02_ERROR_DESCRIPTIONS: Record<W02UiErrorCode, string> = {
 export function repairBudgetText(used: number, limit: number): string {
   return `${used} / ${limit} attempts used`;
 }
+
+// Issue #218 (W0.3-7): UI-safe labels for the closed-set assist-decision
+// gate result. Used by the AgentActivityPanel to render "Deterministic-only"
+// vs "AI-assisted" causally — never decoratively. The reason descriptions
+// stay in product language; they do not leak internal service identifiers.
+
+export const ASSIST_DECISION_OUTCOME_LABELS: Record<AssistDecisionOutcome, string> = {
+  assist_required: 'AI-assisted run',
+  assist_not_required: 'Deterministic-only run',
+};
+
+export const ASSIST_DECISION_OUTCOME_DESCRIPTIONS: Record<AssistDecisionOutcome, string> = {
+  assist_required:
+    'The orchestrator activated a productive AI assist step for this run. Deterministic verification gates still decide the final classification.',
+  assist_not_required:
+    'The orchestrator completed this run without activating any productive AI assist step. The deterministic baseline was sufficient.',
+};
+
+export const ASSIST_DECISION_REASON_LABELS: Record<AssistDecisionReasonCode, string> = {
+  semantic_ir_bounded_ambiguity: 'Semantic IR bounded ambiguity',
+  translation_unsupported_repairable: 'Translation unsupported but repairable',
+  baseline_open_assumptions: 'Baseline left open assumptions',
+  deterministic_candidate_low_confidence: 'Deterministic candidate low confidence',
+  caller_explicit_opt_in: 'Caller explicitly opted in',
+  caller_did_not_opt_in: 'Caller did not opt in',
+  assist_budget_exhausted: 'Assist budget exhausted',
+};
+
+export const ASSIST_DECISION_REASON_DESCRIPTIONS: Record<AssistDecisionReasonCode, string> = {
+  semantic_ir_bounded_ambiguity:
+    'The deterministic semantic IR step finished but flagged bounded ambiguity that warrants a productive assist attempt.',
+  translation_unsupported_repairable:
+    'The deterministic translator could not complete on its own, but the gap is repairable by a productive assist step.',
+  baseline_open_assumptions:
+    'The deterministic baseline produced open assumptions that the assist step is expected to resolve.',
+  deterministic_candidate_low_confidence:
+    'A deterministic candidate exists, but uncertainty markers were strong enough to justify an assist attempt.',
+  caller_explicit_opt_in:
+    'The caller explicitly opted in to productive AI assist for this run.',
+  caller_did_not_opt_in:
+    'The caller did not opt in to productive AI assist, so the run remained on the deterministic baseline.',
+  assist_budget_exhausted:
+    'The caller opted in but the per-run assist budget had no units left, so the deterministic baseline is the final candidate.',
+};
+
+export const ASSIST_DECISION_AGENT_ROLE_LABELS: Record<AssistDecisionAgentRole, string> = {
+  transformation_agent: 'Transformation Agent',
+};

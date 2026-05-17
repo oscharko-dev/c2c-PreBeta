@@ -29,6 +29,11 @@ import {
   W02ActiveAgent,
   W02RepairDecision,
   RunFinalClassification,
+  AssistDecisionSummary,
+  AssistDecisionOutcome,
+  AssistDecisionReasonCode,
+  AssistDecisionAgentRole,
+  AssistDecisionArtifactRef,
 } from "../types/api";
 import { TransformRequest } from "../types/transform-request";
 
@@ -662,6 +667,117 @@ function isWorkflowArtifactRefPayload(
   );
 }
 
+// Issue #218 (W0.3-7): closed-set assist-decision guards. The BFF drops
+// any unknown outcome / reason / agent-role at sanitisation time and the
+// Studio enforces the same closed sets here so a regression upstream
+// surfaces as a contract error rather than rendering as an unknown
+// label. Predicates intentionally narrow the value's union type.
+const ASSIST_DECISION_OUTCOMES: ReadonlySet<AssistDecisionOutcome> = new Set([
+  "assist_required",
+  "assist_not_required",
+]);
+
+const ASSIST_DECISION_REASON_CODES: ReadonlySet<AssistDecisionReasonCode> =
+  new Set([
+    "semantic_ir_bounded_ambiguity",
+    "translation_unsupported_repairable",
+    "baseline_open_assumptions",
+    "deterministic_candidate_low_confidence",
+    "caller_explicit_opt_in",
+    "caller_did_not_opt_in",
+    "assist_budget_exhausted",
+  ]);
+
+const ASSIST_DECISION_AGENT_ROLES: ReadonlySet<AssistDecisionAgentRole> =
+  new Set(["transformation_agent"]);
+
+function isAssistDecisionOutcome(
+  value: unknown,
+): value is AssistDecisionOutcome {
+  return (
+    typeof value === "string" &&
+    ASSIST_DECISION_OUTCOMES.has(value as AssistDecisionOutcome)
+  );
+}
+
+function isAssistDecisionReasonCode(
+  value: unknown,
+): value is AssistDecisionReasonCode {
+  return (
+    typeof value === "string" &&
+    ASSIST_DECISION_REASON_CODES.has(value as AssistDecisionReasonCode)
+  );
+}
+
+function isAssistDecisionAgentRole(
+  value: unknown,
+): value is AssistDecisionAgentRole {
+  return (
+    typeof value === "string" &&
+    ASSIST_DECISION_AGENT_ROLES.has(value as AssistDecisionAgentRole)
+  );
+}
+
+function isAssistDecisionArtifactRefPayload(
+  payload: unknown,
+): payload is AssistDecisionArtifactRef {
+  if (!isRecord(payload)) return false;
+  return (
+    (payload.sha256 === undefined || isString(payload.sha256)) &&
+    (payload.byteSize === undefined ||
+      isNonNegativeInteger(payload.byteSize)) &&
+    (payload.kind === undefined || isString(payload.kind)) &&
+    (payload.path === undefined || isString(payload.path))
+  );
+}
+
+function isAssistDecisionSummaryPayload(
+  payload: unknown,
+): payload is AssistDecisionSummary {
+  if (!isRecord(payload)) return false;
+  if (!isAssistDecisionOutcome(payload.outcome)) return false;
+  if (!isAssistDecisionReasonCode(payload.reasonCode)) return false;
+  if (!isString(payload.decidedAt) || payload.decidedAt.length === 0) {
+    return false;
+  }
+  // ``assist_required`` MUST carry a non-null agent role; ``assist_not_required``
+  // MUST carry a null agent role. The orchestrator owns this invariant; the
+  // Studio rejects any drift loudly.
+  if (payload.outcome === "assist_required") {
+    if (!isAssistDecisionAgentRole(payload.selectedAgentRole)) return false;
+  } else if (payload.selectedAgentRole !== null) {
+    return false;
+  }
+  if (
+    !Array.isArray(payload.affectedArtifactRefs) ||
+    !payload.affectedArtifactRefs.every(isAssistDecisionArtifactRefPayload)
+  ) {
+    return false;
+  }
+  if (
+    payload.repairBudgetSnapshot !== null &&
+    !isRepairBudgetPayload(payload.repairBudgetSnapshot)
+  ) {
+    return false;
+  }
+  if (
+    payload.assistBudgetSnapshot !== null &&
+    !isAssistBudgetPayload(payload.assistBudgetSnapshot)
+  ) {
+    return false;
+  }
+  if (
+    payload.modelInvocationBudgetSnapshot !== null &&
+    !isModelInvocationBudgetPayload(payload.modelInvocationBudgetSnapshot)
+  ) {
+    return false;
+  }
+  if (payload.rationale !== null && !isString(payload.rationale)) {
+    return false;
+  }
+  return true;
+}
+
 // W0.2 contract fields validate as ``undefined`` | ``null`` | a typed value.
 // The production BFF always emits explicit ``null``/``0`` (see runSummary in
 // services/c2c-bff/src/server.ts) — but legacy mocks/fixtures can omit the
@@ -754,6 +870,11 @@ function isRunWorkflowViewPayload(
       isModelInvocationBudgetPayload(payload.modelInvocationBudget)) &&
     Array.isArray(payload.repairAttempts) &&
     payload.repairAttempts.every(isRepairAttemptSummaryPayload) &&
+    // Issue #218 (W0.3-7): explicit assist-decision gate. ``null`` while
+    // the orchestrator has not yet evaluated the gate; otherwise a closed
+    // outcome/reason/agent-role triple is required.
+    (payload.assistDecision === null ||
+      isAssistDecisionSummaryPayload(payload.assistDecision)) &&
     (payload.finalClassification === null ||
       isRunFinalClassification(payload.finalClassification)) &&
     (payload.failureCode === null || isW02UiErrorCode(payload.failureCode)) &&

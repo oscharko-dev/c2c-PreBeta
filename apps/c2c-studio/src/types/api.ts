@@ -363,6 +363,51 @@ export interface WorkflowArtifactRef {
   kind: string;
 }
 
+// Issue #218 (W0.3-7): the closed-set assist-decision surface the BFF
+// publishes on the workflow envelope. Mirrors the BFF types in
+// services/c2c-bff/src/server.ts. The Studio refuses to render any
+// outcome / reason-code / agent-role value outside these enums so an
+// unknown upstream value is surfaced honestly as a contract error
+// rather than silently mis-displayed.
+export type AssistDecisionOutcome =
+  | "assist_required"
+  | "assist_not_required";
+
+// Deterministic uncertainty reason codes (Issue #215) followed by
+// caller-driven baseline codes (Issue #214) and the W0.3-5
+// hard-termination signal (Issue #216): the caller opted in but the
+// per-run assist budget is exhausted so the deterministic baseline is
+// the final candidate.
+export type AssistDecisionReasonCode =
+  | "semantic_ir_bounded_ambiguity"
+  | "translation_unsupported_repairable"
+  | "baseline_open_assumptions"
+  | "deterministic_candidate_low_confidence"
+  | "caller_explicit_opt_in"
+  | "caller_did_not_opt_in"
+  | "assist_budget_exhausted";
+
+export type AssistDecisionAgentRole = "transformation_agent";
+
+export interface AssistDecisionArtifactRef {
+  sha256?: string;
+  byteSize?: number;
+  kind?: string;
+  path?: string;
+}
+
+export interface AssistDecisionSummary {
+  outcome: AssistDecisionOutcome;
+  reasonCode: AssistDecisionReasonCode;
+  decidedAt: string;
+  selectedAgentRole: AssistDecisionAgentRole | null;
+  affectedArtifactRefs: AssistDecisionArtifactRef[];
+  repairBudgetSnapshot: RepairBudget | null;
+  assistBudgetSnapshot: AssistBudget | null;
+  modelInvocationBudgetSnapshot: ModelInvocationBudget | null;
+  rationale: string | null;
+}
+
 export interface RunWorkflowView {
   runId: string;
   programId: string;
@@ -380,6 +425,12 @@ export interface RunWorkflowView {
   assistBudget: AssistBudget | null;
   modelInvocationBudget: ModelInvocationBudget | null;
   repairAttempts: RepairAttemptSummary[];
+  // Issue #218 (W0.3-7): explicit assist-decision gate result. ``null``
+  // while the run has not yet reached the gate; an ``assist_not_required``
+  // outcome marks the run as deterministic-only, an ``assist_required``
+  // outcome marks it as AI-assisted with the selected agent role and the
+  // reason code that justified activation.
+  assistDecision: AssistDecisionSummary | null;
   finalClassification: RunFinalClassification | null;
   failureCode: W02UiErrorCode | null;
   failureMessage: string | null;
