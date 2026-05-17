@@ -424,13 +424,51 @@ ASSIST_OUTCOMES: tuple[str, ...] = (
     ASSIST_OUTCOME_NOT_REQUIRED,
 )
 
-# Closed set of reason codes for the W0.3-3 baseline. Future waves extend
-# this tuple; consumers must treat any code not listed here as opaque
-# rather than rendering an unknown reason silently.
+# Closed set of reason codes. The first four entries are the deterministic
+# uncertainty criteria introduced in Issue #215 (W0.3-4); the last two are
+# the caller-driven baseline introduced in Issue #214 (W0.3-3). Consumers
+# must treat any code not listed here as opaque rather than rendering an
+# unknown reason silently.
+#
+# When more than one uncertainty marker is present on a run, the workflow
+# picks the most specific code from this priority order (top to bottom):
+#
+#   1. ``semantic_ir_bounded_ambiguity`` — the Semantic IR document carries
+#      an explicit bounded-ambiguity marker, so the deterministic baseline
+#      had to commit to one of several semantically valid interpretations.
+#   2. ``translation_unsupported_repairable`` — the deterministic generator
+#      reported ``unsupportedFeatures`` it could not lower, but the run is
+#      otherwise repairable through productive assist.
+#   3. ``baseline_open_assumptions`` — the deterministic baseline emitted
+#      ``openAssumptions`` so the candidate is honest about what it had to
+#      assume.
+#   4. ``deterministic_candidate_low_confidence`` — the deterministic
+#      candidate carries explicit low-confidence markers.
+#   5. ``caller_explicit_opt_in`` — caller opted in but the deterministic
+#      baseline produced no uncertainty markers; assist runs because the
+#      caller asked, not because of detected uncertainty.
+#   6. ``caller_did_not_opt_in`` — caller did not opt into productive
+#      assist; deterministic baseline is the final candidate.
+ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY = "semantic_ir_bounded_ambiguity"
+ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE = "translation_unsupported_repairable"
+ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS = "baseline_open_assumptions"
+ASSIST_REASON_DETERMINISTIC_CANDIDATE_LOW_CONFIDENCE = "deterministic_candidate_low_confidence"
 ASSIST_REASON_CALLER_EXPLICIT_OPT_IN = "caller_explicit_opt_in"
 ASSIST_REASON_CALLER_DID_NOT_OPT_IN = "caller_did_not_opt_in"
 
+# Deterministic uncertainty reason codes in priority order (most specific
+# first). The workflow scans markers from the IR and the generated baseline
+# and records the first match. Order is part of the contract: shuffling it
+# changes which code consumers see and would be a v1 bump.
+ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES: tuple[str, ...] = (
+    ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY,
+    ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE,
+    ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+    ASSIST_REASON_DETERMINISTIC_CANDIDATE_LOW_CONFIDENCE,
+)
+
 ASSIST_REASON_CODES: tuple[str, ...] = (
+    *ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES,
     ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
     ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
 )

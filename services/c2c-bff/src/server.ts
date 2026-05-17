@@ -1547,7 +1547,15 @@ function safeArtifactRef(value: unknown): { sha256: string; byteSize: number; ki
 // invents values for these fields and silently drops anything it does not
 // recognise so the UI cannot render an unknown reason.
 export type AssistDecisionOutcome = 'assist_required' | 'assist_not_required';
+// Closed reason-code set mirrors the orchestrator contract. The first four
+// entries are the deterministic uncertainty criteria (Issue #215); the
+// last two are the caller-driven baseline (Issue #214). The BFF never
+// invents values for this field.
 export type AssistDecisionReasonCode =
+  | 'semantic_ir_bounded_ambiguity'
+  | 'translation_unsupported_repairable'
+  | 'baseline_open_assumptions'
+  | 'deterministic_candidate_low_confidence'
   | 'caller_explicit_opt_in'
   | 'caller_did_not_opt_in';
 export type AssistDecisionAgentRole = 'transformation_agent';
@@ -1606,6 +1614,10 @@ const ASSIST_DECISION_OUTCOMES: ReadonlySet<AssistDecisionOutcome> = new Set([
   'assist_not_required',
 ]);
 const ASSIST_DECISION_REASONS: ReadonlySet<AssistDecisionReasonCode> = new Set([
+  'semantic_ir_bounded_ambiguity',
+  'translation_unsupported_repairable',
+  'baseline_open_assumptions',
+  'deterministic_candidate_low_confidence',
   'caller_explicit_opt_in',
   'caller_did_not_opt_in',
 ]);

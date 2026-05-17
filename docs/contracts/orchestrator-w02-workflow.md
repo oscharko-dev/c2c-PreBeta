@@ -118,10 +118,11 @@ contract, persists the updated contract to the artifact store, and emits a
 Harness event so consumers do not have to infer AI activation from
 `agentAttemptCount > 0` or Model Gateway state.
 
-The gate is intentionally minimal in W0.3-3: it captures the *current*
-caller-opt-in semantics in a stable, recordable shape. Issue #215 (W0.3-4)
-extends the closed reason-code set with deterministic uncertainty criteria
-without changing the contract shape.
+The W0.3-3 gate captured the *current* caller-opt-in semantics in a stable,
+recordable shape. Issue #215 (W0.3-4) extends the closed reason-code set
+with deterministic uncertainty criteria sourced from the Semantic IR and
+the deterministic baseline; the contract shape, outcomes, and event types
+are unchanged.
 
 ### Contract shape
 
@@ -149,11 +150,36 @@ failed before the deterministic baseline).
 | Field | Values |
 |-------|--------|
 | `outcome` | `assist_required`, `assist_not_required` |
-| `reasonCode` | `caller_explicit_opt_in`, `caller_did_not_opt_in` |
+| `reasonCode` | `semantic_ir_bounded_ambiguity`, `translation_unsupported_repairable`, `baseline_open_assumptions`, `deterministic_candidate_low_confidence`, `caller_explicit_opt_in`, `caller_did_not_opt_in` |
 | `selectedAgentRole` | `transformation_agent`, or omitted when `outcome = assist_not_required` |
 
 Consumers MUST drop any value outside these closed sets rather than rendering
 it. The BFF enforces this on `GET /api/v0/runs/{runId}/workflow`.
+
+### Deterministic uncertainty reason codes (W0.3-4 / Issue #215)
+
+When the caller opted into productive assist (`useTransformationAgent = true`),
+the gate scans the Semantic IR and the deterministic baseline for the
+following uncertainty markers and records the highest-priority match (top to
+bottom) as the `reasonCode`. When no marker is detected the gate falls back to
+`caller_explicit_opt_in`. When the caller did not opt in the gate always
+records `caller_did_not_opt_in` and surfaces any detected markers on the
+decision `rationale` only — the deterministic baseline remains the final
+candidate.
+
+| Priority | Reason code | Detected when |
+|----------|-------------|---------------|
+| 1 | `semantic_ir_bounded_ambiguity` | `ir.ambiguityMarkers` is a non-empty list — the Semantic IR has a bounded-ambiguity marker. |
+| 2 | `translation_unsupported_repairable` | `generatedProject.unsupportedFeatures` is a non-empty list — the deterministic generator could not lower one or more constructs but the run is otherwise repairable. |
+| 3 | `baseline_open_assumptions` | `generatedProject.openAssumptions` is a non-empty list — the deterministic baseline emitted explicit assumptions. |
+| 4 | `deterministic_candidate_low_confidence` | `generatedProject.lowConfidenceMarkers` is a non-empty list — the baseline annotated regions of its candidate as low-confidence. |
+
+The Orchestrator never invents an uncertainty marker on behalf of an
+upstream capability: every recorded reason code is backed by a real payload
+value. Productive transformation assist remains impossible without a reason
+code — the `AssistDecision` dataclass rejects an empty or unknown reason
+code at construction time, and the productive agent is invoked only after
+the gate has recorded an `assist_required` decision.
 
 ### Active step
 

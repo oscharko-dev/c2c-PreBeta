@@ -3231,6 +3231,144 @@ test('GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate w
   }
 });
 
+test('GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty reason codes', async () => {
+  // W0.3-4 (#215): the deterministic uncertainty reason codes — semantic
+  // IR bounded ambiguity, translation unsupported-but-repairable, baseline
+  // open assumptions, and deterministic candidate low-confidence — are
+  // members of the closed reasonCode set and must flow through the BFF
+  // sanitiser unchanged. The UI consumers depend on the specific code to
+  // render a causal "why AI was used" surface.
+  const uncertaintyCodes = [
+    'semantic_ir_bounded_ambiguity',
+    'translation_unsupported_repairable',
+    'baseline_open_assumptions',
+    'deterministic_candidate_low_confidence',
+  ] as const;
+  for (const reasonCode of uncertaintyCodes) {
+    const runStore = createRunStore();
+    const samples = stubSamples([FIXED_SAMPLE]);
+    const { client: orch } = stubOrchestrator({
+      workflow: {
+        status: 200,
+        body: {
+          runId: 'live-run-uncertain',
+          workflowId: 'w0-migration-v0',
+          programId: 'BRNCH01',
+          runStatus: 'in-progress',
+          status: 'complete',
+          source: 'live',
+          contract: {
+            currentState: 'transformation_agent_invoked',
+            activeStep: 'transformation-agent',
+            agentAttemptCount: 1,
+            repairBudget: { limit: 2, used: 0, remaining: 2 },
+            repairAttempts: [],
+            assistDecision: {
+              outcome: 'assist_required',
+              reasonCode,
+              decidedAt: '2026-05-17T12:00:00Z',
+              selectedAgentRole: 'transformation_agent',
+              affectedArtifactRefs: [
+                { sha256: 'b'.repeat(64), byteSize: 4096, kind: 'generated-project-manifest' },
+              ],
+              repairBudgetSnapshot: { limit: 2, used: 0, remaining: 2 },
+              rationale: `deterministic uncertainty marker: ${reasonCode}`,
+            },
+            finalClassification: null,
+            failureCode: null,
+            failureMessage: null,
+          },
+          contractRef: null,
+          missingArtifacts: [],
+        },
+      },
+    });
+    const handler = createApp({
+      config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+      samples,
+      orchestrator: orch,
+      evidence: disabledEvidence(),
+      runStore,
+    });
+    const server = await startTestServer(handler);
+    try {
+      const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+        method: 'POST',
+        body: { programId: 'BRNCH01' },
+      });
+      const startedBody = started.body as { runId: string };
+      const workflow = await fetchJson(
+        `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`
+      );
+      const body = workflow.body as { assistDecision: Record<string, unknown> | null };
+      assert.ok(
+        body.assistDecision,
+        `assistDecision must survive sanitisation for ${reasonCode}`
+      );
+      assert.equal(body.assistDecision.reasonCode, reasonCode);
+      assert.equal(body.assistDecision.outcome, 'assist_required');
+      assert.equal(body.assistDecision.selectedAgentRole, 'transformation_agent');
+    } finally {
+      await server.close();
+    }
+  }
+});
+
+test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason code', async () => {
+  // W0.3-4 (#215): every reason code outside the closed set MUST be
+  // sanitised to ``assistDecision: null`` so the UI cannot render an
+  // unrecognised reason silently. The check is symmetrical with the
+  // unknown-outcome case from #214.
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: 'complete',
+        contract: {
+          currentState: 'baseline_generation_attempted',
+          activeStep: 'assist-decision',
+          agentAttemptCount: 0,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          repairAttempts: [],
+          assistDecision: {
+            outcome: 'assist_required',
+            reasonCode: 'generator_felt_unsure',
+            decidedAt: '2026-05-17T12:00:00Z',
+            selectedAgentRole: 'transformation_agent',
+          },
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`
+    );
+    const body = workflow.body as { assistDecision: unknown };
+    assert.equal(body.assistDecision, null);
+  } finally {
+    await server.close();
+  }
+});
+
 test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcome', async () => {
   // W0.3 (#214): the BFF must never surface an unrecognised assist-decision
   // outcome to the UI. Any contract that carries an unknown outcome is

@@ -516,5 +516,255 @@ class W03AssistDecisionGateTests(TransformationAgentWorkflowIntegrationTests):
         )
 
 
+class W03DeterministicUncertaintyReasonTests(TransformationAgentWorkflowIntegrationTests):
+    """W0.3-4 (#215): deterministic uncertainty reason codes drive assist activation.
+
+    The gate must record the most specific deterministic uncertainty marker
+    (IR bounded ambiguity, unsupported-but-repairable, open assumptions, or
+    low-confidence) as the reason code when the caller opts in. When the
+    caller did not opt in the deterministic baseline remains the final
+    candidate regardless of detected markers.
+    """
+
+    def _run_with_opt_in(
+        self,
+        *,
+        ir_overrides: dict | None = None,
+        generated_project_overrides: dict | None = None,
+        use_transformation_agent: bool = True,
+    ):
+        runner, gateway, _store, _tmp = self._runner(
+            agent_response=_ok_model_response()
+        )
+        if ir_overrides:
+            gateway.responses["cobol.ir"]["ir"] = {
+                **gateway.responses["cobol.ir"]["ir"],
+                **ir_overrides,
+            }
+        if generated_project_overrides:
+            gateway.responses["java.generator"]["generatedProject"] = {
+                **gateway.responses["java.generator"]["generatedProject"],
+                **generated_project_overrides,
+            }
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            use_transformation_agent=use_transformation_agent,
+        )
+        result = runner.run(
+            context=context,
+            input_ref={"uri": "urn:src/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+        return result, gateway
+
+    def test_ir_bounded_ambiguity_marker_drives_reason_code(self) -> None:
+        result, _ = self._run_with_opt_in(
+            ir_overrides={"ambiguityMarkers": [{"code": "AMB-01", "loc": "WORKING-STORAGE"}]},
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["outcome"], "assist_required")
+        self.assertEqual(decision["reasonCode"], "semantic_ir_bounded_ambiguity")
+        self.assertEqual(decision["selectedAgentRole"], "transformation_agent")
+        # The rationale should name the detected marker so audit consumers
+        # can see why the gate fired.
+        self.assertIn("semantic_ir_bounded_ambiguity", decision["rationale"])
+
+    def test_unsupported_features_marker_drives_reason_code(self) -> None:
+        result, _ = self._run_with_opt_in(
+            generated_project_overrides={"unsupportedFeatures": ["GO TO"]},
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["outcome"], "assist_required")
+        self.assertEqual(decision["reasonCode"], "translation_unsupported_repairable")
+        self.assertIn("translation_unsupported_repairable", decision["rationale"])
+
+    def test_open_assumptions_marker_drives_reason_code(self) -> None:
+        result, _ = self._run_with_opt_in(
+            generated_project_overrides={
+                "openAssumptions": [{"id": "OA-01", "description": "Assumed 38-digit decimal precision."}],
+            },
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["outcome"], "assist_required")
+        self.assertEqual(decision["reasonCode"], "baseline_open_assumptions")
+        self.assertIn("baseline_open_assumptions", decision["rationale"])
+
+    def test_low_confidence_marker_drives_reason_code(self) -> None:
+        result, _ = self._run_with_opt_in(
+            generated_project_overrides={
+                "lowConfidenceMarkers": [{"id": "LC-01", "file": "src/CASE01.java"}],
+            },
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["outcome"], "assist_required")
+        self.assertEqual(
+            decision["reasonCode"], "deterministic_candidate_low_confidence"
+        )
+        self.assertIn(
+            "deterministic_candidate_low_confidence", decision["rationale"]
+        )
+
+    def test_priority_ir_ambiguity_beats_other_markers(self) -> None:
+        # When multiple markers fire the gate records the highest-priority
+        # one: IR bounded ambiguity wins over unsupported, open assumptions,
+        # and low-confidence markers.
+        result, _ = self._run_with_opt_in(
+            ir_overrides={"ambiguityMarkers": [{"code": "AMB-01"}]},
+            generated_project_overrides={
+                "unsupportedFeatures": ["GO TO"],
+                "openAssumptions": [{"id": "OA-01"}],
+                "lowConfidenceMarkers": [{"id": "LC-01"}],
+            },
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["reasonCode"], "semantic_ir_bounded_ambiguity")
+        # All four detected markers must appear in the rationale so the
+        # Evidence Pack consumer can see the full set without changing the
+        # contract shape.
+        rationale = decision["rationale"]
+        self.assertIn("semantic_ir_bounded_ambiguity", rationale)
+        self.assertIn("translation_unsupported_repairable", rationale)
+        self.assertIn("baseline_open_assumptions", rationale)
+        self.assertIn("deterministic_candidate_low_confidence", rationale)
+
+    def test_priority_unsupported_beats_assumptions_and_low_confidence(self) -> None:
+        result, _ = self._run_with_opt_in(
+            generated_project_overrides={
+                "unsupportedFeatures": ["EXAMINE"],
+                "openAssumptions": [{"id": "OA-01"}],
+                "lowConfidenceMarkers": [{"id": "LC-01"}],
+            },
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(
+            decision["reasonCode"], "translation_unsupported_repairable"
+        )
+
+    def test_priority_open_assumptions_beats_low_confidence(self) -> None:
+        result, _ = self._run_with_opt_in(
+            generated_project_overrides={
+                "openAssumptions": [{"id": "OA-01"}],
+                "lowConfidenceMarkers": [{"id": "LC-01"}],
+            },
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["reasonCode"], "baseline_open_assumptions")
+
+    def test_opt_in_without_markers_records_caller_explicit_opt_in(self) -> None:
+        # No uncertainty markers on the baseline: the gate falls back to
+        # caller_explicit_opt_in. Acceptance-criteria bullet "assist runs
+        # because the caller asked, not because of infrastructure availability."
+        result, _ = self._run_with_opt_in()
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["outcome"], "assist_required")
+        self.assertEqual(decision["reasonCode"], "caller_explicit_opt_in")
+        self.assertIn("no deterministic uncertainty markers", decision["rationale"])
+
+    def test_no_opt_in_keeps_baseline_even_when_markers_present(self) -> None:
+        # When the caller did not opt in the deterministic baseline remains
+        # the final candidate. Detected markers are surfaced on the
+        # rationale for auditability but never flip the outcome.
+        result, _ = self._run_with_opt_in(
+            ir_overrides={"ambiguityMarkers": [{"code": "AMB-01"}]},
+            generated_project_overrides={"unsupportedFeatures": ["GO TO"]},
+            use_transformation_agent=False,
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["outcome"], "assist_not_required")
+        self.assertEqual(decision["reasonCode"], "caller_did_not_opt_in")
+        self.assertNotIn(
+            "selectedAgentRole",
+            decision,
+            "assist_not_required decisions must not name a selected agent role",
+        )
+        rationale = decision["rationale"]
+        self.assertIn("semantic_ir_bounded_ambiguity", rationale)
+        self.assertIn("translation_unsupported_repairable", rationale)
+        # State history must NOT include the productive-agent transition.
+        states = [
+            entry["state"]
+            for entry in result["workflowContract"]["stateHistory"]
+        ]
+        self.assertNotIn("transformation_agent_invoked", states)
+
+    def test_empty_marker_lists_are_ignored(self) -> None:
+        # Empty arrays must not count as markers: the deterministic
+        # baseline emitted nothing notable, so the fallback applies.
+        result, _ = self._run_with_opt_in(
+            ir_overrides={"ambiguityMarkers": []},
+            generated_project_overrides={
+                "unsupportedFeatures": [],
+                "openAssumptions": [],
+                "lowConfidenceMarkers": [],
+            },
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["reasonCode"], "caller_explicit_opt_in")
+
+    def test_non_list_marker_values_are_ignored(self) -> None:
+        # Scalars, dicts, and strings are not lists and must not count as
+        # markers — the helper must not coerce arbitrary metadata.
+        result, _ = self._run_with_opt_in(
+            ir_overrides={"ambiguityMarkers": "AMB-01"},
+            generated_project_overrides={
+                "unsupportedFeatures": {"feature": "GO TO"},
+                "openAssumptions": None,
+                "lowConfidenceMarkers": 0,
+            },
+        )
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertEqual(decision["reasonCode"], "caller_explicit_opt_in")
+
+    def test_uncertainty_event_carries_specific_reason_code(self) -> None:
+        result, gateway = self._run_with_opt_in(
+            generated_project_overrides={"unsupportedFeatures": ["GO TO"]},
+        )
+        decision_events = [
+            event
+            for event in gateway.posted_events
+            if isinstance(event, Mapping)
+            and str(event.get("eventType", "")).startswith(
+                "orchestrator.workflow.assist_decision."
+            )
+        ]
+        self.assertEqual(len(decision_events), 1)
+        event = decision_events[0]
+        self.assertEqual(
+            event["eventType"],
+            "orchestrator.workflow.assist_decision.assist_required",
+        )
+        output_payload = event.get("payload", {}).get("output") or {}
+        self.assertEqual(
+            output_payload.get("reasonCode"),
+            "translation_unsupported_repairable",
+        )
+
+    def test_deterministic_baseline_artifact_preserved_when_assist_runs(self) -> None:
+        # Acceptance-criteria bullet: "Deterministic baseline output still
+        # exists when transformation assist runs." The baseline manifest
+        # must be persisted before the agent's manifest replaces the
+        # generatedJavaRef on the contract.
+        result, _ = self._run_with_opt_in(
+            generated_project_overrides={"unsupportedFeatures": ["GO TO"]},
+        )
+        contract = result["workflowContract"]
+        decision = contract["assistDecision"]
+        self.assertTrue(
+            decision["affectedArtifactRefs"],
+            "assist decision must reference the deterministic baseline",
+        )
+        baseline_ref = decision["affectedArtifactRefs"][0]
+        # The baseline reference is a real, content-addressed artifact: it
+        # carries a sha256 distinct from the agent's manifest hash that
+        # ends up on generatedJavaRef.
+        self.assertTrue(baseline_ref.get("sha256"))
+        self.assertNotEqual(
+            baseline_ref.get("sha256"),
+            contract["generatedJavaRef"]["sha256"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

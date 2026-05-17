@@ -96,8 +96,12 @@ from .run_contract import (
     ASSIST_AGENT_ROLE_TRANSFORMATION,
     ASSIST_OUTCOME_NOT_REQUIRED,
     ASSIST_OUTCOME_REQUIRED,
+    ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
     ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
     ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+    ASSIST_REASON_DETERMINISTIC_CANDIDATE_LOW_CONFIDENCE,
+    ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY,
+    ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE,
     AssistDecision,
     STATE_BASELINE_GENERATION_ATTEMPTED,
     STATE_BUILD_TEST_RUNNING,
@@ -479,6 +483,30 @@ def _first_non_empty_mapping(value: Any) -> JsonObject:
     if isinstance(value, Mapping) and value:
         return dict(value)
     return {}
+
+
+def _has_non_empty_list(mapping: Mapping[str, JsonValue] | None, key: str) -> bool:
+    """Return ``True`` when ``mapping[key]`` is a non-empty list-like value.
+
+    Used by the assist-decision gate (Issue #215) to detect deterministic
+    uncertainty markers on the Semantic IR and the deterministic baseline
+    without coercing scalar metadata into a marker. Strings and bytes are
+    rejected even though they are technically sequences; only list, tuple,
+    and similar iterables count as markers.
+    """
+    if not isinstance(mapping, Mapping):
+        return False
+    value = mapping.get(key)
+    if value is None:
+        return False
+    if isinstance(value, (str, bytes, bytearray)):
+        return False
+    if isinstance(value, Mapping):
+        return False
+    try:
+        return len(value) > 0  # type: ignore[arg-type]
+    except TypeError:
+        return False
 
 
 GENERATED_PROJECT_DIR = "generated-project"
@@ -1719,14 +1747,18 @@ class W0WorkflowRunner:
             # Consumers must read the decision from the contract instead of
             # inferring AI activation from ``agentAttemptCount > 0``.
             #
-            # Issue #215 (W0.3-4) will extend the closed set of reason codes
-            # with deterministic uncertainty criteria; the contract shape is
-            # stable.
+            # Issue #215 (W0.3-4) extends the closed reason-code set with
+            # deterministic uncertainty criteria sourced from the IR and the
+            # baseline generator output. The gate picks the most specific
+            # marker as the reason code when one is detected; the contract
+            # shape is unchanged.
             self._record_assist_decision(
                 context,
                 w02_contract,
                 baseline_artifact_ref=baseline_artifact_ref,
                 ir_output_ref=ir_output.output_ref,
+                ir_document=ir_document,
+                baseline_generated_project=baseline_generated_project,
             )
 
             # Issue #169: when the requester opted into the productive
@@ -3462,38 +3494,73 @@ class W0WorkflowRunner:
         *,
         baseline_artifact_ref: JsonObject | None,
         ir_output_ref: DataReference,
+        ir_document: Mapping[str, JsonValue] | None = None,
+        baseline_generated_project: Mapping[str, JsonValue] | None = None,
     ) -> AssistDecision:
         """Evaluate, record, persist, and emit the W0.3 assist-decision gate.
 
-        Issue #214: the gate runs once per productive run, immediately after
-        the deterministic baseline and before any productive agent step.
-        Its result is recorded on the run contract, persisted to the
-        run artifact store, and emitted as a Harness event so consumers
-        never have to infer AI activation indirectly.
+        Issue #214 introduced the gate with the caller-opt-in baseline.
+        Issue #215 (W0.3-4) extends the closed reason-code set with
+        deterministic uncertainty criteria so the gate records the most
+        specific reason for productive assist rather than always falling
+        back to ``caller_explicit_opt_in``. The contract shape, the
+        outcomes, and the event semantics are unchanged.
 
-        The W0.3-3 baseline only authorises explicit caller opt-in;
-        deterministic uncertainty criteria are owned by Issue #215.
+        When the caller opted in and the deterministic baseline produced
+        uncertainty markers (IR bounded ambiguity, unsupported-but-repairable
+        constructs, open assumptions, or explicit low-confidence markers),
+        the gate records the highest-priority marker as the reason code.
+        Without markers the gate falls back to ``caller_explicit_opt_in``.
+
+        When the caller did not opt in the gate records
+        ``caller_did_not_opt_in`` regardless of markers: the deterministic
+        baseline remains the final candidate. The Orchestrator still
+        attaches the detected uncertainty markers to the decision rationale
+        so the Evidence Pack consumer can see what was observed.
         """
         contract.set_active_step(W02_STEP_ASSIST_DECISION)
         affected_refs: tuple[JsonObject, ...] = ()
         if baseline_artifact_ref is not None:
             affected_refs = (dict(baseline_artifact_ref),)
+
+        detected_reason, detected_markers = self._detect_deterministic_uncertainty(
+            ir_document=ir_document,
+            generated_project=baseline_generated_project,
+        )
+
         if context.use_transformation_agent:
             outcome = ASSIST_OUTCOME_REQUIRED
-            reason_code = ASSIST_REASON_CALLER_EXPLICIT_OPT_IN
             selected_role: str | None = ASSIST_AGENT_ROLE_TRANSFORMATION
-            rationale = (
-                "caller opted into productive Transformation Agent via "
-                "useTransformationAgent=true"
-            )
+            if detected_reason is not None:
+                reason_code = detected_reason
+                rationale = (
+                    f"caller opted into productive Transformation Agent and the "
+                    f"deterministic baseline produced uncertainty markers "
+                    f"({', '.join(detected_markers)})"
+                )
+            else:
+                reason_code = ASSIST_REASON_CALLER_EXPLICIT_OPT_IN
+                rationale = (
+                    "caller opted into productive Transformation Agent via "
+                    "useTransformationAgent=true; no deterministic uncertainty "
+                    "markers detected on the baseline"
+                )
         else:
             outcome = ASSIST_OUTCOME_NOT_REQUIRED
             reason_code = ASSIST_REASON_CALLER_DID_NOT_OPT_IN
             selected_role = None
-            rationale = (
-                "no caller opt-in for productive Transformation Agent; "
-                "deterministic baseline is the final candidate"
-            )
+            if detected_markers:
+                rationale = (
+                    f"no caller opt-in for productive Transformation Agent; "
+                    f"deterministic baseline is the final candidate "
+                    f"(detected markers ignored: {', '.join(detected_markers)})"
+                )
+            else:
+                rationale = (
+                    "no caller opt-in for productive Transformation Agent; "
+                    "deterministic baseline is the final candidate"
+                )
+
         decision = AssistDecision(
             outcome=outcome,
             reason_code=reason_code,
@@ -3507,6 +3574,50 @@ class W0WorkflowRunner:
         self._persist_w02_contract(context, contract)
         self._emit_assist_decision_event(context, decision, ir_output_ref)
         return decision
+
+    @staticmethod
+    def _detect_deterministic_uncertainty(
+        *,
+        ir_document: Mapping[str, JsonValue] | None,
+        generated_project: Mapping[str, JsonValue] | None,
+    ) -> tuple[str | None, tuple[str, ...]]:
+        """Inspect baseline outputs for deterministic uncertainty markers.
+
+        Returns ``(primary_reason_code, detected_markers)`` where
+        ``primary_reason_code`` is the highest-priority match from
+        :data:`run_contract.ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES`
+        and ``detected_markers`` is the ordered tuple of every reason code
+        that fired (so the rationale and downstream evidence can name them
+        all without changing the contract shape).
+
+        The marker conventions:
+
+        * ``ir_document.ambiguityMarkers`` (non-empty list): the Semantic IR
+          carries a bounded-ambiguity marker — the deterministic baseline
+          committed to one of several valid interpretations.
+        * ``generated_project.unsupportedFeatures`` (non-empty list): the
+          deterministic generator could not lower one or more constructs.
+        * ``generated_project.openAssumptions`` (non-empty list): the
+          baseline emitted an explicit assumption it had to make to
+          produce the candidate.
+        * ``generated_project.lowConfidenceMarkers`` (non-empty list): the
+          baseline annotated regions of its candidate as low-confidence.
+
+        Markers that are not non-empty lists are ignored. The orchestrator
+        never invents a marker on behalf of an upstream capability — every
+        recorded reason code must be backed by a real payload value.
+        """
+        markers: list[str] = []
+        if _has_non_empty_list(ir_document, "ambiguityMarkers"):
+            markers.append(ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY)
+        if _has_non_empty_list(generated_project, "unsupportedFeatures"):
+            markers.append(ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE)
+        if _has_non_empty_list(generated_project, "openAssumptions"):
+            markers.append(ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS)
+        if _has_non_empty_list(generated_project, "lowConfidenceMarkers"):
+            markers.append(ASSIST_REASON_DETERMINISTIC_CANDIDATE_LOW_CONFIDENCE)
+        primary = markers[0] if markers else None
+        return primary, tuple(markers)
 
     def _emit_assist_decision_event(
         self,
