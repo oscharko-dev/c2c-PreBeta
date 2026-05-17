@@ -1279,6 +1279,20 @@ class W0WorkflowRunner:
         current_state: str | None = None,
         failed_step: str | None = None,
     ) -> str:
+        # Issue #216 (W0.3-5): a productive call that fails the pre-flight
+        # Model Gateway budget check is, from the consumer's perspective,
+        # the gateway being unavailable for this run. Special-case the
+        # exhaustion (and any StepExecutionError wrapping it) so the
+        # workflow contract terminates as ``blocked`` /
+        # ``model_gateway_unavailable`` rather than the generic
+        # ``failed`` / ``java_generation_failed`` that the step-name
+        # fallback would otherwise produce on the transformation-agent
+        # path. The repair-loop path drives the state machine directly
+        # and does not rely on this classifier.
+        if isinstance(exc, ModelInvocationBudgetExhaustedError) or isinstance(
+            exc.__cause__, ModelInvocationBudgetExhaustedError
+        ):
+            return FAILURE_MODEL_GATEWAY_UNAVAILABLE
         if isinstance(exc, ModelPolicyDeniedStepError):
             return FAILURE_MODEL_POLICY_DENIED
         if isinstance(exc, AgentContractInvalidStepError):
@@ -1836,10 +1850,13 @@ class W0WorkflowRunner:
                 # Issue #216 (W0.3-5): consume one Model Gateway unit
                 # before the productive transformation call so an
                 # exhausted budget hard-terminates *before* the gateway
-                # is contacted. Surface the exhaustion as a step failure
-                # using the canonical model-gateway-unavailable failure
-                # code so the existing classification path renders it
-                # without contract surgery.
+                # is contacted. The runner's classifier special-cases
+                # ``ModelInvocationBudgetExhaustedError`` (raised here
+                # or carried as the cause of the StepExecutionError) so
+                # the contract finalises as ``blocked`` /
+                # ``model_gateway_unavailable`` rather than the generic
+                # ``failed`` / ``java_generation_failed`` that the
+                # step-name fallback would otherwise produce.
                 try:
                     w02_contract.model_invocation_budget.consume()
                 except ModelInvocationBudgetExhaustedError as exhausted_exc:

@@ -1157,6 +1157,58 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
             FAILURE_PARSE_FAILED,
         )
 
+    def test_model_invocation_budget_exhaustion_maps_to_model_gateway_unavailable(self):
+        """Issue #216 (W0.3-5): ``ModelInvocationBudgetExhaustedError`` on the
+        transformation-agent path must surface as ``model_gateway_unavailable``
+        (→ ``blocked``) rather than the step-name fallback
+        ``java_generation_failed`` (→ ``failed``). The classifier picks up the
+        special case both when the exhaustion is raised directly and when it
+        is carried as the cause of a wrapping ``StepExecutionError``.
+        """
+        from orchestrator_service.run_contract import (
+            FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+            ModelInvocationBudgetExhaustedError,
+        )
+        from orchestrator_service.workflow import StepExecutionError
+
+        gateway = StubGateway(
+            _BaseFixture._base_capabilities(),
+            _BaseFixture._base_responses(),
+        )
+        runner = self._runner(gateway)
+        direct = ModelInvocationBudgetExhaustedError(
+            "model invocation budget exhausted (limit=1, used=1)"
+        )
+        self.assertEqual(
+            runner._failure_code_from_exception(
+                direct,
+                current_state=STATE_TRANSFORMATION_AGENT_INVOKED,
+                failed_step="transformation-agent",
+            ),
+            FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+        )
+        wrapped = StepExecutionError("transformation agent blocked")
+        wrapped.__cause__ = direct
+        self.assertEqual(
+            runner._failure_code_from_exception(
+                wrapped,
+                current_state=STATE_TRANSFORMATION_AGENT_INVOKED,
+                failed_step="transformation-agent",
+            ),
+            FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+        )
+        # Non-exhaustion StepExecutionError on the same step still gets the
+        # step-name fallback (java_generation_failed → failed).
+        bare = StepExecutionError("transformation agent crashed")
+        self.assertEqual(
+            runner._failure_code_from_exception(
+                bare,
+                current_state=STATE_TRANSFORMATION_AGENT_INVOKED,
+                failed_step="transformation-agent",
+            ),
+            FAILURE_JAVA_GENERATION_FAILED,
+        )
+
     def test_semantic_ir_failure_emits_semantic_ir_blocked_state(self):
         gateway = _StubGatewayWithIrFailure(
             _BaseFixture._base_capabilities(),
