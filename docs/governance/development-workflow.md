@@ -23,10 +23,14 @@ automation.
 ## 3. Labels and Taxonomy
 Use this label taxonomy for Wave 0 and follow-on W0.x waves:
 - `type: epic|task|feature|bug|chore` - Work kind for planning and reporting.
-- `wave: preflight|w0|w0.1|w0.2|w1` - Delivery wave classification.
+- `wave: preflight|w0|w0.1|w0.2|w0.3|w1` - Delivery wave classification.
 - `priority: p0|p1|p2` - Urgency for sequencing and triage.
 - `status: ready|blocked|in-progress` - Current execution state.
-- `area: governance|platform|security|orchestrator|experience-learning|harness|model-gateway|semantics|target-java|verification|evidence|frontend|bff|corpus|release|architecture|agents` - Primary ownership domain.
+- `area: governance|platform|security|orchestration|experience-learning|harness|model-gateway|semantics|target-java|verification|evidence|frontend|bff|corpus|release|architecture|agents` - Primary ownership domain.
+
+If an issue spans several domains, choose exactly one primary `area:*` label and
+capture the other impacted domains in the issue body instead of inventing
+parallel label taxonomies.
 
 **Ownership Expectations**: Issues must have an assigned owner before work begins. The assignee is responsible for driving the issue to completion.
 

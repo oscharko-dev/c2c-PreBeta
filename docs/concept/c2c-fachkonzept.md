@@ -436,8 +436,8 @@ current gaps:
 | W0 | Done | Deterministic enterprise kernel and evidence backbone. | Service mesh produces compiled Java, build/test result, Harness/Experience Learning telemetry, and complete Evidence Pack for the W0 corpus without required model calls. |
 | W0.1 | Done | Product Studio UI over the W0 kernel. | Browser workflow loads/pastes supported COBOL, starts a BFF/orchestrator run, displays artifact-backed Java, build/test, evidence, progress, artifacts, and honest blocked states. |
 | W0.2 | Done | First productive AI-agent transformation loop. | At least one small COBOL program is transformed through an orchestrator-steered, model-backed agent workflow on the Experience Learning Harness, with bounded repair, first learning signals, and deterministic verification/evidence. |
-| W0.3 | Planned | Custom COBOL coverage expansion. | More customer-like small COBOL snippets work or fail honestly, including selected paragraph, literal, and data initialization semantics. |
-| W1 | Planned | Enterprise agentic hardening. | Broader agent roles, stronger mainframe semantics, model governance hardening, richer Experience Learning, and broader corpus evidence. |
+| W0.3 | Planned | Deterministic-first multi-agent hardening. | Product runs execute deterministic baseline steps first, invoke productive AI only through an explicit Orchestrator assist-decision gate, surface stricter assist/repair budgets, and preserve deterministic verification/evidence as the only path to `success`. |
+| W1 | Planned | Coverage and enterprise agentic expansion. | Broader customer-like COBOL coverage, stronger mainframe semantics, larger bounded agent-team patterns, richer Experience Learning, model-governance hardening, and broader corpus evidence. |
 
 ## Development Rule
 
