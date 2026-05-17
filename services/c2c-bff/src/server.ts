@@ -1542,6 +1542,33 @@ function safeArtifactRef(value: unknown): { sha256: string; byteSize: number; ki
   };
 }
 
+// W0.3 (#214) assist-decision gate summary surfaced to UI consumers.
+// Closed-set strings mirror the orchestrator-owned values; the BFF never
+// invents values for these fields and silently drops anything it does not
+// recognise so the UI cannot render an unknown reason.
+export type AssistDecisionOutcome = 'assist_required' | 'assist_not_required';
+export type AssistDecisionReasonCode =
+  | 'caller_explicit_opt_in'
+  | 'caller_did_not_opt_in';
+export type AssistDecisionAgentRole = 'transformation_agent';
+
+export interface AssistDecisionArtifactRef {
+  sha256?: string;
+  byteSize?: number;
+  kind?: string;
+  path?: string;
+}
+
+export interface AssistDecisionSummary {
+  outcome: AssistDecisionOutcome;
+  reasonCode: AssistDecisionReasonCode;
+  decidedAt: string;
+  selectedAgentRole: AssistDecisionAgentRole | null;
+  affectedArtifactRefs: AssistDecisionArtifactRef[];
+  repairBudgetSnapshot: StoredRepairBudget | null;
+  rationale: string | null;
+}
+
 export interface WorkflowSnapshot {
   state: string | null;
   activeStep: string | null;
@@ -1549,6 +1576,7 @@ export interface WorkflowSnapshot {
   agentAttemptCount: number;
   repairBudget: StoredRepairBudget | null;
   repairAttempts: SanitizedRepairAttempt[];
+  assistDecision: AssistDecisionSummary | null;
   finalClassification: RunFinalClassification | null;
   failureCode: W02UiErrorCode | null;
   failureMessage: string | null;
@@ -1564,6 +1592,7 @@ const EMPTY_WORKFLOW_SNAPSHOT: WorkflowSnapshot = {
   agentAttemptCount: 0,
   repairBudget: null,
   repairAttempts: [],
+  assistDecision: null,
   finalClassification: null,
   failureCode: null,
   failureMessage: null,
@@ -1572,6 +1601,69 @@ const EMPTY_WORKFLOW_SNAPSHOT: WorkflowSnapshot = {
   evidencePackRef: null,
 };
 
+const ASSIST_DECISION_OUTCOMES: ReadonlySet<AssistDecisionOutcome> = new Set([
+  'assist_required',
+  'assist_not_required',
+]);
+const ASSIST_DECISION_REASONS: ReadonlySet<AssistDecisionReasonCode> = new Set([
+  'caller_explicit_opt_in',
+  'caller_did_not_opt_in',
+]);
+const ASSIST_DECISION_AGENT_ROLES: ReadonlySet<AssistDecisionAgentRole> = new Set([
+  'transformation_agent',
+]);
+
+function sanitizeAssistArtifactRef(value: unknown): AssistDecisionArtifactRef | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const ref: AssistDecisionArtifactRef = {};
+  const sha = asString(record.sha256);
+  if (sha) ref.sha256 = sha;
+  const byteSize = asNumber(record.byteSize);
+  if (typeof byteSize === 'number' && byteSize >= 0) ref.byteSize = byteSize;
+  const kind = asString(record.kind);
+  if (kind) ref.kind = kind;
+  const refPath = asString(record.path);
+  if (refPath) ref.path = refPath;
+  return Object.keys(ref).length > 0 ? ref : null;
+}
+
+function sanitizeAssistDecision(value: unknown): AssistDecisionSummary | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const outcome = asString(record.outcome) as AssistDecisionOutcome | '';
+  if (!outcome || !ASSIST_DECISION_OUTCOMES.has(outcome)) return null;
+  const reasonCode = asString(record.reasonCode) as AssistDecisionReasonCode | '';
+  if (!reasonCode || !ASSIST_DECISION_REASONS.has(reasonCode)) return null;
+  const decidedAt = asString(record.decidedAt) || '';
+  if (!decidedAt) return null;
+  const rawRole = asString(record.selectedAgentRole);
+  const selectedAgentRole: AssistDecisionAgentRole | null =
+    rawRole && ASSIST_DECISION_AGENT_ROLES.has(rawRole as AssistDecisionAgentRole)
+      ? (rawRole as AssistDecisionAgentRole)
+      : null;
+  if (outcome === 'assist_required' && selectedAgentRole === null) return null;
+  if (outcome === 'assist_not_required' && selectedAgentRole !== null) return null;
+  const affected: AssistDecisionArtifactRef[] = [];
+  if (Array.isArray(record.affectedArtifactRefs)) {
+    for (const entry of record.affectedArtifactRefs) {
+      const sanitized = sanitizeAssistArtifactRef(entry);
+      if (sanitized) affected.push(sanitized);
+    }
+  }
+  const repairBudgetSnapshot = asRepairBudget(record.repairBudgetSnapshot);
+  const rationale = asString(record.rationale) || null;
+  return {
+    outcome,
+    reasonCode,
+    decidedAt,
+    selectedAgentRole,
+    affectedArtifactRefs: affected,
+    repairBudgetSnapshot,
+    rationale,
+  };
+}
+
 function snapshotFromContract(contract: Record<string, unknown> | undefined): WorkflowSnapshot {
   if (!contract) return { ...EMPTY_WORKFLOW_SNAPSHOT };
   const state = asString(contract.currentState) || null;
@@ -1579,6 +1671,7 @@ function snapshotFromContract(contract: Record<string, unknown> | undefined): Wo
   const agentAttemptCount = asNumber(contract.agentAttemptCount) ?? 0;
   const repairBudget = asRepairBudget(contract.repairBudget);
   const repairAttempts = sanitizeRepairAttempts(contract.repairAttempts);
+  const assistDecision = sanitizeAssistDecision(contract.assistDecision);
   const finalClassification = asFinalClassification(contract.finalClassification);
   const rawFailureCode = contract.failureCode;
   const rawFailureMessage = contract.failureMessage;
@@ -1602,6 +1695,7 @@ function snapshotFromContract(contract: Record<string, unknown> | undefined): Wo
     agentAttemptCount,
     repairBudget,
     repairAttempts,
+    assistDecision,
     finalClassification,
     failureCode,
     failureMessage,
@@ -1624,6 +1718,7 @@ function workflowEnvelope(stored: StoredRun, snapshot: WorkflowSnapshot, source:
     agentAttemptCount: snapshot.agentAttemptCount,
     repairBudget: snapshot.repairBudget,
     repairAttempts: snapshot.repairAttempts,
+    assistDecision: snapshot.assistDecision,
     finalClassification: snapshot.finalClassification,
     failureCode: snapshot.failureCode,
     failureMessage: snapshot.failureMessage,

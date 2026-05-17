@@ -387,5 +387,134 @@ class TransformationAgentWorkflowIntegrationTests(unittest.TestCase):
         self.assertEqual(contract.get("repairAttempts", []), [])
 
 
+class W03AssistDecisionGateTests(TransformationAgentWorkflowIntegrationTests):
+    """W0.3-3 (#214): the explicit Orchestrator-owned assist-decision gate.
+
+    The gate runs once per productive run, records an outcome and reason
+    code on the contract, persists the decision to the run artifact
+    store, and emits a Harness event. Consumers must read the decision
+    directly from the contract instead of inferring from
+    ``agentAttemptCount > 0``.
+    """
+
+    def test_caller_opt_in_records_assist_required_decision(self) -> None:
+        runner, gateway, _store, _tmp = self._runner(
+            agent_response=_ok_model_response()
+        )
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            use_transformation_agent=True,
+        )
+
+        result = runner.run(
+            context=context,
+            input_ref={"uri": "urn:src/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        self.assertEqual(result["status"], "completed")
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertIsNotNone(decision, "assistDecision must be recorded on every productive run")
+        self.assertEqual(decision["outcome"], "assist_required")
+        self.assertEqual(decision["reasonCode"], "caller_explicit_opt_in")
+        self.assertEqual(decision["selectedAgentRole"], "transformation_agent")
+        # Decision includes a repair-budget snapshot so consumers can see
+        # the relevant budget at decision time without reconstructing it.
+        self.assertIsNotNone(decision["repairBudgetSnapshot"])
+        self.assertIn("limit", decision["repairBudgetSnapshot"])
+        self.assertIn("remaining", decision["repairBudgetSnapshot"])
+        # The deterministic baseline artifact reference is attached so
+        # the UI can show what input the gate decided against.
+        self.assertTrue(
+            decision["affectedArtifactRefs"],
+            "assist decision must reference the deterministic baseline artifact",
+        )
+        # Rationale is sanitized human-readable string, never None.
+        self.assertIsInstance(decision["rationale"], str)
+        # Decided-at is an ISO-8601 UTC timestamp.
+        self.assertTrue(decision["decidedAt"].endswith("Z"))
+
+    def test_no_opt_in_records_assist_not_required_decision(self) -> None:
+        runner, gateway, _store, _tmp = self._runner(
+            agent_response=_ok_model_response()
+        )
+        context = W0RunContext(
+            run_id="run-2",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            use_transformation_agent=False,
+        )
+
+        result = runner.run(
+            context=context,
+            input_ref={"uri": "urn:src/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        self.assertEqual(result["status"], "completed")
+        decision = result["workflowContract"]["assistDecision"]
+        self.assertIsNotNone(
+            decision,
+            "every productive run that reaches the gate must record a decision, including the baseline-only path",
+        )
+        self.assertEqual(decision["outcome"], "assist_not_required")
+        self.assertEqual(decision["reasonCode"], "caller_did_not_opt_in")
+        # No selected agent role when assist is not required.
+        self.assertNotIn(
+            "selectedAgentRole",
+            decision,
+            "assist_not_required decisions must not name a selected agent role",
+        )
+        # State history must NOT include the productive-agent transition.
+        states = [entry["state"] for entry in result["workflowContract"]["stateHistory"]]
+        self.assertNotIn("transformation_agent_invoked", states)
+
+    def test_assist_decision_event_emitted_with_decision_payload(self) -> None:
+        runner, gateway, _store, _tmp = self._runner(
+            agent_response=_ok_model_response()
+        )
+        context = W0RunContext(
+            run_id="run-3",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            use_transformation_agent=True,
+        )
+
+        runner.run(
+            context=context,
+            input_ref={"uri": "urn:src/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        decision_events = [
+            event
+            for event in gateway.posted_events
+            if isinstance(event, Mapping)
+            and str(event.get("eventType", "")).startswith(
+                "orchestrator.workflow.assist_decision."
+            )
+        ]
+        self.assertEqual(
+            len(decision_events),
+            1,
+            "exactly one assist-decision event must be emitted per productive run",
+        )
+        event = decision_events[0]
+        self.assertEqual(
+            event["eventType"],
+            "orchestrator.workflow.assist_decision.assist_required",
+        )
+        output_payload = event.get("payload", {}).get("output") or {}
+        self.assertEqual(output_payload.get("outcome"), "assist_required")
+        self.assertEqual(
+            output_payload.get("reasonCode"), "caller_explicit_opt_in"
+        )
+        self.assertEqual(
+            output_payload.get("selectedAgentRole"), "transformation_agent"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
