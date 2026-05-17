@@ -388,7 +388,7 @@
         "matched": { "type": "boolean" },
         "oracleKind": {
           "type": "string",
-          "enum": ["cobol-runtime", "synthetic", "true-golden-master", "absent"]
+          "enum": ["cobol-runtime", "synthetic", "true-golden-master", "user-provided", "absent"]
         },
         "expectedRef": { "$ref": "#/$defs/dataReference" },
         "actualRef": { "$ref": "#/$defs/dataReference" },

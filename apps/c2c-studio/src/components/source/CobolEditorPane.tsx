@@ -16,6 +16,10 @@ export function CobolEditorPane() {
   const {
     sourceText,
     setSourceText,
+    expectedOutput,
+    setExpectedOutput,
+    oracleInput,
+    setOracleInput,
     isDirty,
     sourceName,
     loadedProgramId,
@@ -148,6 +152,35 @@ export function CobolEditorPane() {
           <UnsupportedConstructsPanel constructs={productState.unsupportedFeatures || []} />
         </div>
       ) : null}
+
+      <div className="grid gap-3 border-b border-line bg-bg-1 px-4 py-3 md:grid-cols-2">
+        <label className="flex min-w-0 flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">
+            Optional Expected Output
+          </span>
+          <textarea
+            value={expectedOutput}
+            onChange={(event) => setExpectedOutput(event.currentTarget.value)}
+            spellCheck={false}
+            aria-label="Optional expected output for oracle comparison"
+            placeholder="Leave empty to derive the oracle through COBOL runtime when available."
+            className="min-h-20 resize-y rounded border border-line-2 bg-bg-0 p-2 font-mono text-xs text-text outline-none placeholder:text-text-faint focus:border-accent"
+          />
+        </label>
+        <label className="flex min-w-0 flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">
+            Optional Oracle Input
+          </span>
+          <textarea
+            value={oracleInput}
+            onChange={(event) => setOracleInput(event.currentTarget.value)}
+            spellCheck={false}
+            aria-label="Optional oracle input"
+            placeholder="Stdin passed to the COBOL oracle; leave empty for no input."
+            className="min-h-20 resize-y rounded border border-line-2 bg-bg-0 p-2 font-mono text-xs text-text outline-none placeholder:text-text-faint focus:border-accent"
+          />
+        </label>
+      </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden font-mono text-[12px]">
         <div

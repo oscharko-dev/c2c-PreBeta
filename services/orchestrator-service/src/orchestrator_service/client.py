@@ -13,7 +13,23 @@ from .artifacts import JsonValue
 
 
 class HttpClientError(Exception):
-    """Raised when an HTTP interaction fails."""
+    """Raised when an HTTP interaction fails.
+
+    ``str(error)`` intentionally stays short for logs and user-facing run
+    summaries, while ``body`` preserves structured upstream diagnostics for
+    workflow classification.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        body: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
 
 
 # noinspection PyClassHasNoInitInspection
@@ -75,6 +91,10 @@ class JSONHTTPClient:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace") if exc.fp is not None else ""
             details = body[:200]
-            raise HttpClientError(f"{request.get_method()} {request.full_url} failed with {exc.code}: {details}") from exc
+            raise HttpClientError(
+                f"{request.get_method()} {request.full_url} failed with {exc.code}: {details}",
+                status_code=exc.code,
+                body=body,
+            ) from exc
         except urllib.error.URLError as exc:
             raise HttpClientError(f"{request.get_method()} {request.full_url} failed: {exc}") from exc

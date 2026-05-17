@@ -169,17 +169,13 @@ must be re-derivable from the artifact path in the right column.
 ### 11. Unsupported source is blocked honestly
 
 - [x] Submitting the `FILEIO-UNSUPPORTED` fixture through
-      `POST /api/v0/transform` produces a non-success
-      `finalClassification` (`blocked`, `failed`, or `incomplete`), a
-      closed-set unsupported-source `failureCode`
-      (`unsupported_cobol` or `parse_failed`), **no** generated Java
-      final artifact (`generatedJavaRef`, Evidence Pack `generatedJava`, or
-      `finalJavaArtifact`), and a Studio surface that does not present any
-      "Verified" affordance. The gate accepts either failure code
-      because the orchestrator's mapping is owned by Issue #166 and
-      may surface unsupported source through the parser-diagnostic
-      path (`unsupported_cobol`) or the parser-rejection path
-      (`parse_failed`); both are honest non-success classifications.
+      `POST /api/v0/transform` produces
+      `finalClassification=blocked`, `failureCode=unsupported_cobol`,
+      **no** generated Java final artifact (`generatedJavaRef`, Evidence
+      Pack `generatedJava`, or `finalJavaArtifact`), and a Studio surface
+      that does not present any "Verified" affordance. Parser-rejected
+      unsupported constructs are still classified as unsupported COBOL,
+      not a generic parse failure.
       _Evidence_: blocked-path block of
       [`scripts/w0-2-release-gate.sh`](../../scripts/w0-2-release-gate.sh) ·
       blocked-path test in

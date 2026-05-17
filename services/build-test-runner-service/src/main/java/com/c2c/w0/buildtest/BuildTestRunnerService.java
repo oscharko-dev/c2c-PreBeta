@@ -335,14 +335,24 @@ public final class BuildTestRunnerService {
 
         String programId = string(response.get("programId"), null);
         String sourceText = string(oracleSpec.get("sourceText"), null);
+        String expectedOutput = exactStringOrNull(oracleSpec.get("expectedOutput"));
+        String oracleInput = exactStringOrNull(oracleSpec.get("oracleInput"));
         Map<String, Object> oracleSourceRef = mapOrEmpty(oracleSpec.get("sourceRef"));
 
         CobolRuntimeExecutor.OracleRun oracle =
-                CobolRuntimeExecutor.executeSource(programId, sourceText, oracleTimeoutMs);
+                CobolRuntimeExecutor.executeSource(programId, sourceText, oracleInput, oracleTimeoutMs);
 
         Map<String, Object> oracleMap = oracle.toMap();
         if (!oracleSourceRef.isEmpty()) {
             oracleMap.put("sourceRef", oracleSourceRef);
+        }
+        if (expectedOutput != null) {
+            oracleMap.put("expectedOutputSha256", HashUtil.sha256(expectedOutput));
+            oracleMap.put("expectedOutputBytes", HashUtil.byteLength(expectedOutput));
+        }
+        if (oracleInput != null) {
+            oracleMap.put("oracleInputSha256", HashUtil.sha256(oracleInput));
+            oracleMap.put("oracleInputBytes", HashUtil.byteLength(oracleInput));
         }
         response.put("oracle", oracleMap);
 
@@ -402,15 +412,24 @@ public final class BuildTestRunnerService {
             return response;
         }
 
-        // Both COBOL and Java executed successfully — compare stdout.
+        // Both COBOL and Java executed successfully. Explicit user-supplied
+        // expected output is the paste-mode oracle; otherwise use COBOL stdout.
         String javaStdout = run == null ? "" : run.stdout();
-        Map<String, Object> comparison = compareToOracle(javaStdout, oracle.stdout());
+        boolean usingUserExpectedOutput = expectedOutput != null;
+        String expectedStdout = usingUserExpectedOutput ? expectedOutput : oracle.stdout();
+        Map<String, Object> comparison = compareOutputs(
+                javaStdout,
+                expectedStdout,
+                usingUserExpectedOutput ? "oracle.user-provided" : "oracle.cobol-runtime",
+                usingUserExpectedOutput ? "user-provided-expected-output" : "cobol-oracle-stdout");
         response.put("comparison", comparison);
         if (Boolean.TRUE.equals(comparison.get("matched"))) {
             applyClassification(response, ResultClassifier.match());
         } else {
             applyClassification(response, ResultClassifier.divergence(false,
-                    "Generated Java stdout diverges from COBOL oracle stdout."));
+                    usingUserExpectedOutput
+                            ? "Generated Java stdout diverges from user-supplied expected output."
+                            : "Generated Java stdout diverges from COBOL oracle stdout."));
         }
         response.put("diagnostics", diagnostics);
         response.put("outputRef", reference(response));
@@ -433,17 +452,23 @@ public final class BuildTestRunnerService {
         return map;
     }
 
-    private static Map<String, Object> compareToOracle(String javaStdout, String cobolStdout) {
+    private static Map<String, Object> compareOutputs(
+            String javaStdout,
+            String expectedStdout,
+            String source,
+            String expectedKind) {
         String left = normalise(javaStdout);
-        String right = normalise(cobolStdout);
+        String right = normalise(expectedStdout);
         Map<String, Object> comparison = new LinkedHashMap<>();
         comparison.put("matched", left.equals(right));
         comparison.put("normalisation", "trim+crlf-to-lf");
-        comparison.put("source", "oracle.cobol-runtime");
+        comparison.put("source", source);
         comparison.put("actualSha256", HashUtil.sha256(javaStdout == null ? "" : javaStdout));
-        comparison.put("expectedSha256", HashUtil.sha256(cobolStdout == null ? "" : cobolStdout));
+        comparison.put("expectedSha256", HashUtil.sha256(expectedStdout == null ? "" : expectedStdout));
         comparison.put("actualLength", javaStdout == null ? 0 : javaStdout.length());
-        comparison.put("expectedLength", cobolStdout == null ? 0 : cobolStdout.length());
+        comparison.put("expectedLength", expectedStdout == null ? 0 : expectedStdout.length());
+        comparison.put("actualRef", outputReference("java-stdout", javaStdout));
+        comparison.put("expectedRef", outputReference(expectedKind, expectedStdout));
         if (!left.equals(right)) {
             comparison.put("diff", briefDiff(left, right));
         }
@@ -460,10 +485,24 @@ public final class BuildTestRunnerService {
         comparison.put("expectedSha256", HashUtil.sha256(expected == null ? "" : expected));
         comparison.put("actualLength", actual == null ? 0 : actual.length());
         comparison.put("expectedLength", expected == null ? 0 : expected.length());
+        comparison.put("actualRef", outputReference("java-stdout", actual));
+        comparison.put("expectedRef", outputReference("golden-master-output", expected));
         if (!left.equals(right)) {
             comparison.put("diff", briefDiff(left, right));
         }
         return comparison;
+    }
+
+    private static Map<String, Object> outputReference(String kind, String content) {
+        String safeContent = content == null ? "" : content;
+        String hash = HashUtil.sha256(safeContent);
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("uri", "urn:" + SERVICE_NAME + "/output/" + kind + "/" + hash);
+        ref.put("sha256", hash);
+        ref.put("byteSize", HashUtil.byteLength(safeContent));
+        ref.put("mimeType", "text/plain");
+        ref.put("kind", kind);
+        return ref;
     }
 
     private static String normalise(String value) {
@@ -660,6 +699,13 @@ public final class BuildTestRunnerService {
         }
         String text = value.toString().trim();
         return text.isBlank() ? fallback : text;
+    }
+
+    private static String exactStringOrNull(Object value) {
+        if (!(value instanceof String text) || text.isEmpty()) {
+            return null;
+        }
+        return text;
     }
 
     private static long longValue(Object value, long fallback) {

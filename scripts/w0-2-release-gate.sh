@@ -30,9 +30,8 @@
 #      through safe artifact metadata and pointer-consistent; the productive
 #      W0.2 slots are not enforced because they require the agentic path.
 #   8. POST /api/v0/transform with the FILEIO-UNSUPPORTED fixture reaches
-#      a non-success terminal classification with one of the closed-set
-#      unsupported-source failure codes (unsupported_cobol or
-#      parse_failed) and produces no Java.
+#      finalClassification=blocked with failureCode=unsupported_cobol and
+#      produces no Java.
 #   9. The Studio root document loads and renders the workbench shell so
 #      the UI-to-agent-to-Java-to-evidence path is verifiable in a browser.
 #  10. Evidence artifacts on disk contain no provider credentials or bearer
@@ -466,22 +465,16 @@ for _ in $(seq 1 180); do
   sleep 1
 done
 
-# The orchestrator surfaces unsupported source through one of two closed
-# failure codes — `unsupported_cobol` when the parser returns a structured
-# unsupported-feature diagnostic, or `parse_failed` when the parser bails
-# out without per-construct diagnostics. Both are valid honest non-success
-# classifications. The gate accepts either so it is not coupled to the
-# specific orchestrator mapping, which is owned by Issue #166. What MUST
-# be true is: terminal non-success, a non-null failure code from the
-# accepted set, no generated Java, and the W0.2 terminal state.
+# The orchestrator must preserve parser-rejected unsupported constructs as
+# unsupported COBOL, not collapse them to a generic parse failure.
 jq -e --arg run "$negative_run_id" '
   .runId == $run
-  and (.finalClassification == "blocked" or .finalClassification == "failed" or .finalClassification == "incomplete")
-  and (.failureCode == "unsupported_cobol" or .failureCode == "parse_failed")
+  and .finalClassification == "blocked"
+  and .failureCode == "unsupported_cobol"
   and (.generatedJavaRef == null)
   and (.state == "final_classification")
 ' >/dev/null <<<"$negative_workflow" \
-  || fail "FILEIO-UNSUPPORTED workflow did not reach a non-success terminal with an unsupported-source failure code: $negative_workflow" 4
+  || fail "FILEIO-UNSUPPORTED workflow did not reach blocked/unsupported_cobol without generated Java: $negative_workflow" 4
 
 # Generated view must NOT report a successful generation. Either
 # `unsupported` (parser emitted diagnostics) or `incomplete` (parser

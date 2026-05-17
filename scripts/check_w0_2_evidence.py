@@ -407,7 +407,7 @@ def _check_oracle(oracle: Mapping[str, Any], failures: list[str]) -> None:
     )
     kind = oracle.get("oracleKind")
     _require(
-        kind in {"cobol-runtime", "synthetic", "true-golden-master"},
+        kind in {"cobol-runtime", "synthetic", "true-golden-master", "user-provided"},
         f"oracleComparison.oracleKind must identify a real oracle, got {kind!r}",
         failures,
     )

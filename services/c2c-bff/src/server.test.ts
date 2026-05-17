@@ -525,6 +525,65 @@ test('samples list and detail return registry contents including reference-progr
   }
 });
 
+test('GET /api/v0/acceptance-fixtures exposes W0.2 fixture oracle contract', async () => {
+  const handler = createApp({
+    config: { ...baseConfig, repoRoot: path.resolve(__dirname, '../../..') },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const list = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures`);
+    assert.equal(list.status, 200);
+    const summaries = list.body as Array<{
+      fixtureId: string;
+      expectedFinalClassification: string;
+      modes: string[];
+    }>;
+    assert.ok(summaries.some((entry) => entry.fixtureId === 'HELLOW02'));
+    assert.ok(summaries.some((entry) => entry.fixtureId === 'FILEIO-UNSUPPORTED'));
+    assert.ok(summaries.every((entry) => entry.modes.includes('file-backed')));
+    assert.ok(summaries.every((entry) => entry.modes.includes('paste-mode')));
+
+    const hello = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures/HELLOW02`);
+    assert.equal(hello.status, 200);
+    const helloBody = hello.body as {
+      fixtureId: string;
+      oracleGenerationMode: string | null;
+      expectedOutput: string | null;
+      expectedOutputArtifactRef: { sha256: string; kind: string } | null;
+      supportedSubset: string[];
+    };
+    assert.equal(helloBody.fixtureId, 'HELLOW02');
+    assert.equal(helloBody.oracleGenerationMode, 'cobol-runtime');
+    assert.match(helloBody.expectedOutput ?? '', /HELLO-W02 DONE/);
+    assert.equal(helloBody.expectedOutputArtifactRef?.kind, 'golden-master');
+    assert.ok(helloBody.supportedSubset.includes('PERFORM-VARYING'));
+
+    const unsupported = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures/FILEIO-UNSUPPORTED`);
+    assert.equal(unsupported.status, 200);
+    const unsupportedBody = unsupported.body as {
+      expectedOutput: string | null;
+      expectedOutputArtifactRef: unknown;
+      expectedFinalClassification: string;
+      expectedFailureCode: string;
+      unsupportedConstructs: Array<{ code: string; construct: string }>;
+    };
+    assert.equal(unsupportedBody.expectedOutput, null);
+    assert.equal(unsupportedBody.expectedOutputArtifactRef, null);
+    assert.equal(unsupportedBody.expectedFinalClassification, 'blocked');
+    assert.equal(unsupportedBody.expectedFailureCode, 'unsupported_cobol');
+    assert.ok(unsupportedBody.unsupportedConstructs.some((entry) => entry.construct === 'FILE SECTION'));
+
+    const missing = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures/UNKNOWN`);
+    assert.equal(missing.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
 test('transform refuses to dispatch a programId that maps to an unsupported reference', async () => {
   const unsupported: SampleDetail = {
     ...FIXED_SAMPLE,
@@ -1291,7 +1350,21 @@ test('live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     build: { compileOk: true, sourceCount: 1, diagnostics: [] },
     execution: { ran: true, ok: true, exitCode: 0, stdout: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n', stderr: '', durationMs: 12 },
     goldenMaster: { expected: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n', expectedOutputPath: 'corpus/expected.txt' },
-    comparison: { matched: true },
+    comparison: {
+      matched: true,
+      expectedRef: {
+        uri: 'urn:build-test/expected',
+        sha256: 'e'.repeat(64),
+        byteSize: 36,
+        kind: 'cobol-oracle-stdout',
+      },
+      actualRef: {
+        uri: 'urn:build-test/actual',
+        sha256: 'a'.repeat(64),
+        byteSize: 36,
+        kind: 'java-stdout',
+      },
+    },
     diagnostics: [
       { level: 'info', code: 'compile.ok', message: 'compile succeeded' },
       { level: 'info', code: 'execution.ok', message: 'execution succeeded' },
@@ -1339,6 +1412,8 @@ test('live build-test extracts execution.stdout, goldenMaster.expected, outputRe
       expectedOutput: string;
       actualOutput: string;
       outputRef: { sha256: string } | null;
+      expectedOutputRef: { sha256: string; kind: string } | null;
+      actualOutputRef: { sha256: string; kind: string } | null;
       diagnostics: Array<{ code?: string }>;
     };
     assert.equal(body.status, 'ok');
@@ -1348,6 +1423,10 @@ test('live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     assert.match(body.actualOutput, /APPROVED-COUNT=2/);
     assert.match(body.expectedOutput, /APPROVED-COUNT=2/);
     assert.equal(body.outputRef?.sha256, 'c'.repeat(64));
+    assert.equal(body.expectedOutputRef?.sha256, 'e'.repeat(64));
+    assert.equal(body.expectedOutputRef?.kind, 'cobol-oracle-stdout');
+    assert.equal(body.actualOutputRef?.sha256, 'a'.repeat(64));
+    assert.equal(body.actualOutputRef?.kind, 'java-stdout');
     assert.equal(body.diagnostics.length, 2);
     assert.equal(body.diagnostics[0]?.code, 'compile.ok');
   } finally {

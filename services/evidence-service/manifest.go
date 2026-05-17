@@ -60,6 +60,7 @@ const (
 	OracleKindCobolRuntime     = "cobol-runtime"
 	OracleKindSynthetic        = "synthetic"
 	OracleKindTrueGoldenMaster = "true-golden-master"
+	OracleKindUserProvided     = "user-provided"
 	OracleKindAbsent           = "absent"
 
 	ExportFormatDirectory = "directory"
@@ -381,9 +382,10 @@ func (o OracleComparison) Validate(path string) error {
 		case OracleKindCobolRuntime,
 			OracleKindSynthetic,
 			OracleKindTrueGoldenMaster,
+			OracleKindUserProvided,
 			OracleKindAbsent:
 		default:
-			return fieldError(path+".oracleKind", "oracleKind must be cobol-runtime|synthetic|true-golden-master|absent")
+			return fieldError(path+".oracleKind", "oracleKind must be cobol-runtime|synthetic|true-golden-master|user-provided|absent")
 		}
 	}
 	if o.ExpectedSHA256 != "" && !sha256Pattern.MatchString(o.ExpectedSHA256) {

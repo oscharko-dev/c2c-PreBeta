@@ -1218,6 +1218,16 @@ components:
           oneOf:
             - $ref: "#/components/schemas/OutputRef"
             - type: 'null'
+        expectedOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+          description: Hash-only reference to the oracle or expected-output bytes used for comparison.
+        actualOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+          description: Hash-only reference to the generated Java stdout bytes used for comparison.
         generatedArtifactRef:
           oneOf:
             - $ref: "#/components/schemas/OutputRef"

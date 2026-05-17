@@ -363,9 +363,23 @@ function verifyArtifactOnDisk(
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`acceptance fixture ${fixtureId}: ${field}.path resolves outside the repository root`);
   }
+  let realRepoRoot: string;
+  let realAbs: string;
+  try {
+    realRepoRoot = fs.realpathSync.native(repoRootAbs);
+    realAbs = fs.realpathSync.native(abs);
+  } catch (err) {
+    throw new Error(
+      `acceptance fixture ${fixtureId}: ${field}.path ${ref.path} could not be resolved safely: ${(err as Error).message}`,
+    );
+  }
+  const realRelative = path.relative(realRepoRoot, realAbs);
+  if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
+    throw new Error(`acceptance fixture ${fixtureId}: ${field}.path resolves outside the repository root through a symlink`);
+  }
   let buffer: Buffer;
   try {
-    buffer = fs.readFileSync(abs);
+    buffer = fs.readFileSync(realAbs);
   } catch (err) {
     throw new Error(
       `acceptance fixture ${fixtureId}: ${field}.path ${ref.path} could not be read: ${(err as Error).message}`,

@@ -9,6 +9,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from orchestrator_service.artifacts import RunArtifactStore
+from orchestrator_service.client import HttpClientError
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.harness import DataReference, HarnessFailure
 from orchestrator_service.workflow import (
@@ -489,6 +490,84 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         failed_events = [event for event in gateway.posted_events if event.get("stateTransition") == "step.failed"]
         self.assertGreater(len(retry_events), 0)
         self.assertGreater(len(failed_events), 0)
+
+    def test_unsupported_parser_diagnostic_blocks_with_unsupported_cobol(self):
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
+        original_invoke = gateway.invoke_capability
+
+        def invoke_with_unsupported_parse(capability, payload):
+            if capability["id"] == "cobol.parse":
+                gateway.calls.append(("invoke", capability["id"], dict(payload)))
+                raise HarnessFailure(
+                    422,
+                    str({
+                        "status": "failed",
+                        "diagnostics": [
+                            {
+                                "severity": "error",
+                                "code": "unsupported-feature",
+                                "line": 8,
+                                "message": "FILE SECTION is not supported in the W0.2 subset.",
+                            },
+                        ],
+                    }),
+                )
+            return original_invoke(capability, payload)
+
+        gateway.invoke_capability = invoke_with_unsupported_parse
+        runner = W0WorkflowRunner(config=self._base_config(max_retries=0), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+        )
+
+        with self.assertRaises(StepExecutionError):
+            runner.run(
+                context=context,
+                input_ref={
+                    "uri": "urn:source/file-io.cbl",
+                    "source": "IDENTIFICATION DIVISION.\nPROGRAM-ID. FILEIONO.\nFILE SECTION.\n",
+                },
+            )
+
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["finalClassification"], "blocked")
+        self.assertEqual(contract["failureCode"], "unsupported_cobol")
+        self.assertIn("run_blocked", [entry["state"] for entry in contract["stateHistory"]])
+        invoked = [entry[1] for entry in gateway.calls if entry[0] == "invoke"]
+        self.assertEqual(invoked, ["cobol.parse"])
+        self.assertEqual(gateway.updated_runs[-1][1], "failed")
+
+    def test_truncated_parser_http_error_body_still_maps_to_unsupported_cobol(self):
+        body = json.dumps({
+            "status": "failed",
+            "assumptions": ["x" * 240],
+            "diagnostics": [
+                {
+                    "severity": "error",
+                    "code": "unsupported-feature",
+                    "line": 8,
+                    "message": "Unsupported W0 COBOL feature: FILE SECTION.",
+                },
+            ],
+        })
+        client_error = HttpClientError(
+            "POST http://parser/v0/parse failed with 422: " + body[:200],
+            status_code=422,
+            body=body,
+        )
+        try:
+            raise StepExecutionError(f"step parse-cobol failed: {client_error}") from client_error
+        except StepExecutionError as exc:
+            failure_code = W0WorkflowRunner._failure_code_from_exception(
+                exc,
+                failed_step="parse-cobol",
+            )
+
+        self.assertEqual(failure_code, "unsupported_cobol")
 
 
     def test_workflow_emits_accepted_and_completed_lifecycle_events(self):

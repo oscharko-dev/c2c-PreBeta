@@ -80,6 +80,7 @@ from .run_contract import (
     FAILURE_JAVA_GENERATION_FAILED,
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
+    FAILURE_UNSUPPORTED_COBOL,
     IllegalTransitionError,
     RepairBudgetExhaustedError,
     STEP_COMPILE_TEST_JAVA as W02_STEP_COMPILE_TEST_JAVA,
@@ -577,6 +578,32 @@ _MODEL_POLICY_DENY_MARKERS: tuple[str, ...] = (
     "timeout_exceeded_model_default",
     "unsupported_structured_output",
 )
+
+
+_UNSUPPORTED_COBOL_DIAGNOSTIC_MARKERS: tuple[str, ...] = (
+    "unsupported-feature",
+    "unsupported-data-declaration",
+    "unsupported-statement",
+)
+
+
+def _exception_chain_text(exc: BaseException) -> str:
+    parts: list[str] = []
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts.append(str(current))
+        body = getattr(current, "body", None)
+        if isinstance(body, str) and body:
+            parts.append(body)
+        current = current.__cause__ or current.__context__
+    return " ".join(parts).lower()
+
+
+def _is_unsupported_cobol_diagnostic(exc: BaseException) -> bool:
+    text = _exception_chain_text(exc)
+    return any(marker in text for marker in _UNSUPPORTED_COBOL_DIAGNOSTIC_MARKERS)
 
 
 def _is_model_policy_denial(exc: BaseException) -> bool:
@@ -1182,6 +1209,7 @@ class W0WorkflowRunner:
             FAILURE_AGENT_CONTRACT_INVALID,
             FAILURE_MODEL_GATEWAY_UNAVAILABLE,
             FAILURE_MODEL_POLICY_DENIED,
+            FAILURE_UNSUPPORTED_COBOL,
         }:
             return CLASSIFICATION_BLOCKED
         return CLASSIFICATION_FAILED
@@ -1207,11 +1235,21 @@ class W0WorkflowRunner:
             if "model" in text:
                 return FAILURE_MODEL_GATEWAY_UNAVAILABLE
         if failed_step is not None:
+            if (
+                failed_step == W02_STEP_PARSE_COBOL
+                and _is_unsupported_cobol_diagnostic(exc)
+            ):
+                return FAILURE_UNSUPPORTED_COBOL
             step_failure_code = W0WorkflowRunner._failure_code_for_step_name(failed_step)
             if step_failure_code is not None:
                 return step_failure_code
         failed_step = _failed_step_from_exception(exc)
         if failed_step is not None:
+            if (
+                failed_step == W02_STEP_PARSE_COBOL
+                and _is_unsupported_cobol_diagnostic(exc)
+            ):
+                return FAILURE_UNSUPPORTED_COBOL
             step_failure_code = W0WorkflowRunner._failure_code_for_step_name(failed_step)
             if step_failure_code is not None:
                 return step_failure_code
@@ -3117,13 +3155,20 @@ class W0WorkflowRunner:
             or ""
         )
         status = str(payload.get("status") or "")
+        raw_oracle_payload = payload.get("oracle")
+        oracle_payload = raw_oracle_payload if isinstance(raw_oracle_payload, Mapping) else {}
+        comparison_source = str(comparison.get("source") or "")
         if status == "missing-golden-master":
             oracle_kind = "absent"
+        elif comparison_source == "oracle.user-provided":
+            oracle_kind = "user-provided"
         elif golden.get("classification") == "true":
             oracle_kind = "true-golden-master"
         elif golden.get("classification") == "synthetic":
             oracle_kind = "synthetic"
         elif (golden.get("cobolRuntime") or {}).get("attempted"):
+            oracle_kind = "cobol-runtime"
+        elif (oracle_payload.get("mode") == "cobol-runtime" and oracle_payload.get("attempted")):
             oracle_kind = "cobol-runtime"
         else:
             oracle_kind = "synthetic"
@@ -3138,6 +3183,18 @@ class W0WorkflowRunner:
             envelope["expectedSha256"] = str(expected_sha)
         if actual_sha:
             envelope["actualSha256"] = str(actual_sha)
+        expected_ref = (
+            _reference_payload_from_metadata(comparison.get("expectedRef"))
+            or _reference_payload_from_metadata(oracle.get("expectedRef"))
+        )
+        actual_ref = (
+            _reference_payload_from_metadata(comparison.get("actualRef"))
+            or _reference_payload_from_metadata(oracle.get("actualRef"))
+        )
+        if expected_ref is not None:
+            envelope["expectedRef"] = expected_ref
+        if actual_ref is not None:
+            envelope["actualRef"] = actual_ref
         summary = str(payload.get("summary") or "")
         if summary:
             envelope["summary"] = summary

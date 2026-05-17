@@ -197,6 +197,8 @@ export interface BuildTestView {
   expectedOutput?: string;
   actualOutput?: string;
   outputRef?: OutputRef | null;
+  expectedOutputRef?: OutputRef | null;
+  actualOutputRef?: OutputRef | null;
   generatedArtifactRef: OutputRef | null;
   note?: string;
 }

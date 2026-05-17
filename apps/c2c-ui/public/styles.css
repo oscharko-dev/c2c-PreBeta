@@ -282,6 +282,52 @@ body {
   color: var(--text-muted);
 }
 
+.oracle-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--panel-border);
+  background: var(--bg-elevated);
+}
+
+@media (max-width: 1000px) {
+  .oracle-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.oracle-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.oracle-editor {
+  min-height: 76px;
+  resize: vertical;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: #0b0e13;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  padding: 8px 10px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.oracle-editor::placeholder {
+  color: var(--text-muted);
+}
+
 .viewer {
   flex: 1 1 auto;
   margin: 0;

@@ -208,11 +208,15 @@ describe('Run Panels', () => {
             classification: 'divergence-unknown',
             expectedOutput: 'Line 1\nLine 2',
             actualOutput: 'Line A\nLine B',
+            expectedOutputRef: { sha256: 'e'.repeat(64), byteSize: 13, kind: 'cobol-oracle-stdout' },
+            actualOutputRef: { sha256: 'a'.repeat(64), byteSize: 14, kind: 'java-stdout' },
             generatedArtifactRef: null
           }} 
         />
       );
       expect(screen.getByText('Divergence (Unknown)')).toBeDefined();
+      expect(screen.getByText(/Expected output ref: cobol-oracle-stdout #eeeeeeeeeeee/)).toBeDefined();
+      expect(screen.getByText(/Actual output ref: java-stdout #aaaaaaaaaaaa/)).toBeDefined();
       expect(screen.getByText('Line 1')).toBeDefined();
       expect(screen.getByText('Line 2')).toBeDefined();
       expect(screen.getByText('Line A')).toBeDefined();

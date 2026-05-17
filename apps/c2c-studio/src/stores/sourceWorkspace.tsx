@@ -10,11 +10,15 @@ export interface SourceWorkspaceState {
   isDirty: boolean;
   loadedProgramId: string | null;
   sourceName: string | null;
+  expectedOutput: string;
+  oracleInput: string;
   transformError: string | null;
   isTransforming: boolean;
   canSubmitTransform: boolean;
   setSourceText: (text: string) => void;
-  loadProgram: (programId: string, sourceText: string, sourceName: string) => void;
+  setExpectedOutput: (text: string) => void;
+  setOracleInput: (text: string) => void;
+  loadProgram: (programId: string, sourceText: string, sourceName: string, expectedOutput?: string) => void;
   clearWorkspace: () => void;
   submitTransform: () => Promise<ApiResult<TransformResponse>>;
 }
@@ -26,6 +30,8 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [isDirty, setIsDirty] = useState(false);
   const [loadedProgramId, setLoadedProgramId] = useState<string | null>(null);
   const [sourceName, setSourceName] = useState<string | null>(null);
+  const [expectedOutput, setExpectedOutputInternal] = useState('');
+  const [oracleInput, setOracleInputInternal] = useState('');
   const [transformError, setTransformError] = useState<string | null>(null);
   
   const { state: runState, startTransform } = useTransformationRun();
@@ -40,10 +46,27 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loadProgram = (newProgramId: string, newSourceText: string, newSourceName: string) => {
+  const setExpectedOutput = (text: string) => {
+    setExpectedOutputInternal(text);
+    setTransformError(null);
+  };
+
+  const setOracleInput = (text: string) => {
+    setOracleInputInternal(text);
+    setTransformError(null);
+  };
+
+  const loadProgram = (
+    newProgramId: string,
+    newSourceText: string,
+    newSourceName: string,
+    newExpectedOutput = '',
+  ) => {
     setSourceTextInternal(newSourceText);
     setLoadedProgramId(newProgramId);
     setSourceName(newSourceName);
+    setExpectedOutputInternal(newExpectedOutput);
+    setOracleInputInternal('');
     setIsDirty(false);
     setTransformError(null);
   };
@@ -52,6 +75,8 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setSourceTextInternal('');
     setLoadedProgramId(null);
     setSourceName(null);
+    setExpectedOutputInternal('');
+    setOracleInputInternal('');
     setIsDirty(false);
     setTransformError(null);
   };
@@ -78,6 +103,9 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       sourceText,
       programId: isDirty ? undefined : loadedProgramId ?? undefined,
       sourceName: sourceName || DEFAULT_SOURCE_NAME,
+      targetLanguage: 'java',
+      expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
+      oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
     });
 
     if (!result.ok) {
@@ -94,10 +122,14 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         isDirty,
         loadedProgramId,
         sourceName,
+        expectedOutput,
+        oracleInput,
         transformError,
         isTransforming,
         canSubmitTransform,
         setSourceText,
+        setExpectedOutput,
+        setOracleInput,
         loadProgram,
         clearWorkspace,
         submitTransform,

@@ -89,6 +89,108 @@ class SemanticIrServiceTest {
     }
 
     @Test
+    void normalizesHelloW02AcceptanceFixtureParserShape() {
+        Map<String, Object> response = service.generate(Map.of(
+                "runId", "run-hello-w02",
+                "parseOutput", Map.of(
+                        "status", "ok",
+                        "runId", "run-hello-w02",
+                        "workflowId", "w0-migration-v0",
+                        "sourceRef", Map.of(
+                                "uri", "fixture://corpus/synthetic/programs/hello-w02.cbl",
+                                "sha256", "061074d14470643e3a8333a742ff0f5d4ea6285048d3b88e31f6ae0170ba231e",
+                                "byteSize", 588
+                        ),
+                        "program", Map.of(
+                                "programId", "HELLOW02",
+                                "sourceHash", "061074d14470643e3a8333a742ff0f5d4ea6285048d3b88e31f6ae0170ba231e",
+                                "sourceKind", "cobol",
+                                "dataItems", List.of(
+                                        Map.of(
+                                                "id", "d-ws-counter",
+                                                "name", "WS-COUNTER",
+                                                "level", 1,
+                                                "picture", "99",
+                                                "byteSize", 2,
+                                                "numeric", true,
+                                                "signed", false,
+                                                "scale", 0,
+                                                "value", "1",
+                                                "line", 5
+                                        ),
+                                        Map.of(
+                                                "id", "d-ws-total",
+                                                "name", "WS-TOTAL",
+                                                "level", 1,
+                                                "picture", "99",
+                                                "byteSize", 2,
+                                                "numeric", true,
+                                                "signed", false,
+                                                "scale", 0,
+                                                "value", "0",
+                                                "line", 7
+                                        )
+                                ),
+                                "statements", List.of(
+                                        Map.of(
+                                                "id", "s-perform-varying",
+                                                "kind", "PERFORM",
+                                                "line", 10,
+                                                "raw", "PERFORM VARYING WS-COUNTER FROM 1 BY 1 UNTIL WS-COUNTER > WS-LIMIT",
+                                                "operands", Map.of(
+                                                        "tokens", List.of("PERFORM", "VARYING", "WS-COUNTER", "FROM", "1", "BY", "1", "UNTIL", "WS-COUNTER", ">", "WS-LIMIT"),
+                                                        "mode", "varying-until",
+                                                        "varying", "WS-COUNTER",
+                                                        "from", "1",
+                                                        "by", "1",
+                                                        "until", "WS-COUNTER > WS-LIMIT"
+                                                )
+                                        ),
+                                        Map.of(
+                                                "id", "s-add-total",
+                                                "kind", "ADD",
+                                                "line", 12,
+                                                "raw", "ADD WS-COUNTER TO WS-TOTAL",
+                                                "operands", Map.of(
+                                                        "source", "WS-COUNTER",
+                                                        "targets", List.of("WS-TOTAL")
+                                                )
+                                        ),
+                                        Map.of(
+                                                "id", "s-display-done",
+                                                "kind", "DISPLAY",
+                                                "line", 16,
+                                                "raw", "DISPLAY \"HELLO-W02 DONE\"",
+                                                "operands", Map.of("items", List.of("\"HELLO-W02 DONE\""))
+                                        )
+                                ),
+                                "controlFlow", List.of()
+                        ),
+                        "diagnostics", List.of(),
+                        "assumptions", List.of()
+                )
+        ));
+
+        assertEquals("ok", response.get("status"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ir = (Map<String, Object>) response.get("ir");
+        assertEquals("HELLOW02", ir.get("programId"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> symbols = (Map<String, Object>) ir.get("symbols");
+        assertNotNull(symbols.get("WS-COUNTER"));
+        assertNotNull(symbols.get("WS-TOTAL"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> statements = (List<Map<String, Object>>) ir.get("statements");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> performOperands = (Map<String, Object>) statements.getFirst().get("operands");
+        assertTrue(performOperands.containsKey("performModel"));
+        assertTrue(performOperands.containsKey("conditionModel"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> addOperands = (Map<String, Object>) statements.get(1).get("operands");
+        assertTrue(addOperands.containsKey("arithmeticModel"));
+    }
+
+    @Test
     void carriesValueOccursInheritanceAndStructuredOperands() {
         Map<String, Object> accountGroup = new LinkedHashMap<>();
         accountGroup.put("id", "d-account");
