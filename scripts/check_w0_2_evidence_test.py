@@ -292,6 +292,86 @@ class CheckW02EvidenceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
         self.assertIn("remaining", result.stderr)
 
+    def test_blocked_pack_requires_budget_summary(self) -> None:
+        # Issue #217: budgetSummary stays mandatory even on blocked packs.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
+        manifest["artifacts"].pop("finalJavaArtifact")
+        manifest["artifacts"].pop("budgetSummary")
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
+        manifest["validation"] = {
+            "ok": False,
+            "requiredArtifacts": ["evidence-pack-manifest"],
+            "missingArtifacts": [],
+        }
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("budgetSummary", result.stderr)
+
+    def test_blocked_pack_post_gate_requires_assist_decision(self) -> None:
+        # Issue #217: when post-gate signals (agentTrajectories with
+        # transformation/verification-repair role, or repairAttempts) are
+        # present, assistDecision must be recorded even on a blocked pack.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
+        manifest["artifacts"].pop("finalJavaArtifact")
+        manifest["artifacts"].pop("assistDecision")
+        # Post-gate signal: transformation agent trajectory present.
+        manifest["artifacts"]["agentTrajectories"] = [
+            {"agentRole": "orchestrator", "ledgerRef": {"uri": "file:///tmp/o.json", "sha256": _hex("1"), "byteSize": 50}},
+            {"agentRole": "transformation", "ledgerRef": {"uri": "file:///tmp/t.json", "sha256": _hex("2"), "byteSize": 50}},
+        ]
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
+        manifest["validation"] = {
+            "ok": False,
+            "requiredArtifacts": ["evidence-pack-manifest"],
+            "missingArtifacts": [],
+        }
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("assistDecision", result.stderr)
+
+    def test_blocked_pack_pre_gate_may_omit_assist_decision(self) -> None:
+        # Issue #217: a blocked pack with no post-gate signals legitimately
+        # has no assistDecision.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
+        manifest["artifacts"].pop("finalJavaArtifact")
+        manifest["artifacts"].pop("assistDecision")
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
+        # Strip all post-gate signals.
+        manifest["artifacts"]["agentTrajectories"] = [
+            {"agentRole": "orchestrator", "ledgerRef": {"uri": "file:///tmp/o.json", "sha256": _hex("1"), "byteSize": 50}},
+        ]
+        manifest["artifacts"].pop("repairAttempts", None)
+        manifest["artifacts"]["modelInvocations"] = [
+            {
+                "invocationId": "inv-pre-gate",
+                "modelId": "none",
+                "status": "skipped",
+                "ledgerRef": {"uri": "file:///tmp/ledger.json", "sha256": _hex("0"), "byteSize": 50},
+            }
+        ]
+        manifest["validation"] = {
+            "ok": False,
+            "requiredArtifacts": ["evidence-pack-manifest"],
+            "missingArtifacts": [],
+        }
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     # ----- blocked-path acceptance --------------------------------------
 
     def test_blocked_manifest_passes(self) -> None:

@@ -696,6 +696,50 @@ def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -
                 failures,
             )
 
+        # Issue #217 (W0.3-6): budgetSummary stays mandatory on every W0.2
+        # pack — including blocked runs — because the bounded budgets always
+        # exist on the contract. assistDecision is conditional: blocked
+        # packs that legitimately terminated before the gate fired
+        # (no transformation/verification-repair trajectory and no repair
+        # attempts) may omit it; once any post-gate signal is present, the
+        # decision must be recorded.
+        _check_budget_summary(artifacts.get("budgetSummary"), failures)
+        decision = artifacts.get("assistDecision")
+        gate_fired = _blocked_run_reached_assist_gate(artifacts)
+        if decision is None:
+            _require(
+                not gate_fired,
+                "blocked W0.2 pack shows post-gate signals (agentTrajectories or "
+                "repairAttempts) but does not record artifacts.assistDecision (Issue #217)",
+                failures,
+            )
+        else:
+            _check_assist_decision_lineage(decision, failures)
+
+
+def _blocked_run_reached_assist_gate(artifacts: Mapping[str, Any]) -> bool:
+    """Infer from the pack whether the assist-decision gate fired before the run was blocked."""
+    trajectories = artifacts.get("agentTrajectories") or []
+    if _is_seq(trajectories):
+        for entry in trajectories:
+            if not _is_mapping(entry):
+                continue
+            role = entry.get("agentRole")
+            if role in ("transformation", "verification-repair"):
+                return True
+    repair_attempts = artifacts.get("repairAttempts") or []
+    if _is_seq(repair_attempts) and len(list(repair_attempts)) > 0:
+        return True
+    invocations = artifacts.get("modelInvocations") or []
+    if _is_seq(invocations):
+        for entry in invocations:
+            if not _is_mapping(entry):
+                continue
+            role = entry.get("agentRole")
+            if role in ("transformation", "verification-repair"):
+                return True
+    return False
+
 
 def _scan_referenced_artifacts(
     manifest: Mapping[str, Any],

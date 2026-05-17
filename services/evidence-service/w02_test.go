@@ -871,10 +871,11 @@ func TestBudgetSnapshotRejectsInconsistentRemaining(t *testing.T) {
 	}
 }
 
-func TestCreatePackW02BlockedRunRelaxesAssistDecisionRequirement(t *testing.T) {
-	// A run blocked before the assist-decision gate fires has no
-	// AssistDecision; budgetSummary stays mandatory because the budgets
-	// always exist on a contract.
+func TestCreatePackW02BlockedRunRelaxesAssistDecisionRequirementWhenPreGate(t *testing.T) {
+	// A run blocked BEFORE the assist-decision gate fires (no productive
+	// agent trajectories, no repair attempts, no transformation/repair
+	// invocations) legitimately has no AssistDecision. budgetSummary stays
+	// mandatory because the budgets always exist on a contract.
 	srv, _ := newTestServer(t)
 	artifacts := completeW02Artifacts(t)
 	artifacts.OracleComparison.Matched = false
@@ -884,6 +885,19 @@ func TestCreatePackW02BlockedRunRelaxesAssistDecisionRequirement(t *testing.T) {
 		artifacts.GeneratedJavaArtifacts[i].Selected = false
 	}
 	artifacts.AssistDecision = nil // legitimate: blocked before the gate
+	// Clear all post-gate signals so runReachedAssistGate returns false.
+	artifacts.RepairAttempts = nil
+	artifacts.AgentTrajectories = []AgentTrajectoryRef{
+		{AgentRole: AgentRoleOrchestrator, LedgerRef: mustRef(t, "urn:c2c/trajectory/run-pre-gate/orch", map[string]string{"role": "orchestrator"})},
+	}
+	// Strip productive model invocations; keep at least one entry so the
+	// modelInvocations required-set check still passes.
+	artifacts.ModelInvocations = []ModelInvocationRef{{
+		InvocationID: "inv-pre-gate-skipped",
+		ModelID:      "none",
+		Status:       "skipped",
+		LedgerRef:    mustRef(t, "urn:c2c/model-invocation/inv-pre-gate-skipped", map[string]string{"status": "skipped"}),
+	}}
 
 	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
 		RunID:     "run-w02-blocked-pre-gate",
@@ -907,6 +921,50 @@ func TestCreatePackW02BlockedRunRelaxesAssistDecisionRequirement(t *testing.T) {
 	}
 	if containsString(manifest.Validation.MissingArtifacts, "assistDecision") {
 		t.Fatalf("blocked pre-gate pack must not flag assistDecision as missing; got %v", manifest.Validation.MissingArtifacts)
+	}
+}
+
+func TestCreatePackW02BlockedRunPostGateStillRequiresAssistDecision(t *testing.T) {
+	// A blocked run that has post-gate signals (transformation trajectory,
+	// repair attempts, or productive model invocations) MUST still record
+	// the assist-decision — the gate fired, so the decision exists.
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	artifacts.OracleComparison.Matched = false
+	artifacts.GeneratedJava = nil
+	artifacts.FinalJavaArtifact = nil
+	for i := range artifacts.GeneratedJavaArtifacts {
+		artifacts.GeneratedJavaArtifacts[i].Selected = false
+	}
+	artifacts.AssistDecision = nil // illegitimate: gate fired (trajectories present)
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-blocked-post-gate",
+		Wave:      WaveW02,
+		Blocked:   true,
+		Artifacts: artifacts,
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201; got %d", res.StatusCode)
+	}
+	var manifest EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = res.Body.Close()
+	if !containsString(manifest.Validation.MissingArtifacts, "assistDecision") {
+		t.Fatalf("blocked post-gate pack without assistDecision must still flag it; got %v", manifest.Validation.MissingArtifacts)
+	}
+}
+
+func TestAssistDecisionRequiresAllThreeBudgetSnapshots(t *testing.T) {
+	// Issue #217: every recorded assist-decision must carry all three
+	// gate-time budget snapshots (repair, assist, modelInvocation). The
+	// orchestrator's gate samples all three before recording the decision.
+	a := completeW02Artifacts(t)
+	a.AssistDecision.AssistBudgetSnapshot = nil
+	if err := validateArtifactsShape(&a); err == nil {
+		t.Fatalf("expected validation to require assistBudgetSnapshot on assistDecision")
 	}
 }
 

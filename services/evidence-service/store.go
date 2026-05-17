@@ -75,7 +75,7 @@ func (s *PackStore) Create(input CreateInput) (*EvidencePackManifest, error) {
 	}
 	manifest.Validation = EvaluateValidationForWave(&manifest.Artifacts, wave)
 	if input.Blocked && wave == WaveW02 {
-		manifest.Validation = relaxBlockedW02Validation(manifest.Validation)
+		manifest.Validation = relaxBlockedW02Validation(manifest.Validation, manifest.Artifacts)
 	}
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, input.Blocked)
@@ -135,7 +135,7 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 	}
 	manifest.Validation = EvaluateValidationForWave(&manifest.Artifacts, manifest.Wave)
 	if blocked && manifest.Wave == WaveW02 {
-		manifest.Validation = relaxBlockedW02Validation(manifest.Validation)
+		manifest.Validation = relaxBlockedW02Validation(manifest.Validation, manifest.Artifacts)
 	}
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, blocked)
@@ -322,33 +322,59 @@ func validateBlockedW02Artifacts(a Artifacts) error {
 	return nil
 }
 
-// blockedW02RelaxedRequirements (Issue #217) lists the W0.2 required-artifact
-// names that are LEGITIMATELY absent on a blocked pack: a run can terminate
-// before the deterministic generator, the build/test gate, or the assist-
-// decision gate ever runs. The blocked pack still records its lineage via
-// budgetSummary and (when available) assistDecision, but absence of these
-// other fields does not force evidence_incomplete on top of "blocked".
-//
-// budgetSummary stays mandatory on every W0.2 pack so reviewers can always
-// see the bounded budgets observed during the run.
-var blockedW02RelaxedRequirements = map[string]struct{}{
+// blockedW02PreGateRelaxedRequirements (Issue #217) lists the W0.2 required
+// artifact names that a run blocked BEFORE the assist-decision gate fires
+// (e.g., parse_failed, semantic_ir_failed) legitimately has no way to
+// emit. Post-gate artifacts (assistDecision) and end-of-run lineage
+// (budgetSummary) stay mandatory whenever the pack shows evidence that the
+// gate already fired — see runReachedAssistGate.
+var blockedW02PreGateRelaxedRequirements = map[string]struct{}{
 	"generatedJava":          {},
 	"generatedJavaArtifacts": {},
 	"finalJavaArtifact":      {},
 	"buildTestResults":       {},
 	"oracleComparison":       {},
-	"assistDecision":         {},
+}
+
+// runReachedAssistGate (Issue #217) infers from the pack itself whether the
+// assist-decision gate already fired. The orchestrator only emits a
+// transformation or verification-repair agent trajectory after the gate
+// authorised productive assist (transformation) or after the repair loop
+// started (verification-repair, which is downstream of the gate). Either
+// signal proves the run made it past the gate, so the decision must be
+// present even on a blocked pack.
+func runReachedAssistGate(a Artifacts) bool {
+	for _, trajectory := range a.AgentTrajectories {
+		if trajectory.AgentRole == AgentRoleTransformation || trajectory.AgentRole == AgentRoleVerificationRepair {
+			return true
+		}
+	}
+	if len(a.RepairAttempts) > 0 {
+		return true
+	}
+	for _, invocation := range a.ModelInvocations {
+		if invocation.AgentRole == AgentRoleTransformation || invocation.AgentRole == AgentRoleVerificationRepair {
+			return true
+		}
+	}
+	return false
 }
 
 // relaxBlockedW02Validation drops "missingArtifacts" entries that are
 // legitimately absent on a blocked W0.2 pack (Issue #217). The validation
-// stays "OK=false" if any other artifact is missing, but absence of pre-gate
-// artifacts on a blocked run no longer forces a second-degree
-// "evidence_incomplete" label on top of "blocked".
-func relaxBlockedW02Validation(v ValidationResult) ValidationResult {
+// stays "OK=false" if any other artifact is missing, but absence of
+// pre-gate artifacts on a blocked run no longer forces a second-degree
+// "evidence_incomplete" label on top of "blocked". budgetSummary stays
+// mandatory unconditionally; assistDecision is relaxed only when the
+// pack shows no evidence that the gate fired.
+func relaxBlockedW02Validation(v ValidationResult, artifacts Artifacts) ValidationResult {
+	gateFired := runReachedAssistGate(artifacts)
 	filtered := make([]string, 0, len(v.MissingArtifacts))
 	for _, name := range v.MissingArtifacts {
-		if _, relaxed := blockedW02RelaxedRequirements[name]; relaxed {
+		if _, relaxed := blockedW02PreGateRelaxedRequirements[name]; relaxed {
+			continue
+		}
+		if name == "assistDecision" && !gateFired {
 			continue
 		}
 		filtered = append(filtered, name)

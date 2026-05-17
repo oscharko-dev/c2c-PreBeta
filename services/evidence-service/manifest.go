@@ -583,6 +583,12 @@ func (a *AssistDecisionLineage) Validate(path string) error {
 		// Issue #216: budget-exhausted always degrades to assist_not_required.
 		return fieldError(path+".outcome", "assist_budget_exhausted reason requires outcome=assist_not_required")
 	}
+	// Issue #217: a decision that REACHED the gate (i.e., it was recorded at
+	// all) must carry all three gate-time budget snapshots so reviewers can
+	// audit the budget posture the orchestrator observed at decision time.
+	// Decisions emitted for the not-required-baseline cases still passed
+	// through the gate and thus still have the snapshots — there is no
+	// path that records a decision without first sampling the budgets.
 	for _, snapshot := range []struct {
 		ref  *BudgetSnapshot
 		path string
@@ -592,7 +598,7 @@ func (a *AssistDecisionLineage) Validate(path string) error {
 		{a.ModelInvocationBudgetSnapshot, path + ".modelInvocationBudgetSnapshot"},
 	} {
 		if snapshot.ref == nil {
-			continue
+			return fieldError(snapshot.path, "gate-time budget snapshot is required on every recorded assist-decision")
 		}
 		if err := snapshot.ref.Validate(snapshot.path); err != nil {
 			return err
