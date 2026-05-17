@@ -163,7 +163,7 @@ export function CobolEditorPane() {
             spellCheck={false}
             aria-label="Optional expected output for oracle comparison"
             placeholder="Leave empty to derive the oracle through COBOL runtime when available."
-            className="min-h-20 resize-y rounded border border-line-2 bg-bg-0 p-2 font-mono text-xs text-text outline-none placeholder:text-text-faint focus:border-accent"
+            className="h-20 resize-none overflow-auto rounded border border-line-2 bg-bg-0 p-2 font-mono text-xs text-text outline-none placeholder:text-text-faint focus:border-accent"
           />
         </label>
         <label className="flex min-w-0 flex-col gap-1">
@@ -176,7 +176,7 @@ export function CobolEditorPane() {
             spellCheck={false}
             aria-label="Optional oracle input"
             placeholder="Stdin passed to the COBOL oracle; leave empty for no input."
-            className="min-h-20 resize-y rounded border border-line-2 bg-bg-0 p-2 font-mono text-xs text-text outline-none placeholder:text-text-faint focus:border-accent"
+            className="h-20 resize-none overflow-auto rounded border border-line-2 bg-bg-0 p-2 font-mono text-xs text-text outline-none placeholder:text-text-faint focus:border-accent"
           />
         </label>
       </div>

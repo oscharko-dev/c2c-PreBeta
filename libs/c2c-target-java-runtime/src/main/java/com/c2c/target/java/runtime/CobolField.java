@@ -77,7 +77,9 @@ public final class CobolField {
             throw new IllegalStateException(
                     "Field '" + name + "' overflows PIC " + picture.raw() + ": " + value);
         }
-        this.numericValue = rescaled;
+        this.numericValue = picture.signed() && !rescaled.signed()
+                ? CobolDecimal.of(rescaled.value(), rescaled.scale(), true)
+                : rescaled;
     }
 
     /** Move a numeric literal into this field using the field's declared scale. */

@@ -526,7 +526,33 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(request.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
-	output, invokeErr := validated.provider.Invoke(ctx, request, validated.model)
+	selected := validated
+	output, invokeErr := selected.provider.Invoke(ctx, selected.request, selected.model)
+	if invokeErr != nil {
+		log.Printf("model provider invocation failed: run=%s model=%s error=%s", request.RunID, selected.model.ID, invokeErr.Error())
+	}
+	if invokeErr != nil && !isProviderTimeout(invokeErr, ctx) {
+		for _, fallbackModelID := range s.fallbackModelIDsForRole(request.AgentRole, selected.model.ID) {
+			fallbackRequest := request
+			fallbackRequest.ModelID = fallbackModelID
+			fallbackValidated, fallbackErr := s.validateInvocation(fallbackRequest, requestRef)
+			if fallbackErr != nil {
+				log.Printf("model provider fallback skipped: run=%s model=%s error=%s", request.RunID, fallbackModelID, fallbackErr.Error())
+				continue
+			}
+			fallbackOutput, fallbackInvokeErr := fallbackValidated.provider.Invoke(ctx, fallbackValidated.request, fallbackValidated.model)
+			if fallbackInvokeErr == nil {
+				selected = fallbackValidated
+				output = fallbackOutput
+				invokeErr = nil
+				break
+			}
+			log.Printf("model provider fallback failed: run=%s model=%s error=%s", request.RunID, fallbackValidated.model.ID, fallbackInvokeErr.Error())
+			invokeErr = fallbackInvokeErr
+		}
+	}
+	validated = selected
+	request = selected.request
 	latencyMs := int64(time.Since(start) / time.Millisecond)
 	outputData := map[string]any{
 		"invocationId": invocationID,
@@ -540,7 +566,7 @@ func (s *ModelGatewayService) invokeHandler(w http.ResponseWriter, r *http.Reque
 	if invokeErr != nil {
 		outputStatus = statusFailed
 		switch {
-		case errors.Is(invokeErr, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded):
+		case isProviderTimeout(invokeErr, ctx):
 			errorClass = errorClassProviderTimeout
 			errorCode = errorCodeProviderTimeout
 		default:
@@ -673,6 +699,30 @@ func normalizeInvocationStatus(status string) string {
 	default:
 		return statusCompleted
 	}
+}
+
+func isProviderTimeout(err error, ctx context.Context) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+func (s *ModelGatewayService) fallbackModelIDsForRole(role string, currentModelID string) []string {
+	seen := map[string]struct{}{strings.TrimSpace(currentModelID): {}}
+	candidates := make([]string, 0)
+	for _, modelID := range s.fallbackModelDeployments {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		if _, exists := seen[modelID]; exists {
+			continue
+		}
+		seen[modelID] = struct{}{}
+		if !s.allowlist.IsRoleAllowed(role, modelID) {
+			continue
+		}
+		candidates = append(candidates, modelID)
+	}
+	return candidates
 }
 
 func safeProviderFailureMessage(errorCode string) string {

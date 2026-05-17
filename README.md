@@ -6,14 +6,23 @@ Think Big, Start Small.
 
 This repository is the W0/W0.1/W0.2 product foundation for a polyglot service
 mesh that prepares and validates COBOL-to-code migrations. The implemented
-product path is intentionally constrained, deterministic, and reproducible;
-W0.2 adds the first productive AI-agent transformation loop.
+product path is intentionally constrained, deterministic-first, and
+reproducible; W0.2 adds the first productive AI-agent transformation loop.
+Deterministic capabilities and model-backed agents are not separate product
+paths: both run through the global Orchestrator, which is a deterministic state
+machine rather than an LLM.
 
 The Harness is the long-term differentiation layer: shared infrastructure,
 governance, ledgers, and Experience Learning. It observes agent, tool, model,
 artifact, and verification outcomes, learns which patterns work, and exposes
 those signals to orchestrators and agents. The Orchestrator still controls each
 workflow; the Harness does not become a hidden workflow engine.
+
+Architecture shorthand: deterministic services are used whenever their
+semantics are known; LLMs enter through bounded agent steps only when they add
+value. Later LLM-based Team Leads or Planner Agents may coordinate specialist
+agents inside an Orchestrator-approved step, but they never replace the global
+Orchestrator and never bypass deterministic build/test/evidence gates.
 
 Canonical concept and roadmap:
 

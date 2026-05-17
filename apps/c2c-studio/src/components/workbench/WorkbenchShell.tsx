@@ -23,7 +23,7 @@ export function WorkbenchShell() {
         <SourceWorkspaceProvider>
           <GeneratedArtifactsProvider>
             <div
-              className="flex min-h-screen w-full flex-col overflow-hidden bg-bg-0 text-text font-ui"
+              className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-bg-0 text-text font-ui"
               data-testid="studio-workbench-shell"
             >
               <a

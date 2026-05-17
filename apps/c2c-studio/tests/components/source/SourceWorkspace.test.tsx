@@ -172,6 +172,19 @@ describe('COBOL source input', () => {
     });
   });
 
+  it('keeps oracle text fields as internally scrollable controls instead of resizing the IDE shell', () => {
+    renderSourceWorkbench(<CobolEditorPane />);
+
+    fireEvent.click(screen.getByText('Start Typing'));
+
+    expect(screen.getByRole('textbox', { name: /optional expected output/i })).toHaveClass('h-20');
+    expect(screen.getByRole('textbox', { name: /optional expected output/i })).toHaveClass('resize-none');
+    expect(screen.getByRole('textbox', { name: /optional expected output/i })).toHaveClass('overflow-auto');
+    expect(screen.getByRole('textbox', { name: /optional oracle input/i })).toHaveClass('h-20');
+    expect(screen.getByRole('textbox', { name: /optional oracle input/i })).toHaveClass('resize-none');
+    expect(screen.getByRole('textbox', { name: /optional oracle input/i })).toHaveClass('overflow-auto');
+  });
+
   it('top bar start action submits the current editor buffer', async () => {
     vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r3', programId: 'OWN03', status: 'starting' } as unknown as TransformResponse });
 

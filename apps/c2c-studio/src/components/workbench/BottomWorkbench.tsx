@@ -33,7 +33,7 @@ export function BottomWorkbench() {
   return (
     <section
       id="bottom-workbench-region"
-      className="flex flex-col border-t border-line bg-bg-1 shrink-0 w-full relative group" 
+      className="relative flex w-full shrink-0 flex-col overflow-hidden border-t border-line bg-bg-1 group"
       aria-label="Bottom Workbench"
       style={{ height: size }}
     >

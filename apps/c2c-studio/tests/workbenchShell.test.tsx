@@ -72,6 +72,25 @@ describe('WorkbenchShell Layout & Topbar Readiness', () => {
     expect(screen.getByRole('status')).toHaveTextContent('No run active');
   });
 
+  it('keeps the IDE shell constrained to the viewport and delegates scrolling to inner panes', () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: { status: 'ok' },
+      mode: { orchestrator: 'live', evidence: 'live' },
+      error: null,
+      errorKind: null,
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    expect(screen.getByTestId('studio-workbench-shell')).toHaveClass('h-[100dvh]');
+    expect(screen.getByTestId('studio-workbench-shell')).toHaveClass('max-h-[100dvh]');
+    expect(screen.getByTestId('studio-workbench-shell')).toHaveClass('overflow-hidden');
+    expect(screen.getByLabelText('Split Editor Area')).toHaveClass('min-h-0');
+    expect(screen.getByLabelText('Split Editor Area')).toHaveClass('overflow-hidden');
+    expect(screen.getByLabelText('Bottom Workbench')).toHaveClass('overflow-hidden');
+  });
+
   it('allows workbench tabs to be selected through pointer interaction', () => {
     vi.mocked(useC2cApi).mockReturnValue({
       health: { status: 'ok' },

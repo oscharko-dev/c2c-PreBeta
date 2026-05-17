@@ -59,7 +59,7 @@ STUDIO_PORT="${C2C_LOCAL_STUDIO_PORT:-3000}"
 
 HARNESS_TOKEN="${C2C_LOCAL_HARNESS_TOKEN:-c2c-local-control-plane-token}"
 INTERNAL_CONTROL_TOKEN="${C2C_LOCAL_INTERNAL_CONTROL_TOKEN:-$HARNESS_TOKEN}"
-MODEL_GATEWAY_ENABLED="${C2C_LOCAL_MODEL_GATEWAY_ENABLED:-false}"
+MODEL_GATEWAY_ENABLED="${C2C_LOCAL_MODEL_GATEWAY_ENABLED:-auto}"
 
 HARNESS_URL="http://127.0.0.1:${HARNESS_PORT}"
 EVIDENCE_URL="http://127.0.0.1:${EVIDENCE_PORT}"
@@ -83,6 +83,32 @@ is_truthy() {
   esac
 }
 
+resolve_model_gateway_enabled() {
+  local value
+  value="$(printf '%s' "$MODEL_GATEWAY_ENABLED" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    1|true|yes|on)
+      MODEL_GATEWAY_ENABLED=true
+      return 0
+      ;;
+    0|false|no|off)
+      MODEL_GATEWAY_ENABLED=false
+      return 0
+      ;;
+    auto|"")
+      if [[ -n "${C2C_MODEL_PROVIDER:-}" || -n "${AZURE_FOUNDRY_ENDPOINT:-}" || -n "${C2C_MODEL_DEFAULT_DEPLOYMENT:-}" ]]; then
+        MODEL_GATEWAY_ENABLED=true
+      else
+        MODEL_GATEWAY_ENABLED=false
+      fi
+      return 0
+      ;;
+    *)
+      fail "C2C_LOCAL_MODEL_GATEWAY_ENABLED must be true, false, or auto (got $MODEL_GATEWAY_ENABLED)"
+      ;;
+  esac
+}
+
 require() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required tool: $1"
 }
@@ -95,6 +121,9 @@ require mvn
 require node
 require npm
 require python3
+
+resolve_model_gateway_enabled
+log "model gateway enabled: $MODEL_GATEWAY_ENABLED"
 
 launcher_pid_file="$PID_DIR/launcher.pid"
 
@@ -269,7 +298,7 @@ build_java_runtime() {
   log "building c2c-target-java-runtime"
   (
     cd "$ROOT_DIR/libs/c2c-target-java-runtime"
-    mvn -B -ntp -DskipTests install
+    mvn -B -ntp -DskipTests clean install
   ) >"$LOG_DIR/mvn-runtime.log" 2>&1 || fail "c2c-target-java-runtime install failed (see $LOG_DIR/mvn-runtime.log)"
 }
 
@@ -284,7 +313,7 @@ build_java_services() {
     fi
     (
       cd "$ROOT_DIR/services/$svc"
-      mvn -B -ntp -DskipTests "$goal"
+      mvn -B -ntp -DskipTests clean "$goal"
     ) >"$LOG_DIR/mvn-${svc}.log" 2>&1 || fail "services/$svc package failed (see $LOG_DIR/mvn-${svc}.log)"
   done
 }

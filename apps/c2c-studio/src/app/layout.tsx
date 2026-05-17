@@ -36,7 +36,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${ibmPlexMono.variable}`}>{children}</body>
+      <body className={`${inter.variable} ${ibmPlexMono.variable} h-full overflow-hidden`}>{children}</body>
     </html>
   );
 }
