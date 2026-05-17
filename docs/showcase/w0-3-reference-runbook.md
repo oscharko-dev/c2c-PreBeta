@@ -269,30 +269,43 @@ In `--foundry` mode the gate submits **HELLOW02** with
 
 ## Exhaustion paths
 
-Two W0.3 behaviours are best exercised in isolation. Both are covered by
-orchestrator unit tests; the local recipe below makes them reproducible by
-hand.
+Both new W0.3 budgets carry explicit exhaustion semantics. The
+`assistBudget` is **per-run** (each new run starts with
+`limit = ORCHESTRATOR_ASSIST_BUDGET_MAX`, default `1`), so it cannot be
+exhausted by chaining product runs from the BFF — its exhaustion path is
+only reachable when the budget is consumed *within the same run* before the
+gate fires. The `modelInvocationBudget` is also per-run, but its multiple
+consumption sites within a single run (productive transformation + each
+repair iteration) make it reproducible end-to-end against the live stack.
 
 ### Assist-budget exhaustion (`assist_budget_exhausted`)
 
-Set the assist budget to `1` (the default) and submit two runs with
-`useTransformationAgent = true` against the same orchestrator process. The
-second run still records the gate but degrades:
+This code path is exercised by the orchestrator unit test
+[`test_assist_budget_exhaustion_degrades_gate_to_assist_not_required`](../../services/orchestrator-service/tests/test_w02_contract.py),
+which pre-consumes the `assistBudget` directly on the run contract before
+invoking the gate. Operators verifying this code path should run the
+orchestrator test directly:
 
 ```bash
-curl -sf "http://localhost:${C2C_LOCAL_BFF_PORT:-18089}/api/v0/runs/${RUN_ID}/workflow" \
-  | jq '.contract.assistDecision | { outcome, reasonCode }'
-# Expected: { "outcome": "assist_not_required", "reasonCode": "assist_budget_exhausted" }
+cd services/orchestrator-service
+PYTHONPATH=src python3 -m unittest \
+  tests.test_w02_contract.W02WorkflowIntegrationTests.test_assist_budget_exhaustion_degrades_gate_to_assist_not_required
 ```
 
-The deterministic baseline is the final candidate and the run still
-completes deterministically on the success path.
+When the assertion holds the gate records
+`outcome = assist_not_required` with
+`reasonCode = assist_budget_exhausted`, the deterministic baseline becomes
+the final candidate, and the run still completes deterministically on the
+success path. End-to-end product runs from the BFF cannot reach this code
+path because each new run receives a fresh `assistBudget` from config.
 
 ### Model-invocation-budget exhaustion
 
-Set `ORCHESTRATOR_MODEL_INVOCATION_BUDGET_MAX=1` and submit a run that needs
-both a productive transformation and at least one repair iteration. The
-repair loop refuses the next gateway call before it reaches the gateway:
+Set `ORCHESTRATOR_MODEL_INVOCATION_BUDGET_MAX=1` and submit a run with
+`useTransformationAgent = true` that needs both a productive transformation
+and at least one repair iteration. The productive transformation consumes
+the only model-invocation unit; the repair loop then refuses the next
+gateway call before it reaches the gateway:
 
 ```bash
 curl -sf "http://localhost:${C2C_LOCAL_BFF_PORT:-18089}/api/v0/runs/${RUN_ID}/workflow" \
