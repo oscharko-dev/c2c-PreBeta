@@ -387,15 +387,17 @@ field have this shape:
 
 For productive W0.2 runs, the orchestrator submits the Evidence Pack with
 dedicated references for source intake and parsing, not only the final Java
-result. Successful packs must carry `artifacts.sourceMetadata` for the
-persisted `source-ref.json`, `artifacts.parseOutput` for `parse-output.json`,
-`artifacts.semanticIr`, all generated Java candidates, `finalJavaArtifact`,
-`runtimeVersion`, build/test results, oracle comparison, model invocation
-ledgers, agent trajectory refs, and Harness events. If any required reference
-is absent, evidence-service returns `completenessStatus=evidence_incomplete`
-and the workflow final classification must not be promoted to `success`.
-The orchestrator does not fabricate `sourceMetadata` or `parseOutput` from
-in-memory payloads when the persisted artifact metadata is missing.
+result. Successful packs must carry `artifacts.sourceCobol`,
+`artifacts.sourceMetadata` for the persisted `source-ref.json`,
+`artifacts.parseOutput` for `parse-output.json`, `artifacts.semanticIr`, all
+generated Java candidates, `finalJavaArtifact`, `runtimeVersion`, build/test
+results, oracle comparison, model invocation ledgers, agent trajectory refs,
+Harness events, and — added by W0.3-6 (Issue #217) — the assist-decision and
+budget-summary lineage. If any required reference is absent, evidence-service
+returns `completenessStatus=evidence_incomplete` and the workflow final
+classification must not be promoted to `success`. The orchestrator does not
+fabricate `sourceMetadata` or `parseOutput` from in-memory payloads when the
+persisted artifact metadata is missing.
 
 For a blocked run the same contract carries
 `finalClassification = "blocked"`, a non-null `failureCode`, and a non-null
@@ -404,6 +406,51 @@ Blocked Evidence Packs must not publish an authoritative final Java artifact:
 `artifacts.generatedJava` and `artifacts.finalJavaArtifact` are omitted, and
 any retained `generatedJavaArtifacts[]` entries remain unselected audit
 history only.
+
+### Assist-decision and budget lineage (W0.3-6 / Issue #217)
+
+The W0.2 Evidence Pack carries two additional fields so reviewers can audit
+"was AI required, why, and against which budgets?" from the pack alone — no
+need to correlate with the live run contract or the Harness event ledger.
+
+- **`artifacts.assistDecision`** mirrors the
+  [Assist-decision gate](#assist-decision-gate-w03--issue-214) snapshot the
+  orchestrator records on the run contract: `outcome`, `reasonCode`,
+  `decidedAt`, optional `selectedAgentRole`, optional `rationale`, and the
+  three gate-time budget snapshots
+  (`assistBudgetSnapshot`, `repairBudgetSnapshot`,
+  `modelInvocationBudgetSnapshot`). The closed set of outcomes, reason codes,
+  and agent roles is identical to the BFF `AssistDecisionSummary` — drift is
+  a contract bug. The field is **required for non-blocked W0.2 runs**.
+  Blocked runs that terminated before the gate fired (e.g.,
+  `parse_failed`) legitimately omit it; evidence-service relaxes the
+  requirement for blocked packs only.
+
+- **`artifacts.budgetSummary`** records the end-of-run consumption of the
+  three bounded run budgets defined in W0.3-5 (Issue #216), each as a
+  `{limit, used, remaining}` snapshot:
+  - `budgetSummary.repair`
+  - `budgetSummary.assist`
+  - `budgetSummary.modelInvocation`
+
+  This field is **required for every W0.2 run**, including blocked ones. The
+  budgets always exist on the run contract; their final values must always
+  reach the pack so the bounded-budget posture is visible to reviewers.
+
+Budgets are monotonic during a run, so evidence-service refuses a pack whose
+`budgetSummary.{repair,assist,modelInvocation}.used` is _lower_ than the
+matching gate-time snapshot on `assistDecision`. Similarly, when
+`assistDecision.outcome` is `assist_required` and `selectedAgentRole` is
+`transformation_agent`, the pack must reference at least one
+`modelInvocations` entry with `agentRole=transformation` — otherwise the
+audit trail does not back up the gate's claim.
+
+These fields are deterministic-first: their presence and shape do not by
+themselves imply AI success. A pack with `assistDecision.outcome =
+assist_required` and `finalJavaArtifact` set still requires deterministic
+build/test verification to pass before the orchestrator promotes the run to
+`success`. A failed deterministic gate still forces `classification` away
+from `success` regardless of any assist-decision recorded.
 
 ## Harness boundary
 

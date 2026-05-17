@@ -100,6 +100,28 @@ func completeW02Artifacts(t *testing.T) Artifacts {
 		repairModelRef,
 	}
 
+	// Issue #217 (W0.3-6): every complete W0.2 fixture must carry the
+	// assist-decision lineage and the bounded-budget summary so the
+	// extended required-artifact set evaluates as OK. Budgets reflect the
+	// W0.3-5 defaults: one assist activation consumed, two repair
+	// iterations available with one used, six model invocations available
+	// with two used (one transformation + one repair).
+	base.AssistDecision = &AssistDecisionLineage{
+		Outcome:           AssistOutcomeRequired,
+		ReasonCode:        AssistReasonBaselineOpenAssumptions,
+		DecidedAt:         "2026-05-17T00:00:00Z",
+		SelectedAgentRole: AssistAgentRoleTransformation,
+		Rationale:         "deterministic baseline emitted openAssumptions; assist required",
+		AssistBudgetSnapshot:          &BudgetSnapshot{Limit: 1, Used: 1, Remaining: 0},
+		RepairBudgetSnapshot:          &BudgetSnapshot{Limit: 2, Used: 0, Remaining: 2},
+		ModelInvocationBudgetSnapshot: &BudgetSnapshot{Limit: 6, Used: 1, Remaining: 5},
+	}
+	base.BudgetSummary = &BudgetSummary{
+		Repair:          BudgetSnapshot{Limit: 2, Used: 1, Remaining: 1},
+		Assist:          BudgetSnapshot{Limit: 1, Used: 1, Remaining: 0},
+		ModelInvocation: BudgetSnapshot{Limit: 6, Used: 2, Remaining: 4},
+	}
+
 	return base
 }
 
@@ -127,6 +149,9 @@ func TestEvaluateValidationW02Complete(t *testing.T) {
 		"harnessEvents":          true,
 		"modelInvocations":       true,
 		"agentTrajectories":      true,
+		// Issue #217 (W0.3-6):
+		"assistDecision": true,
+		"budgetSummary":  true,
 	}
 	for _, req := range v.RequiredArtifacts {
 		delete(want, req)
@@ -746,6 +771,173 @@ func TestPatchPropagatesW02CompletenessAndClassification(t *testing.T) {
 	}
 	if patched.Classification != ClassificationSuccess {
 		t.Fatalf("expected classification=success after PATCH; got %s", patched.Classification)
+	}
+}
+
+// --- Issue #217 (W0.3-6) ---------------------------------------------------
+
+func TestEvaluateValidationW02FailsClosedOnMissingAssistDecision(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.AssistDecision = nil
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when assistDecision is missing")
+	}
+	if !containsString(v.MissingArtifacts, "assistDecision") {
+		t.Fatalf("missingArtifacts must call out assistDecision; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FailsClosedOnMissingBudgetSummary(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.BudgetSummary = nil
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected validation to fail when budgetSummary is missing")
+	}
+	if !containsString(v.MissingArtifacts, "budgetSummary") {
+		t.Fatalf("missingArtifacts must call out budgetSummary; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestAssistDecisionRejectsUnknownReasonCode(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.AssistDecision.ReasonCode = "totally_made_up"
+
+	if err := validateArtifactsShape(&a); err == nil {
+		t.Fatalf("expected validation to reject unknown assist-decision reason code")
+	}
+}
+
+func TestAssistDecisionRequiresSelectedAgentRoleWhenRequired(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.AssistDecision.SelectedAgentRole = ""
+
+	if err := validateArtifactsShape(&a); err == nil {
+		t.Fatalf("expected assist_required without selectedAgentRole to fail validation")
+	}
+}
+
+func TestAssistDecisionAssistBudgetExhaustedForcesNotRequired(t *testing.T) {
+	a := completeW02Artifacts(t)
+	a.AssistDecision.Outcome = AssistOutcomeRequired
+	a.AssistDecision.ReasonCode = AssistReasonAssistBudgetExhausted
+	a.AssistDecision.SelectedAgentRole = AssistAgentRoleTransformation
+
+	if err := validateArtifactsShape(&a); err == nil {
+		t.Fatalf("expected assist_budget_exhausted to force outcome=assist_not_required")
+	}
+}
+
+func TestEvaluateValidationW02FlagsBudgetUsageRegression(t *testing.T) {
+	a := completeW02Artifacts(t)
+	// End-of-run consumption falls BELOW the assist gate-time snapshot.
+	a.BudgetSummary.Assist = BudgetSnapshot{Limit: 1, Used: 0, Remaining: 1}
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected regression to fail validation")
+	}
+	if !containsString(v.MissingArtifacts, "budgetSummary.assist.usedRegression") {
+		t.Fatalf("missingArtifacts must call out usedRegression; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestEvaluateValidationW02FlagsMissingTransformationInvocationWhenAssistSelectedTransformation(t *testing.T) {
+	a := completeW02Artifacts(t)
+	// Strip the transformation-role invocation, keep only the repair one.
+	for i, inv := range a.ModelInvocations {
+		if inv.AgentRole == AgentRoleTransformation {
+			a.ModelInvocations = append(a.ModelInvocations[:i], a.ModelInvocations[i+1:]...)
+			break
+		}
+	}
+
+	v := EvaluateValidationForWave(&a, WaveW02)
+	if v.OK {
+		t.Fatalf("expected missing transformation invocation under assist_required to fail")
+	}
+	if !containsString(v.MissingArtifacts, "assistDecision.modelInvocations.transformation") {
+		t.Fatalf("missingArtifacts must call out assistDecision.modelInvocations.transformation; got %v", v.MissingArtifacts)
+	}
+}
+
+func TestBudgetSnapshotRejectsInconsistentRemaining(t *testing.T) {
+	snap := BudgetSnapshot{Limit: 5, Used: 2, Remaining: 99}
+	if err := snap.Validate("budget"); err == nil {
+		t.Fatalf("expected mismatched remaining to fail validation")
+	}
+}
+
+func TestCreatePackW02BlockedRunRelaxesAssistDecisionRequirement(t *testing.T) {
+	// A run blocked before the assist-decision gate fires has no
+	// AssistDecision; budgetSummary stays mandatory because the budgets
+	// always exist on a contract.
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	artifacts.OracleComparison.Matched = false
+	artifacts.GeneratedJava = nil
+	artifacts.FinalJavaArtifact = nil
+	for i := range artifacts.GeneratedJavaArtifacts {
+		artifacts.GeneratedJavaArtifacts[i].Selected = false
+	}
+	artifacts.AssistDecision = nil // legitimate: blocked before the gate
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-blocked-pre-gate",
+		Wave:      WaveW02,
+		Blocked:   true,
+		Artifacts: artifacts,
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for blocked pre-gate pack; got %d", res.StatusCode)
+	}
+	var manifest EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = res.Body.Close()
+	if manifest.Classification != ClassificationBlocked {
+		t.Fatalf("expected classification=blocked; got %s", manifest.Classification)
+	}
+	if manifest.CompletenessStatus != CompletenessStatusBlocked {
+		t.Fatalf("expected completenessStatus=blocked; got %s", manifest.CompletenessStatus)
+	}
+	if containsString(manifest.Validation.MissingArtifacts, "assistDecision") {
+		t.Fatalf("blocked pre-gate pack must not flag assistDecision as missing; got %v", manifest.Validation.MissingArtifacts)
+	}
+}
+
+func TestCreatePackW02BlockedRunStillRequiresBudgetSummary(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	artifacts.OracleComparison.Matched = false
+	artifacts.GeneratedJava = nil
+	artifacts.FinalJavaArtifact = nil
+	for i := range artifacts.GeneratedJavaArtifacts {
+		artifacts.GeneratedJavaArtifacts[i].Selected = false
+	}
+	artifacts.AssistDecision = nil
+	artifacts.BudgetSummary = nil
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-blocked-no-budget",
+		Wave:      WaveW02,
+		Blocked:   true,
+		Artifacts: artifacts,
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201; got %d", res.StatusCode)
+	}
+	var manifest EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = res.Body.Close()
+	if !containsString(manifest.Validation.MissingArtifacts, "budgetSummary") {
+		t.Fatalf("blocked pack without budgetSummary must still flag it; got %v", manifest.Validation.MissingArtifacts)
 	}
 }
 

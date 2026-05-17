@@ -155,6 +155,14 @@
         "experienceEvents": {
           "type": "array",
           "items": { "$ref": "#/$defs/dataReference" }
+        },
+        "assistDecision": {
+          "$ref": "#/$defs/assistDecisionLineage",
+          "description": "W0.3 (#217) — Orchestrator-owned assist-decision recorded on the run contract. Required for non-blocked W0.2 packs so successful runs always answer 'was AI required?' and 'why?' directly from the evidence; blocked packs may omit it when the run terminated before the gate fired."
+        },
+        "budgetSummary": {
+          "$ref": "#/$defs/budgetSummary",
+          "description": "W0.3 (#217) — final consumption summary for the three bounded run budgets (assist, repair, model invocation). Required for every W0.2 pack so reviewers can audit budget pressure even on blocked runs."
         }
       },
       "additionalProperties": true
@@ -187,7 +195,12 @@
     },
     "validation": {
       "type": "object",
-      "required": ["requiredArtifacts", "missingArtifacts", "ok", "completenessStatus"],
+      "required": [
+        "requiredArtifacts",
+        "missingArtifacts",
+        "ok",
+        "completenessStatus"
+      ],
       "properties": {
         "ok": { "type": "boolean" },
         "requiredArtifacts": {
@@ -317,11 +330,7 @@
     "repairAttempt": {
       "type": "object",
       "description": "Outcome of one Verification/Repair Agent invocation in the bounded repair loop.",
-      "required": [
-        "attemptNumber",
-        "decision",
-        "buildTestResultRef"
-      ],
+      "required": ["attemptNumber", "decision", "buildTestResultRef"],
       "properties": {
         "attemptNumber": {
           "type": "integer",
@@ -329,12 +338,7 @@
         },
         "decision": {
           "type": "string",
-          "enum": [
-            "propose_candidate",
-            "refuse",
-            "escalate",
-            "no_change"
-          ]
+          "enum": ["propose_candidate", "refuse", "escalate", "no_change"]
         },
         "decisionRef": {
           "$ref": "#/$defs/dataReference",
@@ -370,11 +374,7 @@
       "properties": {
         "agentRole": {
           "type": "string",
-          "enum": [
-            "orchestrator",
-            "transformation",
-            "verification-repair"
-          ]
+          "enum": ["orchestrator", "transformation", "verification-repair"]
         },
         "ledgerRef": { "$ref": "#/$defs/dataReference" }
       },
@@ -388,7 +388,13 @@
         "matched": { "type": "boolean" },
         "oracleKind": {
           "type": "string",
-          "enum": ["cobol-runtime", "synthetic", "true-golden-master", "user-provided", "absent"]
+          "enum": [
+            "cobol-runtime",
+            "synthetic",
+            "true-golden-master",
+            "user-provided",
+            "absent"
+          ]
         },
         "expectedRef": { "$ref": "#/$defs/dataReference" },
         "actualRef": { "$ref": "#/$defs/dataReference" },
@@ -403,6 +409,69 @@
         "buildTestResultRef": { "$ref": "#/$defs/dataReference" },
         "classification": { "type": "string" },
         "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "budgetSnapshot": {
+      "type": "object",
+      "description": "W0.3 (#217) — per-run budget snapshot. ``limit`` is the configured cap, ``used`` is what was consumed, and ``remaining`` is ``max(0, limit - used)``. All three are present so consumers can audit without re-deriving values.",
+      "required": ["limit", "used", "remaining"],
+      "properties": {
+        "limit": { "type": "integer", "minimum": 0 },
+        "used": { "type": "integer", "minimum": 0 },
+        "remaining": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "budgetSummary": {
+      "type": "object",
+      "description": "W0.3 (#217) — final consumption summary for the three bounded run budgets at evidence-write time.",
+      "required": ["repair", "assist", "modelInvocation"],
+      "properties": {
+        "repair": { "$ref": "#/$defs/budgetSnapshot" },
+        "assist": { "$ref": "#/$defs/budgetSnapshot" },
+        "modelInvocation": { "$ref": "#/$defs/budgetSnapshot" }
+      },
+      "additionalProperties": false
+    },
+    "assistDecisionLineage": {
+      "type": "object",
+      "description": "W0.3 (#217) — Orchestrator-owned assist-decision lineage. Mirrors the contract shape exposed by the BFF (AssistDecisionSummary) so evidence consumers see the same outcome, reason code, agent role, rationale, and budget snapshots without re-fetching the run contract. The closed set of reason codes and agent roles is owned by the orchestrator; consumers MUST drop any value outside this set rather than rendering an unrecognised reason.",
+      "required": ["outcome", "reasonCode", "decidedAt"],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["assist_required", "assist_not_required"]
+        },
+        "reasonCode": {
+          "type": "string",
+          "enum": [
+            "semantic_ir_bounded_ambiguity",
+            "translation_unsupported_repairable",
+            "baseline_open_assumptions",
+            "deterministic_candidate_low_confidence",
+            "caller_explicit_opt_in",
+            "caller_did_not_opt_in",
+            "assist_budget_exhausted"
+          ]
+        },
+        "decidedAt": { "type": "string", "format": "date-time" },
+        "selectedAgentRole": {
+          "type": "string",
+          "enum": ["transformation_agent"],
+          "description": "Set when outcome=assist_required. The closed set of agent roles the gate may select (today only the productive Transformation Agent)."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Optional human-readable rationale the orchestrator stamped on the decision."
+        },
+        "repairBudgetSnapshot": { "$ref": "#/$defs/budgetSnapshot" },
+        "assistBudgetSnapshot": { "$ref": "#/$defs/budgetSnapshot" },
+        "modelInvocationBudgetSnapshot": { "$ref": "#/$defs/budgetSnapshot" },
+        "affectedArtifactRefs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dataReference" }
+        }
       },
       "additionalProperties": false
     }

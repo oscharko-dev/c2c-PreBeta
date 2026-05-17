@@ -107,7 +107,15 @@ W0.3 does **not** introduce:
 - The Orchestrator workflow contract must grow explicit assist-decision
   semantics and associated evidence references.
 - Evidence Pack and Studio views must expose the cause and scope of AI
-  participation more clearly.
+  participation more clearly. W0.3-6 (#217) lands this for the Evidence Pack
+  by adding `artifacts.assistDecision` (mirror of the Orchestrator-owned
+  decision: outcome, reason code, agent role, gate-time budget snapshots,
+  optional rationale) and `artifacts.budgetSummary` (end-of-run consumption
+  of the three bounded W0.3 budgets). Both are wired into the W0.2 required
+  artifact set and into the W0.2 release-gate validator so reviewers can
+  audit "was AI required, why, and against which budgets?" from the pack
+  alone; the deterministic-first rule that evidence incompleteness blocks
+  verified success is preserved unchanged.
 - Coverage expansion remains important, but moves behind this architectural
   hardening in wave sequencing. W1 can then scale coverage and enterprise
   hardening on top of a cleaner control model.

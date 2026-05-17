@@ -63,6 +63,27 @@ const (
 	OracleKindUserProvided     = "user-provided"
 	OracleKindAbsent           = "absent"
 
+	// AssistOutcomeRequired and its sibling are W0.3 assist-decision outcomes
+	// (Issue #217). Mirrors orchestrator run_contract.ASSIST_OUTCOMES.
+	AssistOutcomeRequired    = "assist_required"
+	AssistOutcomeNotRequired = "assist_not_required"
+
+	// AssistReason* are the closed set of W0.3 assist-decision reason codes
+	// (Issues #214, #215, #216, #217). Anything outside this set is rejected
+	// by evidence-service so reviewers never see an unrecognised reason.
+	AssistReasonSemanticIRBoundedAmbiguity         = "semantic_ir_bounded_ambiguity"
+	AssistReasonTranslationUnsupportedRepairable   = "translation_unsupported_repairable"
+	AssistReasonBaselineOpenAssumptions            = "baseline_open_assumptions"
+	AssistReasonDeterministicCandidateLowConfidence = "deterministic_candidate_low_confidence"
+	AssistReasonCallerExplicitOptIn                = "caller_explicit_opt_in"
+	AssistReasonCallerDidNotOptIn                  = "caller_did_not_opt_in"
+	AssistReasonAssistBudgetExhausted              = "assist_budget_exhausted"
+
+	// AssistAgentRoleTransformation is the only agent role the assist-decision
+	// gate may select in W0.3 (Issue #214). The Verification/Repair Agent runs
+	// under the bounded repair-budget loop and is not part of this gate.
+	AssistAgentRoleTransformation = "transformation_agent"
+
 	ExportFormatDirectory = "directory"
 	ExportFormatTar       = "tar"
 )
@@ -84,11 +105,23 @@ var requiredArtifactsW0 = []string{
 	"modelInvocations",
 }
 
-// requiredArtifactsW02 (Issue #171) extends the W0 set with the artifacts a
-// reviewer needs to reconstruct a W0.2 productive-agent run end-to-end.
-// Successful W0.2 runs must materialise every entry below; absence flips
-// completenessStatus to "evidence_incomplete" and refuses success
-// classification.
+// requiredArtifactsW02 (Issue #171, extended by Issue #217) lists the
+// artifacts a reviewer needs to reconstruct a W0.2 productive-agent run
+// end-to-end. Successful W0.2 runs must materialise every entry below;
+// absence flips completenessStatus to "evidence_incomplete" and refuses
+// success classification.
+//
+// Issue #217 (W0.3-6) adds:
+//   - assistDecision: the Orchestrator-owned assist-decision recorded for
+//     this run, so the pack always answers "was AI required, and why?".
+//   - budgetSummary: the final consumption snapshot of the three bounded
+//     run budgets (repair, assist, model invocation), so the pack always
+//     records the budget pressure observed during the run.
+//
+// Both fields are required for non-blocked runs. Blocked runs may legitimately
+// terminate before the assist-decision gate fires (e.g., parse_failed); for
+// those, validateBlockedW02RequiredArtifacts in store.go relaxes the
+// assistDecision requirement while keeping budgetSummary mandatory.
 var requiredArtifactsW02 = []string{
 	"sourceCobol",
 	"sourceMetadata",
@@ -103,6 +136,8 @@ var requiredArtifactsW02 = []string{
 	"harnessEvents",
 	"modelInvocations",
 	"agentTrajectories",
+	"assistDecision",
+	"budgetSummary",
 }
 
 // DataReference matches the dataReference $def in
@@ -421,6 +456,159 @@ func (rv RuntimeVersion) IsZero() bool {
 	return rv.ID == "" && (rv.Ref == nil || rv.Ref.IsZero())
 }
 
+// BudgetSnapshot (Issue #217) is the per-budget snapshot embedded inside
+// BudgetSummary and AssistDecisionLineage. limit and used are authoritative;
+// remaining is materialised for consumers (always max(0, limit-used)).
+type BudgetSnapshot struct {
+	Limit     int `json:"limit"`
+	Used      int `json:"used"`
+	Remaining int `json:"remaining"`
+}
+
+func (b BudgetSnapshot) IsZero() bool {
+	return b.Limit == 0 && b.Used == 0 && b.Remaining == 0
+}
+
+func (b BudgetSnapshot) Validate(path string) error {
+	if b.Limit < 0 {
+		return fieldError(path+".limit", "limit must be non-negative")
+	}
+	if b.Used < 0 {
+		return fieldError(path+".used", "used must be non-negative")
+	}
+	if b.Remaining < 0 {
+		return fieldError(path+".remaining", "remaining must be non-negative")
+	}
+	expectedRemaining := b.Limit - b.Used
+	if expectedRemaining < 0 {
+		expectedRemaining = 0
+	}
+	if b.Remaining != expectedRemaining {
+		return fieldError(path+".remaining", "remaining must equal max(0, limit - used)")
+	}
+	return nil
+}
+
+// BudgetSummary (Issue #217) records the end-of-run consumption snapshot for
+// the three bounded run budgets defined in Issue #216 (repair, assist, model
+// invocation). Required on every W0.2 pack — including blocked packs — so
+// reviewers can always answer "what budget pressure did this run encounter?".
+type BudgetSummary struct {
+	Repair          BudgetSnapshot `json:"repair"`
+	Assist          BudgetSnapshot `json:"assist"`
+	ModelInvocation BudgetSnapshot `json:"modelInvocation"`
+}
+
+func (b *BudgetSummary) IsZero() bool {
+	if b == nil {
+		return true
+	}
+	return b.Repair.IsZero() && b.Assist.IsZero() && b.ModelInvocation.IsZero()
+}
+
+func (b *BudgetSummary) Validate(path string) error {
+	if b == nil {
+		return fieldError(path, "budgetSummary is required")
+	}
+	if err := b.Repair.Validate(path + ".repair"); err != nil {
+		return err
+	}
+	if err := b.Assist.Validate(path + ".assist"); err != nil {
+		return err
+	}
+	if err := b.ModelInvocation.Validate(path + ".modelInvocation"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// AssistDecisionLineage (Issue #217) mirrors the orchestrator's AssistDecision
+// contract (Issues #214/#215/#216) inside the evidence pack so reviewers can
+// answer "was AI required, why, and against which budgets?" without
+// re-fetching the run contract. The closed enums are intentionally identical
+// to the BFF's AssistDecisionSummary and the orchestrator's run_contract
+// constants — drift is a contract bug.
+type AssistDecisionLineage struct {
+	Outcome                       string          `json:"outcome"`
+	ReasonCode                    string          `json:"reasonCode"`
+	DecidedAt                     string          `json:"decidedAt"`
+	SelectedAgentRole             string          `json:"selectedAgentRole,omitempty"`
+	Rationale                     string          `json:"rationale,omitempty"`
+	RepairBudgetSnapshot          *BudgetSnapshot `json:"repairBudgetSnapshot,omitempty"`
+	AssistBudgetSnapshot          *BudgetSnapshot `json:"assistBudgetSnapshot,omitempty"`
+	ModelInvocationBudgetSnapshot *BudgetSnapshot `json:"modelInvocationBudgetSnapshot,omitempty"`
+	AffectedArtifactRefs          []DataReference `json:"affectedArtifactRefs,omitempty"`
+}
+
+func (a *AssistDecisionLineage) IsZero() bool {
+	if a == nil {
+		return true
+	}
+	return a.Outcome == "" && a.ReasonCode == "" && a.DecidedAt == ""
+}
+
+func (a *AssistDecisionLineage) Validate(path string) error {
+	if a == nil {
+		return fieldError(path, "assistDecision is required")
+	}
+	switch a.Outcome {
+	case AssistOutcomeRequired, AssistOutcomeNotRequired:
+	default:
+		return fieldError(path+".outcome", "outcome must be assist_required|assist_not_required")
+	}
+	switch a.ReasonCode {
+	case AssistReasonSemanticIRBoundedAmbiguity,
+		AssistReasonTranslationUnsupportedRepairable,
+		AssistReasonBaselineOpenAssumptions,
+		AssistReasonDeterministicCandidateLowConfidence,
+		AssistReasonCallerExplicitOptIn,
+		AssistReasonCallerDidNotOptIn,
+		AssistReasonAssistBudgetExhausted:
+	default:
+		return fieldError(path+".reasonCode", "reasonCode must be one of the closed W0.3 assist-decision reason codes")
+	}
+	if a.DecidedAt == "" {
+		return fieldError(path+".decidedAt", "decidedAt is required")
+	}
+	if a.SelectedAgentRole != "" && a.SelectedAgentRole != AssistAgentRoleTransformation {
+		return fieldError(path+".selectedAgentRole", "selectedAgentRole must be transformation_agent when set")
+	}
+	if a.Outcome == AssistOutcomeRequired && a.SelectedAgentRole == "" {
+		return fieldError(path+".selectedAgentRole", "assist_required outcome requires a selectedAgentRole")
+	}
+	if a.Outcome == AssistOutcomeNotRequired && a.SelectedAgentRole != "" {
+		return fieldError(path+".selectedAgentRole", "assist_not_required outcome must not carry a selectedAgentRole")
+	}
+	if a.ReasonCode == AssistReasonAssistBudgetExhausted && a.Outcome != AssistOutcomeNotRequired {
+		// Issue #216: budget-exhausted always degrades to assist_not_required.
+		return fieldError(path+".outcome", "assist_budget_exhausted reason requires outcome=assist_not_required")
+	}
+	for _, snapshot := range []struct {
+		ref  *BudgetSnapshot
+		path string
+	}{
+		{a.RepairBudgetSnapshot, path + ".repairBudgetSnapshot"},
+		{a.AssistBudgetSnapshot, path + ".assistBudgetSnapshot"},
+		{a.ModelInvocationBudgetSnapshot, path + ".modelInvocationBudgetSnapshot"},
+	} {
+		if snapshot.ref == nil {
+			continue
+		}
+		if err := snapshot.ref.Validate(snapshot.path); err != nil {
+			return err
+		}
+	}
+	for i, ref := range a.AffectedArtifactRefs {
+		if err := ref.Validate(fmt.Sprintf("%s.affectedArtifactRefs[%d]", path, i)); err != nil {
+			return err
+		}
+	}
+	if ContainsSecretLike(a.Rationale) {
+		return fieldError(path+".rationale", "rationale appears to contain a secret or credential and was rejected by evidence-service")
+	}
+	return nil
+}
+
 type Artifacts struct {
 	SourceCobol            []DataReference      `json:"sourceCobol,omitempty"`
 	SourceMetadata         *DataReference       `json:"sourceMetadata,omitempty"`
@@ -442,6 +630,11 @@ type Artifacts struct {
 	HarnessEvents          *DataReference       `json:"harnessEvents,omitempty"`
 	TrajectoryLedger       *DataReference       `json:"trajectoryLedger,omitempty"`
 	ExperienceEvents       []DataReference      `json:"experienceEvents,omitempty"`
+	// Issue #217 (W0.3-6): assist-decision and budget-consumption lineage.
+	// AssistDecision is required for non-blocked W0.2 runs; BudgetSummary is
+	// required for every W0.2 run (including blocked ones).
+	AssistDecision *AssistDecisionLineage `json:"assistDecision,omitempty"`
+	BudgetSummary  *BudgetSummary         `json:"budgetSummary,omitempty"`
 }
 
 type OpenAssumption struct {
@@ -688,6 +881,16 @@ func validateArtifactsShape(a *Artifacts) error {
 			return err
 		}
 	}
+	if a.AssistDecision != nil && !a.AssistDecision.IsZero() {
+		if err := a.AssistDecision.Validate("artifacts.assistDecision"); err != nil {
+			return err
+		}
+	}
+	if a.BudgetSummary != nil && !a.BudgetSummary.IsZero() {
+		if err := a.BudgetSummary.Validate("artifacts.budgetSummary"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -753,6 +956,17 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		}
 		if len(a.AgentTrajectories) == 0 {
 			missing = append(missing, "agentTrajectories")
+		}
+		// Issue #217 (W0.3-6): assist-decision and budget summary are
+		// required for the W0.2 evidence pack. budgetSummary stays mandatory
+		// on every W0.2 run (including blocked ones); assistDecision is
+		// expected for any run that reached the gate, and the store relaxes
+		// it for runs blocked before the gate fired (see store.go).
+		if a.AssistDecision == nil || a.AssistDecision.IsZero() {
+			missing = append(missing, "assistDecision")
+		}
+		if a.BudgetSummary == nil || a.BudgetSummary.IsZero() {
+			missing = append(missing, "budgetSummary")
 		}
 		missing = append(missing, validateW02ReferentialIntegrity(a)...)
 	default:
@@ -846,6 +1060,37 @@ func validateW02ReferentialIntegrity(a *Artifacts) []string {
 	if a.GeneratedJava != nil && !a.GeneratedJava.IsZero() && a.FinalJavaArtifact != nil && !a.FinalJavaArtifact.IsZero() {
 		if a.GeneratedJava.URI != a.FinalJavaArtifact.URI || a.GeneratedJava.SHA256 != a.FinalJavaArtifact.SHA256 {
 			missing = append(missing, "generatedJava.finalJavaArtifact")
+		}
+	}
+	// Issue #217 (W0.3-6): when both the BudgetSummary and the AssistDecision
+	// gate-time snapshots are present, the end-of-run consumption must be at
+	// least the snapshot taken at gate time (budgets only grow). Drift would
+	// indicate that the orchestrator silently re-used budget after the gate
+	// recorded its snapshot, which we refuse to certify as audit-complete.
+	if a.AssistDecision != nil && !a.AssistDecision.IsZero() && a.BudgetSummary != nil && !a.BudgetSummary.IsZero() {
+		if snap := a.AssistDecision.AssistBudgetSnapshot; snap != nil && a.BudgetSummary.Assist.Used < snap.Used {
+			missing = append(missing, "budgetSummary.assist.usedRegression")
+		}
+		if snap := a.AssistDecision.RepairBudgetSnapshot; snap != nil && a.BudgetSummary.Repair.Used < snap.Used {
+			missing = append(missing, "budgetSummary.repair.usedRegression")
+		}
+		if snap := a.AssistDecision.ModelInvocationBudgetSnapshot; snap != nil && a.BudgetSummary.ModelInvocation.Used < snap.Used {
+			missing = append(missing, "budgetSummary.modelInvocation.usedRegression")
+		}
+	}
+	// Issue #217: when the assist-decision selected the Transformation Agent,
+	// the run must carry a model invocation tagged with the transformation
+	// role; otherwise the audit trail does not back up the gate's claim.
+	if a.AssistDecision != nil && a.AssistDecision.Outcome == AssistOutcomeRequired && a.AssistDecision.SelectedAgentRole == AssistAgentRoleTransformation {
+		hasTransformationInvocation := false
+		for _, invocation := range a.ModelInvocations {
+			if invocation.AgentRole == AgentRoleTransformation {
+				hasTransformationInvocation = true
+				break
+			}
+		}
+		if !hasTransformationInvocation {
+			missing = append(missing, "assistDecision.modelInvocations.transformation")
 		}
 	}
 

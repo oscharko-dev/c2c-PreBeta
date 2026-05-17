@@ -97,6 +97,22 @@ GOOD_SUCCESS_MANIFEST: dict[str, Any] = {
             "id": "c2c-target-java-runtime:21",
             "ref": {"uri": "file:///tmp/runtime.json", "sha256": _hex("6"), "byteSize": 50},
         },
+        # Issue #217 (W0.3-6): the W0.2 success contract now requires
+        # assist-decision and budget-summary lineage in the evidence pack.
+        "assistDecision": {
+            "outcome": "assist_not_required",
+            "reasonCode": "caller_did_not_opt_in",
+            "decidedAt": "2026-05-17T00:00:00Z",
+            "repairBudgetSnapshot": {"limit": 2, "used": 0, "remaining": 2},
+            "assistBudgetSnapshot": {"limit": 1, "used": 0, "remaining": 1},
+            "modelInvocationBudgetSnapshot": {"limit": 6, "used": 0, "remaining": 6},
+            "rationale": "caller did not opt into productive assist",
+        },
+        "budgetSummary": {
+            "repair": {"limit": 2, "used": 0, "remaining": 2},
+            "assist": {"limit": 1, "used": 0, "remaining": 1},
+            "modelInvocation": {"limit": 6, "used": 1, "remaining": 5},
+        },
     },
     "validation": {
         "ok": True,
@@ -227,6 +243,54 @@ class CheckW02EvidenceTest(unittest.TestCase):
         result = self._run(manifest, "--success", "--expect-policy-skipped")
         self.assertEqual(result.returncode, 3)
         self.assertIn("generatedJava", result.stderr)
+
+    # ----- W0.3-6 (Issue #217) assist-decision + budget lineage ---------
+
+    def test_missing_assist_decision_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("assistDecision")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("assistDecision", result.stderr)
+
+    def test_assist_decision_with_unknown_reason_code_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["assistDecision"]["reasonCode"] = "made_up"
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("reasonCode", result.stderr)
+
+    def test_assist_required_without_selected_agent_role_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["assistDecision"]["outcome"] = "assist_required"
+        manifest["artifacts"]["assistDecision"]["reasonCode"] = "baseline_open_assumptions"
+        manifest["artifacts"]["assistDecision"].pop("selectedAgentRole", None)
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("selectedAgentRole", result.stderr)
+
+    def test_assist_budget_exhausted_must_force_not_required(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["assistDecision"]["outcome"] = "assist_required"
+        manifest["artifacts"]["assistDecision"]["reasonCode"] = "assist_budget_exhausted"
+        manifest["artifacts"]["assistDecision"]["selectedAgentRole"] = "transformation_agent"
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("assist_budget_exhausted", result.stderr)
+
+    def test_missing_budget_summary_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("budgetSummary")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("budgetSummary", result.stderr)
+
+    def test_budget_summary_with_inconsistent_remaining_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["budgetSummary"]["repair"]["remaining"] = 99
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("remaining", result.stderr)
 
     # ----- blocked-path acceptance --------------------------------------
 

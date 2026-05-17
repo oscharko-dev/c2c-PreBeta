@@ -10,52 +10,54 @@ present alongside any pack.
 
 ## Where things live
 
-| Item | Path |
-|------|------|
+| Item                      | Path                                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
 | Canonical manifest schema | [`schemas/evidence-pack-manifest-v0.json`](../../schemas/evidence-pack-manifest-v0.json) |
-| Worked sample manifest | [`sample-evidence-pack-manifest.json`](./sample-evidence-pack-manifest.json) |
-| Go service implementation | [`services/evidence-service/`](../../services/evidence-service/) |
-| HTTP contract | [`services/evidence-service/openapi.yaml`](../../services/evidence-service/openapi.yaml) |
+| Worked sample manifest    | [`sample-evidence-pack-manifest.json`](./sample-evidence-pack-manifest.json)             |
+| Go service implementation | [`services/evidence-service/`](../../services/evidence-service/)                         |
+| HTTP contract             | [`services/evidence-service/openapi.yaml`](../../services/evidence-service/openapi.yaml) |
 
 ## Manifest field guide
 
-| Field | Required (W0) | Notes |
-|-------|---------------|-------|
-| `schemaVersion` | yes | Always `"v0"`. |
-| `capability` | yes | Always `"evidence.pack"`. |
-| `service` | yes | Issuing service identifier (`evidence-service`). |
-| `packId` | yes | `epk-<runId>-<seq>`; stable for the run. |
-| `runId` | yes | Cross-references the agentic-harness-core run. |
-| `workflowId` | optional | Filled in when the orchestrator created the run with one. |
-| `wave` | yes | `"w0"` for the deterministic baseline; `"w0.2"` when productive agents ran. The wave enum controls which completeness rule the service applies. |
-| `status` | yes | `complete` only when every required artifact is populated. |
-| `completenessStatus` | yes | `complete` / `evidence_incomplete` / `blocked`. Independent of `status` so the orchestrator can distinguish *missing required evidence* from *upstream failure blocked the run*. |
-| `classification` | yes | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed). |
-| `createdAt` | yes | UTC RFC 3339 timestamp. |
-| `artifacts.sourceCobol` | **yes** | One or more references to ingested COBOL source files. |
-| `artifacts.sourceMetadata` | **yes (W0.2)** | Normalized source metadata captured after input intake. W0.2 packs must reference the persisted `source-ref.json` artifact; the orchestrator does not synthesize this reference if persistence failed. |
-| `artifacts.corpusMetadata` | optional | Pointer to the corpus index entry used for the run. |
-| `artifacts.parseOutput` | **yes (W0.2)** | Persisted `parse-output.json` reference used to produce Semantic IR. The field is omitted, and the pack remains incomplete, if that artifact metadata is absent. |
-| `artifacts.semanticIr` | **yes** | Reference to the Semantic IR document. |
-| `artifacts.transformationPasses` | optional | Ordered list of transformation pass outputs. |
-| `artifacts.generatedJava` | **yes for success** | Reference to the final generated Java project bundle (legacy single-ref field). For successful W0.2 runs the same artifact is mirrored as the selected entry of `generatedJavaArtifacts[]`; blocked W0.2 packs must omit it. |
-| `artifacts.generatedJavaArtifacts` | **yes (W0.2)** | One entry per Java candidate persisted during the run: the deterministic baseline, the Transformation Agent's candidate, and each Verification/Repair Agent candidate. Each entry carries `origin`, `attemptNumber`, and `selected`. |
-| `artifacts.finalJavaArtifact` | **yes for W0.2 success** | The candidate that passed the deterministic gate. Required for `completenessStatus=complete`; blocked W0.2 packs must omit it. |
-| `artifacts.repairAttempts` | **yes when ≥1 attempt ran** | One entry per Verification/Repair Agent invocation. Captures `attemptNumber`, `decision`, `decisionRef`, `modelInvocationRef`, optional `newJavaCandidateRef`, `buildTestResultRef`, and `refusalCode`/`noChange` when applicable. |
-| `artifacts.agentTrajectories` | **yes (W0.2)** | Per-agent trajectory ledger references (`orchestrator`, `transformation`, `verification-repair`). Replaces the singular `trajectoryLedger` for W0.2 runs; both fields are populated for backwards compatibility. |
-| `artifacts.oracleComparison` | **yes (W0.2)** | Flat envelope summarising the comparison between the Java output and the COBOL oracle / golden master. Carries `matched`, `oracleKind`, `actualSha256`, `expectedSha256`, `classification`, and a pointer to the build/test result. `oracleKind=user-provided` means paste-mode expected output supplied the oracle; `oracleKind=absent` means no oracle was available. |
-| `artifacts.runtimeVersion` | **yes (W0.2)** | Target Java runtime/contract coordinate plus optional reference. |
-| `artifacts.modelInvocations` | **yes** | One entry per model invocation; W0.2 packs must include productive Transformation and Verification/Repair Agent ledgers when those agent trajectories are present. The ledger holds the structured request/response references — the evidence pack never embeds raw prompts or completions. |
-| `artifacts.buildTestResults` | **yes** | References to `build-test-runner-service` results. |
-| `artifacts.sbom` | optional | SBOM document references (CycloneDX, SPDX). |
-| `artifacts.licenseReports` | optional | License/policy report references. |
-| `artifacts.harnessEvents` | **yes** | Reference to the harness JSONL event log for the run. |
-| `artifacts.trajectoryLedger` | optional | Reference to the agent trajectory ledger snapshot. |
-| `artifacts.experienceEvents` | optional | One entry per emitted Experience Event. |
-| `openAssumptions` | optional | Semantic assumptions the run is taking; surface in UI. |
-| `unsupportedFeatures` | optional | Features encountered but not supported in W0. |
-| `validation` | yes | `{ ok, requiredArtifacts, missingArtifacts, messages }`. |
-| `exports` | optional | Appended on each `POST /v0/packs/{id}/export`. |
+| Field                              | Required (W0)                             | Notes                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                    | yes                                       | Always `"v0"`.                                                                                                                                                                                                                                                                                                                                                          |
+| `capability`                       | yes                                       | Always `"evidence.pack"`.                                                                                                                                                                                                                                                                                                                                               |
+| `service`                          | yes                                       | Issuing service identifier (`evidence-service`).                                                                                                                                                                                                                                                                                                                        |
+| `packId`                           | yes                                       | `epk-<runId>-<seq>`; stable for the run.                                                                                                                                                                                                                                                                                                                                |
+| `runId`                            | yes                                       | Cross-references the agentic-harness-core run.                                                                                                                                                                                                                                                                                                                          |
+| `workflowId`                       | optional                                  | Filled in when the orchestrator created the run with one.                                                                                                                                                                                                                                                                                                               |
+| `wave`                             | yes                                       | `"w0"` for the deterministic baseline; `"w0.2"` when productive agents ran. The wave enum controls which completeness rule the service applies.                                                                                                                                                                                                                         |
+| `status`                           | yes                                       | `complete` only when every required artifact is populated.                                                                                                                                                                                                                                                                                                              |
+| `completenessStatus`               | yes                                       | `complete` / `evidence_incomplete` / `blocked`. Independent of `status` so the orchestrator can distinguish _missing required evidence_ from _upstream failure blocked the run_.                                                                                                                                                                                        |
+| `classification`                   | yes                                       | `success` / `evidence_incomplete` / `blocked` / `failed`. A run is success-classifiable **only** when `completenessStatus=complete`; absence of any required artifact forces `evidence_incomplete` (fail closed).                                                                                                                                                       |
+| `createdAt`                        | yes                                       | UTC RFC 3339 timestamp.                                                                                                                                                                                                                                                                                                                                                 |
+| `artifacts.sourceCobol`            | **yes**                                   | One or more references to ingested COBOL source files.                                                                                                                                                                                                                                                                                                                  |
+| `artifacts.sourceMetadata`         | **yes (W0.2)**                            | Normalized source metadata captured after input intake. W0.2 packs must reference the persisted `source-ref.json` artifact; the orchestrator does not synthesize this reference if persistence failed.                                                                                                                                                                  |
+| `artifacts.corpusMetadata`         | optional                                  | Pointer to the corpus index entry used for the run.                                                                                                                                                                                                                                                                                                                     |
+| `artifacts.parseOutput`            | **yes (W0.2)**                            | Persisted `parse-output.json` reference used to produce Semantic IR. The field is omitted, and the pack remains incomplete, if that artifact metadata is absent.                                                                                                                                                                                                        |
+| `artifacts.semanticIr`             | **yes**                                   | Reference to the Semantic IR document.                                                                                                                                                                                                                                                                                                                                  |
+| `artifacts.transformationPasses`   | optional                                  | Ordered list of transformation pass outputs.                                                                                                                                                                                                                                                                                                                            |
+| `artifacts.generatedJava`          | **yes for success**                       | Reference to the final generated Java project bundle (legacy single-ref field). For successful W0.2 runs the same artifact is mirrored as the selected entry of `generatedJavaArtifacts[]`; blocked W0.2 packs must omit it.                                                                                                                                            |
+| `artifacts.generatedJavaArtifacts` | **yes (W0.2)**                            | One entry per Java candidate persisted during the run: the deterministic baseline, the Transformation Agent's candidate, and each Verification/Repair Agent candidate. Each entry carries `origin`, `attemptNumber`, and `selected`.                                                                                                                                    |
+| `artifacts.finalJavaArtifact`      | **yes for W0.2 success**                  | The candidate that passed the deterministic gate. Required for `completenessStatus=complete`; blocked W0.2 packs must omit it.                                                                                                                                                                                                                                          |
+| `artifacts.repairAttempts`         | **yes when ≥1 attempt ran**               | One entry per Verification/Repair Agent invocation. Captures `attemptNumber`, `decision`, `decisionRef`, `modelInvocationRef`, optional `newJavaCandidateRef`, `buildTestResultRef`, and `refusalCode`/`noChange` when applicable.                                                                                                                                      |
+| `artifacts.agentTrajectories`      | **yes (W0.2)**                            | Per-agent trajectory ledger references (`orchestrator`, `transformation`, `verification-repair`). Replaces the singular `trajectoryLedger` for W0.2 runs; both fields are populated for backwards compatibility.                                                                                                                                                        |
+| `artifacts.oracleComparison`       | **yes (W0.2)**                            | Flat envelope summarising the comparison between the Java output and the COBOL oracle / golden master. Carries `matched`, `oracleKind`, `actualSha256`, `expectedSha256`, `classification`, and a pointer to the build/test result. `oracleKind=user-provided` means paste-mode expected output supplied the oracle; `oracleKind=absent` means no oracle was available. |
+| `artifacts.runtimeVersion`         | **yes (W0.2)**                            | Target Java runtime/contract coordinate plus optional reference.                                                                                                                                                                                                                                                                                                        |
+| `artifacts.modelInvocations`       | **yes**                                   | One entry per model invocation; W0.2 packs must include productive Transformation and Verification/Repair Agent ledgers when those agent trajectories are present. The ledger holds the structured request/response references — the evidence pack never embeds raw prompts or completions.                                                                             |
+| `artifacts.buildTestResults`       | **yes**                                   | References to `build-test-runner-service` results.                                                                                                                                                                                                                                                                                                                      |
+| `artifacts.sbom`                   | optional                                  | SBOM document references (CycloneDX, SPDX).                                                                                                                                                                                                                                                                                                                             |
+| `artifacts.licenseReports`         | optional                                  | License/policy report references.                                                                                                                                                                                                                                                                                                                                       |
+| `artifacts.harnessEvents`          | **yes**                                   | Reference to the harness JSONL event log for the run.                                                                                                                                                                                                                                                                                                                   |
+| `artifacts.trajectoryLedger`       | optional                                  | Reference to the agent trajectory ledger snapshot.                                                                                                                                                                                                                                                                                                                      |
+| `artifacts.experienceEvents`       | optional                                  | One entry per emitted Experience Event.                                                                                                                                                                                                                                                                                                                                 |
+| `artifacts.assistDecision`         | **yes (W0.2 non-blocked; W0.3-6 / #217)** | Mirror of the Orchestrator-owned assist-decision (outcome, reason code, agent role, gate-time budget snapshots, optional rationale). Closed enums identical to the BFF `AssistDecisionSummary`. Relaxed on blocked packs that terminated before the gate fired.                                                                                                         |
+| `artifacts.budgetSummary`          | **yes (W0.2; W0.3-6 / #217)**             | End-of-run consumption snapshot for the three bounded budgets (`repair`, `assist`, `modelInvocation`), each `{limit, used, remaining}`. Required on every W0.2 pack — including blocked — so the bounded-budget posture is always visible.                                                                                                                              |
+| `openAssumptions`                  | optional                                  | Semantic assumptions the run is taking; surface in UI.                                                                                                                                                                                                                                                                                                                  |
+| `unsupportedFeatures`              | optional                                  | Features encountered but not supported in W0.                                                                                                                                                                                                                                                                                                                           |
+| `validation`                       | yes                                       | `{ ok, requiredArtifacts, missingArtifacts, messages }`.                                                                                                                                                                                                                                                                                                                |
+| `exports`                          | optional                                  | Appended on each `POST /v0/packs/{id}/export`.                                                                                                                                                                                                                                                                                                                          |
 
 The full set of structural rules is in
 [`schemas/evidence-pack-manifest-v0.json`](../../schemas/evidence-pack-manifest-v0.json).
@@ -85,15 +87,17 @@ Issue #171 extends the required set for productive-agent runs. A
 - `sourceMetadata`
 - `parseOutput`
 - `semanticIr`
-- `generatedJava` *(legacy single ref preserved for backwards compatibility)*
-- `generatedJavaArtifacts` *(every persisted candidate)*
-- `finalJavaArtifact` *(the selected candidate)*
+- `generatedJava` _(legacy single ref preserved for backwards compatibility)_
+- `generatedJavaArtifacts` _(every persisted candidate)_
+- `finalJavaArtifact` _(the selected candidate)_
 - `runtimeVersion`
 - `buildTestResults`
 - `oracleComparison`
 - `harnessEvents`
 - `modelInvocations`
 - `agentTrajectories`
+- `assistDecision` _(W0.3-6 / #217 — Orchestrator-owned assist-decision lineage; relaxed on blocked packs that never reached the gate)_
+- `budgetSummary` _(W0.3-6 / #217 — final consumption of the three bounded W0.3 budgets; required even on blocked packs)_
 
 Missing artifacts move the manifest to `status="incomplete"` and surface in
 `validation.missingArtifacts`. W0.2 packs additionally flip
@@ -112,6 +116,27 @@ When a W0.2 pack transitions to blocked through `PATCH` with `blocked=true`,
 evidence-service normalizes that shape by clearing the authoritative Java refs
 and unselecting any retained candidate-history entries before revalidating.
 
+### W0.3-6 referential integrity (Issue #217)
+
+Beyond presence checks, evidence-service enforces two consistency rules on the
+new assist-decision and budget-summary lineage:
+
+- **Budgets are monotonic.** When both `assistDecision` and `budgetSummary`
+  are present, the end-of-run `budgetSummary.{repair,assist,modelInvocation}.used`
+  must be ≥ the matching gate-time snapshot on `assistDecision`. A regression
+  is reported as `missingArtifacts: ["budgetSummary.<budget>.usedRegression"]`.
+- **Productive activation must be backed by an invocation.** When
+  `assistDecision.outcome = assist_required` and
+  `selectedAgentRole = transformation_agent`, the pack must reference at least
+  one `modelInvocations` entry with `agentRole = transformation`; otherwise
+  the gate's claim is unsupported and the pack is reported as
+  `missingArtifacts: ["assistDecision.modelInvocations.transformation"]`.
+
+Blocked packs may legitimately omit `assistDecision` (when the run terminated
+before the gate fired); evidence-service drops that requirement for blocked
+manifests. `budgetSummary` stays mandatory on every W0.2 pack because the
+bounded run budgets always exist on the contract.
+
 ### Secret scrubbing
 
 Evidence packs are reviewer-visible and MUST NOT contain raw secrets. The
@@ -128,10 +153,10 @@ fails closed with `400 Bad Request` if any reference appears credential-shaped.
 
 `POST /v0/packs/{packId}/export`
 
-| Body field | Default | Meaning |
-|------------|---------|---------|
-| `format` | `directory` | `directory` writes `manifest.json` at the root; `tar` produces a PAX-format archive with the same single entry. |
-| `destination` | auto | Optional path constrained to the configured `EVIDENCE_EXPORT_DIR` root. |
+| Body field    | Default     | Meaning                                                                                                         |
+| ------------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `format`      | `directory` | `directory` writes `manifest.json` at the root; `tar` produces a PAX-format archive with the same single entry. |
+| `destination` | auto        | Optional path constrained to the configured `EVIDENCE_EXPORT_DIR` root.                                         |
 
 The response returns the updated manifest (with the new `exports[]` entry
 appended) and the `ExportRecord` for the latest export. Every successful

@@ -17,7 +17,13 @@ import unittest
 from collections.abc import Mapping
 from orchestrator_service.artifacts import JsonValue, RunArtifactStore
 from orchestrator_service.artifacts import KIND_PARSE_OUTPUT, KIND_SOURCE_REF
-from orchestrator_service.run_contract import new_run_contract
+from orchestrator_service.run_contract import (
+    ASSIST_AGENT_ROLE_TRANSFORMATION,
+    ASSIST_OUTCOME_REQUIRED,
+    ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+    AssistDecision,
+    new_run_contract,
+)
 from orchestrator_service.workflow import (
     DataReference,
     W0RunContext,
@@ -658,6 +664,149 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             productive_model_invocations=[transformation_model_ref],
         )
         self.assertEqual(payload["artifacts"]["oracleComparison"]["oracleKind"], "absent")
+
+
+class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):
+    """Issue #217 (W0.3-6): the W0.2 evidence pack records the Orchestrator-
+    owned assist-decision and the final consumption of the three bounded
+    run budgets so reviewers can audit AI activation and budget pressure
+    without consulting the run contract."""
+
+    @staticmethod
+    def _w02_contract():
+        return new_run_contract(
+            run_id="run-evidence",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            source_ref={"uri": "urn:source/HELLO.cob"},
+        )
+
+    @staticmethod
+    def _record_assist_required(contract) -> AssistDecision:
+        decision = AssistDecision(
+            outcome=ASSIST_OUTCOME_REQUIRED,
+            reason_code=ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+            decided_at="2026-05-17T00:00:00Z",
+            selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
+            assist_budget_snapshot={"limit": 1, "used": 1, "remaining": 0},
+            repair_budget_snapshot={"limit": 2, "used": 0, "remaining": 2},
+            model_invocation_budget_snapshot={"limit": 6, "used": 1, "remaining": 5},
+            rationale="baseline emitted openAssumptions",
+        )
+        contract.record_assist_decision(decision)
+        return decision
+
+    def _baseline_payload(self, *, blocked: bool, with_assist: bool):
+        context = self._w0_context(use_transformation_agent=True)
+        if not blocked:
+            W02ProductiveEvidenceTests._write_source_and_parse_metadata(self, context)  # type: ignore[arg-type]
+        contract = self._w02_contract()
+        if with_assist:
+            self._record_assist_required(contract)
+        # Pull on a repair attempt so the budget summary shows non-zero use.
+        repair_model_ref = _model_invocation_ref(
+            "verification-repair",
+            invocation_id="inv-run-evidence-01-repair",
+            sha="b" * 64,
+        )
+        contract.repair_budget.consume()
+        contract.model_invocation_budget.consume()
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12}
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "ok",
+                "classification": "match",
+                "comparison": {"matched": True},
+                "goldenMaster": {"classification": "true"},
+            },
+            output_uri="urn:run/build-1",
+        )
+        return self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/baseline"),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            generated_artifact_ref=baseline_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=blocked,
+            productive_model_invocations=[transformation_model_ref, repair_model_ref],
+        )
+
+    def test_successful_w02_run_emits_assist_decision_and_budget_summary(self) -> None:
+        payload = self._baseline_payload(blocked=False, with_assist=True)
+
+        artifacts = payload["artifacts"]
+        self.assertIn("assistDecision", artifacts)
+        decision = artifacts["assistDecision"]
+        self.assertEqual(decision["outcome"], "assist_required")
+        self.assertEqual(decision["reasonCode"], "baseline_open_assumptions")
+        self.assertEqual(decision["selectedAgentRole"], "transformation_agent")
+        # The gate snapshots are mirrored on the lineage envelope so reviewers
+        # see the budget state at decision time.
+        self.assertEqual(decision["assistBudgetSnapshot"]["used"], 1)
+        self.assertEqual(decision["modelInvocationBudgetSnapshot"]["used"], 1)
+
+        self.assertIn("budgetSummary", artifacts)
+        summary = artifacts["budgetSummary"]
+        self.assertEqual(summary["assist"], {"limit": 1, "used": 0, "remaining": 1})
+        # The repair + model invocation budgets each consumed one unit above,
+        # so the end-of-run summary reflects those increments.
+        self.assertEqual(summary["repair"], {"limit": 2, "used": 1, "remaining": 1})
+        self.assertEqual(summary["modelInvocation"], {"limit": 6, "used": 1, "remaining": 5})
+
+    def test_w02_run_without_gate_omits_assist_decision_but_still_emits_budget_summary(
+        self,
+    ) -> None:
+        payload = self._baseline_payload(blocked=False, with_assist=False)
+
+        artifacts = payload["artifacts"]
+        # No gate yet → the orchestrator must not invent an assist-decision.
+        self.assertNotIn("assistDecision", artifacts)
+        # The bounded budgets always exist on the contract, so the summary
+        # is still emitted (acceptance: "blocked/failed/incomplete run still
+        # records the relevant decision lineage").
+        self.assertIn("budgetSummary", artifacts)
+        self.assertEqual(artifacts["budgetSummary"]["assist"]["used"], 0)
+
+    def test_blocked_w02_run_records_lineage_when_gate_already_fired(self) -> None:
+        payload = self._baseline_payload(blocked=True, with_assist=True)
+
+        artifacts = payload["artifacts"]
+        # Blocked-post-gate: assist-decision still recorded for auditing.
+        self.assertIn("assistDecision", artifacts)
+        self.assertEqual(artifacts["assistDecision"]["outcome"], "assist_required")
+        # budgetSummary mandatory on every W0.2 run.
+        self.assertIn("budgetSummary", artifacts)
+
+    def test_w0_run_does_not_emit_assist_decision_or_budget_summary(self) -> None:
+        context = self._w0_context(use_transformation_agent=False)
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/generated"),
+            build_test_output=_step("compile-test-java", output_uri="urn:run/build-1"),
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+        )
+
+        artifacts = payload["artifacts"]
+        self.assertNotIn("assistDecision", artifacts)
+        self.assertNotIn("budgetSummary", artifacts)
 
 
 if __name__ == "__main__":
