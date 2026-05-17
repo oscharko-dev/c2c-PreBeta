@@ -14,7 +14,7 @@ const (
 	defaultAllowlistPath     = "config/foundry-development-allowlist-v0.yaml"
 	defaultLedgerPath        = "data/model-invocation-ledger-v0.jsonl"
 	defaultEventLogPath      = "data/model-gateway-events-v0.jsonl"
-	defaultModelListenAddr   = ":8085"
+	defaultModelListenAddr   = "127.0.0.1:8085"
 
 	gatewayEventSchemaVersion       = "v0"
 	eventServiceName                = "model-gateway-service"

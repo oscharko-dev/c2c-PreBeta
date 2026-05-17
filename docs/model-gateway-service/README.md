@@ -25,6 +25,9 @@ for all model-related operations and must not call model providers directly.
     role has at least one available model.
 - `POST /v0/invoke`
   - Executes a model invocation through the configured provider mode.
+  - Requires `Authorization: Bearer <MODEL_GATEWAY_CONTROL_TOKEN>` (or the
+    shared `C2C_INTERNAL_CONTROL_TOKEN`) because this route can spend governed
+    model budget.
   - Accepts an optional `agentRole` field. When present the gateway
     enforces the role-to-model policy declared under `roles:` in the
     allowlist YAML; a role-to-model mismatch returns HTTP 403 with
@@ -56,6 +59,10 @@ and the gateway-unavailable / provider-error / provider-timeout signals to
 
 - Registry: `config/model-registry.example.yaml`
 - Allowlist: `config/foundry-development-allowlist-v0.yaml`
+- Listen default: `127.0.0.1:8085`; bare ports and `:port` values are
+  normalized to loopback unless an explicit host is provided.
+- Invocation auth: `/v0/invoke` requires `MODEL_GATEWAY_CONTROL_TOKEN` or
+  `C2C_INTERNAL_CONTROL_TOKEN` as a bearer/control token.
 - Runtime defaults can be overridden with environment variables:
   - `C2C_MODEL_PROVIDER` (`azure_foundry` or `foundry-development`)
   - `C2C_MODEL_DEFAULT_DEPLOYMENT`
@@ -66,6 +73,8 @@ and the gateway-unavailable / provider-error / provider-timeout signals to
     or `foundry-development-v0`)
   - `C2C_MODEL_INVOCATION_LEDGER_ENABLED`
   - `C2C_HARNESS_EVENT_EMISSION_ENABLED`
+  - `HARNESS_EVENT_TOKEN` (required when remote Harness event emission is
+    enabled and `HARNESS_EVENT_URL` targets an auth-protected Harness)
   - `AZURE_FOUNDRY_ENDPOINT`
   - `AZURE_FOUNDRY_API_KEY`
   - `AZURE_FOUNDRY_API_KEY_REF`
@@ -76,6 +85,7 @@ and the gateway-unavailable / provider-error / provider-timeout signals to
     - `MODEL_GATEWAY_LEDGER_PATH`
     - `MODEL_GATEWAY_EVENT_LOG_PATH`
     - `MODEL_GATEWAY_LISTEN_ADDR`
+    - `MODEL_GATEWAY_CONTROL_TOKEN`
     - `MODEL_GATEWAY_PROVIDER`
     - `MODEL_GATEWAY_FOUNDRY_ENDPOINT`
     - `MODEL_GATEWAY_FOUNDRY_API_KEY_REF`

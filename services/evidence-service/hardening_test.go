@@ -10,7 +10,13 @@ import (
 func TestDecodeJSONRejectsOversizedBody(t *testing.T) {
 	srv, _ := newTestServer(t)
 	body := bytes.NewReader(bytes.Repeat([]byte("a"), maxRequestBodyBytes+1024))
-	res, err := http.Post(srv.URL+"/v0/packs", "application/json", body)
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v0/packs", body)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testControlToken)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -27,6 +33,7 @@ func TestDecodeJSONRejectsNonJSONContentType(t *testing.T) {
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "text/html")
+	req.Header.Set("Authorization", "Bearer "+testControlToken)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)

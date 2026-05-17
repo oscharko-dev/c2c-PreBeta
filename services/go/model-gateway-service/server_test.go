@@ -122,6 +122,50 @@ func newGatewayServiceForTest(now time.Time, provider ModelProvider, model Model
 	}
 }
 
+func TestModelGatewayRoutes_InvokeRequiresControlToken(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	provider := &stubProvider{
+		output: map[string]any{"text": "ok"},
+		status: "completed",
+	}
+	service := newGatewayServiceForTest(now, provider, activeModel("foundry-gpt", now), true)
+	service.controlToken = "gateway-control-token"
+	body, _ := json.Marshal(ModelInvocationRequest{
+		RunID:                 "run-auth",
+		ModelID:               "foundry-gpt",
+		Actor:                 "agent-1",
+		AgentRole:             AgentRoleTransformation,
+		DataClass:             "model",
+		PromptTemplateVersion: "v1",
+		Prompt:                "Hello",
+		TimeoutMs:             1000,
+		Parameters:            map[string]any{},
+	})
+
+	unauthorized := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
+	unauthorized.Header.Set("content-type", "application/json")
+	rr := httptest.NewRecorder()
+	service.Routes().ServeHTTP(rr, unauthorized)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider should not be called before auth, got %d calls", provider.calls)
+	}
+
+	authorized := httptest.NewRequest(http.MethodPost, "/v0/invoke", strings.NewReader(string(body)))
+	authorized.Header.Set("content-type", "application/json")
+	authorized.Header.Set("Authorization", "Bearer gateway-control-token")
+	rr = httptest.NewRecorder()
+	service.Routes().ServeHTTP(rr, authorized)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 with token, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if provider.calls != 1 {
+		t.Fatalf("expected one provider call after auth, got %d", provider.calls)
+	}
+}
+
 func TestResolveGatewayConfigFromEnv_IssueVariables(t *testing.T) {
 	t.Setenv("C2C_MODEL_PROVIDER", "azure_foundry")
 	t.Setenv("C2C_MODEL_DEFAULT_DEPLOYMENT", "gpt-oss-120b")
@@ -130,6 +174,8 @@ func TestResolveGatewayConfigFromEnv_IssueVariables(t *testing.T) {
 	t.Setenv("C2C_MODEL_DATA_POLICY", "public_synthetic_only")
 	t.Setenv("C2C_MODEL_INVOCATION_LEDGER_ENABLED", "true")
 	t.Setenv("C2C_HARNESS_EVENT_EMISSION_ENABLED", "true")
+	t.Setenv("HARNESS_EVENT_TOKEN", "harness-control-token")
+	t.Setenv("MODEL_GATEWAY_CONTROL_TOKEN", "gateway-control-token")
 	t.Setenv("AZURE_FOUNDRY_ENDPOINT", "https://workspacedevfoundry.example.com/openai/deployments")
 	t.Setenv("AZURE_FOUNDRY_API_KEY", "dummy-key")
 	t.Setenv("AZURE_FOUNDRY_API_VERSION", "2024-05-01-preview")
@@ -149,6 +195,12 @@ func TestResolveGatewayConfigFromEnv_IssueVariables(t *testing.T) {
 	}
 	if !cfg.invocationLedgerEnabled || !cfg.harnessEventEmissionEnabled {
 		t.Fatalf("expected ledger and event emission to be enabled")
+	}
+	if cfg.harnessEventToken != "harness-control-token" {
+		t.Fatalf("unexpected harness event token")
+	}
+	if cfg.controlToken != "gateway-control-token" {
+		t.Fatalf("unexpected control token")
 	}
 }
 

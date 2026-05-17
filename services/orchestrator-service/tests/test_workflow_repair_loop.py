@@ -500,6 +500,7 @@ class RepairLoopMalformedResponseTests(_BaseRepairLoopFixture):
         self.assertEqual(len(contract["repairAttempts"]), 1)
         attempt = contract["repairAttempts"][0]
         self.assertEqual(attempt["repairDecision"], DECISION_REFUSE)
+        self.assertEqual(attempt["refusalCode"], "no_safe_repair")
         self.assertEqual(
             attempt["modelInvocationRef"]["invocationId"],
             "inv-run-1-01-repair",
@@ -637,6 +638,7 @@ class RepairLoopGatewayUnavailableTests(_BaseRepairLoopFixture):
         self.assertEqual(len(contract["repairAttempts"]), 1)
         attempt = contract["repairAttempts"][0]
         self.assertEqual(attempt["repairDecision"], DECISION_REFUSE)
+        self.assertEqual(attempt["refusalCode"], "no_safe_repair")
         self.assertIn("repairInputRef", attempt)
         self.assertIn("repairDecisionRef", attempt)
         self.assertNotIn("modelInvocationRef", attempt)

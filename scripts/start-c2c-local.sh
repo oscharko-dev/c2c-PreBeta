@@ -58,6 +58,7 @@ BFF_PORT="${C2C_LOCAL_BFF_PORT:-18089}"
 STUDIO_PORT="${C2C_LOCAL_STUDIO_PORT:-3000}"
 
 HARNESS_TOKEN="${C2C_LOCAL_HARNESS_TOKEN:-c2c-local-control-plane-token}"
+INTERNAL_CONTROL_TOKEN="${C2C_LOCAL_INTERNAL_CONTROL_TOKEN:-$HARNESS_TOKEN}"
 MODEL_GATEWAY_ENABLED="${C2C_LOCAL_MODEL_GATEWAY_ENABLED:-false}"
 
 HARNESS_URL="http://127.0.0.1:${HARNESS_PORT}"
@@ -457,7 +458,8 @@ start_evidence() {
   local bin
   bin="$(build_go_binary evidence "$ROOT_DIR/services/evidence-service")"
   start_bg evidence "$LOG_DIR/evidence.log" \
-    EVIDENCE_PORT="$EVIDENCE_PORT" \
+    EVIDENCE_LISTEN_ADDR="127.0.0.1:$EVIDENCE_PORT" \
+    EVIDENCE_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
     EVIDENCE_EVENT_LOG_PATH="$VAR_DIR/evidence-events.jsonl" \
     EVIDENCE_EXPORT_DIR="$VAR_DIR/evidence-exports" \
     -- \
@@ -488,7 +490,8 @@ start_model_gateway() {
   local bin
   bin="$(build_go_binary model-gateway "$ROOT_DIR/services/go/model-gateway-service")"
   start_bg model-gateway "$LOG_DIR/model-gateway.log" \
-    MODEL_GATEWAY_LISTEN_ADDR=":$MODEL_GATEWAY_PORT" \
+    MODEL_GATEWAY_LISTEN_ADDR="127.0.0.1:$MODEL_GATEWAY_PORT" \
+    MODEL_GATEWAY_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
     MODEL_GATEWAY_MODEL_REGISTRY_PATH="$ROOT_DIR/config/model-registry.example.yaml" \
     MODEL_GATEWAY_ALLOWLIST_PATH="$ROOT_DIR/config/foundry-development-allowlist-v0.yaml" \
     MODEL_GATEWAY_LEDGER_PATH="$VAR_DIR/model-invocation-ledger-v0.jsonl" \
@@ -496,6 +499,7 @@ start_model_gateway() {
     C2C_MODEL_INVOCATION_LEDGER_ENABLED=true \
     C2C_HARNESS_EVENT_EMISSION_ENABLED=true \
     HARNESS_EVENT_URL="$HARNESS_URL/v0/events" \
+    HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     -- \
     "$bin"
   wait_http model-gateway "$MODEL_GATEWAY_URL/v0/health"
@@ -547,9 +551,11 @@ start_orchestrator() {
   local capabilities_json
   capabilities_json="$(build_orchestrator_capabilities_json)"
   start_bg orchestrator "$LOG_DIR/orchestrator.log" \
-    ORCHESTRATOR_LISTEN_ADDR=":${ORCHESTRATOR_PORT}" \
+    ORCHESTRATOR_LISTEN_ADDR="127.0.0.1:${ORCHESTRATOR_PORT}" \
     ORCHESTRATOR_HARNESS_BASE_URL="$HARNESS_URL" \
     ORCHESTRATOR_HARNESS_TOKEN="$HARNESS_TOKEN" \
+    ORCHESTRATOR_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
+    ORCHESTRATOR_CAPABILITY_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
     ORCHESTRATOR_W0_CAPABILITIES="$capabilities_json" \
     ORCHESTRATOR_PARSE_CAPABILITY_ENDPOINT="$PARSER_URL/v0/parse" \
     ORCHESTRATOR_IR_CAPABILITY_ENDPOINT="$SEMANTIC_IR_URL/v0/ir" \
@@ -567,14 +573,19 @@ start_orchestrator() {
 }
 
 start_bff() {
+  local bff_model_gateway_url=""
+  if is_truthy "$MODEL_GATEWAY_ENABLED"; then
+    bff_model_gateway_url="$MODEL_GATEWAY_URL"
+  fi
   start_bg c2c-bff "$LOG_DIR/c2c-bff.log" \
     C2C_REPO_ROOT="$ROOT_DIR" \
     C2C_UI_DIST="$ROOT_DIR/apps/c2c-ui/dist" \
     C2C_BFF_PORT="$BFF_PORT" \
     C2C_ORCHESTRATOR_URL="$ORCHESTRATOR_URL" \
+    C2C_ORCHESTRATOR_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
     C2C_EVIDENCE_URL="$EVIDENCE_URL" \
     C2C_EXPERIENCE_LEARNING_URL="$EXPERIENCE_URL" \
-    C2C_MODEL_GATEWAY_URL="$MODEL_GATEWAY_URL" \
+    C2C_MODEL_GATEWAY_URL="$bff_model_gateway_url" \
     C2C_HARNESS_URL="$HARNESS_URL" \
     -- \
     node "$ROOT_DIR/services/c2c-bff/dist/index.js"

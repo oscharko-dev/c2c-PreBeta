@@ -20,7 +20,7 @@ import {
   type OrchestratorClient,
   type UpstreamResponse,
 } from './upstream';
-import type { BffConfig } from './config';
+import { loadConfig, type BffConfig } from './config';
 
 const FIXED_SAMPLE: SampleDetail = {
   programId: 'BRNCH01',
@@ -104,6 +104,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       targetLanguage?: string;
       expectedOutput?: string;
       oracleInput?: string;
+      useTransformationAgent?: boolean;
     }>;
     getGenerated: number;
     getGeneratedFiles: number;
@@ -129,6 +130,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       targetLanguage?: string;
       expectedOutput?: string;
       oracleInput?: string;
+      useTransformationAgent?: boolean;
     }>,
     getGenerated: 0,
     getGeneratedFiles: 0,
@@ -311,6 +313,7 @@ const baseConfig: BffConfig = {
   repoRoot: '/tmp/c2c-test-root',
   staticRoot: '/tmp/c2c-test-static-does-not-exist',
   orchestratorUrl: '',
+  orchestratorControlToken: '',
   evidenceUrl: '',
   experienceLearningUrl: '',
   modelGatewayUrl: '',
@@ -320,6 +323,16 @@ const baseConfig: BffConfig = {
   artifactContentMaxBytes: 1_048_576,
   enableDiagnosticFixtures: false,
 };
+
+test('loadConfig rejects live orchestrator URL without a control token', () => {
+  assert.throws(
+    () => loadConfig({
+      C2C_ORCHESTRATOR_URL: 'http://orchestrator',
+      C2C_REPO_ROOT: '/tmp/c2c-test-root',
+    } as NodeJS.ProcessEnv, __dirname),
+    /C2C_ORCHESTRATOR_CONTROL_TOKEN is required/,
+  );
+});
 
 interface RunningServer {
   baseUrl: string;
@@ -2504,6 +2517,14 @@ test('experience route maps live learning summaries into the Studio contract', a
           candidateByPattern: { repeated_action: 2 },
           experienceEventIds: ['evt-1', 'evt-2'],
           observedPatterns: ['repeated_action'],
+          signals: [{
+            key: 'model_invocation_outcome',
+            label: 'Model invocation outcome',
+            status: 'observed',
+            summary: '1 model-gateway outcome observed.',
+            count: 1,
+            evidenceRefs: ['evt-model'],
+          }],
           observationOnly: true,
           policyVersion: 'v0',
           policyFingerprint: 'fp-1',
@@ -2532,6 +2553,14 @@ test('experience route maps live learning summaries into the Studio contract', a
       productMode: 'live',
       summary: '2 learning candidates observed • from 4 source events • 2 source ledgers considered • observation-only mode',
       observationPolicy: 'v0 / fp-1',
+      learningSignals: [{
+        key: 'model_invocation_outcome',
+        label: 'Model invocation outcome',
+        status: 'observed',
+        summary: '1 model-gateway outcome observed.',
+        count: 1,
+        evidenceRefs: ['evt-model'],
+      }],
       detectedPatterns: ['repeated_action', 'repeated_action: 2'],
       artifactRefs: ['evt-1', 'evt-2'],
     });
@@ -3383,6 +3412,33 @@ test('POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
     assert.equal(calls.startTransformRun[0]?.targetLanguage, 'java');
     assert.equal(calls.startTransformRun[0]?.expectedOutput, 'HELLO WORLD\n');
     assert.equal(calls.startTransformRun[0]?.oracleInput, '');
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST /api/v0/transform opts into the transformation agent when Model Gateway is enabled', async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream', modelGatewayUrl: 'http://gateway' },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: 'POST',
+      body: {
+        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        targetLanguage: 'java',
+      },
+    });
+    assert.equal(response.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, true);
   } finally {
     await server.close();
   }

@@ -94,6 +94,14 @@ describe('Observability Surfaces', () => {
           productMode: 'live',
           summary: 'Learned something new',
           observationPolicy: 'strict',
+          learningSignals: [{
+            key: 'model_invocation_outcome',
+            label: 'Model invocation outcome',
+            status: 'observed',
+            summary: '1 model-gateway outcome observed.',
+            count: 1,
+            evidenceRefs: ['evt-model'],
+          }],
           detectedPatterns: ['pattern A'],
           artifactRefs: ['urn:test']
         }
@@ -103,6 +111,8 @@ describe('Observability Surfaces', () => {
     render(<ExperienceLearningPanel />);
     expect(screen.getByText('Learned something new')).toBeDefined();
     expect(screen.getByText('strict')).toBeDefined();
+    expect(screen.getByText('Model invocation outcome')).toBeDefined();
+    expect(screen.getByText('1 model-gateway outcome observed.')).toBeDefined();
     expect(screen.getByText('pattern A')).toBeDefined();
     expect(screen.getByText('urn:test')).toBeDefined();
   });

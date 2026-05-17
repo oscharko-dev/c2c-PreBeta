@@ -13,9 +13,10 @@ models:
     allowedDataClasses:
       - "model-gateway"
     supportedTemplateVersions:
+      - "v0"
       - "v1"
-    supportsStructuredOutput: false
-    defaultTimeoutMs: 15000
+    supportsStructuredOutput: true
+    defaultTimeoutMs: 60000
     capability: "model-generation"
 
   - id: "mistral-large-3"
@@ -32,9 +33,10 @@ models:
     allowedDataClasses:
       - "model-gateway"
     supportedTemplateVersions:
+      - "v0"
       - "v1"
-    supportsStructuredOutput: false
-    defaultTimeoutMs: 20000
+    supportsStructuredOutput: true
+    defaultTimeoutMs: 60000
     capability: "model-generation"
 
   - id: "phi-4"
@@ -51,9 +53,10 @@ models:
     allowedDataClasses:
       - "model-gateway"
     supportedTemplateVersions:
+      - "v0"
       - "v1"
-    supportsStructuredOutput: false
-    defaultTimeoutMs: 15000
+    supportsStructuredOutput: true
+    defaultTimeoutMs: 60000
     capability: "model-generation"
 
   - id: "phi-4-mini-instruct"
@@ -70,7 +73,8 @@ models:
     allowedDataClasses:
       - "model-gateway"
     supportedTemplateVersions:
+      - "v0"
       - "v1"
-    supportsStructuredOutput: false
-    defaultTimeoutMs: 15000
+    supportsStructuredOutput: true
+    defaultTimeoutMs: 60000
     capability: "model-generation"

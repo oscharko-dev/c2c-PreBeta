@@ -165,7 +165,7 @@ class BuildTestRunnerServiceTest {
     }
 
     @Test
-    void registryDivergenceIsUnknownWhenFixtureDoesNotDeclareKnownGap() {
+    void registryDivergenceIsUnknownForTrueFixtureWithoutKnownGap() {
         Map<String, Object> generatedProject = trivialProject(
                 "sample.SilentCtrlDec",
                 "package sample; public class SilentCtrlDec { "
@@ -178,7 +178,7 @@ class BuildTestRunnerServiceTest {
         assertEquals("output-divergence", response.get("status"));
         assertEquals("divergence-unknown", response.get("classification"));
         Map<?, ?> golden = (Map<?, ?>) response.get("goldenMaster");
-        assertEquals("synthetic", golden.get("classification"));
+        assertEquals("true", golden.get("classification"));
         assertTrue(((String) golden.get("source"))
                 .endsWith("ctrl-decimal-payroll-output.txt"));
     }

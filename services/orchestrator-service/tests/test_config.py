@@ -16,8 +16,29 @@ class OrchestratorConfigTests(unittest.TestCase):
 
         capability_ids = {capability["id"] for capability in config.w0_capabilities}
         self.assertIn("model-gateway", capability_ids)
+        self.assertEqual(config.listen_addr, "127.0.0.1:8084")
         self.assertEqual(config.model_gateway_model_id, "gpt-oss-120b")
         self.assertEqual(config.model_policy_version, "v0")
+
+    def test_port_only_listen_addr_normalizes_to_loopback(self):
+        with patch.dict(os.environ, {"ORCHESTRATOR_LISTEN_ADDR": ":18088"}, clear=True):
+            config = load_config()
+
+        self.assertEqual(config.listen_addr, "127.0.0.1:18088")
+
+    def test_control_tokens_can_be_configured(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ORCHESTRATOR_CONTROL_TOKEN": "orchestrator-token",
+                "ORCHESTRATOR_CAPABILITY_CONTROL_TOKEN": "capability-token",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.control_token, "orchestrator-token")
+        self.assertEqual(config.capability_control_token, "capability-token")
 
     def test_model_gateway_endpoint_model_id_and_policy_version_can_be_overridden(self):
         with patch.dict(
@@ -47,7 +68,7 @@ class OrchestratorConfigTests(unittest.TestCase):
             "c2c.verification-repair-agent.cobol-to-java.v0",
         )
         self.assertEqual(config.repair_agent_prompt_template_version, "v0")
-        self.assertEqual(config.repair_agent_deadline_ms, 30000)
+        self.assertEqual(config.repair_agent_deadline_ms, 60000)
         self.assertEqual(config.repair_agent_max_output_bytes, 256 * 1024)
         # By default the repair agent reuses the transformation agent's
         # package base.
@@ -86,7 +107,7 @@ class OrchestratorConfigTests(unittest.TestCase):
             clear=True,
         ):
             config = load_config()
-        self.assertEqual(config.repair_agent_deadline_ms, 30000)
+        self.assertEqual(config.repair_agent_deadline_ms, 60000)
 
 
 if __name__ == "__main__":

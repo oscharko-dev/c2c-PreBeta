@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,10 +67,11 @@ type ErrorResponse struct {
 }
 
 type Service struct {
-	store    *PackStore
-	exporter *Exporter
-	events   EventSink
-	stepSeq  *stepCounter
+	store        *PackStore
+	exporter     *Exporter
+	events       EventSink
+	stepSeq      *stepCounter
+	controlToken string
 }
 
 type stepCounter struct {
@@ -99,6 +101,39 @@ func NewService(eventLogPath, exportRoot string) *Service {
 		events:   sink,
 		stepSeq:  newStepCounter(),
 	}
+}
+
+func (s *Service) SetControlToken(token string) {
+	s.controlToken = strings.TrimSpace(token)
+}
+
+func (s *Service) requireControlToken(w http.ResponseWriter, r *http.Request) bool {
+	expected := strings.TrimSpace(s.controlToken)
+	if expected == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	presented := presentedControlToken(r)
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) != 1 {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	return true
+}
+
+func presentedControlToken(r *http.Request) string {
+	if raw := strings.TrimSpace(r.Header.Get("X-C2C-Control-Token")); raw != "" {
+		return raw
+	}
+	if raw := strings.TrimSpace(r.Header.Get("X-Harness-Token")); raw != "" {
+		return raw
+	}
+	raw := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "bearer "
+	if strings.HasPrefix(strings.ToLower(raw), prefix) {
+		return strings.TrimSpace(raw[len(prefix):])
+	}
+	return ""
 }
 
 func (s *Service) Routes() *http.ServeMux {
@@ -139,6 +174,9 @@ func (s *Service) packCollectionHandler(w http.ResponseWriter, r *http.Request) 
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, s.store.List())
 	case http.MethodPost:
+		if !s.requireControlToken(w, r) {
+			return
+		}
 		var input CreateInput
 		if err := decodeJSON(w, r, &input); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -176,6 +214,9 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, http.StatusOK, manifest)
 		case http.MethodPatch:
+			if !s.requireControlToken(w, r) {
+				return
+			}
 			var patch PatchInput
 			if err := decodeJSON(w, r, &patch); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
@@ -205,6 +246,9 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		if !s.requireControlToken(w, r) {
+			return
+		}
 		manifest, ok := s.store.Get(packID)
 		if !ok {
 			writeError(w, http.StatusNotFound, "pack not found")
@@ -229,6 +273,9 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 	case "export":
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if !s.requireControlToken(w, r) {
 			return
 		}
 		var req ExportRequest

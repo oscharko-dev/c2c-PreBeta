@@ -468,7 +468,8 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             },
             output_uri="urn:run/build-2",
         )
-        final_ref = {"uri": "urn:run/repair-1", "sha256": "d" * 64, "byteSize": 10, "kind": "transformation-agent-project-manifest"}
+        contract.record_agent_attempt()
+        final_ref = {"uri": "urn:run/transformation-agent", "sha256": "d" * 64, "byteSize": 10, "kind": "transformation-agent-project-manifest"}
         baseline_ref = {"uri": "urn:run/baseline", "sha256": "1" * 64, "byteSize": 12, "kind": "generated-project-manifest"}
 
         payload = self.runner._build_evidence_payload(
@@ -493,6 +494,12 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(artifacts["sourceMetadata"]["kind"], KIND_SOURCE_REF)
         self.assertEqual(artifacts["parseOutput"]["uri"], parse_meta.uri)
         self.assertEqual(artifacts["parseOutput"]["kind"], KIND_PARSE_OUTPUT)
+        self.assertEqual(len(artifacts["generatedJavaArtifacts"]), 2)
+        self.assertEqual(artifacts["generatedJavaArtifacts"][0]["origin"], "deterministic-baseline")
+        self.assertEqual(artifacts["generatedJavaArtifacts"][1]["origin"], "transformation-agent")
+        self.assertTrue(artifacts["generatedJavaArtifacts"][1]["selected"])
+        self.assertEqual(artifacts["finalJavaArtifact"]["uri"], final_ref["uri"])
+        self.assertTrue(artifacts["finalJavaArtifact"]["selected"])
 
     def test_repair_attempt_without_build_ref_is_not_fabricated(self) -> None:
         context = self._w0_context(use_transformation_agent=True)

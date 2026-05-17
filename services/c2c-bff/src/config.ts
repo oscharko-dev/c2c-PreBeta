@@ -7,6 +7,7 @@ export interface BffConfig {
   repoRoot: string;
   staticRoot: string;
   orchestratorUrl: string;
+  orchestratorControlToken: string;
   evidenceUrl: string;
   experienceLearningUrl: string;
   modelGatewayUrl: string;
@@ -85,12 +86,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, packageRoot: st
   const repoRoot = env.C2C_REPO_ROOT?.trim()
     ? path.resolve(env.C2C_REPO_ROOT)
     : findRepoRoot(path.resolve(packageRoot, '..', '..'));
+  const orchestratorUrl = env.C2C_ORCHESTRATOR_URL?.trim() ?? '';
+  const orchestratorControlToken = env.C2C_ORCHESTRATOR_CONTROL_TOKEN?.trim() ?? '';
+  if (orchestratorUrl && !orchestratorControlToken) {
+    throw new Error('C2C_ORCHESTRATOR_CONTROL_TOKEN is required when C2C_ORCHESTRATOR_URL is set');
+  }
   return {
     serviceName: SERVICE_NAME,
     port: parsePort(env.C2C_BFF_PORT, DEFAULT_PORT),
     repoRoot,
     staticRoot: resolveStaticRoot(env, repoRoot),
-    orchestratorUrl: env.C2C_ORCHESTRATOR_URL?.trim() ?? '',
+    orchestratorUrl,
+    orchestratorControlToken,
     evidenceUrl: env.C2C_EVIDENCE_URL?.trim() ?? '',
     experienceLearningUrl: env.C2C_EXPERIENCE_LEARNING_URL?.trim() ?? '',
     modelGatewayUrl: env.C2C_MODEL_GATEWAY_URL?.trim() ?? '',

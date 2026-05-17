@@ -11,7 +11,7 @@ from typing import Iterable, Mapping
 from .artifacts import DEFAULT_RUN_ARTIFACT_ROOT, JsonObject
 
 
-DEFAULT_LISTEN_ADDR = "0.0.0.0:8084"
+DEFAULT_LISTEN_ADDR = "127.0.0.1:8084"
 DEFAULT_HARNESS_BASE_URL = "http://127.0.0.1:8080"
 DEFAULT_EXPERIENCE_LEARNING_BASE_URL = ""
 DEFAULT_WORKFLOW_ID = "w0-migration-v0"
@@ -39,7 +39,7 @@ REPAIR_BUDGET_MAX = 3
 # Issue #169: defaults for the productive Transformation Agent.
 DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID = "c2c.transformation-agent.cobol-to-java.v0"
 DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION = "v0"
-DEFAULT_TRANSFORMATION_AGENT_DEADLINE_MS = 30000
+DEFAULT_TRANSFORMATION_AGENT_DEADLINE_MS = 60000
 DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES = 1024 * 1024
 DEFAULT_TRANSFORMATION_AGENT_PACKAGE_BASE = "com.c2c.generated"
 DEFAULT_TRANSFORMATION_AGENT_JAVA_VERSION = "21"
@@ -61,7 +61,7 @@ DEFAULT_TRANSFORMATION_AGENT_W0_SUBSET: tuple[str, ...] = (
 # Issue #170: defaults for the productive Verification/Repair Agent.
 DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_ID = "c2c.verification-repair-agent.cobol-to-java.v0"
 DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION = "v0"
-DEFAULT_REPAIR_AGENT_DEADLINE_MS = 30000
+DEFAULT_REPAIR_AGENT_DEADLINE_MS = 60000
 DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES = 256 * 1024
 
 DEFAULT_PARSER_SERVICE_HOST = "127.0.0.1"
@@ -159,6 +159,8 @@ class OrchestratorConfig:
     model_gateway_capability_id: str
     w0_capabilities: tuple[JsonObject, ...]
     harness_token: str = ""
+    control_token: str = ""
+    capability_control_token: str = ""
     service_name: str = "orchestrator-service"
     model_gateway_model_id: str = DEFAULT_MODEL_GATEWAY_MODEL_ID
     model_policy_version: str = DEFAULT_MODEL_POLICY_VERSION
@@ -206,9 +208,11 @@ def load_config() -> OrchestratorConfig:
     if not listen_addr:
         listen_addr = DEFAULT_LISTEN_ADDR
 
-    if not listen_addr.startswith(":") and ":" not in listen_addr:
+    if listen_addr.startswith(":"):
+        listen_addr = f"127.0.0.1{listen_addr}"
+    elif ":" not in listen_addr:
         # compatibility with service snippets that set only a port number
-        listen_addr = f"0.0.0.0:{listen_addr}"
+        listen_addr = f"127.0.0.1:{listen_addr}"
 
     harness_base_url = os.environ.get("ORCHESTRATOR_HARNESS_BASE_URL", DEFAULT_HARNESS_BASE_URL).strip()
     if not harness_base_url:
@@ -246,6 +250,14 @@ def load_config() -> OrchestratorConfig:
     if not model_policy_version:
         model_policy_version = DEFAULT_MODEL_POLICY_VERSION
     harness_token = os.environ.get("ORCHESTRATOR_HARNESS_TOKEN", "").strip()
+    control_token = os.environ.get(
+        "ORCHESTRATOR_CONTROL_TOKEN",
+        os.environ.get("C2C_INTERNAL_CONTROL_TOKEN", ""),
+    ).strip()
+    capability_control_token = os.environ.get(
+        "ORCHESTRATOR_CAPABILITY_CONTROL_TOKEN",
+        os.environ.get("C2C_INTERNAL_CONTROL_TOKEN", ""),
+    ).strip()
 
     experience_learning_base_url = os.environ.get(
         "ORCHESTRATOR_EXPERIENCE_LEARNING_BASE_URL",
@@ -388,6 +400,8 @@ def load_config() -> OrchestratorConfig:
         model_gateway_capability_id=model_gateway_capability_id,
         w0_capabilities=w0_capabilities,
         harness_token=harness_token,
+        control_token=control_token,
+        capability_control_token=capability_control_token,
         model_gateway_model_id=model_gateway_model_id,
         model_policy_version=model_policy_version,
         run_artifact_root=run_artifact_root,

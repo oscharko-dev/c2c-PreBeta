@@ -58,7 +58,7 @@ func main() {
 	sinks := []EventSink{eventSink}
 
 	if strings.TrimSpace(cfg.harnessEventURL) != "" {
-		remoteSink, err := NewRemoteHarnessEventSink(cfg.harnessEventURL)
+		remoteSink, err := NewRemoteHarnessEventSink(cfg.harnessEventURL, cfg.harnessEventToken)
 		if err != nil {
 			log.Fatalf("init remote event sink failed: %v", err)
 		}
@@ -81,8 +81,10 @@ func main() {
 	if addr == "" {
 		addr = defaultModelListenAddr
 	}
-	if addr[0] != ':' && !strings.HasPrefix(addr, "http") {
-		addr = ":" + addr
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	} else if !strings.Contains(addr, ":") {
+		addr = "127.0.0.1:" + addr
 	}
 
 	server := &http.Server{

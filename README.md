@@ -4,10 +4,10 @@ Experience Learning Harness · Open Source · Open Weight · EU Sovereignty
 
 Think Big, Start Small.
 
-This repository is the W0/W0.1 product foundation for a polyglot service mesh
-that prepares and validates COBOL-to-code migrations. The implemented product
-path is intentionally constrained, deterministic, and reproducible; W0.2 is the
-next wave that introduces the first productive AI-agent transformation loop.
+This repository is the W0/W0.1/W0.2 product foundation for a polyglot service
+mesh that prepares and validates COBOL-to-code migrations. The implemented
+product path is intentionally constrained, deterministic, and reproducible;
+W0.2 adds the first productive AI-agent transformation loop.
 
 The Harness is the long-term differentiation layer: shared infrastructure,
 governance, ledgers, and Experience Learning. It observes agent, tool, model,
@@ -190,7 +190,7 @@ Launcher overrides are documented in `.env.example`:
 |------|--------|-----------------|
 | W0 | Done | Deterministic COBOL-to-Java enterprise kernel: parser, Semantic IR, Java generation, build/test, evidence, Harness, Experience Learning telemetry, and no required model call. |
 | W0.1 | Done | Next.js/Tailwind c2c Studio: editable COBOL, BFF-backed transformation run, generated Java artifact view, build/test, evidence, artifacts, and honest blocked states. |
-| W0.2 | Closing | First productive AI transformation loop on the Experience Learning Harness: orchestrator-steered Transformation and Verification/Repair Agents, Model Gateway/Foundry calls, bounded repair, first read-only learning signals, deterministic verification/evidence gate, and an executable release gate at [`scripts/w0-2-release-gate.sh`](scripts/w0-2-release-gate.sh). |
+| W0.2 | Done | First productive AI transformation loop on the Experience Learning Harness: orchestrator-steered Transformation and Verification/Repair Agents, Model Gateway/Foundry calls, bounded repair, first read-only learning signals, deterministic verification/evidence gate, and an executable release gate at [`scripts/w0-2-release-gate.sh`](scripts/w0-2-release-gate.sh). |
 
 The W0/W0.1 product can transform supported W0 COBOL programs and selected
 small custom sources that stay inside the implemented subset. It must not be

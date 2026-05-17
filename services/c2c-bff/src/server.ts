@@ -116,7 +116,14 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
     config: deps.config,
     samples: deps.samples ?? loadSampleRegistry(deps.config.repoRoot),
     acceptanceFixtures: acceptanceFixturesAccessor,
-    orchestrator: deps.orchestrator ?? createOrchestratorClient(deps.config.orchestratorUrl, httpClient, deps.config.upstreamTimeoutMs),
+    orchestrator:
+      deps.orchestrator
+      ?? createOrchestratorClient(
+        deps.config.orchestratorUrl,
+        httpClient,
+        deps.config.upstreamTimeoutMs,
+        deps.config.orchestratorControlToken,
+      ),
     evidence: deps.evidence ?? createEvidenceClient(deps.config.evidenceUrl, httpClient, deps.config.upstreamTimeoutMs),
     experienceLearning:
       deps.experienceLearning
@@ -560,6 +567,7 @@ function normalizeExperienceViewFromSummary(
   const observationOnly = asBoolean(summaryRaw.observationOnly) ?? false;
   const policyVersion = asString(summaryRaw.policyVersion);
   const policyFingerprint = asString(summaryRaw.policyFingerprint);
+  const learningSignals = normalizeLearningSignals(summaryRaw.signals);
 
   const summaryParts = [
     `${candidateCount} learning candidate${candidateCount === 1 ? '' : 's'} observed`,
@@ -577,9 +585,32 @@ function normalizeExperienceViewFromSummary(
     productMode: learningView.productMode,
     summary: summaryParts.join(' • '),
     observationPolicy,
+    learningSignals,
     detectedPatterns: [...observedPatterns, ...patternBreakdown],
     artifactRefs: experienceEventIds,
   };
+}
+
+function normalizeLearningSignals(raw: unknown): Array<Record<string, unknown>> {
+  const signals: Array<Record<string, unknown>> = [];
+  if (!Array.isArray(raw)) return signals;
+  for (const entry of raw) {
+    const item = asRecord(entry);
+    if (!item) continue;
+    const key = asString(item.key);
+    const label = asString(item.label);
+    const status = asString(item.status);
+    if (!key || !label || !status) continue;
+    signals.push({
+      key,
+      label,
+      status,
+      summary: asString(item.summary),
+      count: asNumber(item.count) ?? 0,
+      evidenceRefs: asStringArray(item.evidenceRefs),
+    });
+  }
+  return signals;
 }
 
 interface OutputRef {
@@ -1804,7 +1835,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
 
         try {
-          const upstream = await orchestrator.startTransformRun({
+          const transformInput: Parameters<typeof orchestrator.startTransformRun>[0] = {
             programId,
             sourceText,
             requester: 'c2c-ui',
@@ -1813,7 +1844,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             targetLanguage,
             expectedOutput,
             oracleInput,
-          });
+          };
+          if (modelGateway.enabled) {
+            transformInput.useTransformationAgent = true;
+          }
+          const upstream = await orchestrator.startTransformRun(transformInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             const liveRunId = extractLiveRunId(upstream.body);
             const stored = runStore.create(createSourceTextSample(programId, sourceText, sourceName), 'live', liveRunId, {

@@ -135,7 +135,10 @@ class W0SmokeIntegrationTest {
     }
 
     private static String expectedGoldenClassification(String programId) {
-        return "BRNCH01".equals(programId) ? "true" : "synthetic";
+        return switch (programId) {
+            case "BRNCH01", "CTRLDEC01", "ARITH01", "BATCH01" -> "true";
+            default -> "synthetic";
+        };
     }
 
     private static Path repoRoot() {

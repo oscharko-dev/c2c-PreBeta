@@ -903,6 +903,7 @@ class W0WorkflowRunner:
         baseline_artifact_ref: Mapping[str, JsonValue] | None,
         baseline_files: Mapping[str, str] | None,
         oracle_reference: DataReference | None,
+        oracle_payload: Mapping[str, JsonValue] | None,
     ) -> TransformationAgentResult:
         """Run one Transformation Agent attempt and return its structured
         result. Raises :class:`TransformationAgentError` on terminal
@@ -947,6 +948,7 @@ class W0WorkflowRunner:
             baseline_java_ref=dict(baseline_artifact_ref) if baseline_artifact_ref else None,
             baseline_files=dict(baseline_files) if baseline_files else None,
             oracle_ref=oracle_ref_payload,
+            oracle_payload=dict(oracle_payload) if isinstance(oracle_payload, Mapping) and oracle_payload else None,
             deadline_ms=getattr(
                 self.config,
                 "transformation_agent_deadline_ms",
@@ -1008,6 +1010,7 @@ class W0WorkflowRunner:
         failure_category: str,
         source_text: str | None,
         source_cobol_ref: Mapping[str, JsonValue] | None,
+        oracle_payload: Mapping[str, JsonValue] | None,
         semantic_ir: Mapping[str, JsonValue] | None,
         semantic_ir_ref: Mapping[str, JsonValue] | None,
         previous_repair_decision_refs: Sequence[Mapping[str, JsonValue]],
@@ -1050,6 +1053,7 @@ class W0WorkflowRunner:
             repair_budget_remaining=int(repair_budget_remaining),
             source_text=source_text,
             source_cobol_ref=dict(source_cobol_ref) if source_cobol_ref else None,
+            oracle_payload=dict(oracle_payload) if isinstance(oracle_payload, Mapping) and oracle_payload else None,
             semantic_ir=dict(semantic_ir) if isinstance(semantic_ir, Mapping) and semantic_ir else None,
             semantic_ir_ref=dict(semantic_ir_ref) if semantic_ir_ref else None,
             previous_repair_decision_refs=tuple(
@@ -1759,6 +1763,7 @@ class W0WorkflowRunner:
                             else None
                         ),
                         oracle_reference=oracle_reference_for_agent,
+                        oracle_payload=oracle_payload_for_agent,
                     )
                 except (
                     AgentContractInvalidAgentError,
@@ -1810,8 +1815,14 @@ class W0WorkflowRunner:
                     # files so the build-test runner receives the agent's
                     # Java content (mirrors the deterministic generator
                     # payload shape).
+                    entry_class_for_build = (
+                        f"{agent_result.candidate.entry_package}.{agent_result.candidate.entry_class}"
+                        if agent_result.candidate.entry_package
+                        else agent_result.candidate.entry_class
+                    )
                     generated_project = {
-                        "entryClass": agent_result.candidate.entry_class,
+                        "entryClass": entry_class_for_build,
+                        "entryPackage": agent_result.candidate.entry_package,
                         "entryFilePath": agent_result.candidate.entry_file_path,
                         "fileCount": len(agent_result.candidate.files),
                         "files": dict(agent_result.candidate.files),
@@ -2095,6 +2106,11 @@ class W0WorkflowRunner:
                         failure_category=build_failure_code or "java_compile_failed",
                         source_text=source_text,
                         source_cobol_ref=_as_reference_payload(input_reference),
+                        oracle_payload=(
+                            dict(build_test_input["oracle"])
+                            if isinstance(build_test_input.get("oracle"), Mapping)
+                            else None
+                        ),
                         semantic_ir=ir_document,
                         semantic_ir_ref=_as_reference_payload(ir_output.output_ref),
                         previous_repair_decision_refs=list(previous_repair_decision_refs),
@@ -2119,6 +2135,7 @@ class W0WorkflowRunner:
                         "attemptNumber": attempt,
                         "repairDecision": "refuse",
                         "failureCategory": build_failure_code,
+                        "refusalCode": "no_safe_repair",
                         "rationale": str(repair_exc),
                         "buildTestResultRef": build_test_result_ref_payload,
                     }
@@ -2981,9 +2998,9 @@ class W0WorkflowRunner:
         history: list[JsonObject] = []
         repair_attempts: list[JsonObject] = []
 
-        # Attempt 0 is the deterministic baseline OR the productive
-        # transformation agent's candidate. If we have an explicit baseline
-        # ref, use it; otherwise fall back to the generator step's output.
+        # Attempt 0 is the deterministic baseline. Productive transformation
+        # candidates are added below when they are the selected final artifact
+        # and no repair attempt already accounts for that final ref.
         baseline_ref: Mapping[str, JsonValue]
         if baseline_artifact_ref:
             baseline_ref = baseline_artifact_ref
@@ -3070,8 +3087,28 @@ class W0WorkflowRunner:
             if not repair_attempts_have_required_refs:
                 repair_attempts = []
 
-        # Mark the selected candidate inside history (if it matches).
         selected_entry: JsonObject | None = None
+        if final_uri and final_sha and not blocked:
+            final_is_already_in_history = any(
+                entry.get("uri") == final_uri and entry.get("sha256") == final_sha
+                for entry in history
+            )
+            if not final_is_already_in_history:
+                transformation_attempt = 1
+                if w02_contract is not None:
+                    transformation_attempt = max(
+                        1,
+                        int(getattr(w02_contract, "agent_attempt_count", 0) or 1),
+                    )
+                transformation_entry = self._java_candidate_ref(
+                    ref=final_artifact_ref,
+                    origin="transformation-agent",
+                    attempt_number=transformation_attempt,
+                )
+                if transformation_entry is not None:
+                    history.append(transformation_entry)
+
+        # Mark the selected candidate inside history (if it matches).
         if final_uri and final_sha:
             for entry in history:
                 if entry.get("uri") == final_uri and entry.get("sha256") == final_sha:

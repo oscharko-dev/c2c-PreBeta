@@ -13,6 +13,8 @@ import (
 	"testing"
 )
 
+const testControlToken = "evidence-test-control-token"
+
 func TestHealthAndReady(t *testing.T) {
 	srv, _ := newTestServer(t)
 	for _, path := range []string{"/v0/health", "/v0/ready"} {
@@ -25,6 +27,53 @@ func TestHealthAndReady(t *testing.T) {
 		}
 		_ = res.Body.Close()
 	}
+}
+
+func TestPackMutationRoutesRequireControlToken(t *testing.T) {
+	exportDir := t.TempDir()
+	service := NewService("", exportDir)
+	service.SetControlToken(testControlToken)
+	srv := httptest.NewServer(service.Routes())
+	t.Cleanup(srv.Close)
+
+	raw, err := json.Marshal(CreateInput{RunID: "run-auth"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	res, err := http.Post(srv.URL+"/v0/packs", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("POST without auth: %v", err)
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated create to return 401, got %d", res.StatusCode)
+	}
+	_ = res.Body.Close()
+
+	res = postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-auth",
+		Artifacts: completeArtifacts(t),
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected authenticated create to return 201, got %d", res.StatusCode)
+	}
+	var manifest EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = res.Body.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v0/packs/"+manifest.PackID+"/export", nil)
+	if err != nil {
+		t.Fatalf("new export request: %v", err)
+	}
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("export without auth: %v", err)
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated export to return 401, got %d", res.StatusCode)
+	}
+	_ = res.Body.Close()
 }
 
 func TestCreateIncompletePackReportsMissingArtifacts(t *testing.T) {
@@ -334,6 +383,7 @@ func TestJSONLEventSinkPersistsEvents(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "events.jsonl")
 	service := NewService(logPath, dir)
+	service.SetControlToken(testControlToken)
 	srv := httptest.NewServer(service.Routes())
 	t.Cleanup(srv.Close)
 
@@ -356,6 +406,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Service) {
 	t.Helper()
 	exportDir := t.TempDir()
 	service := NewService("", exportDir)
+	service.SetControlToken(testControlToken)
 	srv := httptest.NewServer(service.Routes())
 	t.Cleanup(srv.Close)
 	return srv, service
@@ -367,7 +418,13 @@ func postJSON(t *testing.T, url string, payload any) *http.Response {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	res, err := http.Post(url, "application/json", bytes.NewReader(raw))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testControlToken)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
@@ -385,6 +442,7 @@ func patchJSON(t *testing.T, url string, payload any) *http.Response {
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testControlToken)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("PATCH %s: %v", url, err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -68,11 +69,15 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(f.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
+	systemMessage := "Provide concise, audit-safe migration guidance. Do not include secrets or raw source payloads."
+	if request.StructuredOutput {
+		systemMessage += " Return only a single JSON object matching the requested output contract. Do not wrap it in Markdown."
+	}
 	payload := map[string]any{
 		"messages": []map[string]string{
 			{
 				"role":    "system",
-				"content": "Provide concise, audit-safe migration guidance. Do not include secrets or raw source payloads.",
+				"content": systemMessage,
 			},
 			{
 				"role":    "user",
@@ -85,6 +90,9 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 	}
 	if maxTokens, ok := request.Parameters["max_tokens"]; ok {
 		payload["max_tokens"] = maxTokens
+	}
+	if request.StructuredOutput {
+		payload["response_format"] = map[string]any{"type": "json_object"}
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -131,13 +139,50 @@ func (f *FoundryAdapter) Invoke(ctx context.Context, request ModelInvocationRequ
 		"deployment": model.DeploymentName,
 	}
 	if text := firstChatCompletionText(parsed); text != "" {
-		output["text"] = text
+		if request.StructuredOutput {
+			structured, err := decodeStructuredCompletionText(text)
+			if err != nil {
+				return ModelInvocationOutput{}, err
+			}
+			output = structured
+		} else {
+			output["text"] = text
+		}
 	}
 	metadata := map[string]any{"provider": f.Name()}
 	if usage := extractChatCompletionUsage(parsed); len(usage) > 0 {
 		metadata["usage"] = usage
 	}
 	return ModelInvocationOutput{Data: output, Status: status, Metadata: metadata}, nil
+}
+
+func decodeStructuredCompletionText(text string) (map[string]any, error) {
+	clean := strings.TrimSpace(text)
+	if clean == "" {
+		return nil, fmt.Errorf("foundry structured response was empty")
+	}
+	if strings.HasPrefix(clean, "```") {
+		lines := strings.Split(clean, "\n")
+		if len(lines) < 2 || !strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+			return nil, fmt.Errorf("foundry structured response contained an unterminated markdown fence")
+		}
+		clean = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+	}
+
+	var output map[string]any
+	decoder := json.NewDecoder(strings.NewReader(clean))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&output); err != nil {
+		return nil, fmt.Errorf("decode foundry structured response: %w", err)
+	}
+	if len(output) == 0 {
+		return nil, fmt.Errorf("foundry structured response was an empty object")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("foundry structured response contained multiple JSON values")
+	}
+	return output, nil
 }
 
 // extractChatCompletionUsage normalises the optional `usage` object returned by

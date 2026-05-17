@@ -22,10 +22,10 @@ Hard rules enforced by this module:
   text in the response is a convenience view; the artifact in the run
   artifact store is the source of truth and is the value referenced by
   ``javaCandidateRef`` on the response.
-* Invalid model output (non-Java content, missing class metadata, oversized
-  output, unsupported COBOL without ``status="blocked"``) is rejected. The
-  Orchestrator surfaces ``agent_contract_invalid`` for the resulting run
-  contract.
+* Invalid model output (no Java entry source, missing class metadata,
+  oversized output, unsupported COBOL without ``status="blocked"``) is
+  rejected. The Orchestrator surfaces ``agent_contract_invalid`` for the
+  resulting run contract.
 * The agent does not perform verification. It does not claim behavioural
   correctness. Build, test, and oracle comparison happen downstream.
 * Harness events are emitted for invocation start/completion. They observe
@@ -55,6 +55,7 @@ from .artifacts import (
     KIND_MODEL_INVOCATION_LEDGER,
     KIND_TRANSFORMATION_AGENT_JAVA_FILE,
     KIND_TRANSFORMATION_AGENT_PROJECT_MANIFEST,
+    KIND_TRANSFORMATION_AGENT_PROJECT_FILE,
     KIND_TRANSFORMATION_AGENT_REQUEST,
     KIND_TRANSFORMATION_AGENT_RESPONSE,
     MIME_JAVA,
@@ -133,6 +134,10 @@ _JAVA_SHAPE_HINTS = re.compile(
     r"\b(class|interface|enum|record)\s+[A-Za-z_$][A-Za-z0-9_$]*",
     re.MULTILINE,
 )
+_JAVA_TYPE_DECLARATION = re.compile(
+    r"\b(?:public\s+)?(?:final\s+)?(?:class|interface|enum|record)\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+    re.MULTILINE,
+)
 _JAVA_PACKAGE_LINE = re.compile(r"^\s*package\s+([A-Za-z_$][\w$.]*)\s*;", re.MULTILINE)
 _JAVA_IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 _JAVA_PACKAGE_PATTERN = re.compile(
@@ -197,7 +202,8 @@ class TransformationAgentRequest:
     baseline_java_ref: Mapping[str, JsonValue] | None = None
     baseline_files: Mapping[str, str] | None = None
     oracle_ref: Mapping[str, JsonValue] | None = None
-    deadline_ms: int = 30000
+    oracle_payload: Mapping[str, JsonValue] | None = None
+    deadline_ms: int = 60000
     trace_ref: str | None = None
 
     def __post_init__(self) -> None:
@@ -244,7 +250,7 @@ class GeneratedJavaCandidate:
                     "path": path,
                     "sha256": sha256(encoded).hexdigest(),
                     "byteSize": len(encoded),
-                    "mimeType": MIME_JAVA,
+                    "mimeType": _candidate_mime_type(path),
                 }
             )
         return {
@@ -729,11 +735,14 @@ def _parse_model_output_envelope(raw_output: Any) -> Mapping[str, JsonValue]:
 def _validate_inner_status(status: Any) -> str:
     if not isinstance(status, str):
         raise AgentContractInvalidAgentError("inner status must be a string")
-    if status not in {"success", "blocked", "failed"}:
+    normalized = status.strip().lower()
+    if normalized == "completed":
+        return "success"
+    if normalized not in {"success", "blocked", "failed"}:
         raise AgentContractInvalidAgentError(
             f"inner status must be one of 'success'/'blocked'/'failed', got {status!r}"
         )
-    return status
+    return normalized
 
 
 def _validate_inner_failure(envelope: Mapping[str, JsonValue], status: str) -> tuple[str, str]:
@@ -763,13 +772,56 @@ def _validate_inner_failure(envelope: Mapping[str, JsonValue], status: str) -> t
     return failure_code, failure_message
 
 
+def _candidate_files_from_inner_output(envelope: Mapping[str, JsonValue]) -> Mapping[str, JsonValue] | None:
+    for key in ("files", "generatedFiles", "projectFiles"):
+        raw = envelope.get(key)
+        if isinstance(raw, Mapping) and raw:
+            return raw
+
+    for key in ("generatedProject", "project", "javaProject"):
+        raw_project = envelope.get(key)
+        if not isinstance(raw_project, Mapping):
+            continue
+        raw_files = raw_project.get("files") or raw_project.get("generatedFiles")
+        if isinstance(raw_files, Mapping) and raw_files:
+            return raw_files
+
+    raw_artifacts = envelope.get("artifacts")
+    if isinstance(raw_artifacts, Sequence) and not isinstance(raw_artifacts, (str, bytes, bytearray)):
+        files: dict[str, JsonValue] = {}
+        for item in raw_artifacts:
+            if not isinstance(item, Mapping):
+                continue
+            raw_path = item.get("path") or item.get("filePath") or item.get("name")
+            raw_content = item.get("content") or item.get("source")
+            if isinstance(raw_path, str) and raw_path.strip() and isinstance(raw_content, str):
+                files[raw_path] = raw_content
+        if files:
+            return files
+
+    java_source = envelope.get("javaSource") or envelope.get("javaCode")
+    if isinstance(java_source, str) and java_source.strip():
+        entry_file_path = envelope.get("entryFilePath") or envelope.get("entry_file_path")
+        if not isinstance(entry_file_path, str) or not entry_file_path.strip():
+            entry_class = envelope.get("entryClass") or envelope.get("entry_class") or "GeneratedProgram"
+            entry_class_text = str(entry_class).strip().split(".")[-1] or "GeneratedProgram"
+            entry_file_path = f"src/main/java/generated/{entry_class_text}.java"
+        files = {entry_file_path: java_source}
+        pom_xml = envelope.get("pomXml") or envelope.get("pomXML")
+        if isinstance(pom_xml, str) and pom_xml.strip():
+            files["pom.xml"] = pom_xml
+        return files
+
+    return None
+
+
 def _decode_candidate(
     envelope: Mapping[str, JsonValue],
     *,
     max_output_bytes: int,
     default_package: str,
 ) -> GeneratedJavaCandidate:
-    files_raw = envelope.get("files")
+    files_raw = _candidate_files_from_inner_output(envelope)
     if not isinstance(files_raw, Mapping) or not files_raw:
         raise AgentContractInvalidAgentError(
             "success response must include non-empty 'files' map"
@@ -777,15 +829,12 @@ def _decode_candidate(
     files: dict[str, str] = {}
     total_bytes = 0
     has_java_shape = False
+    has_java_file = False
     for raw_path, raw_content in files_raw.items():
         path = _safe_relpath(raw_path)
         if path is None:
             raise AgentContractInvalidAgentError(
                 f"invalid generated file path: {raw_path!r}"
-            )
-        if not path.lower().endswith(".java"):
-            raise AgentContractInvalidAgentError(
-                f"generated file {path!r} does not end in .java; non-Java output rejected"
             )
         if not isinstance(raw_content, str):
             raise AgentContractInvalidAgentError(
@@ -795,30 +844,22 @@ def _decode_candidate(
         total_bytes += len(encoded_bytes)
         if total_bytes > max_output_bytes:
             raise AgentContractInvalidAgentError(
-                f"generated Java exceeds size limit ({total_bytes} > {max_output_bytes} bytes)"
+                f"generated files exceed size limit ({total_bytes} > {max_output_bytes} bytes)"
             )
-        if _JAVA_SHAPE_HINTS.search(raw_content):
-            has_java_shape = True
+        if path.lower().endswith(".java"):
+            has_java_file = True
+            if _JAVA_SHAPE_HINTS.search(raw_content):
+                has_java_shape = True
         files[path] = raw_content
+    if not has_java_file:
+        raise AgentContractInvalidAgentError(
+            "success response must include at least one .java file"
+        )
     if not has_java_shape:
         raise AgentContractInvalidAgentError(
             "no generated file contains a Java type declaration (class/interface/enum/record); non-Java content rejected"
         )
 
-    entry_class = envelope.get("entryClass") or envelope.get("entry_class")
-    if not isinstance(entry_class, str) or not _JAVA_IDENTIFIER.match(entry_class):
-        raise AgentContractInvalidAgentError(
-            f"missing or invalid entryClass identifier: {entry_class!r}"
-        )
-    entry_package_raw = envelope.get("entryPackage") or envelope.get("entry_package")
-    if entry_package_raw is None or (isinstance(entry_package_raw, str) and not entry_package_raw.strip()):
-        entry_package = default_package
-    elif isinstance(entry_package_raw, str) and _JAVA_PACKAGE_PATTERN.match(entry_package_raw.strip()):
-        entry_package = entry_package_raw.strip()
-    else:
-        raise AgentContractInvalidAgentError(
-            f"invalid entryPackage identifier: {entry_package_raw!r}"
-        )
     entry_file_path_raw = envelope.get("entryFilePath") or envelope.get("entry_file_path")
     entry_file_path: str | None
     if isinstance(entry_file_path_raw, str) and entry_file_path_raw.strip():
@@ -827,22 +868,21 @@ def _decode_candidate(
             raise AgentContractInvalidAgentError(
                 f"invalid entryFilePath: {entry_file_path_raw!r}"
             )
+        if not entry_file_path.lower().endswith(".java"):
+            raise AgentContractInvalidAgentError(
+                f"entryFilePath {entry_file_path!r} must point to a .java file"
+            )
         if entry_file_path not in files:
             raise AgentContractInvalidAgentError(
                 f"entryFilePath {entry_file_path!r} is not present in generated files"
             )
     else:
-        # Try to derive the entry file path from package + class.
-        derived_parts = entry_package.split(".") + [f"{entry_class}.java"]
-        derived = "/".join(derived_parts)
-        for candidate_prefix in ("src/main/java/", "src/", ""):
-            candidate = candidate_prefix + derived
-            if candidate in files:
-                entry_file_path = candidate
-                break
+        java_paths = [path for path in files if path.lower().endswith(".java")]
+        if len(java_paths) == 1:
+            entry_file_path = java_paths[0]
         else:
             raise AgentContractInvalidAgentError(
-                "missing entryFilePath and no file matches the entryClass naming convention"
+                "missing entryFilePath and generated files do not contain exactly one .java file"
             )
 
     # The entry file must carry a package declaration that matches the
@@ -855,10 +895,41 @@ def _decode_candidate(
             f"entry file {entry_file_path!r} is missing a 'package' declaration"
         )
     declared_package = package_match.group(1)
+    entry_package_raw = envelope.get("entryPackage") or envelope.get("entry_package")
+    if entry_package_raw is None or (isinstance(entry_package_raw, str) and not entry_package_raw.strip()):
+        entry_package = declared_package
+    elif isinstance(entry_package_raw, str) and _JAVA_PACKAGE_PATTERN.match(entry_package_raw.strip()):
+        entry_package = entry_package_raw.strip()
+    else:
+        raise AgentContractInvalidAgentError(
+            f"invalid entryPackage identifier: {entry_package_raw!r}"
+        )
     if declared_package != entry_package:
         raise AgentContractInvalidAgentError(
             f"entryPackage {entry_package!r} does not match package declaration {declared_package!r}"
         )
+    entry_class_raw = envelope.get("entryClass") or envelope.get("entry_class")
+    if isinstance(entry_class_raw, str) and _JAVA_IDENTIFIER.match(entry_class_raw.strip()):
+        entry_class = entry_class_raw.strip()
+    elif isinstance(entry_class_raw, str) and _JAVA_PACKAGE_PATTERN.match(entry_class_raw.strip()):
+        raw_entry_class = entry_class_raw.strip()
+        raw_package, _, raw_class = raw_entry_class.rpartition(".")
+        if raw_package != entry_package or not _JAVA_IDENTIFIER.match(raw_class):
+            raise AgentContractInvalidAgentError(
+                f"entryClass {entry_class_raw!r} does not match entryPackage {entry_package!r}"
+            )
+        entry_class = raw_class
+    else:
+        if entry_class_raw is not None and str(entry_class_raw).strip():
+            raise AgentContractInvalidAgentError(
+                f"missing or invalid entryClass identifier: {entry_class_raw!r}"
+            )
+        type_match = _JAVA_TYPE_DECLARATION.search(entry_content)
+        if type_match is None:
+            raise AgentContractInvalidAgentError(
+                f"missing or invalid entryClass identifier: {entry_class_raw!r}"
+            )
+        entry_class = type_match.group(1)
 
     unsupported_raw = envelope.get("unsupportedConstructs") or envelope.get("unsupported_constructs") or ()
     if isinstance(unsupported_raw, str):
@@ -881,6 +952,19 @@ def _decode_candidate(
         unsupported_constructs=unsupported,
         explanation=explanation,
     )
+
+
+def _candidate_mime_type(path: str) -> str:
+    lower = path.lower()
+    if lower.endswith(".java"):
+        return MIME_JAVA
+    if lower.endswith(".json"):
+        return "application/json"
+    if lower.endswith(".xml") or lower.endswith(".pom"):
+        return "application/xml"
+    if lower.endswith(".md") or lower.endswith(".txt"):
+        return "text/plain"
+    return "application/octet-stream"
 
 
 # ---------------------------------------------------------------------------
@@ -1088,13 +1172,18 @@ class TransformationAgent:
         java_candidate_ref: JsonObject | None = None
         if candidate is not None:
             for relpath, content in sorted(candidate.files.items()):
+                is_java = relpath.lower().endswith(".java")
                 file_meta = self._artifact_store.write_text(
                     request.run_id,
                     request.workflow_id,
                     f"{attempt_dir}/java/{relpath}",
                     content,
-                    kind=KIND_TRANSFORMATION_AGENT_JAVA_FILE,
-                    mime_type=MIME_JAVA,
+                    kind=(
+                        KIND_TRANSFORMATION_AGENT_JAVA_FILE
+                        if is_java
+                        else KIND_TRANSFORMATION_AGENT_PROJECT_FILE
+                    ),
+                    mime_type=_candidate_mime_type(relpath),
                 )
                 persisted_artifacts.append(file_meta.to_dict())
             manifest_payload = {
@@ -1566,9 +1655,7 @@ class TransformationAgent:
         """
         prompt_payload = self._build_model_prompt(request)
         invoke_payload = {
-            "schemaVersion": "v0",
             "runId": request.run_id,
-            "workflowId": request.workflow_id,
             "actor": "orchestrator-service",
             "agentRole": MODEL_GATEWAY_AGENT_ROLE,
             "modelId": request.model_id,
@@ -1582,6 +1669,8 @@ class TransformationAgent:
                 "attemptNumber": int(request.attempt_number),
                 "promptTemplateId": self._config.transformation_agent_prompt_template_id,
                 "sourceRef": _coerce_artifact_ref(request.source_ref),
+                "temperature": 0,
+                "max_tokens": 8192,
             },
             "timeoutMs": int(request.deadline_ms),
         }
@@ -1648,9 +1737,49 @@ class TransformationAgent:
                 if request.oracle_ref and _looks_like_artifact_ref(request.oracle_ref)
                 else None
             ),
+            "oraclePayload": dict(request.oracle_payload or {}) or None,
+            "instructions": [
+                "Return only JSON matching transformation-agent-inner-v0.",
+                "Do not return status=success unless the top-level files object is present and non-empty.",
+                "For status=success, files MUST be a complete compilable Java project map: path -> full file content.",
+                "Use the exact top-level key 'files'; do not use generatedFiles, project, artifacts, patches, or markdown.",
+                "Include every required project file in files, including unchanged baselineFiles when no source change is needed.",
+                "Prefer minimal, auditable changes to baselineFiles when they are present.",
+                "Never adjust, reinterpret, or replace the oracle or expected output; generated Java must match it.",
+                "For numeric COBOL DISPLAY fields, preserve PIC formatting including leading zeroes; when using the c2c runtime, call CobolField.displayValue().",
+            ],
             "outputContract": {
                 "shape": "transformation-agent-inner-v0",
                 "schemaRef": _TRANSFORMATION_INNER_OUTPUT_SCHEMA_ID,
+                "allowedTopLevelKeys": [
+                    "status",
+                    "files",
+                    "entryClass",
+                    "entryPackage",
+                    "entryFilePath",
+                    "unsupportedConstructs",
+                    "explanation",
+                    "failureCode",
+                    "failureMessage",
+                ],
+                "successRequirements": [
+                    "status must be success",
+                    "files must be a non-empty JSON object",
+                    "files keys are safe relative project paths",
+                    "files values are full text contents, not diffs",
+                    "at least one files key must end with .java",
+                    "entryFilePath must point to a .java file included in files",
+                ],
+                "successSkeleton": {
+                    "status": "success",
+                    "entryFilePath": "src/main/java/<package>/<Program>.java",
+                    "entryClass": "<fully.qualified.Program>",
+                    "files": {
+                        "pom.xml": "<complete pom.xml>",
+                        "src/main/java/<package>/<Program>.java": "<complete Java source>",
+                    },
+                    "explanation": "<brief rationale>",
+                },
             },
         }
         return json.dumps(envelope, sort_keys=True, ensure_ascii=False)

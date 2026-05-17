@@ -309,6 +309,146 @@ func TestIngestHarnessEvents_AcceptsOutputDivergenceAndAnalyzesFailure(t *testin
 	}
 }
 
+func TestPatternAnalyzer_W02LearningSignals(t *testing.T) {
+	cfgNow := time.Date(2026, 5, 14, 11, 10, 0, 0, time.UTC)
+	service := NewExperienceLearningService(
+		experienceLearningConfig{autoAnalyzeOnIngest: false},
+		NewInMemoryHarnessEventStore(),
+		NewInMemoryTrajectoryLedgerStore(),
+		NewInMemoryExperienceEventStore(),
+		DefaultLearningPolicy(),
+		func() time.Time { return cfgNow },
+	)
+
+	runID := "run-w02-signals"
+	events := []EventEnvelopeV0{
+		testHarnessEvent(t, runID, "completed"),
+		testHarnessEvent(t, runID, "model-completed"),
+		testHarnessEvent(t, runID, "repair-started"),
+		testHarnessEvent(t, runID, "artifact-accepted"),
+	}
+	events[0].EventID = "evt-capability"
+	events[0].EventType = "capability.invoked"
+	events[0].Capability = "cobol.parse"
+	events[0].DataClass = dataClassParser
+	events[1].EventID = "evt-model"
+	events[1].EventType = "model-gateway.invocation.completed"
+	events[1].Capability = "model-gateway"
+	events[1].DataClass = dataClassModelGateway
+	events[2].EventID = "evt-repair"
+	events[2].EventType = "orchestrator.agent.repair.invoked"
+	events[2].Capability = "verification-repair-agent"
+	events[2].DataClass = dataClassGenerator
+	events[3].EventID = "evt-java"
+	events[3].EventType = "controlled.artifact.accepted"
+	events[3].Capability = "target.java.generate"
+	events[3].DataClass = dataClassGenerator
+	if _, err := service.ingestHarnessEvents(events); err != nil {
+		t.Fatalf("ingest harness events: %v", err)
+	}
+	if err := service.ledgers.Append(AgentTrajectoryLedgerV0{
+		SchemaVersion: experienceSchemaVersion,
+		RunID:         runID,
+		Status:        "completed",
+		StartedAt:     cfgNow,
+		CompletedAt:   cfgNow,
+		CapturedAt:    cfgNow,
+		Steps: []AgentTrajectoryEntry{
+			{
+				EventID:         "traj-orchestrator",
+				StepID:          1,
+				Actor:           "orchestrator-service",
+				Capability:      "transformation-agent",
+				DataClass:       dataClassGenerator,
+				EventType:       "orchestrator.agent.handoff",
+				StateTransition: "agent.handoff",
+				Status:          "completed",
+				CreatedAt:       cfgNow,
+			},
+			{
+				EventID:         "traj-repair",
+				StepID:          2,
+				Actor:           "verification-repair-agent",
+				Capability:      "model-gateway",
+				DataClass:       dataClassModelGateway,
+				EventType:       "orchestrator.agent.repair.completed",
+				StateTransition: "repair.completed",
+				Status:          "completed",
+				CreatedAt:       cfgNow,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("append trajectory ledger: %v", err)
+	}
+
+	summary, err := service.RunLearningSummary(runID)
+	if err != nil {
+		t.Fatalf("run summary: %v", err)
+	}
+	signals := map[string]LearningSignal{}
+	for _, signal := range summary.Signals {
+		signals[signal.Key] = signal
+	}
+	for _, key := range []string{
+		signalCapabilityAvailability,
+		signalModelInvocationOutcome,
+		signalAgentHandoff,
+		signalRepairLoopProgress,
+		signalGeneratedCandidateOutcome,
+	} {
+		signal, ok := signals[key]
+		if !ok {
+			t.Fatalf("expected signal %s", key)
+		}
+		if signal.Status != "observed" {
+			t.Fatalf("expected signal %s to be observed, got %q", key, signal.Status)
+		}
+		if signal.Count == 0 {
+			t.Fatalf("expected signal %s to carry evidence refs", key)
+		}
+	}
+}
+
+func TestPatternAnalyzer_W02LearningSignalsAvoidFalsePositives(t *testing.T) {
+	cfgNow := time.Date(2026, 5, 14, 11, 12, 0, 0, time.UTC)
+	service := NewExperienceLearningService(
+		experienceLearningConfig{autoAnalyzeOnIngest: false},
+		NewInMemoryHarnessEventStore(),
+		NewInMemoryTrajectoryLedgerStore(),
+		NewInMemoryExperienceEventStore(),
+		DefaultLearningPolicy(),
+		func() time.Time { return cfgNow },
+	)
+
+	runID := "run-w02-absent-signals"
+	event := testHarnessEvent(t, runID, "completed")
+	event.EventID = "evt-ordinary-orchestrator"
+	event.EventType = "run.progress.updated"
+	event.Actor = "orchestrator-service"
+	event.Capability = "cobol.parse"
+	event.DataClass = dataClassParser
+	event.StateTransition = "run.updated"
+	if _, err := service.ingestHarnessEvents([]EventEnvelopeV0{event}); err != nil {
+		t.Fatalf("ingest harness event: %v", err)
+	}
+
+	summary, err := service.RunLearningSummary(runID)
+	if err != nil {
+		t.Fatalf("run summary: %v", err)
+	}
+	if len(summary.Signals) != 5 {
+		t.Fatalf("expected five W0.2 signals, got %d", len(summary.Signals))
+	}
+	for _, signal := range summary.Signals {
+		if signal.Status != "absent" {
+			t.Fatalf("expected signal %s to remain absent, got %#v", signal.Key, signal)
+		}
+		if signal.Count != 0 || len(signal.EvidenceRefs) != 0 {
+			t.Fatalf("expected absent signal %s to carry no evidence, got %#v", signal.Key, signal)
+		}
+	}
+}
+
 func TestIngestHarnessEvents_MapsRawBuildTestFailureStatuses(t *testing.T) {
 	cases := []struct {
 		name            string
