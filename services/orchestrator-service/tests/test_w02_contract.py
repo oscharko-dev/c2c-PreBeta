@@ -21,10 +21,16 @@ from pathlib import Path
 from orchestrator_service.artifacts import RunArtifactStore
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.run_contract import (
+    ASSIST_BUDGET_MAX,
+    ASSIST_BUDGET_MIN,
+    AssistBudget,
+    AssistBudgetExhaustedError,
     CLASSIFICATION_BLOCKED,
     CLASSIFICATION_FAILED,
     CLASSIFICATION_INCOMPLETE,
     CLASSIFICATION_SUCCESS,
+    DEFAULT_ASSIST_BUDGET,
+    DEFAULT_MODEL_INVOCATION_BUDGET,
     DEFAULT_REPAIR_BUDGET,
     FAILURE_CODES,
     FAILURE_JAVA_COMPILE_FAILED,
@@ -34,6 +40,10 @@ from orchestrator_service.run_contract import (
     FAILURE_SEMANTIC_IR_FAILED,
     FINAL_CLASSIFICATIONS,
     IllegalTransitionError,
+    MODEL_INVOCATION_BUDGET_MAX,
+    MODEL_INVOCATION_BUDGET_MIN,
+    ModelInvocationBudget,
+    ModelInvocationBudgetExhaustedError,
     RepairBudget,
     RepairBudgetExhaustedError,
     SCHEMA_VERSION,
@@ -54,10 +64,12 @@ from orchestrator_service.run_contract import (
     WORKFLOW_STATES,
     WorkflowStateMachine,
     build_test_outcome,
+    clamp_assist_budget,
+    clamp_model_invocation_budget,
     clamp_repair_budget,
     new_run_contract,
 )
-from orchestrator_service.workflow import W0RunContext, W0WorkflowRunner
+from orchestrator_service.workflow import W0RunContext, W0WorkflowRunner, _build_reference
 
 # Reuse the StubGateway from test_workflow.py without dragging its TestCase
 # into discovery (which would re-run those tests under this module).
@@ -221,6 +233,159 @@ class RepairBudgetTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Assist budget (Issue #216 / W0.3-5)
+# ---------------------------------------------------------------------------
+
+
+class AssistBudgetTests(unittest.TestCase):
+    """Contract-level coverage for the W0.3-5 productive-assist budget."""
+
+    def test_default_assist_budget_is_one(self):
+        self.assertEqual(DEFAULT_ASSIST_BUDGET, 1)
+
+    def test_budget_consumes_until_exhausted(self):
+        budget = AssistBudget(limit=2)
+        self.assertFalse(budget.exhausted)
+        self.assertEqual(budget.remaining, 2)
+        self.assertEqual(budget.consume(), 1)
+        self.assertEqual(budget.remaining, 1)
+        self.assertEqual(budget.consume(), 2)
+        self.assertEqual(budget.remaining, 0)
+        self.assertTrue(budget.exhausted)
+
+    def test_exhausted_consume_raises(self):
+        budget = AssistBudget(limit=1)
+        budget.consume()
+        with self.assertRaises(AssistBudgetExhaustedError):
+            budget.consume()
+
+    def test_clamp_assist_budget_enforces_w03_range(self):
+        self.assertEqual(clamp_assist_budget(0), ASSIST_BUDGET_MIN)
+        self.assertEqual(clamp_assist_budget(-5), ASSIST_BUDGET_MIN)
+        self.assertEqual(clamp_assist_budget(1), 1)
+        self.assertEqual(clamp_assist_budget(3), ASSIST_BUDGET_MAX)
+        self.assertEqual(clamp_assist_budget(100), ASSIST_BUDGET_MAX)
+
+    def test_budget_rejects_out_of_range_limit(self):
+        with self.assertRaises(ValueError):
+            AssistBudget(limit=0)
+        with self.assertRaises(ValueError):
+            AssistBudget(limit=4)
+
+    def test_budget_rejects_negative_used(self):
+        with self.assertRaises(ValueError):
+            AssistBudget(limit=2, used=-1)
+
+    def test_to_dict_shape(self):
+        budget = AssistBudget(limit=2)
+        budget.consume()
+        self.assertEqual(budget.to_dict(), {"limit": 2, "used": 1, "remaining": 1})
+
+
+# ---------------------------------------------------------------------------
+# Model invocation budget (Issue #216 / W0.3-5)
+# ---------------------------------------------------------------------------
+
+
+class ModelInvocationBudgetTests(unittest.TestCase):
+    """Contract-level coverage for the W0.3-5 Model Gateway invocation budget."""
+
+    def test_default_model_invocation_budget_is_six(self):
+        self.assertEqual(DEFAULT_MODEL_INVOCATION_BUDGET, 6)
+
+    def test_budget_consumes_until_exhausted(self):
+        budget = ModelInvocationBudget(limit=3)
+        for expected_used in (1, 2, 3):
+            self.assertEqual(budget.consume(), expected_used)
+        self.assertEqual(budget.remaining, 0)
+        self.assertTrue(budget.exhausted)
+
+    def test_exhausted_consume_raises(self):
+        budget = ModelInvocationBudget(limit=1)
+        budget.consume()
+        with self.assertRaises(ModelInvocationBudgetExhaustedError):
+            budget.consume()
+
+    def test_clamp_model_invocation_budget_enforces_w03_range(self):
+        self.assertEqual(
+            clamp_model_invocation_budget(0), MODEL_INVOCATION_BUDGET_MIN
+        )
+        self.assertEqual(
+            clamp_model_invocation_budget(-3), MODEL_INVOCATION_BUDGET_MIN
+        )
+        self.assertEqual(clamp_model_invocation_budget(6), 6)
+        self.assertEqual(
+            clamp_model_invocation_budget(MODEL_INVOCATION_BUDGET_MAX),
+            MODEL_INVOCATION_BUDGET_MAX,
+        )
+        self.assertEqual(
+            clamp_model_invocation_budget(MODEL_INVOCATION_BUDGET_MAX + 5),
+            MODEL_INVOCATION_BUDGET_MAX,
+        )
+
+    def test_budget_rejects_out_of_range_limit(self):
+        with self.assertRaises(ValueError):
+            ModelInvocationBudget(limit=0)
+        with self.assertRaises(ValueError):
+            ModelInvocationBudget(limit=MODEL_INVOCATION_BUDGET_MAX + 1)
+
+    def test_budget_rejects_negative_used(self):
+        with self.assertRaises(ValueError):
+            ModelInvocationBudget(limit=3, used=-1)
+
+    def test_to_dict_shape(self):
+        budget = ModelInvocationBudget(limit=4)
+        budget.consume()
+        budget.consume()
+        self.assertEqual(
+            budget.to_dict(), {"limit": 4, "used": 2, "remaining": 2}
+        )
+
+
+class NewRunContractBudgetWiringTests(unittest.TestCase):
+    """``new_run_contract`` accepts and clamps the new budget limits."""
+
+    @staticmethod
+    def _source_ref() -> dict[str, object]:
+        return {"uri": "urn:source/main.cob", "sha256": "f" * 64, "byteSize": 24}
+
+    def test_defaults_match_module_constants(self):
+        contract = new_run_contract(
+            run_id="run-default-budgets",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            source_ref=self._source_ref(),
+        )
+        self.assertEqual(contract.assist_budget.limit, DEFAULT_ASSIST_BUDGET)
+        self.assertEqual(
+            contract.model_invocation_budget.limit,
+            DEFAULT_MODEL_INVOCATION_BUDGET,
+        )
+
+    def test_clamps_out_of_range_assist_budget_limit(self):
+        contract = new_run_contract(
+            run_id="run-clamp-assist",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            source_ref=self._source_ref(),
+            assist_budget_limit=99,
+        )
+        self.assertEqual(contract.assist_budget.limit, ASSIST_BUDGET_MAX)
+
+    def test_clamps_out_of_range_model_invocation_budget_limit(self):
+        contract = new_run_contract(
+            run_id="run-clamp-model",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            source_ref=self._source_ref(),
+            model_invocation_budget_limit=-5,
+        )
+        self.assertEqual(
+            contract.model_invocation_budget.limit, MODEL_INVOCATION_BUDGET_MIN
+        )
+
+
+# ---------------------------------------------------------------------------
 # Run-contract shape tests
 # ---------------------------------------------------------------------------
 
@@ -250,6 +415,11 @@ class W02RunContractShapeTests(unittest.TestCase):
             "activeStep",
             "agentAttemptCount",
             "repairBudget",
+            # Issue #216 (W0.3-5): assist + model invocation budgets are
+            # part of the contract envelope from the moment the run is
+            # accepted.
+            "assistBudget",
+            "modelInvocationBudget",
             "generatedJavaRef",
             "buildTestResultRef",
             "evidencePackRef",
@@ -269,6 +439,20 @@ class W02RunContractShapeTests(unittest.TestCase):
         self.assertEqual(payload["repairBudget"]["limit"], 2)
         self.assertEqual(payload["repairBudget"]["used"], 0)
         self.assertEqual(payload["repairBudget"]["remaining"], 2)
+        # Issue #216 (W0.3-5): the new budgets are populated from
+        # ``new_run_contract`` defaults and carry the same flat shape.
+        self.assertEqual(
+            payload["assistBudget"],
+            {"limit": DEFAULT_ASSIST_BUDGET, "used": 0, "remaining": DEFAULT_ASSIST_BUDGET},
+        )
+        self.assertEqual(
+            payload["modelInvocationBudget"],
+            {
+                "limit": DEFAULT_MODEL_INVOCATION_BUDGET,
+                "used": 0,
+                "remaining": DEFAULT_MODEL_INVOCATION_BUDGET,
+            },
+        )
         self.assertIsNone(payload["finalClassification"])
         self.assertIsNone(payload["failureCode"])
 
@@ -574,13 +758,21 @@ class _StubRepairAgentInvoker:
 
 class W02WorkflowIntegrationTests(unittest.TestCase):
     @staticmethod
-    def _config(repair_budget_max: int = DEFAULT_REPAIR_BUDGET) -> OrchestratorConfig:
+    def _config(
+        repair_budget_max: int = DEFAULT_REPAIR_BUDGET,
+        assist_budget_max: int = DEFAULT_ASSIST_BUDGET,
+        model_invocation_budget_max: int = DEFAULT_MODEL_INVOCATION_BUDGET,
+    ) -> OrchestratorConfig:
         # noinspection PyProtectedMemberInspection
         base = _BaseFixture._base_config()
         # ``OrchestratorConfig`` is frozen — round-trip through ``dict`` so we
-        # can override the repair budget without rebuilding the whole fixture.
+        # can override budgets without rebuilding the whole fixture.
         params = base.__dict__.copy()
         params["repair_budget_max"] = repair_budget_max
+        # Issue #216 (W0.3-5): tests can override the assist + model
+        # invocation budgets to force budget exhaustion in a single run.
+        params["assist_budget_max"] = assist_budget_max
+        params["model_invocation_budget_max"] = model_invocation_budget_max
         return OrchestratorConfig(**params)
 
     def _runner(
@@ -588,11 +780,17 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
         gateway: StubGateway,
         repair_budget_max: int = DEFAULT_REPAIR_BUDGET,
         repair_agent_invoker=None,
+        assist_budget_max: int = DEFAULT_ASSIST_BUDGET,
+        model_invocation_budget_max: int = DEFAULT_MODEL_INVOCATION_BUDGET,
     ) -> W0WorkflowRunner:
         tmp = tempfile.mkdtemp()
         artifact_store = RunArtifactStore(tmp, created_by="orchestrator-service")
         return W0WorkflowRunner(
-            config=self._config(repair_budget_max=repair_budget_max),
+            config=self._config(
+                repair_budget_max=repair_budget_max,
+                assist_budget_max=assist_budget_max,
+                model_invocation_budget_max=model_invocation_budget_max,
+            ),
             gateway=gateway,
             artifact_store=artifact_store,
             repair_agent_invoker=repair_agent_invoker or _StubRepairAgentInvoker([]),
@@ -759,6 +957,160 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
         self.assertEqual(contract["repairBudget"]["used"], 1)
         self.assertEqual(contract["agentAttemptCount"], 1)
 
+    # ----- Issue #216 (W0.3-5): budget hardening integration coverage -----
+
+    def test_deterministic_success_leaves_new_budgets_unused(self):
+        """Deterministic-only path consumes neither assist nor model budget.
+
+        AC: "Deterministic verification remains the only path to ``success``
+        regardless of budget state." A run that never opts into a productive
+        agent must succeed with the new budgets at ``used=0`` so consumers
+        can audit that no productive activation happened.
+        """
+        gateway = StubGateway(
+            _BaseFixture._base_capabilities(),
+            _BaseFixture._base_responses(),
+        )
+        runner = self._runner(
+            gateway,
+            assist_budget_max=1,
+            model_invocation_budget_max=1,
+        )
+        result = runner.run(context=self._context(), input_ref=self._input_ref())
+
+        self.assertEqual(result["status"], "completed")
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_SUCCESS)
+        # Budgets surfaced on every snapshot.
+        self.assertEqual(contract["assistBudget"]["limit"], 1)
+        self.assertEqual(contract["assistBudget"]["used"], 0)
+        self.assertEqual(contract["assistBudget"]["remaining"], 1)
+        self.assertEqual(contract["modelInvocationBudget"]["limit"], 1)
+        self.assertEqual(contract["modelInvocationBudget"]["used"], 0)
+        self.assertEqual(contract["modelInvocationBudget"]["remaining"], 1)
+
+    def test_model_invocation_budget_exhaustion_blocks_repair_loop(self):
+        """An exhausted Model Gateway budget hard-terminates the repair loop.
+
+        AC: "No hidden continuation happens after budget exhaustion." The
+        repair loop must consume one Model Gateway unit per attempt and stop
+        invoking the agent the moment the budget is gone, recording an
+        explicit ``refuse`` trajectory entry tagged
+        ``model_invocation_budget_exhausted`` so consumers can distinguish
+        budget exhaustion from agent-side failures.
+        """
+        responses = _BaseFixture._base_responses()
+        gateway = _StubGatewayWithBuildOutcomes(
+            _BaseFixture._base_capabilities(),
+            responses,
+            build_outcomes=[
+                {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "oracle_mismatch",
+                    "outputRef": {
+                        "uri": "urn:orchestrator/run-1/build/attempt-1"
+                    },
+                },
+                {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "oracle_mismatch",
+                    "outputRef": {
+                        "uri": "urn:orchestrator/run-1/build/attempt-2"
+                    },
+                },
+            ],
+        )
+        # repair_budget allows two iterations; model_invocation budget allows
+        # only one. The first repair attempt consumes the gateway unit, the
+        # second attempt's pre-flight raises ``ModelInvocationBudgetExhausted``
+        # and the run blocks before contacting the gateway.
+        runner = self._runner(
+            gateway,
+            repair_budget_max=2,
+            model_invocation_budget_max=1,
+        )
+        result = runner.run(context=self._context(), input_ref=self._input_ref())
+        self.assertEqual(result["status"], CLASSIFICATION_BLOCKED)
+
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
+        # Build-test failure code surfaced as the canonical failure code.
+        self.assertEqual(contract["failureCode"], FAILURE_ORACLE_MISMATCH)
+        # Model invocation budget fully consumed exactly once.
+        self.assertEqual(contract["modelInvocationBudget"]["used"], 1)
+        self.assertEqual(contract["modelInvocationBudget"]["remaining"], 0)
+        # The second repair attempt was recorded as a refuse with the
+        # dedicated refusal code so the trajectory ledger is honest.
+        budget_refusals = [
+            entry
+            for entry in contract["repairAttempts"]
+            if entry.get("refusalCode") == "model_invocation_budget_exhausted"
+        ]
+        self.assertEqual(len(budget_refusals), 1)
+
+    def test_assist_budget_exhaustion_degrades_gate_to_assist_not_required(self):
+        """Exhausted assist budget forces the gate to ``assist_not_required``.
+
+        AC: "Exhaustion semantics are explicit and tested." The dedicated
+        ``assist_budget_exhausted`` reason code is the contract-level signal
+        that productive activation was declined because the budget cap was
+        reached, not because the caller opted out — and the deterministic
+        baseline remains the final candidate without a hidden continuation.
+        """
+        from orchestrator_service.run_contract import (
+            ASSIST_OUTCOME_NOT_REQUIRED,
+            ASSIST_REASON_ASSIST_BUDGET_EXHAUSTED,
+        )
+
+        gateway = StubGateway(
+            _BaseFixture._base_capabilities(),
+            _BaseFixture._base_responses(),
+        )
+        runner = self._runner(gateway, assist_budget_max=1)
+        contract = new_run_contract(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            source_ref={"uri": "urn:source/main.cob"},
+            assist_budget_limit=1,
+        )
+        # Pre-exhaust the assist budget so the gate has nothing to consume
+        # when it evaluates the caller's opt-in.
+        contract.assist_budget.consume()
+        self.assertTrue(contract.assist_budget.exhausted)
+
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            evidence_refs=[],
+            model_prompt=None,
+            use_transformation_agent=True,
+        )
+        ir_output_ref = _build_reference(
+            f"urn:orchestrator/{context.run_id}/ir-out",
+            {"irId": "ir-0"},
+        )
+        # noinspection PyProtectedMember
+        decision = runner._record_assist_decision(
+            context,
+            contract,
+            baseline_artifact_ref=None,
+            ir_output_ref=ir_output_ref,
+            ir_document=None,
+            baseline_generated_project=None,
+        )
+        self.assertEqual(decision.outcome, ASSIST_OUTCOME_NOT_REQUIRED)
+        self.assertEqual(decision.reason_code, ASSIST_REASON_ASSIST_BUDGET_EXHAUSTED)
+        self.assertIsNone(decision.selected_agent_role)
+        # Budget snapshots are persisted on the decision payload.
+        payload = decision.to_dict()
+        self.assertEqual(payload["assistBudgetSnapshot"]["used"], 1)
+        self.assertEqual(payload["assistBudgetSnapshot"]["remaining"], 0)
+        self.assertIn("modelInvocationBudgetSnapshot", payload)
+
     def test_parse_failure_marks_run_failed_with_canonical_failure_code(self):
         gateway = StubGateway(
             _BaseFixture._base_capabilities(),
@@ -803,6 +1155,58 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
                 current_state=STATE_SOURCE_NORMALIZED,
             ),
             FAILURE_PARSE_FAILED,
+        )
+
+    def test_model_invocation_budget_exhaustion_maps_to_model_gateway_unavailable(self):
+        """Issue #216 (W0.3-5): ``ModelInvocationBudgetExhaustedError`` on the
+        transformation-agent path must surface as ``model_gateway_unavailable``
+        (→ ``blocked``) rather than the step-name fallback
+        ``java_generation_failed`` (→ ``failed``). The classifier picks up the
+        special case both when the exhaustion is raised directly and when it
+        is carried as the cause of a wrapping ``StepExecutionError``.
+        """
+        from orchestrator_service.run_contract import (
+            FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+            ModelInvocationBudgetExhaustedError,
+        )
+        from orchestrator_service.workflow import StepExecutionError
+
+        gateway = StubGateway(
+            _BaseFixture._base_capabilities(),
+            _BaseFixture._base_responses(),
+        )
+        runner = self._runner(gateway)
+        direct = ModelInvocationBudgetExhaustedError(
+            "model invocation budget exhausted (limit=1, used=1)"
+        )
+        self.assertEqual(
+            runner._failure_code_from_exception(
+                direct,
+                current_state=STATE_TRANSFORMATION_AGENT_INVOKED,
+                failed_step="transformation-agent",
+            ),
+            FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+        )
+        wrapped = StepExecutionError("transformation agent blocked")
+        wrapped.__cause__ = direct
+        self.assertEqual(
+            runner._failure_code_from_exception(
+                wrapped,
+                current_state=STATE_TRANSFORMATION_AGENT_INVOKED,
+                failed_step="transformation-agent",
+            ),
+            FAILURE_MODEL_GATEWAY_UNAVAILABLE,
+        )
+        # Non-exhaustion StepExecutionError on the same step still gets the
+        # step-name fallback (java_generation_failed → failed).
+        bare = StepExecutionError("transformation agent crashed")
+        self.assertEqual(
+            runner._failure_code_from_exception(
+                bare,
+                current_state=STATE_TRANSFORMATION_AGENT_INVOKED,
+                failed_step="transformation-agent",
+            ),
+            FAILURE_JAVA_GENERATION_FAILED,
         )
 
     def test_semantic_ir_failure_emits_semantic_ir_blocked_state(self):
