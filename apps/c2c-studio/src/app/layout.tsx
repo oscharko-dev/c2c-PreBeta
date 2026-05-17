@@ -18,6 +18,10 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: 'c2c Transformation Studio',
   description: 'Next.js Studio shell for the c2c BFF product surface.',
+  icons: {
+    icon: '/favicon.svg?v=mirrored-20260517',
+    shortcut: '/favicon.svg?v=mirrored-20260517',
+  },
 };
 
 export const viewport: Viewport = {

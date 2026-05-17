@@ -260,6 +260,7 @@ class GeneratedJavaCandidate:
             "fileCount": len(manifest_files),
             "files": manifest_files,
             "unsupportedConstructs": list(self.unsupported_constructs),
+            "explanation": self.explanation,
         }
 
 
@@ -820,12 +821,24 @@ def _decode_candidate(
     *,
     max_output_bytes: int,
     default_package: str,
+    fallback_files: Mapping[str, str] | None = None,
 ) -> GeneratedJavaCandidate:
     files_raw = _candidate_files_from_inner_output(envelope)
+    used_fallback_files = False
     if not isinstance(files_raw, Mapping) or not files_raw:
-        raise AgentContractInvalidAgentError(
-            "success response must include non-empty 'files' map"
-        )
+        if fallback_files:
+            # Foundry-backed open-weight models occasionally return a
+            # structurally successful decision but omit the unchanged project
+            # file map even though the prompt asks for baselineFiles to be
+            # echoed. Keep the product path useful without weakening the
+            # gatekeeper: reuse only the already generated deterministic
+            # baseline, then compile/run/oracle-test it downstream.
+            files_raw = dict(fallback_files)
+            used_fallback_files = True
+        else:
+            raise AgentContractInvalidAgentError(
+                "success response must include non-empty 'files' map"
+            )
     files: dict[str, str] = {}
     total_bytes = 0
     has_java_shape = False
@@ -943,6 +956,13 @@ def _decode_candidate(
 
     explanation_raw = envelope.get("explanation") or envelope.get("notes") or ""
     explanation = str(explanation_raw) if explanation_raw is not None else ""
+    if used_fallback_files:
+        suffix = (
+            "Model returned success without a files map; the orchestrator "
+            "reused the deterministic baseline files as the agent candidate "
+            "and will validate them through compile/run/oracle gates."
+        )
+        explanation = f"{explanation.strip()} {suffix}".strip()
 
     return GeneratedJavaCandidate(
         files=files,
@@ -1124,6 +1144,7 @@ class TransformationAgent:
                     inner_envelope,
                     max_output_bytes=self._config.transformation_agent_max_output_bytes,
                     default_package=self._config.transformation_agent_package_base,
+                    fallback_files=request.baseline_files,
                 )
             else:
                 failure_code, failure_message = _validate_inner_failure(
