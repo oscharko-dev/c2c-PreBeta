@@ -1,7 +1,7 @@
 # c2c Fachkonzept
 
 **Status**: Canonical working concept
-**Last updated**: 2026-05-16
+**Last updated**: 2026-05-17
 **Governing issue**: [#164](https://github.com/oscharko-dev/c2c-PreBeta/issues/164)
 **Related issues**: [#165](https://github.com/oscharko-dev/c2c-PreBeta/issues/165)
 
@@ -42,6 +42,28 @@ architecture.
 - **Microservice-based from the beginning.** Parser, Semantic IR, target Java
   generation, build/test, evidence, BFF, model gateway, Harness, Experience
   Learning, and Studio UI remain separate capability boundaries.
+- **Deterministic first, AI only where it adds value.** COBOL parsing,
+  copybook/data modelling, Semantic IR, target-runtime semantics, Java project
+  assembly, compile/run, oracle comparison, evidence assembly, policy checks,
+  and release gates must be deterministic whenever they can be specified
+  reliably. LLMs and agents are used for ambiguity handling, candidate
+  improvement, repair, explanation, planning assistance, and later
+  large-module decomposition — never as a replacement for deterministic
+  semantics that we already understand.
+- **One authoritative workflow path through the Orchestrator.** Deterministic
+  steps and AI-assisted steps both run under Orchestrator control. Parser,
+  Semantic IR, target generation, build/test, evidence, Model Gateway, and
+  agents must not be invoked as browser-visible or product-success side paths.
+  If deterministic services can complete a transformation, the Orchestrator
+  still owns the run contract, state transitions, artifact persistence,
+  Harness events, and final classification. This avoids two competing
+  product paths and keeps Evidence Packs replayable.
+- **The global Orchestrator is deterministic, not an LLM.** The global
+  Orchestrator is the authoritative state machine for run sequencing,
+  capability selection, retry/repair budgets, cancellation, policy decisions,
+  and final release gates. It may consult Harness Experience Learning signals
+  and may start AI agents, but it must not be replaced by an LLM that freely
+  decides workflow order or success.
 - **Harness is infrastructure, governance, and Experience Learning system, not
   the orchestrator.** The Harness provides the capability catalog, tool and
   registry surfaces, MCP access, run state, events, policy hooks, ledgers, and
@@ -62,6 +84,12 @@ architecture.
 - **Deterministic core remains the gatekeeper.** AI agents may generate,
   repair, and explain code, but the final success state is decided by
   deterministic compile/run/equivalence/evidence checks.
+- **Bounded LLM-led agent teams are allowed only inside an Orchestrator-owned
+  step.** Later waves may use an LLM-based Agent Team Lead, Planner Agent, or
+  bounded sub-orchestrator for larger modules. That component may coordinate
+  specialist agents inside the approved step, but it never becomes the global
+  Orchestrator, never bypasses the Harness, and never bypasses deterministic
+  gates.
 - **No success fallback.** Unsupported, unavailable, failed, incomplete, or
   verification-blocked states must be shown honestly in the UI and evidence.
 
@@ -81,12 +109,23 @@ documentation, and wave planning.
   orchestrators and agents. The Harness does not decide workflow order or agent
   sequencing.
 - **Orchestrator**: workflow control component. It starts runs, selects the
-  workflow path, assigns work to agents, manages loop boundaries and stop
-  conditions, and decides when deterministic verification must run.
+  workflow path, resolves and invokes deterministic capabilities, assigns work
+  to agents, manages loop boundaries and stop conditions, and decides when
+  deterministic verification must run. The global Orchestrator is a
+  deterministic state machine, not an LLM. Every product transformation,
+  including a transformation that can be solved fully deterministically, must
+  pass through this Orchestrator so that run contracts, artifacts, Harness
+  events, Experience Learning records, and Evidence Packs remain consistent.
 - **Agents**: bounded execution and analysis roles inside a workflow. Agents
   transform, inspect, repair, explain, or verify artifacts. Agents use
   Harness-provided capabilities and may call models only through the Model
   Gateway.
+- **Agent Team Lead / bounded sub-orchestrator**: optional later-wave
+  LLM-assisted coordinator inside one Orchestrator-approved step. It can plan
+  work for specialist agents on a large module, but its output is still just a
+  candidate artifact or decision returned to the global Orchestrator. It cannot
+  make final success claims, change global retry budgets, bypass Model Gateway,
+  or bypass deterministic verification/evidence gates.
 - **Model Gateway**: exclusive model-access boundary. It enforces provider
   routing, model policy, authentication, auditability, and provider abstraction
   for Microsoft Foundry in development and customer-internal endpoints in
@@ -101,6 +140,39 @@ documentation, and wave planning.
 Multiple orchestrators and multiple agent teams may run on the same Harness.
 That is a design goal, not an optional future interpretation. The Harness is
 therefore a shared platform layer, not a hidden monolithic orchestrator.
+
+### Deterministic-First Workflow Semantics
+
+c2c must not treat deterministic transformation and AI-assisted
+transformation as two separate products. They are two capability categories
+inside the same Orchestrator-owned workflow.
+
+The required product path is:
+
+```text
+Studio UI
+  -> c2c BFF
+  -> deterministic global Orchestrator
+  -> Harness capability and policy infrastructure
+  -> deterministic capabilities where semantics are known
+  -> Model Gateway and agents only for approved AI-assisted steps
+  -> deterministic compile/run/oracle/evidence gate
+  -> final run classification
+```
+
+This means:
+
+- if the W0/W0.2 deterministic parser, IR, and generator can produce a valid
+  Java candidate, the Orchestrator still owns the flow and persists that
+  candidate as part of the run;
+- if an AI agent is invoked, the agent may improve or repair the candidate,
+  but the final Java is accepted only after deterministic gates pass;
+- if an LLM-based Agent Team Lead is introduced later, it is scoped to a
+  bounded sub-task and returns artifacts or decisions to the global
+  Orchestrator;
+- no UI, BFF handler, release script, or service may claim a product-success
+  transformation by calling deterministic services outside the Orchestrator and
+  Evidence Pack path.
 
 ### Harness as Experience Learning System
 
@@ -198,24 +270,26 @@ Canonical evidence:
 - [c2c Studio browser acceptance test](../../apps/c2c-studio/tests/e2e/workflow.spec.ts)
 - [local product launcher](../../scripts/start-c2c-local.sh)
 
-## Next Wave: W0.2 Productive AI Transformation Loop
+## W0.2: Productive AI Transformation Loop
 
-W0.2 is the next mandatory wave. Its purpose is to introduce the first
-productive AI into the transformation path without weakening deterministic
-proof.
+W0.2 introduces the first productive AI participation into the transformation
+path without weakening deterministic proof. It does not replace the
+deterministic W0 backbone; it adds model-backed agents as bounded workflow
+participants under the deterministic global Orchestrator.
 
 The W0.2 target state:
 
 ```text
 Studio UI
   -> c2c BFF
-  -> orchestrator as Harness consumer
-  -> orchestrator-steered agent workflow on the Experience Learning Harness
-  -> Model Gateway / Microsoft Foundry
-  -> Transformation Agent
+  -> deterministic global Orchestrator as Harness consumer
+  -> deterministic parser / Semantic IR / baseline generator
+  -> optional Orchestrator-approved agent step
+  -> Model Gateway / Microsoft Foundry for all LLM calls
+  -> Transformation Agent or later bounded Agent Team Lead
   -> deterministic build/test gate
-  -> Verification/Repair Agent
-  -> bounded repair loop
+  -> Verification/Repair Agent only when the gate fails
+  -> bounded repair loop controlled by the Orchestrator
   -> Harness records events, model invocations, agent trajectories, and
      experience signals
   -> Evidence Pack with model, policy, repair, verification, and agent records
@@ -245,6 +319,9 @@ Required W0.2 capabilities:
   iterations are happening;
 - deterministic success gate: Java artifact exists, compiles, runs, and passes
   the configured equivalence check before the UI may show a verified state.
+- explicit separation between the deterministic global Orchestrator and any
+  LLM-assisted agent/team-lead role. The Orchestrator controls the workflow;
+  agents produce or repair candidates inside bounded steps.
 
 W0.2 explicitly does **not** need to deliver:
 
@@ -358,7 +435,7 @@ current gaps:
 |------|--------|---------|--------------|
 | W0 | Done | Deterministic enterprise kernel and evidence backbone. | Service mesh produces compiled Java, build/test result, Harness/Experience Learning telemetry, and complete Evidence Pack for the W0 corpus without required model calls. |
 | W0.1 | Done | Product Studio UI over the W0 kernel. | Browser workflow loads/pastes supported COBOL, starts a BFF/orchestrator run, displays artifact-backed Java, build/test, evidence, progress, artifacts, and honest blocked states. |
-| W0.2 | Next | First productive AI-agent transformation loop. | At least one small COBOL program is transformed through an orchestrator-steered, model-backed agent workflow on the Experience Learning Harness, with bounded repair, first learning signals, and deterministic verification/evidence. |
+| W0.2 | Done | First productive AI-agent transformation loop. | At least one small COBOL program is transformed through an orchestrator-steered, model-backed agent workflow on the Experience Learning Harness, with bounded repair, first learning signals, and deterministic verification/evidence. |
 | W0.3 | Planned | Custom COBOL coverage expansion. | More customer-like small COBOL snippets work or fail honestly, including selected paragraph, literal, and data initialization semantics. |
 | W1 | Planned | Enterprise agentic hardening. | Broader agent roles, stronger mainframe semantics, model governance hardening, richer Experience Learning, and broader corpus evidence. |
 

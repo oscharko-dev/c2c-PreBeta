@@ -83,6 +83,14 @@ class CobolFieldTest {
     }
 
     @Test
+    void signedPicturePreservesPositiveSignWhenAssignedUnsignedValue() {
+        CobolField f = new CobolField("WS-AMT", "ir-12b", PictureSpec.parse("S9(3)V99"));
+        f.setNumericValue(CobolDecimal.of("12.30", 2, false));
+        assertEquals("+012.30", f.displayValue());
+        assertTrue(f.numericValue().signed());
+    }
+
+    @Test
     void positiveSignedDecimalDisplaysWithPlusSign() {
         CobolField f = new CobolField("WS-AMT", "ir-13", PictureSpec.parse("S9(3)V99"));
         f.moveNumericLiteral("12.30");

@@ -12,6 +12,14 @@ events and provides infrastructure (capability registry, model gateway, event
 ledger, model invocation ledger, agent trajectory ledger, experience learning
 substrate) but does not decide what step runs next.
 
+The Orchestrator is a deterministic workflow controller, not an LLM. It is the
+only authoritative product workflow path for UI-started transformations:
+deterministic parser, Semantic IR, target generation, build/test, evidence,
+and AI-assisted agent steps are all invoked through this contract. Direct
+deterministic success paths outside the Orchestrator are not product paths,
+because they would bypass run state, Harness events, artifact lineage,
+Experience Learning, and Evidence Pack completeness checks.
+
 This document is the canonical contract for the run lifecycle and the run
 state document exposed at:
 
@@ -131,6 +139,24 @@ When build-test reports failure, the Orchestrator:
 
 The budget is never used on the success path — a passing first build-test
 keeps `used = 0`.
+
+## Agent-team extension rule
+
+Later waves may add a larger module-level agent team, including an LLM-based
+Team Lead, Planner Agent, Supervisor Agent, or bounded sub-orchestrator. Such a
+component is not the global Orchestrator. It is a capability invoked inside one
+Orchestrator-approved state transition and must return a candidate artifact,
+repair decision, plan, or blocked result to this run contract.
+
+The extension rule is:
+
+1. the global Orchestrator still owns state transitions, retry budgets,
+   cancellation, policy boundaries, and final classification;
+2. the agent team may call models only through the Model Gateway capability
+   exposed via the Harness;
+3. the agent team may not mark a transformation successful;
+4. any candidate produced by the team must pass the deterministic build/test,
+   oracle, and evidence gates before `finalClassification = "success"`.
 
 ## Endpoint envelope and run contract shape
 

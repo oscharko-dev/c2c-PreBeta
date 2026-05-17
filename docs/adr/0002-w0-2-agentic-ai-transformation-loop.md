@@ -1,7 +1,7 @@
 # ADR 0002: W0.2 Agentic AI Transformation Loop
 
 **Date**: 2026-05-16
-**Status**: Proposed
+**Status**: Accepted
 **Issue**: [#164](https://github.com/oscharko-dev/c2c-PreBeta/issues/164)
 **Related issues**: [#165](https://github.com/oscharko-dev/c2c-PreBeta/issues/165)
 
@@ -25,12 +25,14 @@ must be designed without turning the Harness into the workflow controller.
 
 ## Decision
 
-W0.2 will introduce a small orchestrator-steered agent workflow running on the
-Experience Learning Harness:
+W0.2 introduces a small orchestrator-steered agent workflow running on the
+Experience Learning Harness. The controlling architecture is
+**deterministic-first, one workflow path through the global Orchestrator**:
 
 1. The Studio still calls only the c2c BFF.
 2. The BFF starts a transformation run through the orchestrator.
-3. The orchestrator acts as a Harness consumer and controls the workflow.
+3. The global Orchestrator acts as a Harness consumer and controls the
+   workflow. It is a deterministic state machine, not an LLM.
 4. Agents use Harness-provided tools, registries, ledgers, policy hooks, and
    experience signals.
 5. Agents call models only through model-gateway-service.
@@ -51,18 +53,29 @@ Experience Learning Harness:
 11. The repair loop has a hard iteration limit.
 12. A run can be marked verified only after deterministic build/test/evidence
    gates pass.
+13. Deterministic services do not form a side path. Parser, Semantic IR,
+    target generation, build/test, evidence, and policy checks are invoked
+    under Orchestrator control and recorded in the same run contract as
+    AI-assisted steps.
+14. LLM-based supervisors, planners, or Agent Team Leads are allowed only as
+    bounded sub-orchestrators inside an Orchestrator-approved step. They may
+    coordinate specialist agents for larger modules in later waves, but they
+    never replace the global Orchestrator, never bypass the Harness or Model
+    Gateway, and never make final success claims.
 
 ## Non-Goals
 
 W0.2 does not deliver broad COBOL coverage, customer production readiness,
 autonomous test-generation maturity, full Experience Learning feedback loops,
 autonomous workflow optimization, or enterprise multi-agent optimization. W0.2
-also does not deliver multiple agent teams or multiple orchestrators in
-production, and does not add target languages beyond Java. The platform
-architecture must keep those futures open, but the W0.2 release ships exactly
-one Orchestrator, one agent team, and the COBOL-to-Java path. Those remain
-later-wave concerns. W0.2 must still create the structured experience records
-and first read-only learning signals that later waves will build on.
+also does not deliver multiple production agent teams, multiple production
+orchestrators, or an LLM-based global orchestrator, and does not add target
+languages beyond Java. The platform architecture must keep later agent-team
+and bounded sub-orchestrator patterns open, but the W0.2 release ships exactly
+one deterministic global Orchestrator, one initial agent workflow, and the
+COBOL-to-Java path. Those remain later-wave concerns. W0.2 must still create
+the structured experience records and first read-only learning signals that
+later waves will build on.
 
 ## Failure States
 
@@ -107,6 +120,11 @@ rewriting agents or the Orchestrator.
 ## Consequences
 
 - The deterministic W0 core remains the authoritative verifier.
+- Deterministic transformation and AI-assisted transformation remain one
+  Orchestrator-owned product path, not two competing runtime paths.
+- The global Orchestrator is explicitly not an LLM. Any LLM-based planning or
+  team-lead behavior is scoped to a bounded agent step and is subject to the
+  same deterministic gates.
 - The first completed model invocations must appear in model invocation ledgers.
 - Agent trajectory records become part of the Evidence Pack for W0.2 runs.
 - Experience Learning records become part of the Harness value proposition:

@@ -44,7 +44,8 @@
     @apply bg-[var(--bg-0)] text-[var(--text)] font-ui;
     margin: 0;
     padding: 0;
-    min-height: 100vh;
+    height: 100%;
+    overflow: hidden;
     -webkit-font-smoothing: antialiased;
   }
 

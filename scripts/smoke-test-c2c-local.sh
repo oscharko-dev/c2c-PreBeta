@@ -75,8 +75,107 @@ encode_generated_path() {
   jq -rn --arg path "$relpath" '$path | split("/") | map(@uri) | join("/")'
 }
 
+effective_model_gateway_enabled() {
+  case "$MODEL_GATEWAY_FLAG" in
+    1|true|yes|on)
+      printf 'true'
+      ;;
+    0|false|no|off)
+      printf 'false'
+      ;;
+    auto|"")
+      if [[ -n "${C2C_MODEL_PROVIDER:-}" || -n "${AZURE_FOUNDRY_ENDPOINT:-}" || -n "${C2C_MODEL_DEFAULT_DEPLOYMENT:-}" ]]; then
+        printf 'true'
+      else
+        printf 'false'
+      fi
+      ;;
+    *)
+      fail "C2C_LOCAL_MODEL_GATEWAY_ENABLED must be true, false, or auto (got $MODEL_GATEWAY_FLAG)"
+      ;;
+  esac
+}
+
+assert_product_transform() {
+  local source_file="$1"
+  local source_name
+  source_name="$(basename "$source_file")"
+  [[ -f "$source_file" ]] || fail "product-path COBOL fixture missing: $source_file"
+
+  log "starting product transform through BFF: $source_name"
+  local transform_payload transform_json run_id run_json run_status
+  transform_payload="$(jq -n --rawfile source "$source_file" --arg sourceName "$source_name" '{sourceText: $source, sourceName: $sourceName}')"
+  transform_json="$(post_json "$BFF_URL/api/v0/transform" "$transform_payload")"
+  run_id="$(jq -r '.runId // empty' <<<"$transform_json")"
+  [[ -n "$run_id" ]] || fail "$source_name: transform response did not include runId: $transform_json"
+
+  run_json=""
+  for _ in $(seq 1 240); do
+    run_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id")"
+    run_status="$(jq -r '.status // empty' <<<"$run_json")"
+    if [[ "$run_status" == "completed" ]]; then
+      break
+    fi
+    if [[ "$run_status" == "failed" ]]; then
+      fail "$source_name: transform run failed: $run_json"
+    fi
+    sleep 1
+  done
+
+  if [[ "$(jq -r '.status // empty' <<<"$run_json")" != "completed" ]]; then
+    fail "$source_name: transform run did not complete before timeout: $run_json"
+  fi
+
+  local generated_json generated_files_json build_test_json evidence_json progress_json artifacts_json
+  generated_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/generated")"
+  generated_files_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/generated/files")"
+  build_test_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/build-test")"
+  evidence_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/evidence")"
+  progress_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/progress")"
+  artifacts_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/artifacts")"
+
+  jq -e --arg run "$run_id" '.runId == $run and .status == "generated" and (.artifactRef.sha256 | type == "string")' >/dev/null <<<"$generated_json" \
+    || fail "$source_name: generated view did not report artifact-backed Java for $run_id: $generated_json"
+  jq -e --arg run "$run_id" '.runId == $run and .status == "complete" and (.files | length > 0)' >/dev/null <<<"$generated_files_json" \
+    || fail "$source_name: generated files index is incomplete for $run_id: $generated_files_json"
+  jq -e --arg run "$run_id" '.runId == $run and .status == "ok" and .classification == "match"' >/dev/null <<<"$build_test_json" \
+    || fail "$source_name: build/test result is not a matching success for $run_id: $build_test_json"
+  jq -e --arg run "$run_id" '.runId == $run and .status == "complete"' >/dev/null <<<"$evidence_json" \
+    || fail "$source_name: evidence pack is not complete for $run_id: $evidence_json"
+  if [[ "$EFFECTIVE_MODEL_GATEWAY_ENABLED" == "false" ]]; then
+    jq -e --arg run "$run_id" '.runId == $run and .status == "complete" and ([.steps[].name] | index("model-policy-skipped"))' >/dev/null <<<"$progress_json" \
+      || fail "$source_name: progress timeline did not include model-policy-skipped for deterministic no-model mode: $progress_json"
+    jq -e --arg run "$run_id" '.runId == $run and ([.artifacts[].kind] | index("model-policy-skipped"))' >/dev/null <<<"$artifacts_json" \
+      || fail "$source_name: run artifacts did not include model-policy-skipped for deterministic no-model mode: $artifacts_json"
+  else
+    jq -e --arg run "$run_id" '.runId == $run and ([.steps[].name] | index("transformation-agent"))' >/dev/null <<<"$progress_json" \
+      || fail "$source_name: progress timeline did not include transformation-agent for model mode: $progress_json"
+    jq -e --arg run "$run_id" '.runId == $run and ([.artifacts[].kind] | index("transformation-agent-response"))' >/dev/null <<<"$artifacts_json" \
+      || fail "$source_name: run artifacts did not include transformation-agent-response for model mode: $artifacts_json"
+  fi
+
+  local generated_artifact_sha entry_file_path encoded_entry_path generated_file_json entry_file_sha
+  generated_artifact_sha="$(jq -r '.artifactRef.sha256' <<<"$generated_json")"
+  jq -e --arg sha "$generated_artifact_sha" '.generatedArtifactRef.sha256 == $sha' >/dev/null <<<"$build_test_json" \
+    || fail "$source_name: build/test generated artifact ref does not align with generated view"
+  jq -e --arg sha "$generated_artifact_sha" '.generatedArtifactRef.sha256 == $sha' >/dev/null <<<"$evidence_json" \
+    || fail "$source_name: evidence generated artifact ref does not align with generated view"
+
+  entry_file_path="$(jq -r '.entryFilePath // .files[0].path // empty' <<<"$generated_files_json")"
+  [[ -n "$entry_file_path" ]] || fail "$source_name: generated files index did not include an entry file: $generated_files_json"
+  encoded_entry_path="$(encode_generated_path "$entry_file_path")"
+  generated_file_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/generated/files/$encoded_entry_path")"
+  entry_file_sha="$(jq -r --arg path "$entry_file_path" '.files[] | select(.path == $path) | .sha256' <<<"$generated_files_json")"
+  jq -e --arg run "$run_id" --arg path "$entry_file_path" --arg sha "$entry_file_sha" \
+    '.runId == $run and .path == $path and .sha256 == $sha and (.content | test("public[[:space:]]+(final[[:space:]]+)?class"))' >/dev/null <<<"$generated_file_json" \
+    || fail "$source_name: entry generated Java file content did not match the files index for $run_id: $generated_file_json"
+
+  log "product transform passed: $source_name ($run_id)"
+}
+
 launcher_log="$(mktemp "${TMPDIR:-/tmp}/c2c-local-launcher.XXXXXX.log")"
 launcher_pid=""
+EFFECTIVE_MODEL_GATEWAY_ENABLED="$(effective_model_gateway_enabled)"
 
 cleanup() {
   local exit_code=$?
@@ -135,68 +234,24 @@ if grep -Fq 'Error loading programs: Contract error: API returned malformed JSON
   fail "c2c-studio loaded against the wrong API origin and could not fetch reference programs"
 fi
 
-source_file="$ROOT_DIR/corpus/synthetic/programs/branch-account-guard.cbl"
-[[ -f "$source_file" ]] || fail "product-path COBOL fixture missing: $source_file"
-
-log "starting deterministic product transform through BFF"
-transform_payload="$(jq -n --rawfile source "$source_file" '{sourceText: $source, sourceName: "branch-account-guard.cbl"}')"
-transform_json="$(post_json "$BFF_URL/api/v0/transform" "$transform_payload")"
-run_id="$(jq -r '.runId // empty' <<<"$transform_json")"
-[[ -n "$run_id" ]] || fail "transform response did not include runId: $transform_json"
-
-run_json=""
-for _ in $(seq 1 180); do
-  run_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id")"
-  run_status="$(jq -r '.status // empty' <<<"$run_json")"
-  if [[ "$run_status" == "completed" ]]; then
-    break
+if [[ "$EFFECTIVE_MODEL_GATEWAY_ENABLED" == "true" ]]; then
+  if ! wait_http "$BFF_URL/api/v0/model-gateway/health"; then
+    tail -n 120 "$launcher_log" >&2 || true
+    fail "model-gateway health endpoint never became ready"
   fi
-  if [[ "$run_status" == "failed" ]]; then
-    fail "transform run failed: $run_json"
-  fi
-  sleep 1
+fi
+
+supported_sources=(
+  "$ROOT_DIR/corpus/synthetic/programs/arithmetic-adjustment-ledger.cbl"
+  "$ROOT_DIR/corpus/synthetic/programs/branch-account-guard.cbl"
+  "$ROOT_DIR/corpus/synthetic/programs/ctrl-decimal-payroll.cbl"
+  "$ROOT_DIR/corpus/synthetic/programs/decimal-batch-aggregator.cbl"
+  "$ROOT_DIR/corpus/synthetic/programs/hello-w02.cbl"
+)
+
+for source_file in "${supported_sources[@]}"; do
+  assert_product_transform "$source_file"
 done
-
-if [[ "$(jq -r '.status // empty' <<<"$run_json")" != "completed" ]]; then
-  fail "transform run did not complete before timeout: $run_json"
-fi
-
-generated_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/generated")"
-generated_files_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/generated/files")"
-build_test_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/build-test")"
-evidence_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/evidence")"
-progress_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/progress")"
-artifacts_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/artifacts")"
-
-jq -e --arg run "$run_id" '.runId == $run and .status == "generated" and (.artifactRef.sha256 | type == "string")' >/dev/null <<<"$generated_json" \
-  || fail "generated view did not report artifact-backed Java for $run_id: $generated_json"
-jq -e --arg run "$run_id" '.runId == $run and .status == "complete" and (.files | length > 0)' >/dev/null <<<"$generated_files_json" \
-  || fail "generated files index is incomplete for $run_id: $generated_files_json"
-jq -e --arg run "$run_id" '.runId == $run and .status == "ok" and .classification == "match"' >/dev/null <<<"$build_test_json" \
-  || fail "build/test result is not a matching success for $run_id: $build_test_json"
-jq -e --arg run "$run_id" '.runId == $run and .status == "complete"' >/dev/null <<<"$evidence_json" \
-  || fail "evidence pack is not complete for $run_id: $evidence_json"
-if [[ "$MODEL_GATEWAY_FLAG" == "false" || "$MODEL_GATEWAY_FLAG" == "0" ]]; then
-  jq -e --arg run "$run_id" '.runId == $run and .status == "complete" and ([.steps[].name] | index("model-policy-skipped"))' >/dev/null <<<"$progress_json" \
-    || fail "progress timeline did not include model-policy-skipped for deterministic no-model mode: $progress_json"
-  jq -e --arg run "$run_id" '.runId == $run and ([.artifacts[].kind] | index("model-policy-skipped"))' >/dev/null <<<"$artifacts_json" \
-    || fail "run artifacts did not include model-policy-skipped for deterministic no-model mode: $artifacts_json"
-fi
-
-generated_artifact_sha="$(jq -r '.artifactRef.sha256' <<<"$generated_json")"
-jq -e --arg sha "$generated_artifact_sha" '.generatedArtifactRef.sha256 == $sha' >/dev/null <<<"$build_test_json" \
-  || fail "build/test generated artifact ref does not align with generated view"
-jq -e --arg sha "$generated_artifact_sha" '.generatedArtifactRef.sha256 == $sha' >/dev/null <<<"$evidence_json" \
-  || fail "evidence generated artifact ref does not align with generated view"
-
-entry_file_path="$(jq -r '.entryFilePath // .files[0].path // empty' <<<"$generated_files_json")"
-[[ -n "$entry_file_path" ]] || fail "generated files index did not include an entry file: $generated_files_json"
-encoded_entry_path="$(encode_generated_path "$entry_file_path")"
-generated_file_json="$(curl_json "$BFF_URL/api/v0/runs/$run_id/generated/files/$encoded_entry_path")"
-entry_file_sha="$(jq -r --arg path "$entry_file_path" '.files[] | select(.path == $path) | .sha256' <<<"$generated_files_json")"
-jq -e --arg run "$run_id" --arg path "$entry_file_path" --arg sha "$entry_file_sha" \
-  '.runId == $run and .path == $path and .sha256 == $sha and (.content | test("public[[:space:]]+(final[[:space:]]+)?class"))' >/dev/null <<<"$generated_file_json" \
-  || fail "entry generated Java file content did not match the files index for $run_id: $generated_file_json"
 
 log "smoke checks passed, stopping stack"
 "$ROOT_DIR/scripts/stop-c2c-local.sh"
