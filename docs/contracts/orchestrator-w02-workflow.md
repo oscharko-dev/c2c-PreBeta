@@ -45,7 +45,7 @@ transitions; any non-listed transition raises `IllegalTransitionError`.
 | 4a | `semantic_ir_ready` | Parser returned an IR the runner can consume. |
 | 4b | `semantic_ir_blocked` | Source is unsupported or IR generation failed. |
 | 5 | `baseline_generation_attempted` | Deterministic target-Java generator invoked. |
-| 6 | `transformation_agent_invoked` | Transformation Agent invoked to produce or improve a Java candidate before deterministic verification. |
+| 6 | `transformation_agent_invoked` | Transformation Agent invoked to produce or improve a Java candidate before deterministic verification. Reached only when the run was started with an explicit `useTransformationAgent = true` request; as of W0.3 (#213) the BFF no longer sets this flag implicitly from Model Gateway availability, and the explicit assist-decision gate that authorizes opt-in is owned by #214. |
 | 7 | `java_candidate_persisted` | Generated Java written to the artifact store. |
 | 8 | `build_test_running` | Build-test runner invoked. |
 | 9 | `verification_repair_invoked` | Build-test failed; orchestrator entered the verification/repair loop. |

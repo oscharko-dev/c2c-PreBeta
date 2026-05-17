@@ -1835,6 +1835,13 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
 
         try {
+          // W0.3 deterministic-first hardening (#213): the productive
+          // Transformation Agent must not be activated implicitly by
+          // Model Gateway availability. The explicit assist-decision
+          // gate that authorizes agent participation is owned by a
+          // separate W0.3 issue (#214); until that gate lands, every
+          // product run starts deterministically regardless of gateway
+          // state.
           const transformInput: Parameters<typeof orchestrator.startTransformRun>[0] = {
             programId,
             sourceText,
@@ -1845,9 +1852,6 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             expectedOutput,
             oracleInput,
           };
-          if (modelGateway.enabled) {
-            transformInput.useTransformationAgent = true;
-          }
           const upstream = await orchestrator.startTransformRun(transformInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             const liveRunId = extractLiveRunId(upstream.body);

@@ -3412,12 +3412,21 @@ test('POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
     assert.equal(calls.startTransformRun[0]?.targetLanguage, 'java');
     assert.equal(calls.startTransformRun[0]?.expectedOutput, 'HELLO WORLD\n');
     assert.equal(calls.startTransformRun[0]?.oracleInput, '');
+    // W0.3 (#213): with the Model Gateway unconfigured, the productive
+    // Transformation Agent must not be activated.
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, undefined);
   } finally {
     await server.close();
   }
 });
 
-test('POST /api/v0/transform opts into the transformation agent when Model Gateway is enabled', async () => {
+test('POST /api/v0/transform does not implicitly activate the transformation agent when Model Gateway is enabled', async () => {
+  // W0.3 deterministic-first hardening (#213): Model Gateway availability is
+  // infrastructure, not a decision. The BFF must not opt the productive
+  // Transformation Agent in just because a gateway URL is configured. The
+  // explicit assist-decision gate that authorizes opt-in is owned by a
+  // separate W0.3 issue (#214); until then every product run starts
+  // deterministically regardless of gateway state.
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
@@ -3438,7 +3447,7 @@ test('POST /api/v0/transform opts into the transformation agent when Model Gatew
     });
     assert.equal(response.status, 201);
     assert.equal(calls.startTransformRun.length, 1);
-    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, true);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, undefined);
   } finally {
     await server.close();
   }
