@@ -5,8 +5,18 @@ export interface RunExperienceView {
   productMode: 'live' | 'unavailable';
   summary?: string;
   observationPolicy?: string;
+  learningSignals?: LearningSignal[];
   detectedPatterns?: string[];
   artifactRefs?: string[];
+}
+
+export interface LearningSignal {
+  key: string;
+  label: string;
+  status: 'observed' | 'absent';
+  summary?: string;
+  count: number;
+  evidenceRefs?: string[];
 }
 
 export interface ModelGatewayHealth {

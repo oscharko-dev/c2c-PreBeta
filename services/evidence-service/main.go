@@ -10,13 +10,18 @@ import (
 const defaultPort = "8080"
 
 func main() {
-	port := strings.TrimSpace(os.Getenv("EVIDENCE_PORT"))
-	if port == "" {
-		port = defaultPort
+	addr := strings.TrimSpace(os.Getenv("EVIDENCE_LISTEN_ADDR"))
+	if addr == "" {
+		port := strings.TrimSpace(os.Getenv("EVIDENCE_PORT"))
+		if port == "" {
+			port = defaultPort
+		}
+		addr = port
 	}
-	addr := port
-	if !strings.HasPrefix(addr, ":") {
-		addr = ":" + addr
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	} else if !strings.Contains(addr, ":") {
+		addr = "127.0.0.1:" + addr
 	}
 
 	eventLogPath := strings.TrimSpace(os.Getenv(envEventLogPath))
@@ -28,7 +33,13 @@ func main() {
 		exportRoot = defaultExportRoot
 	}
 
+	controlToken := strings.TrimSpace(os.Getenv("EVIDENCE_CONTROL_TOKEN"))
+	if controlToken == "" {
+		controlToken = strings.TrimSpace(os.Getenv("C2C_INTERNAL_CONTROL_TOKEN"))
+	}
+
 	service := NewService(eventLogPath, exportRoot)
+	service.SetControlToken(controlToken)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: service.Routes(),

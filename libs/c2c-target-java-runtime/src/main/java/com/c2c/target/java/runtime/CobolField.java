@@ -156,8 +156,8 @@ public final class CobolField {
             padded = "0".repeat(width - unscaled.length()) + unscaled;
         }
         StringBuilder out = new StringBuilder();
-        if (picture.signed() && numericValue.value().signum() < 0) {
-            out.append('-');
+        if (picture.signed()) {
+            out.append(numericValue.value().signum() < 0 ? '-' : '+');
         }
         if (picture.scale() > 0) {
             int dot = padded.length() - picture.scale();

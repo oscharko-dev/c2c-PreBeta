@@ -61,7 +61,9 @@ attached to the manifest at any point in the run.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `EVIDENCE_PORT` | `8080` | HTTP listen port |
+| `EVIDENCE_LISTEN_ADDR` | `127.0.0.1:8080` | HTTP listen address. Bare ports and `:port` values are normalized to loopback. |
+| `EVIDENCE_PORT` | `8080` | Backward-compatible HTTP port when `EVIDENCE_LISTEN_ADDR` is unset. |
+| `EVIDENCE_CONTROL_TOKEN` / `C2C_INTERNAL_CONTROL_TOKEN` | unset | Bearer/control token required for pack create, update, validate, and export routes. |
 | `EVIDENCE_EVENT_LOG_PATH` | `data/evidence-events-v0.jsonl` | JSONL Harness event sink (falls back to in-memory if the path cannot be opened) |
 | `EVIDENCE_EXPORT_DIR` | `data/evidence-exports` | Root directory for directory/tar exports. **Recommended to set an absolute path** owned exclusively by the service user; relative values are resolved against the process working directory at startup and the resolved path is then symlink-normalized before the containment check. Destinations passed in API calls must be relative and stay under this root. |
 
@@ -83,12 +85,12 @@ attached to the manifest at any point in the run.
 
 ## Trust boundary
 
-evidence-service v0 has **no built-in authentication or authorization** and
-serves plaintext HTTP. It is designed to run cluster-local behind an
-authenticating mesh/proxy (mTLS or shared-secret) — never expose it directly
-to a public ingress. Customer-facing access is mediated by the orchestrator
-and the BFF, which add their own auth layer. Cryptographic signing of the
-manifest is intentionally out of scope for v0; consumers rely on artifact
+evidence-service v0 binds to loopback by default and requires a control token
+for pack mutation/export routes. It still serves plaintext HTTP and is
+designed to run cluster-local behind an authenticating mesh/proxy (mTLS or a
+shared-secret) — never expose it directly to a public ingress. Customer-facing
+access is mediated by the orchestrator and the BFF. Cryptographic signing of
+the manifest is intentionally out of scope for v0; consumers rely on artifact
 sha256s plus the harness JSONL ledger.
 
 ## Run locally
@@ -98,7 +100,7 @@ cd services/evidence-service
 go test ./...                          # unit + integration tests
 go test ./... -race                    # race-detector pass
 go test ./... -bench=. -run=^$         # benchmarks (baseline below)
-go run .                               # start service on :8080
+EVIDENCE_CONTROL_TOKEN=local-token go run . # start service on 127.0.0.1:8080
 ```
 
 ### Performance baseline (Apple M4 Max, Go 1.26)

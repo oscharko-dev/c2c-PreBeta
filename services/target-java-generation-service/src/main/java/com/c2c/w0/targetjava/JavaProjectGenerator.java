@@ -193,7 +193,7 @@ final class JavaProjectGenerator {
         }
         FieldReference field = fieldReference(token, state, line, stmtId);
         if (field != null) {
-            return field.field.numeric ? field.accessor() + ".numericValue().toString()" : field.accessor() + ".displayValue()";
+            return field.accessor() + ".displayValue()";
         }
         if (isNumericLiteral(token)) {
             return javaStringLiteral(token);

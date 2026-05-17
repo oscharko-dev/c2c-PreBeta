@@ -253,10 +253,13 @@ func (s *JSONLHarnessEventSink) Close() error {
 
 type RemoteHarnessEventSink struct {
 	Endpoint string
+	Token    string
+	Actor    string
+	Role     string
 	Client   *http.Client
 }
 
-func NewRemoteHarnessEventSink(endpoint string) (*RemoteHarnessEventSink, error) {
+func NewRemoteHarnessEventSink(endpoint string, token string) (*RemoteHarnessEventSink, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return nil, nil
@@ -266,11 +269,15 @@ func NewRemoteHarnessEventSink(endpoint string) (*RemoteHarnessEventSink, error)
 	}
 	return &RemoteHarnessEventSink{
 		Endpoint: strings.TrimRight(endpoint, "/"),
+		Token:    strings.TrimSpace(token),
+		Actor:    eventServiceName,
+		Role:     "service",
 		Client:   &http.Client{},
 	}, nil
 }
 
 func (r *RemoteHarnessEventSink) Emit(event EventEnvelopeV0) error {
+	event = r.prepareEvent(event)
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal harness event: %w", err)
@@ -280,6 +287,11 @@ func (r *RemoteHarnessEventSink) Emit(event EventEnvelopeV0) error {
 		return fmt.Errorf("build harness event request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
+	if r.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+r.Token)
+		req.Header.Set("X-Harness-Actor", r.Actor)
+		req.Header.Set("X-Harness-Role", r.Role)
+	}
 	resp, err := r.Client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post harness event failed: %w", err)
@@ -289,6 +301,27 @@ func (r *RemoteHarnessEventSink) Emit(event EventEnvelopeV0) error {
 		return fmt.Errorf("harness event API responded with %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (r *RemoteHarnessEventSink) prepareEvent(event EventEnvelopeV0) EventEnvelopeV0 {
+	actor := strings.TrimSpace(r.Actor)
+	if actor == "" {
+		return event
+	}
+	originalActor := strings.TrimSpace(event.Actor)
+	if originalActor != "" && originalActor != actor {
+		payload := make(map[string]any, len(event.Payload)+1)
+		for key, value := range event.Payload {
+			payload[key] = value
+		}
+		if _, exists := payload["requestActor"]; !exists {
+			payload["requestActor"] = originalActor
+		}
+		event.Payload = payload
+	}
+	event.Actor = actor
+	event.Service = actor
+	return event
 }
 
 type CompositeEventSink struct {

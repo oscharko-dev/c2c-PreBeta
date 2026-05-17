@@ -26,12 +26,19 @@ class DataReference:
 
 
 class HarnessGateway:
-    def __init__(self, base_url: str, http: JSONHTTPClient, harness_headers: Mapping[str, str] | None = None):
+    def __init__(
+        self,
+        base_url: str,
+        http: JSONHTTPClient,
+        harness_headers: Mapping[str, str] | None = None,
+        capability_headers: Mapping[str, str] | None = None,
+    ):
         if not base_url:
             raise ValueError("harness base URL is required")
         self.base_url = base_url.rstrip("/")
         self.http = http
         self.harness_headers = dict(harness_headers or {})
+        self.capability_headers = dict(capability_headers or {})
 
     def create_run(self, workflow_id: str, requester: str = "orchestrator", evidence_refs=None) -> JsonObject:
         if evidence_refs is None:
@@ -120,7 +127,16 @@ class HarnessGateway:
         endpoint = str(capability.get("endpoint", "")).strip()
         if not endpoint:
             raise ValueError("capability endpoint is required")
-        resp = self.http.post_json(endpoint, payload)
+        timeout_seconds = None
+        timeout_ms = payload.get("timeoutMs")
+        if isinstance(timeout_ms, int) and timeout_ms > 0:
+            timeout_seconds = max(1, (timeout_ms + 999) // 1000 + 5)
+        resp = self.http.post_json(
+            endpoint,
+            payload,
+            headers=self.capability_headers,
+            timeout_seconds=timeout_seconds,
+        )
         if resp.status not in (200, 201):
             raise HarnessFailure(resp.status, str(resp.payload))
         if not isinstance(resp.payload, dict):

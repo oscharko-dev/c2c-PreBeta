@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,7 @@ type ModelGatewayService struct {
 	modelProvider               string
 	azureAPIVersion             string
 	policyID                    string
+	controlToken                string
 }
 
 type gatewayConfig struct {
@@ -50,12 +52,14 @@ type gatewayConfig struct {
 	policyID                     string
 	invocationLedgerEnabled      bool
 	harnessEventEmissionEnabled  bool
+	harnessEventToken            string
 	azureFoundryEndpoint         string
 	azureFoundryAPIKey           string
 	azureFoundryAPIKeyRef        string
 	azureFoundryAPIResource      string
 	azureFoundryAPIResourceGroup string
 	azureFoundryAPIVersion       string
+	controlToken                 string
 }
 
 type validatedInvocation struct {
@@ -147,6 +151,7 @@ func (s *ModelGatewayService) applyGatewayRuntimeConfig(cfg gatewayConfig) error
 	if s.policyID == "" {
 		s.policyID = s.allowlist.ResolvedPolicyID()
 	}
+	s.controlToken = strings.TrimSpace(cfg.controlToken)
 
 	if err := validateDeploymentPolicyActive(s.registry, s.now, s.allowedModelDeployments); err != nil {
 		return err
@@ -167,8 +172,42 @@ func (s *ModelGatewayService) Routes() *http.ServeMux {
 	mux.HandleFunc("/v0/models", s.modelsHandler)
 	mux.HandleFunc("/v0/models/", s.modelsHandler)
 	mux.HandleFunc("/v0/capabilities", s.capabilitiesHandler)
-	mux.HandleFunc("/v0/invoke", s.invokeHandler)
+	mux.HandleFunc("/v0/invoke", s.requireControlToken(s.invokeHandler))
 	return mux
+}
+
+func (s *ModelGatewayService) requireControlToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.authorized(r) {
+			next(w, r)
+			return
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+}
+
+func (s *ModelGatewayService) authorized(r *http.Request) bool {
+	expected := strings.TrimSpace(s.controlToken)
+	if expected == "" {
+		return false
+	}
+	presented := presentedControlToken(r)
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) == 1
+}
+
+func presentedControlToken(r *http.Request) string {
+	if raw := strings.TrimSpace(r.Header.Get("X-C2C-Control-Token")); raw != "" {
+		return raw
+	}
+	if raw := strings.TrimSpace(r.Header.Get("X-Harness-Token")); raw != "" {
+		return raw
+	}
+	raw := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "bearer "
+	if strings.HasPrefix(strings.ToLower(raw), prefix) {
+		return strings.TrimSpace(raw[len(prefix):])
+	}
+	return ""
 }
 
 // resolvedPolicyID returns the active policy id, preferring the runtime
@@ -1024,6 +1063,8 @@ func resolveGatewayConfigFromEnv() (gatewayConfig, error) {
 	cfg.allowedModelDeployments = parseCommaSeparatedIDs(firstNonEmptyEnv("C2C_MODEL_ALLOWED_DEPLOYMENTS"))
 	cfg.dataPolicy = firstNonEmptyEnv("C2C_MODEL_DATA_POLICY")
 	cfg.policyID = firstNonEmptyEnv("C2C_MODEL_POLICY_ID", "MODEL_GATEWAY_POLICY_ID")
+	cfg.controlToken = firstNonEmptyEnv("MODEL_GATEWAY_CONTROL_TOKEN", "C2C_INTERNAL_CONTROL_TOKEN")
+	cfg.harnessEventToken = firstNonEmptyEnv("HARNESS_EVENT_TOKEN", "HARNESS_CONTROL_PLANE_TOKEN", "C2C_LOCAL_HARNESS_TOKEN")
 
 	invocationLedgerEnabled, hasInvocationLedgerFlag, err := parseBoolEnv("C2C_MODEL_INVOCATION_LEDGER_ENABLED", "MODEL_GATEWAY_INVOCATION_LEDGER_ENABLED")
 	if err != nil {

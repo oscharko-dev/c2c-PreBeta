@@ -53,6 +53,14 @@ const (
 	patternAcceptedPattern = "accepted_pattern"
 )
 
+const (
+	signalCapabilityAvailability    = "capability_availability"
+	signalModelInvocationOutcome    = "model_invocation_outcome"
+	signalAgentHandoff              = "agent_handoff"
+	signalRepairLoopProgress        = "repair_loop_progress"
+	signalGeneratedCandidateOutcome = "generated_java_candidate_outcome"
+)
+
 const defaultPolicyMode = "observation"
 
 var allowedDataClasses = map[string]struct{}{
@@ -400,18 +408,28 @@ type LearningArtifactRegistryV0 struct {
 }
 
 type RunLearningSummary struct {
-	RunID              string         `json:"runId"`
-	RunStatus          string         `json:"runStatus,omitempty"`
-	ObservedAt         time.Time      `json:"observedAt"`
-	SourceEventCount   int            `json:"sourceEventCount"`
-	SourceLedgerCount  int            `json:"sourceLedgerCount"`
-	CandidateCount     int            `json:"candidateCount"`
-	CandidateByPattern map[string]int `json:"candidateByPattern"`
-	ExperienceEventIDs []string       `json:"experienceEventIds"`
-	ObservedPatterns   []string       `json:"observedPatterns"`
-	ObservationOnly    bool           `json:"observationOnly"`
-	PolicyVersion      string         `json:"policyVersion"`
-	PolicyFingerprint  string         `json:"policyFingerprint"`
+	RunID              string           `json:"runId"`
+	RunStatus          string           `json:"runStatus,omitempty"`
+	ObservedAt         time.Time        `json:"observedAt"`
+	SourceEventCount   int              `json:"sourceEventCount"`
+	SourceLedgerCount  int              `json:"sourceLedgerCount"`
+	CandidateCount     int              `json:"candidateCount"`
+	CandidateByPattern map[string]int   `json:"candidateByPattern"`
+	ExperienceEventIDs []string         `json:"experienceEventIds"`
+	ObservedPatterns   []string         `json:"observedPatterns"`
+	Signals            []LearningSignal `json:"signals"`
+	ObservationOnly    bool             `json:"observationOnly"`
+	PolicyVersion      string           `json:"policyVersion"`
+	PolicyFingerprint  string           `json:"policyFingerprint"`
+}
+
+type LearningSignal struct {
+	Key          string   `json:"key"`
+	Label        string   `json:"label"`
+	Status       string   `json:"status"`
+	Summary      string   `json:"summary"`
+	Count        int      `json:"count"`
+	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
 }
 
 type PolicyDecision struct {

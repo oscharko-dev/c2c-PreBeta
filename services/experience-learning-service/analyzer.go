@@ -40,8 +40,9 @@ func (a *PatternAnalyzer) AnalyzeRun(runID string, events []EventEnvelopeV0, led
 	}
 
 	eventsForRun := filterEventsByRun(events, runID)
+	ledgersForRun := filterLedgersByRun(ledgers, runID)
 	summary.SourceEventCount = len(eventsForRun)
-	summary.SourceLedgerCount = len(filterLedgersByRun(ledgers, runID))
+	summary.SourceLedgerCount = len(ledgersForRun)
 
 	sort.Slice(eventsForRun, func(i, j int) bool {
 		if eventsForRun[i].CreatedAt.Equal(eventsForRun[j].CreatedAt) {
@@ -76,7 +77,7 @@ func (a *PatternAnalyzer) AnalyzeRun(runID string, events []EventEnvelopeV0, led
 	}
 	combined = append(combined, analyzeRetrySequences(a, runID, eventsForRun)...)
 
-	for _, ledger := range filterLedgersByRun(ledgers, runID) {
+	for _, ledger := range ledgersForRun {
 		combined = append(combined, analyzeLedger(ledger, runID, a)...)
 	}
 
@@ -129,7 +130,228 @@ func (a *PatternAnalyzer) AnalyzeRun(runID string, events []EventEnvelopeV0, led
 	}
 	summary.CandidateCount = len(combined)
 	summary.ObservedPatterns = sortedPatternKeys(summary.CandidateByPattern)
+	summary.Signals = buildW02LearningSignals(eventsForRun, ledgersForRun)
 	return combined, summary, nil
+}
+
+func buildW02LearningSignals(events []EventEnvelopeV0, ledgers []AgentTrajectoryLedgerV0) []LearningSignal {
+	return []LearningSignal{
+		buildSignal(
+			signalCapabilityAvailability,
+			"Tool/capability availability",
+			collectEventEvidence(events, isCapabilityAvailabilityEvent),
+			"capability/tool events observed",
+		),
+		buildSignal(
+			signalModelInvocationOutcome,
+			"Model invocation outcome",
+			appendEvidence(
+				collectEventEvidence(events, isModelSignalEvent),
+				collectLedgerEvidence(ledgers, isModelSignalStep)...,
+			),
+			"model-gateway outcomes observed",
+		),
+		buildSignal(
+			signalAgentHandoff,
+			"Agent handoff",
+			appendEvidence(
+				collectEventEvidence(events, isAgentHandoffEvent),
+				collectLedgerEvidence(ledgers, isAgentHandoffStep)...,
+			),
+			"orchestrator/agent handoff records observed",
+		),
+		buildSignal(
+			signalRepairLoopProgress,
+			"Repair-loop progress",
+			appendEvidence(
+				collectEventEvidence(events, isRepairSignalEvent),
+				collectLedgerEvidence(ledgers, isRepairSignalStep)...,
+			),
+			"repair-loop records observed",
+		),
+		buildSignal(
+			signalGeneratedCandidateOutcome,
+			"Generated Java candidate outcome",
+			appendEvidence(
+				collectEventEvidence(events, isGeneratedCandidateEvent),
+				collectLedgerEvidence(ledgers, isGeneratedCandidateStep)...,
+			),
+			"generated-candidate outcome records observed",
+		),
+	}
+}
+
+func buildSignal(key, label string, refs []string, observedSummary string) LearningSignal {
+	refs = uniqueStrings(refs)
+	status := "absent"
+	summary := "No " + observedSummary + "."
+	if len(refs) > 0 {
+		status = "observed"
+		summary = fmt.Sprintf("%d %s.", len(refs), observedSummary)
+	}
+	return LearningSignal{
+		Key:          key,
+		Label:        label,
+		Status:       status,
+		Summary:      summary,
+		Count:        len(refs),
+		EvidenceRefs: refs,
+	}
+}
+
+func appendEvidence(base []string, extra ...string) []string {
+	out := append([]string{}, base...)
+	out = append(out, extra...)
+	return out
+}
+
+func collectEventEvidence(events []EventEnvelopeV0, match func(EventEnvelopeV0) bool) []string {
+	refs := make([]string, 0)
+	for _, event := range events {
+		if match(event) {
+			refs = append(refs, event.EventID)
+		}
+	}
+	return refs
+}
+
+func collectLedgerEvidence(ledgers []AgentTrajectoryLedgerV0, match func(AgentTrajectoryEntry) bool) []string {
+	refs := make([]string, 0)
+	for _, ledger := range ledgers {
+		for _, step := range ledger.Steps {
+			if match(step) {
+				refs = append(refs, step.EventID)
+			}
+		}
+	}
+	return refs
+}
+
+func isCapabilityAvailabilityEvent(ev EventEnvelopeV0) bool {
+	eventType := strings.ToLower(strings.TrimSpace(ev.EventType))
+	state := strings.ToLower(strings.TrimSpace(ev.StateTransition))
+	return strings.HasPrefix(eventType, "capability.") ||
+		strings.Contains(state, "capability.resolved") ||
+		strings.Contains(state, "capability.available") ||
+		strings.Contains(state, "capability.invoked")
+}
+
+func isModelSignalEvent(ev EventEnvelopeV0) bool {
+	return strings.EqualFold(ev.DataClass, dataClassModelGateway) ||
+		strings.EqualFold(ev.Capability, "model-gateway") ||
+		hasAnySignalToken(ev.EventType, "model-gateway.", "model.invocation.") ||
+		hasAnySignalToken(ev.StateTransition, "model-gateway.", "model.invocation.")
+}
+
+func isModelSignalStep(step AgentTrajectoryEntry) bool {
+	return strings.EqualFold(step.DataClass, dataClassModelGateway) ||
+		strings.EqualFold(step.Capability, "model-gateway") ||
+		hasAnySignalToken(step.EventType, "model-gateway.", "model.invocation.") ||
+		hasAnySignalToken(step.StateTransition, "model-gateway.", "model.invocation.")
+}
+
+func isAgentHandoffEvent(ev EventEnvelopeV0) bool {
+	return hasAnySignalToken(
+		signalText(ev.EventType, ev.StateTransition, ev.Capability),
+		"agent.handoff",
+		"orchestrator.agent.",
+		"transformation-agent",
+		"verification-repair-agent",
+	)
+}
+
+func isAgentHandoffStep(step AgentTrajectoryEntry) bool {
+	return hasAnySignalToken(
+		signalText(step.EventType, step.StateTransition, step.Capability),
+		"agent.handoff",
+		"orchestrator.agent.",
+		"transformation-agent",
+		"verification-repair-agent",
+	)
+}
+
+func isRepairSignalEvent(ev EventEnvelopeV0) bool {
+	return hasAnySignalToken(
+		signalText(ev.Actor, ev.Capability, ev.EventType, ev.StateTransition),
+		"verification-repair",
+		"repair.",
+		".repair.",
+		"repair-loop",
+	)
+}
+
+func isRepairSignalStep(step AgentTrajectoryEntry) bool {
+	return hasAnySignalToken(
+		signalText(step.Actor, step.Capability, step.EventType, step.StateTransition),
+		"verification-repair",
+		"repair.",
+		".repair.",
+		"repair-loop",
+	)
+}
+
+func isGeneratedCandidateEvent(ev EventEnvelopeV0) bool {
+	text := signalText(ev.Capability, ev.EventType, ev.StateTransition)
+	return strings.EqualFold(ev.DataClass, dataClassBuildTest) ||
+		strings.EqualFold(ev.Capability, "target.java.generate") ||
+		strings.EqualFold(ev.Capability, "build-test.run") ||
+		hasAnySignalToken(
+			text,
+			"controlled.artifact.accepted",
+			"java_candidate_persisted",
+			"final_java_selected",
+			"generated-java",
+			"generated.project",
+			"transformation-agent",
+		)
+}
+
+func isGeneratedCandidateStep(step AgentTrajectoryEntry) bool {
+	text := signalText(step.Capability, step.EventType, step.StateTransition)
+	return strings.EqualFold(step.DataClass, dataClassBuildTest) ||
+		strings.EqualFold(step.Capability, "target.java.generate") ||
+		strings.EqualFold(step.Capability, "build-test.run") ||
+		hasAnySignalToken(
+			text,
+			"controlled.artifact.accepted",
+			"java_candidate_persisted",
+			"final_java_selected",
+			"generated-java",
+			"generated.project",
+			"transformation-agent",
+		)
+}
+
+func signalText(parts ...string) string {
+	return strings.ToLower(strings.Join(parts, " "))
+}
+
+func hasAnySignalToken(value string, needles ...string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, needle := range needles {
+		if strings.Contains(value, strings.ToLower(needle)) {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func analyzeBucket(analyzer *PatternAnalyzer, runID string, key PatternKey, items []EventEnvelopeV0) []ExperienceEventV0 {

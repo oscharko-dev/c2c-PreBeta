@@ -52,10 +52,14 @@ GENERATOR_URL="http://127.0.0.1:${GENERATOR_PORT}"
 BTR_URL="http://127.0.0.1:${BTR_PORT}"
 MODEL_GATEWAY_URL="http://127.0.0.1:${MODEL_GATEWAY_PORT}"
 HARNESS_TOKEN="${W0_REFERENCE_RUN_HARNESS_TOKEN:-w0-reference-run-local-control-plane-token}"
+INTERNAL_CONTROL_TOKEN="${W0_REFERENCE_RUN_INTERNAL_CONTROL_TOKEN:-$HARNESS_TOKEN}"
 HARNESS_AUTH_HEADERS=(
   -H "Authorization: Bearer ${HARNESS_TOKEN}"
   -H "X-Harness-Actor: w0-reference-run"
   -H "X-Harness-Role: orchestrator"
+)
+INTERNAL_AUTH_HEADERS=(
+  -H "Authorization: Bearer ${INTERNAL_CONTROL_TOKEN}"
 )
 
 START_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -221,7 +225,8 @@ start_evidence() {
   local bin
   bin="$(build_go_binary evidence services/evidence-service)"
   start_go_service evidence "$bin" "$LOG_DIR/evidence.log" \
-    "EVIDENCE_PORT=$EVIDENCE_PORT" \
+    "EVIDENCE_LISTEN_ADDR=127.0.0.1:$EVIDENCE_PORT" \
+    "EVIDENCE_CONTROL_TOKEN=$INTERNAL_CONTROL_TOKEN" \
     "EVIDENCE_EVENT_LOG_PATH=$EVENT_DIR/evidence-events.jsonl" \
     "EVIDENCE_EXPORT_DIR=$EXPORTS_DIR"
   wait_http evidence "$EVIDENCE_URL/v0/health"
@@ -281,13 +286,15 @@ start_model_gateway() {
   local bin
   bin="$(build_go_binary model-gateway services/go/model-gateway-service)"
   start_go_service model-gateway "$bin" "$LOG_DIR/model-gateway.log" \
-    "MODEL_GATEWAY_LISTEN_ADDR=:$MODEL_GATEWAY_PORT" \
+    "MODEL_GATEWAY_LISTEN_ADDR=127.0.0.1:$MODEL_GATEWAY_PORT" \
+    "MODEL_GATEWAY_CONTROL_TOKEN=$INTERNAL_CONTROL_TOKEN" \
     "MODEL_GATEWAY_MODEL_REGISTRY_PATH=${MODEL_GATEWAY_MODEL_REGISTRY_PATH:-config/model-registry.example.yaml}" \
     "MODEL_GATEWAY_ALLOWLIST_PATH=${MODEL_GATEWAY_ALLOWLIST_PATH:-config/foundry-development-allowlist-v0.yaml}" \
     "MODEL_GATEWAY_LEDGER_PATH=$EVENT_DIR/model-invocation-ledger-v0.jsonl" \
     "MODEL_GATEWAY_EVENT_LOG_PATH=$EVENT_DIR/model-gateway-events-v0.jsonl" \
     "C2C_MODEL_INVOCATION_LEDGER_ENABLED=true" \
-    "C2C_HARNESS_EVENT_EMISSION_ENABLED=true"
+    "C2C_HARNESS_EVENT_EMISSION_ENABLED=true" \
+    "HARNESS_EVENT_TOKEN=$HARNESS_TOKEN"
   wait_http model-gateway "$MODEL_GATEWAY_URL/v0/health"
 }
 
@@ -545,7 +552,7 @@ run_program() {
         },
         timeoutMs:$timeoutMs}' \
       >"$modelRequest"
-    curl -fsS -X POST -H "Content-Type: application/json" \
+    curl -fsS -X POST -H "Content-Type: application/json" "${INTERNAL_AUTH_HEADERS[@]}" \
       --data-binary "@$modelRequest" "$modelEndpoint" \
       >"$modelResponse" \
       || fail "$programId: model-gateway invocation failed"
@@ -622,7 +629,7 @@ run_program() {
     >"$createBody"
 
   local evidenceCreated="$outDir/13-evidence-created.json"
-  curl -fsS -X POST -H "Content-Type: application/json" \
+  curl -fsS -X POST -H "Content-Type: application/json" "${INTERNAL_AUTH_HEADERS[@]}" \
     --data-binary "@$createBody" "$evidenceEndpoint" \
     >"$evidenceCreated" \
     || fail "$programId: evidence pack create failed"
@@ -633,7 +640,7 @@ run_program() {
   # Re-validate explicitly so the validation result is captured next to the
   # manifest, regardless of how the Go service reports it on create.
   local evidenceValidated="$outDir/14-evidence-validated.json"
-  curl -fsS -X POST -H "Content-Type: application/json" \
+  curl -fsS -X POST -H "Content-Type: application/json" "${INTERNAL_AUTH_HEADERS[@]}" \
     "$EVIDENCE_URL/v0/packs/$packId/validate" \
     >"$evidenceValidated" \
     || fail "$programId: evidence validate failed"
@@ -645,7 +652,7 @@ run_program() {
   local exportBody
   exportBody="$(jq -n --arg dest "$packId" '{format:"directory", destination:$dest}')"
   local evidenceExported="$outDir/15-evidence-exported.json"
-  curl -fsS -X POST -H "Content-Type: application/json" \
+  curl -fsS -X POST -H "Content-Type: application/json" "${INTERNAL_AUTH_HEADERS[@]}" \
     --data "$exportBody" "$EVIDENCE_URL/v0/packs/$packId/export" \
     >"$evidenceExported" \
     || fail "$programId: evidence export failed"

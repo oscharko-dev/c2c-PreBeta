@@ -53,7 +53,13 @@ class JSONHTTPClient:
         self.timeout_seconds = timeout_seconds
         self.default_headers = dict(default_headers or {})
 
-    def post_json(self, url: str, payload: JSONBody, headers: Mapping[str, str] | None = None) -> HttpResponse:
+    def post_json(
+        self,
+        url: str,
+        payload: JSONBody,
+        headers: Mapping[str, str] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request = Request(
             url=url,
@@ -61,7 +67,7 @@ class JSONHTTPClient:
             headers=self._headers({"Content-Type": "application/json"}, headers),
             method="POST",
         )
-        return self._send(request)
+        return self._send(request, timeout_seconds=timeout_seconds)
 
     def patch_json(self, url: str, payload: Mapping[str, JsonValue], headers: Mapping[str, str] | None = None) -> HttpResponse:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -83,9 +89,10 @@ class JSONHTTPClient:
         merged.update(extra_headers or {})
         return merged
 
-    def _send(self, request: Request) -> HttpResponse:
+    def _send(self, request: Request, *, timeout_seconds: int | None = None) -> HttpResponse:
+        timeout = timeout_seconds if isinstance(timeout_seconds, int) and timeout_seconds > 0 else self.timeout_seconds
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            with urlopen(request, timeout=timeout) as response:
                 body = response.read()
                 payload: Any = None
                 if body:

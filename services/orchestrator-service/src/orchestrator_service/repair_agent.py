@@ -237,10 +237,11 @@ class RepairAgentRequest:
     oracle_diff_ref: Mapping[str, JsonValue] | None = None
     source_cobol_ref: Mapping[str, JsonValue] | None = None
     source_text: str | None = None
+    oracle_payload: Mapping[str, JsonValue] | None = None
     semantic_ir_ref: Mapping[str, JsonValue] | None = None
     semantic_ir: Mapping[str, JsonValue] | None = None
     previous_repair_decision_refs: tuple[Mapping[str, JsonValue], ...] = ()
-    deadline_ms: int = 30000
+    deadline_ms: int = 60000
     trace_ref: str | None = None
 
     def __post_init__(self) -> None:
@@ -621,9 +622,12 @@ class RepairAgent:
             decision = _validate_inner_decision(inner_envelope.get("decision"))
             rationale = inner_envelope.get("rationale")
             if not isinstance(rationale, str) or not rationale.strip():
-                raise RepairAgentContractInvalidError(
-                    "decision envelope must include a non-empty rationale"
+                rationale = (
+                    inner_envelope.get("explanation")
+                    or inner_envelope.get("reason")
+                    or f"Model returned {decision} without rationale; decoder derived a bounded audit rationale."
                 )
+                rationale = str(rationale).strip()
             confidence = _coerce_confidence(inner_envelope.get("confidence"))
 
             candidate: RepairedJavaCandidate | None = None
@@ -1045,9 +1049,7 @@ class RepairAgent:
         """
         prompt_payload = self._build_model_prompt(request)
         invoke_payload: JsonObject = {
-            "schemaVersion": "v0",
             "runId": request.run_id,
-            "workflowId": request.workflow_id,
             "actor": "orchestrator-service",
             "agentRole": MODEL_GATEWAY_AGENT_ROLE,
             "modelId": request.model_id,
@@ -1066,6 +1068,8 @@ class RepairAgent:
                 ),
                 "buildTestResultRef": _coerce_artifact_ref(request.build_test_result_ref),
                 "repairBudgetRemaining": int(request.repair_budget_remaining),
+                "temperature": 0,
+                "max_tokens": 8192,
             },
             "timeoutMs": int(request.deadline_ms),
         }
@@ -1147,6 +1151,14 @@ class RepairAgent:
             "previousJavaFiles": dict(request.previous_java_files),
             "buildTestResultRef": _coerce_artifact_ref(request.build_test_result_ref),
             "buildTestPayload": dict(request.build_test_payload) if request.build_test_payload else None,
+            "oraclePayload": dict(request.oracle_payload or {}) or None,
+            "instructions": [
+                "Return only JSON matching agent-repair-decision-inner-v0.",
+                "Allowed decision values are exactly propose_candidate, refuse, or escalate.",
+                "Never return adjust_expected_output and never modify the oracle or expected output.",
+                "For output-divergence failures, prefer propose_candidate when a Java-only fix can make stdout match the oracle.",
+                "For numeric COBOL DISPLAY fields, preserve PIC formatting including leading zeroes; when using the c2c runtime, call CobolField.displayValue().",
+            ],
             "outputContract": {
                 "shape": "agent-repair-decision-inner-v0",
                 "schemaRef": _REPAIR_INNER_OUTPUT_SCHEMA_ID,

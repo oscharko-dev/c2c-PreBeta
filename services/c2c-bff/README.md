@@ -65,6 +65,7 @@ Every payload from a run-scoped endpoint includes two mode signals:
 | `C2C_REPO_ROOT` | walks up from package | Repo root used to locate `corpus/` and `fixtures/`. |
 | `C2C_UI_DIST` | `../../apps/c2c-ui/dist` | Static root served under `/`. |
 | `C2C_ORCHESTRATOR_URL` | empty | Base URL for `orchestrator-service`. Empty means product mode is not ready. |
+| `C2C_ORCHESTRATOR_CONTROL_TOKEN` | empty | Bearer/control token for orchestrator live-mode calls. Required whenever `C2C_ORCHESTRATOR_URL` is set. |
 | `C2C_EVIDENCE_URL` | empty | Base URL for `evidence-service`. Empty means evidence-service is not reachable; product runs still proceed but artifact endpoints report `productMode: "unavailable"` until upstream payloads land. |
 | `C2C_UPSTREAM_TIMEOUT_MS` | `4000` | Per-upstream-request timeout. |
 | `C2C_ENABLE_DIAGNOSTIC_FIXTURES` | unset | Developer opt-in. When `true`, `POST /api/v0/runs` produces a `diagnostic-fixture` run (deterministic local content) instead of `503`. The resulting run is never labelled as a product result. Must not be set in W0 browser acceptance flows. |

@@ -20,39 +20,39 @@
       "title": "Arithmetic adjustment ledger",
       "cobolSource": "corpus/synthetic/programs/arithmetic-adjustment-ledger.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/arithmetic-adjustment-ledger-output.txt",
-      "classification": "synthetic",
+      "classification": "true",
       "knownDivergenceAtW0": false,
       "supportedInProductMode": true,
       "w0Subset": ["MOVE", "SUBTRACT", "MULTIPLY", "DIVIDE", "DISPLAY"],
-      "oracleMode": "synthetic-fixture",
+      "oracleMode": "cobol-runtime",
       "knownLimitations": [],
-      "rationale": "Synthetic expected output now matches generated Java for the W0 MOVE/SUBTRACT/MULTIPLY/DIVIDE/DISPLAY subset."
+      "rationale": "Expected output was reproduced from corpus/synthetic/programs/arithmetic-adjustment-ledger.cbl with GnuCOBOL cobc -x -free and direct execution."
     },
     {
       "programId": "CTRLDEC01",
       "title": "Control decimal payroll",
       "cobolSource": "corpus/synthetic/programs/ctrl-decimal-payroll.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/ctrl-decimal-payroll-output.txt",
-      "classification": "synthetic",
+      "classification": "true",
       "knownDivergenceAtW0": false,
       "supportedInProductMode": true,
       "w0Subset": ["COMPUTE", "IF", "DISPLAY"],
-      "oracleMode": "synthetic-fixture",
+      "oracleMode": "cobol-runtime",
       "knownLimitations": [],
-      "rationale": "Synthetic expected output now matches generated Java for the W0 COMPUTE/IF/DISPLAY subset using fixed-point HALF_EVEN rescale semantics."
+      "rationale": "Expected output was reproduced from corpus/synthetic/programs/ctrl-decimal-payroll.cbl with GnuCOBOL cobc -x -free and direct execution."
     },
     {
       "programId": "BATCH01",
       "title": "Decimal batch aggregator",
       "cobolSource": "corpus/synthetic/programs/decimal-batch-aggregator.cbl",
       "expectedOutputPath": "corpus/synthetic/fixtures/decimal-batch-aggregator-output.txt",
-      "classification": "synthetic",
+      "classification": "true",
       "knownDivergenceAtW0": false,
       "supportedInProductMode": true,
       "w0Subset": ["PERFORM", "COMPUTE", "ADD", "DISPLAY"],
-      "oracleMode": "synthetic-fixture",
+      "oracleMode": "cobol-runtime",
       "knownLimitations": [],
-      "rationale": "Synthetic expected output now matches generated Java for the W0 PERFORM/COMPUTE/ADD/DISPLAY subset."
+      "rationale": "Expected output was reproduced from corpus/synthetic/programs/decimal-batch-aggregator.cbl with GnuCOBOL cobc -x -free and direct execution."
     }
   ]
 }

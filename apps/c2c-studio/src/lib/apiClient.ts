@@ -862,8 +862,21 @@ function isRunExperienceViewPayload(payload: unknown): payload is RunExperienceV
          isRunProductMode(payload.productMode) &&
          (payload.summary === undefined || isString(payload.summary)) &&
          (payload.observationPolicy === undefined || isString(payload.observationPolicy)) &&
+         (payload.learningSignals === undefined || isLearningSignalArray(payload.learningSignals)) &&
          (payload.detectedPatterns === undefined || isStringArray(payload.detectedPatterns)) &&
          (payload.artifactRefs === undefined || isStringArray(payload.artifactRefs));
+}
+
+function isLearningSignalArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => {
+    if (!isRecord(item)) return false;
+    return isString(item.key) &&
+           isString(item.label) &&
+           (item.status === 'observed' || item.status === 'absent') &&
+           typeof item.count === 'number' &&
+           (item.summary === undefined || isString(item.summary)) &&
+           (item.evidenceRefs === undefined || isStringArray(item.evidenceRefs));
+  });
 }
 
 function parseRunExperienceView(payload: unknown): ApiResult<RunExperienceView> {

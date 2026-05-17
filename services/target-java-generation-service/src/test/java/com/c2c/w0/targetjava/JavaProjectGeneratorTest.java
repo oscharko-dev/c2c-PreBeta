@@ -48,6 +48,8 @@ class JavaProjectGeneratorTest {
         assertTrue(entry.contains("PROGRAM_ID = \"CASE01\""));
         assertTrue(entry.contains("CobolField"));
         assertTrue(entry.contains("PictureSpec.parse"));
+        assertTrue(entry.contains("append(wsTotal.displayValue())"),
+                "DISPLAY of numeric COBOL fields must use PIC-aware displayValue(): " + entry);
 
         String trace = result.files().get("src/main/resources/c2c-trace.json");
         assertNotNull(trace);

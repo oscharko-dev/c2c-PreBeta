@@ -511,6 +511,9 @@ fi
 if [[ "$MODE" == "foundry" ]]; then
   log "running foundry-smoke.sh capability probe through Model Gateway"
   MODEL_GATEWAY_BASE_URL="http://127.0.0.1:${C2C_LOCAL_MODEL_GATEWAY_PORT:-18087}" \
+  MODEL_GATEWAY_CONTROL_TOKEN="${C2C_LOCAL_INTERNAL_CONTROL_TOKEN:-${C2C_INTERNAL_CONTROL_TOKEN:-${C2C_LOCAL_HARNESS_TOKEN:-c2c-local-control-plane-token}}}" \
+  HARNESS_BASE_URL="http://127.0.0.1:${C2C_LOCAL_HARNESS_PORT:-18080}" \
+  HARNESS_CONTROL_TOKEN="${C2C_LOCAL_HARNESS_TOKEN:-c2c-local-control-plane-token}" \
     "$ROOT_DIR/scripts/foundry-smoke.sh" transformation \
       "${C2C_MODEL_DEFAULT_DEPLOYMENT:-gpt-oss-120b}" \
     || fail "foundry-smoke.sh refused to confirm Foundry capability for transformation" 3

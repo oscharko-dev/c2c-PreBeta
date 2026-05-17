@@ -334,6 +334,13 @@ def _rmtree(path: str) -> None:
 
 
 class OrchestratorIntegrationTests(unittest.TestCase):
+    CONTROL_TOKEN = "integration-control-token"
+    AUTH_HEADERS = {"Authorization": f"Bearer {CONTROL_TOKEN}"}
+    JSON_AUTH_HEADERS = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {CONTROL_TOKEN}",
+    }
+
     def _create_orchestrator(self, host: str, mock_port: int):
         artifact_root = tempfile.mkdtemp(prefix="orchestrator-artifacts-")
         self.addCleanup(_rmtree, artifact_root)
@@ -357,6 +364,8 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             build_test_capability_id="java.build-test",
             evidence_capability_id="evidence.writer",
             model_gateway_capability_id="model-gateway",
+            control_token=OrchestratorIntegrationTests.CONTROL_TOKEN,
+            capability_control_token=OrchestratorIntegrationTests.CONTROL_TOKEN,
             run_artifact_root=artifact_root,
             w0_capabilities=(
                 {"id": "cobol.parse", "name": "COBOL Parser", "owner": "parser-service", "dataClass": "parser", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/parse"},
@@ -398,7 +407,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                     "POST",
                     "/v0/runs",
                     body=json.dumps(payload),
-                    headers={"Content-Type": "application/json"},
+                    headers=self.JSON_AUTH_HEADERS,
                 )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 201)
@@ -411,7 +420,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             for _ in range(60):
                 connection = HTTPConnection(host, orchestrator_port, timeout=3)
                 try:
-                    connection.request("GET", f"/v0/runs/{run_id}")
+                    connection.request("GET", f"/v0/runs/{run_id}", headers=self.AUTH_HEADERS)
                     status_response = connection.getresponse()
                     run_state = json.loads(status_response.read().decode("utf-8"))
                     status = run_state.get("status", "")
@@ -486,7 +495,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                     "POST",
                     "/v0/runs",
                     body=json.dumps(payload),
-                    headers={"Content-Type": "application/json"},
+                    headers=self.JSON_AUTH_HEADERS,
                 )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 201)
@@ -499,7 +508,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             for _ in range(60):
                 connection = HTTPConnection(host, orchestrator_port, timeout=3)
                 try:
-                    connection.request("GET", f"/v0/runs/{run_id}")
+                    connection.request("GET", f"/v0/runs/{run_id}", headers=self.AUTH_HEADERS)
                     status_response = connection.getresponse()
                     run_state = json.loads(status_response.read().decode("utf-8"))
                     status = run_state.get("status", "")
@@ -568,7 +577,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 connection.request(
                     "GET",
                     "/health",
-                    headers={"Content-Type": "application/json"},
+                    headers=self.JSON_AUTH_HEADERS,
                 )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 200)
@@ -578,6 +587,67 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(health["status"], "ok")
             self.assertEqual(health["service"], "orchestrator-service")
             self.assertEqual(len(state.capability_registrations), 6)
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_run_routes_require_control_token(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            MockHarnessHandler.state = state
+            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request("GET", "/v0/runs")
+                response = connection.getresponse()
+                self.assertEqual(response.status, 401)
+                _ = response.read()
+            finally:
+                connection.close()
+
+            payload = {
+                "requester": "integration",
+                "inputRef": {
+                    "uri": "urn:integration/main.cob",
+                    "source": "IDENTIFICATION DIVISION.",
+                },
+            }
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps(payload),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 401)
+                _ = response.read()
+            finally:
+                connection.close()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps(payload),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 201)
+                _ = response.read()
+            finally:
+                connection.close()
         finally:
             mock_server.shutdown()
             mock_server.server_close()
@@ -610,7 +680,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                             },
                         }
                     ),
-                    headers={"Content-Type": "application/json"},
+                    headers=self.JSON_AUTH_HEADERS,
                 )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 201)
@@ -620,7 +690,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             time.sleep(0.05)
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
             try:
-                connection.request("GET", f"/v0/runs/{run_id}")
+                connection.request("GET", f"/v0/runs/{run_id}", headers=self.AUTH_HEADERS)
                 mid_response = connection.getresponse()
                 run_state = json.loads(mid_response.read().decode("utf-8"))
                 self.assertEqual(mid_response.status, 200)
@@ -648,14 +718,14 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
             try:
-                connection.request("GET", "/v0/runs")
+                connection.request("GET", "/v0/runs", headers=self.AUTH_HEADERS)
                 list_response = connection.getresponse()
                 self.assertEqual(list_response.status, 503)
             finally:
                 connection.close()
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
             try:
-                connection.request("GET", "/v0/runs/run-1")
+                connection.request("GET", "/v0/runs/run-1", headers=self.AUTH_HEADERS)
                 run_response = connection.getresponse()
                 self.assertEqual(run_response.status, 503)
             finally:
@@ -692,7 +762,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                             },
                         }
                     ),
-                    headers={"Content-Type": "application/json"},
+                    headers=self.JSON_AUTH_HEADERS,
                 )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 201)
@@ -704,7 +774,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             for _ in range(60):
                 connection = HTTPConnection(host, orchestrator_port, timeout=3)
                 try:
-                    connection.request("GET", f"/v0/runs/{run_id}")
+                    connection.request("GET", f"/v0/runs/{run_id}", headers=self.AUTH_HEADERS)
                     resp = connection.getresponse()
                     body = json.loads(resp.read().decode("utf-8"))
                     status = body.get("status", "")
@@ -717,7 +787,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
             try:
-                connection.request("GET", f"/v0/runs/{run_id}/workflow")
+                connection.request("GET", f"/v0/runs/{run_id}/workflow", headers=self.AUTH_HEADERS)
                 response = connection.getresponse()
                 self.assertEqual(response.status, 200)
                 workflow = json.loads(response.read().decode("utf-8"))
@@ -769,7 +839,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                             },
                         }
                     ),
-                    headers={"Content-Type": "application/json"},
+                    headers=self.JSON_AUTH_HEADERS,
                 )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 201)
@@ -781,7 +851,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             for _ in range(60):
                 connection = HTTPConnection(host, orchestrator_port, timeout=3)
                 try:
-                    connection.request("GET", f"/v0/runs/{run_id}")
+                    connection.request("GET", f"/v0/runs/{run_id}", headers=self.AUTH_HEADERS)
                     resp = connection.getresponse()
                     body = json.loads(resp.read().decode("utf-8"))
                     status = body.get("status", "")
@@ -795,7 +865,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             def _fetch_json(path: str):
                 conn = HTTPConnection(host, orchestrator_port, timeout=3)
                 try:
-                    conn.request("GET", path)
+                    conn.request("GET", path, headers=self.AUTH_HEADERS)
                     r = conn.getresponse()
                     return r.status, json.loads(r.read().decode("utf-8"))
                 finally:

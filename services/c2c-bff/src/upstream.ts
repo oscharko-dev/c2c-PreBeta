@@ -174,6 +174,7 @@ export interface OrchestratorClient {
     targetLanguage?: string;
     expectedOutput?: string;
     oracleInput?: string;
+    useTransformationAgent?: boolean;
   }): Promise<UpstreamResponse | undefined>;
   getRun(runId: string): Promise<UpstreamResponse | undefined>;
   getArtifacts(runId: string): Promise<UpstreamResponse | undefined>;
@@ -206,7 +207,12 @@ export interface ExperienceLearningClient {
   getRunSummary(runId: string): Promise<UpstreamResponse | undefined>;
 }
 
-export function createOrchestratorClient(baseUrl: string, http: HttpClient, timeoutMs: number): OrchestratorClient {
+export function createOrchestratorClient(
+  baseUrl: string,
+  http: HttpClient,
+  timeoutMs: number,
+  controlToken = '',
+): OrchestratorClient {
   if (!baseUrl) {
     return {
       enabled: false,
@@ -251,10 +257,15 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       },
     };
   }
+  const trimmedControlToken = controlToken.trim();
+  const controlHeaders = trimmedControlToken
+    ? { Authorization: `Bearer ${trimmedControlToken}` }
+    : undefined;
   const getRunScopedArtifact = async (runId: string, segment: string): Promise<UpstreamResponse | undefined> => {
     const safe = encodeURIComponent(runId);
     return http.request(`${baseUrl}/v0/runs/${safe}/${segment}`, {
       method: 'GET',
+      headers: controlHeaders,
       timeoutMs,
     });
   };
@@ -273,6 +284,7 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       };
       return http.request(`${baseUrl}/v0/runs`, {
         method: 'POST',
+        headers: controlHeaders,
         body: payload,
         timeoutMs,
       });
@@ -286,6 +298,7 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       targetLanguage,
       expectedOutput,
       oracleInput,
+      useTransformationAgent,
     }) {
       const sha256 = createHash('sha256').update(sourceText, 'utf8').digest('hex');
       const inputRef: Record<string, unknown> = {
@@ -316,8 +329,12 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       if (options !== undefined) {
         payload.options = options;
       }
+      if (typeof useTransformationAgent === 'boolean') {
+        payload.useTransformationAgent = useTransformationAgent;
+      }
       return http.request(`${baseUrl}/v0/runs`, {
         method: 'POST',
+        headers: controlHeaders,
         body: payload,
         timeoutMs,
       });
@@ -326,6 +343,7 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       const safe = encodeURIComponent(runId);
       return http.request(`${baseUrl}/v0/runs/${safe}`, {
         method: 'GET',
+        headers: controlHeaders,
         timeoutMs,
       });
     },
@@ -339,6 +357,7 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       const safe = encodeURIComponent(runId);
       return http.request(`${baseUrl}/v0/runs/${safe}/generated/files`, {
         method: 'GET',
+        headers: controlHeaders,
         timeoutMs,
       });
     },
@@ -358,6 +377,7 @@ export function createOrchestratorClient(baseUrl: string, http: HttpClient, time
       const responseCap = maxResponseBytes === undefined ? undefined : maxResponseBytes + 4096;
       return http.request(`${baseUrl}/v0/runs/${safeRun}/generated/files/${encodedPath}`, {
         method: 'GET',
+        headers: controlHeaders,
         timeoutMs,
         maxResponseBytes: responseCap,
       });

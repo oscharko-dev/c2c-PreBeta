@@ -250,9 +250,13 @@ class TransformationAgentRequestAssemblyTests(unittest.TestCase):
         self.assertEqual(gateway_request["modelId"], "gpt-oss-120b")
         self.assertEqual(gateway_request["dataClass"], "model-gateway")
         self.assertTrue(gateway_request["structuredOutput"])
+        self.assertNotIn("schemaVersion", gateway_request)
+        self.assertNotIn("workflowId", gateway_request)
         parameters = gateway_request["parameters"]
         self.assertEqual(parameters["runId"], "run-1")
         self.assertEqual(parameters["attemptNumber"], 1)
+        self.assertEqual(parameters["temperature"], 0)
+        self.assertEqual(parameters["max_tokens"], 8192)
         self.assertEqual(parameters["sourceRef"]["uri"], "urn:src/main.cob")
         self.assertEqual(parameters["semanticIrRef"]["uri"], "urn:ir/HELLO")
         self.assertEqual(parameters["baselineJavaRef"]["uri"], "urn:baseline/HELLO")
@@ -267,6 +271,8 @@ class TransformationAgentRequestAssemblyTests(unittest.TestCase):
         self.assertEqual(envelope["targetPackageBase"], _config().transformation_agent_package_base)
         self.assertEqual(envelope["targetRuntimeLibrary"], _config().transformation_agent_runtime_library)
         self.assertEqual(envelope["sourceProgramId"], "HELLO")
+        self.assertIn("files must be a non-empty JSON object", envelope["outputContract"]["successRequirements"])
+        self.assertIn("files", envelope["outputContract"]["successSkeleton"])
         self.assertEqual(envelope["sourceText"], _request().source_text)
         self.assertEqual(envelope["sourceRef"]["uri"], "urn:src/main.cob")
         self.assertEqual(envelope["semanticIrRef"]["uri"], "urn:ir/HELLO")
@@ -372,6 +378,22 @@ class TransformationAgentSuccessPersistenceTests(unittest.TestCase):
         self.assertEqual(response["toolUseRecords"][0]["surface"], "model-gateway")
         self.assertEqual(response["toolUseRecords"][0]["status"], "success")
 
+    def test_completed_inner_status_is_normalized_to_success(self) -> None:
+        gateway_response = _ok_gateway_response(output_overrides={"status": "completed"})
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RunArtifactStore(tmp)
+            store.init_run("run-1", "w0-migration-v0")
+            agent = TransformationAgent(
+                config=_config(),
+                artifact_store=store,
+                model_invoker=_StubInvoker(gateway_response),
+            )
+
+            result = agent.invoke(_request())
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.response_payload["status"], "success")
+
 
 class TransformationAgentBlockedTests(unittest.TestCase):
     """The agent must return a structured ``blocked`` result when the model
@@ -406,6 +428,46 @@ class TransformationAgentBlockedTests(unittest.TestCase):
             self.assertFalse((attempt_dir / "generated-project-manifest.json").exists())
             self.assertFalse((attempt_dir / "java").exists())
 
+    def test_fully_qualified_entry_class_is_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RunArtifactStore(tmp)
+            store.init_run("run-1", "w0-migration-v0")
+            agent = TransformationAgent(
+                config=_config(),
+                artifact_store=store,
+                model_invoker=_StubInvoker(
+                    _ok_gateway_response(
+                        output_overrides={"entryClass": "com.c2c.generated.Hello"}
+                    )
+                ),
+            )
+
+            result = agent.invoke(_request())
+
+            self.assertEqual(result.status, "success")
+            self.assertIsNotNone(result.candidate)
+            self.assertEqual(result.candidate.entry_class, "Hello")
+            self.assertEqual(result.candidate.entry_package, "com.c2c.generated")
+
+    def test_generated_project_file_map_is_canonicalized(self) -> None:
+        gateway_response = _ok_gateway_response()
+        files = gateway_response["output"].pop("files")
+        gateway_response["output"]["generatedProject"] = {"files": files}
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RunArtifactStore(tmp)
+            store.init_run("run-1", "w0-migration-v0")
+            agent = TransformationAgent(
+                config=_config(),
+                artifact_store=store,
+                model_invoker=_StubInvoker(gateway_response),
+            )
+
+            result = agent.invoke(_request())
+
+            self.assertEqual(result.status, "success")
+            self.assertIsNotNone(result.candidate)
+            self.assertIn("src/main/java/com/c2c/generated/Hello.java", result.candidate.files)
+
 
 class TransformationAgentRejectionTests(unittest.TestCase):
     """Negative paths: invalid model output must be rejected, not silently
@@ -433,12 +495,12 @@ class TransformationAgentRejectionTests(unittest.TestCase):
         self.assertIn("Java type declaration", str(ctx.exception))
         self.assertEqual(ctx.exception.failure_code, "agent_contract_invalid")
 
-    def test_missing_entry_class_is_rejected(self) -> None:
+    def test_missing_entry_class_is_derived_from_entry_file(self) -> None:
         gateway_response = _ok_gateway_response()
         gateway_response["output"].pop("entryClass")
         agent = self._agent_for_response(gateway_response)
-        with self.assertRaises(AgentContractInvalidAgentError):
-            agent.invoke(_request())
+        result = agent.invoke(_request())
+        self.assertEqual(result.candidate.entry_class, "Hello")
 
     # noinspection PyPep8Naming
     def test_missing_modelInvocationId_is_rejected(self) -> None:
@@ -458,13 +520,32 @@ class TransformationAgentRejectionTests(unittest.TestCase):
             agent.invoke(_request())
         self.assertIn("missing ledgerRef", str(ctx.exception))
 
-    def test_non_java_file_extension_is_rejected(self) -> None:
+    def test_success_can_include_non_java_project_support_files(self) -> None:
         gateway_response = _ok_gateway_response(
-            files={"src/main/java/com/c2c/generated/Hello.txt": SAMPLE_JAVA}
+            files={
+                "README.md": "# Generated project\n",
+                "pom.xml": "<project />\n",
+                "src/main/java/com/c2c/generated/Hello.java": SAMPLE_JAVA,
+            }
         )
         agent = self._agent_for_response(gateway_response)
-        with self.assertRaises(AgentContractInvalidAgentError):
+        result = agent.invoke(_request())
+        self.assertIn("README.md", result.candidate.files)
+        self.assertIn("pom.xml", result.candidate.files)
+        self.assertEqual(result.candidate.entry_file_path, "src/main/java/com/c2c/generated/Hello.java")
+
+    def test_entry_file_path_must_be_java(self) -> None:
+        gateway_response = _ok_gateway_response(
+            files={
+                "README.md": SAMPLE_JAVA,
+                "src/main/java/com/c2c/generated/Hello.java": SAMPLE_JAVA,
+            }
+        )
+        gateway_response["output"]["entryFilePath"] = "README.md"
+        agent = self._agent_for_response(gateway_response)
+        with self.assertRaises(AgentContractInvalidAgentError) as ctx:
             agent.invoke(_request())
+        self.assertIn("must point to a .java file", str(ctx.exception))
 
     def test_oversized_output_is_rejected(self) -> None:
         big = "package com.c2c.generated;\npublic class Big {}\n" + ("// padding\n" * 200000)

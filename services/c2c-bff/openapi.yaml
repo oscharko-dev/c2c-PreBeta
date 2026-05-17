@@ -1436,6 +1436,20 @@ components:
         productMode: { type: string, enum: [live, unavailable] }
         summary: { type: string }
         observationPolicy: { type: string }
+        learningSignals:
+          type: array
+          items:
+            type: object
+            required: [key, label, status, count]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              status: { type: string, enum: [observed, absent] }
+              summary: { type: string }
+              count: { type: integer, minimum: 0 }
+              evidenceRefs:
+                type: array
+                items: { type: string }
         detectedPatterns:
           type: array
           items: { type: string }

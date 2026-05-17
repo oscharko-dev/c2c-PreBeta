@@ -170,6 +170,14 @@ class TransformationAgentWorkflowIntegrationTests(unittest.TestCase):
             build_test_call[2]["generatedProject"]["generationSource"],
             "transformation-agent",
         )
+        self.assertEqual(
+            build_test_call[2]["generatedProject"]["entryClass"],
+            "com.c2c.generated.Hello",
+        )
+        self.assertEqual(
+            build_test_call[2]["generatedProject"]["entryPackage"],
+            "com.c2c.generated",
+        )
 
     def test_agent_disabled_preserves_deterministic_baseline(self) -> None:
         runner, gateway, store, _tmp = self._runner(agent_response=_ok_model_response())

@@ -15,6 +15,7 @@ interface CapturedRequest {
   method: string;
   path: string;
   body: string;
+  headers: http.IncomingHttpHeaders;
 }
 
 async function withEchoServer<T>(
@@ -27,7 +28,7 @@ async function withEchoServer<T>(
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf-8');
-      captured.push({ method: req.method ?? 'GET', path: req.url ?? '/', body });
+      captured.push({ method: req.method ?? 'GET', path: req.url ?? '/', body, headers: req.headers });
       handler(req, res, body);
     });
   });
@@ -118,6 +119,26 @@ test('transform orchestrator client includes source text metadata and default re
   );
 });
 
+test('orchestrator client forwards configured control token', async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({ run: { runId: 'live-auth-1' }, status: 'started' });
+      res.writeHead(201, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000, 'orchestrator-control-token');
+      const response = await orch.startRun({
+        programId: 'BRNCH01',
+        cobolSourcePath: 'corpus/synthetic/programs/reference.cbl',
+      });
+      assert.equal(response?.status, 201);
+      assert.equal(captured[0]?.headers.authorization, 'Bearer orchestrator-control-token');
+    },
+  );
+});
+
 test('orchestrator and evidence clients are disabled when no base url is configured', async () => {
   const client = createNodeHttpClient();
   const orch = createOrchestratorClient('', client, 1_000);
@@ -158,6 +179,27 @@ test('startTransformRun forwards W0.2 targetLanguage and oracle metadata on the 
       assert.equal(parsed.targetLanguage, 'java');
       assert.equal(parsed.inputRef.expectedOutput, 'HELLO WORLD\n');
       assert.equal(parsed.inputRef.oracleInput, undefined);
+    },
+  );
+});
+
+test('startTransformRun forwards transformation-agent opt-in on the run payload', async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({ run: { runId: 'live-1', status: 'updating' }, status: 'started' });
+      res.writeHead(201, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      await orch.startTransformRun({
+        programId: 'HELLO01',
+        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        useTransformationAgent: true,
+      });
+      const parsed = JSON.parse(captured[0]?.body ?? '{}');
+      assert.equal(parsed.useTransformationAgent, true);
     },
   );
 });

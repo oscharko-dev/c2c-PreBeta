@@ -15,7 +15,7 @@ export function ExperienceLearningPanel() {
     );
   }
 
-  const { summary, observationPolicy, detectedPatterns, artifactRefs } = state.experience;
+  const { summary, observationPolicy, learningSignals, detectedPatterns, artifactRefs } = state.experience;
 
   return (
     <div className="flex flex-col h-full overflow-y-auto p-4 space-y-6 text-sm text-neutral-300">
@@ -29,6 +29,27 @@ export function ExperienceLearningPanel() {
         <div className="bg-neutral-800 rounded p-3 font-mono text-xs">
           {observationPolicy || 'default'}
         </div>
+      </div>
+
+      <div>
+        <h4 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">W0.2 Learning Signals</h4>
+        {learningSignals && learningSignals.length > 0 ? (
+          <ul className="space-y-2">
+            {learningSignals.map((signal) => (
+              <li key={signal.key} className="rounded border border-neutral-800 bg-neutral-900/60 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-neutral-200">{signal.label}</span>
+                  <span className={signal.status === 'observed' ? 'text-emerald-300' : 'text-neutral-500'}>
+                    {signal.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-neutral-400">{signal.summary || `${signal.count} evidence record(s)`}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-neutral-500 italic">No W0.2 learning signals reported.</p>
+        )}
       </div>
 
       <div>

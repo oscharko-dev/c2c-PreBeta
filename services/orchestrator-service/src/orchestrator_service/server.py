@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hmac
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -100,6 +101,31 @@ class OrchestratorService:
                 raw = self.rfile.read(content_length)
                 return json.loads(raw.decode("utf-8"))
 
+            def _presented_control_token(self) -> str:
+                raw = self.headers.get("X-C2C-Control-Token", "").strip()
+                if raw:
+                    return raw
+                raw = self.headers.get("X-Harness-Token", "").strip()
+                if raw:
+                    return raw
+                authorization = self.headers.get("Authorization", "").strip()
+                prefix = "bearer "
+                if authorization.lower().startswith(prefix):
+                    return authorization[len(prefix):].strip()
+                return ""
+
+            def _is_authorized(self) -> bool:
+                expected = service.config.control_token.strip()
+                if not expected:
+                    return False
+                return hmac.compare_digest(self._presented_control_token(), expected)
+
+            def _require_control_token(self) -> bool:
+                if self._is_authorized():
+                    return True
+                self._write_json(401, {"error": "unauthorized"})
+                return False
+
             # noinspection PyPep8Naming
             def do_GET(self) -> None:
                 try:
@@ -116,6 +142,8 @@ class OrchestratorService:
                                 "workflowId": service.config.workflow_id,
                             },
                         )
+                        return
+                    if not self._require_control_token():
                         return
                     if parts == ["v0", "runs"]:
                         self._write_json(200, service._runs_list())
@@ -165,6 +193,8 @@ class OrchestratorService:
             def do_POST(self) -> None:
                 try:
                     parts = self._route_parts()
+                    if not self._require_control_token():
+                        return
                     if len(parts) == 2 and parts[0] == "v0" and parts[1] == "runs":
                         payload = self._read_json()
                         status_code, response_body = service._start_run(payload)
@@ -181,6 +211,8 @@ class OrchestratorService:
 
             # noinspection PyPep8Naming
             def do_PATCH(self) -> None:
+                if not self._require_control_token():
+                    return
                 self._write_json(405, {"error": "method not allowed"})
 
             def log_message(self, fmt: str, *args: object) -> None:
@@ -708,7 +740,15 @@ def create_configured_server(config: OrchestratorConfig) -> tuple[HTTPServer, W0
             "X-Harness-Role": "orchestrator",
         }
     http_client = JSONHTTPClient(timeout_seconds=config.request_timeout_seconds)
-    gateway = HarnessGateway(config.harness_base_url, http_client, harness_headers=harness_headers)
+    capability_headers = {}
+    if config.capability_control_token:
+        capability_headers = {"Authorization": f"Bearer {config.capability_control_token}"}
+    gateway = HarnessGateway(
+        config.harness_base_url,
+        http_client,
+        harness_headers=harness_headers,
+        capability_headers=capability_headers,
+    )
     _register_capabilities_with_harness(config=config, gateway=gateway)
     artifact_store = RunArtifactStore(config.run_artifact_root, created_by=config.service_name)
     experience_learning: ExperienceLearningGateway | NullExperienceLearningGateway

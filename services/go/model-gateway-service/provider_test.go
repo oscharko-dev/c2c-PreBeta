@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -104,8 +105,8 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 		Prompt:                 "hello",
 		TimeoutMs:              1000,
 		PromptTemplateVersion:  "v1",
-		StructuredOutput:       true,
-		StructuredOutputSchema: map[string]any{"type": "object"},
+		StructuredOutput:       false,
+		StructuredOutputSchema: map[string]any{},
 		Parameters: map[string]any{
 			"temperature": 0.2,
 		},
@@ -130,6 +131,119 @@ func TestFoundryAdapter_Invoke(t *testing.T) {
 	}
 	if len(received) == 0 {
 		t.Fatalf("expected non-empty request body")
+	}
+}
+
+func TestFoundryAdapter_InvokeStructuredOutputParsesCompletionJSON(t *testing.T) {
+	var systemMessage string
+	var responseFormat map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make(map[string]any, 8)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if raw, ok := body["response_format"].(map[string]any); ok {
+			responseFormat = raw
+		}
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) == 0 {
+			t.Fatalf("expected messages in request body")
+		}
+		first, ok := messages[0].(map[string]any)
+		if !ok {
+			t.Fatalf("expected first message object")
+		}
+		systemMessage, _ = first["content"].(string)
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": "```json\n{\"decision\":\"refuse\",\"rationale\":\"not safe\",\"refusalCode\":\"no_safe_repair\"}\n```"}},
+			},
+			"usage": map[string]any{"total_tokens": float64(42)},
+		})
+	}))
+	defer server.Close()
+
+	adapter, err := NewFoundryAdapter(ProviderFoundryConfig{
+		Endpoint:  server.URL,
+		ApiKeyRef: "api-key-ref-123",
+		TimeoutMs: 2000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected adapter error: %v", err)
+	}
+
+	output, err := adapter.Invoke(context.Background(), ModelInvocationRequest{
+		ModelID:                "m-1",
+		Prompt:                 "hello",
+		TimeoutMs:              1000,
+		PromptTemplateVersion:  "v0",
+		StructuredOutput:       true,
+		StructuredOutputSchema: map[string]any{"type": "object"},
+		Parameters:             map[string]any{},
+	}, ModelMetadata{
+		ID:             "m-1",
+		DeploymentName: "deployment-1",
+		ModelName:      "foundry-gpt",
+		Version:        "1",
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected invoke error: %v", err)
+	}
+	if output.Data["decision"] != "refuse" {
+		t.Fatalf("expected parsed decision, got %v", output.Data["decision"])
+	}
+	if _, ok := output.Data["text"]; ok {
+		t.Fatalf("structured output should not retain raw text")
+	}
+	if systemMessage == "" || !strings.Contains(systemMessage, "Return only a single JSON object") {
+		t.Fatalf("expected structured-output system instruction, got %q", systemMessage)
+	}
+	if responseFormat["type"] != "json_object" {
+		t.Fatalf("expected JSON-mode response_format, got %#v", responseFormat)
+	}
+	if usage, ok := output.Metadata["usage"].(map[string]any); !ok || usage["total_tokens"] != float64(42) {
+		t.Fatalf("expected usage metadata, got %#v", output.Metadata["usage"])
+	}
+}
+
+func TestFoundryAdapter_InvokeStructuredOutputRejectsNonJSONCompletion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": "not json"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter, err := NewFoundryAdapter(ProviderFoundryConfig{
+		Endpoint:  server.URL,
+		ApiKeyRef: "api-key-ref-123",
+		TimeoutMs: 2000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected adapter error: %v", err)
+	}
+
+	_, err = adapter.Invoke(context.Background(), ModelInvocationRequest{
+		ModelID:                "m-1",
+		Prompt:                 "hello",
+		TimeoutMs:              1000,
+		PromptTemplateVersion:  "v0",
+		StructuredOutput:       true,
+		StructuredOutputSchema: map[string]any{"type": "object"},
+		Parameters:             map[string]any{},
+	}, ModelMetadata{
+		ID:             "m-1",
+		DeploymentName: "deployment-1",
+		ModelName:      "foundry-gpt",
+		Version:        "1",
+	})
+	if err == nil {
+		t.Fatalf("expected non-JSON structured output to fail")
 	}
 }
 

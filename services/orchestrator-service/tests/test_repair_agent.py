@@ -322,8 +322,12 @@ class RepairAgentGatewayRequestTests(unittest.TestCase):
         self.assertEqual(call["agentRole"], "verification-repair")
         self.assertEqual(call["modelId"], "gpt-oss-120b")
         self.assertTrue(call["structuredOutput"])
+        self.assertNotIn("schemaVersion", call)
+        self.assertNotIn("workflowId", call)
         params = call["parameters"]
         self.assertEqual(params["failureCategory"], "java_compile_failed")
+        self.assertEqual(params["temperature"], 0)
+        self.assertEqual(params["max_tokens"], 8192)
         self.assertEqual(params["previousJavaCandidateRef"]["uri"], "urn:gen/manifest")
         self.assertEqual(params["buildTestResultRef"]["uri"], "urn:build/result")
         self.assertEqual(params["semanticIrRef"]["uri"], "urn:ir/HELLO")
@@ -600,6 +604,17 @@ class RepairAgentGatewayFailureTests(unittest.TestCase):
         with self.assertRaises(RepairAgentContractInvalidError):
             agent.invoke(_request())
 
+    def test_missing_rationale_is_derived_for_valid_decision(self):
+        response = _ok_propose_response()
+        response["output"].pop("rationale")
+        response["output"]["explanation"] = "Applied a Java-only repair."
+        agent, store, tmp = _agent_for(response)
+
+        result = agent.invoke(_request())
+
+        self.assertEqual(result.decision, DECISION_PROPOSE)
+        self.assertEqual(result.rationale, "Applied a Java-only repair.")
+
 
 # ---------------------------------------------------------------------------
 # Java candidate validation (delegated to transformation_agent decoder)
@@ -631,12 +646,12 @@ class RepairAgentCandidateValidationTests(unittest.TestCase):
         with self.assertRaises(RepairAgentContractInvalidError):
             agent.invoke(_request())
 
-    def test_missing_entry_class_rejected(self):
+    def test_missing_entry_class_is_derived_from_entry_file(self):
         bad = _ok_propose_response()
         bad["output"].pop("entryClass")
         agent, store, tmp = _agent_for(bad)
-        with self.assertRaises(RepairAgentContractInvalidError):
-            agent.invoke(_request())
+        result = agent.invoke(_request())
+        self.assertEqual(result.candidate.entry_class, "Hello")
 
     def test_entry_file_must_declare_package(self):
         bad = _ok_propose_response(

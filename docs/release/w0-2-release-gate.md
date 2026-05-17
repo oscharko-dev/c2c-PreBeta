@@ -134,7 +134,7 @@ must be re-derivable from the artifact path in the right column.
 ### 8. Behavioural verification runs against an explicit oracle
 
 - [x] `artifacts.oracleComparison.matched == true`,
-      `oracleKind ∈ {cobol-runtime, synthetic, true-golden-master}`, and
+      `oracleKind ∈ {cobol-runtime, synthetic, true-golden-master, user-provided}`, and
       `actualSha256 == expectedSha256`.
       _Evidence_:
       [`schemas/evidence-pack-manifest-v0.json`](../../schemas/evidence-pack-manifest-v0.json) ·
@@ -197,8 +197,9 @@ must be re-derivable from the artifact path in the right column.
 - [x] The Experience Learning surface records first-class W0.2 signals
       for the run: tool/capability availability, model invocation
       outcome, agent handoff, repair-loop progress, and generated-Java
-      candidate outcome class. The Studio renders these read-only via
-      `runs/{runId}/learning` and `runs/{runId}/experience`. The Harness
+      candidate outcome class. The BFF preserves those signals on
+      `runs/{runId}/experience`, and Studio renders them read-only alongside
+      pattern observations. The Harness
       MUST NOT take control decisions; the Orchestrator and the
       deterministic gatekeeper remain in charge.
       _Evidence_:

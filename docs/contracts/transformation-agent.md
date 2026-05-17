@@ -59,7 +59,7 @@ existing callers are unaffected.
 | `inputArtifactRefs` | yes (≥1) | content-addressed refs to source COBOL, Semantic IR, deterministic baseline manifest, oracle |
 | `policyDecisionRef` | yes | `policy allow` decision stamped at request time |
 | `modelInvocationRef` | yes | Provisional invocation id the gateway can reuse. `ledgerRef` is intentionally omitted here because the gateway creates the invocation ledger during the model call; the persisted response must include it. |
-| `deadlineMs` | yes | configured per agent (default 30 s) |
+| `deadlineMs` | yes | configured per agent (default 60 s) |
 | `traceRef` | optional | `trace-{runId}` for Experience Learning correlation |
 
 The request payload is validated against
@@ -99,7 +99,7 @@ The payload shape is:
     "baselineJavaRef": { ... },
     "oracleRef": { ... }
   },
-  "timeoutMs": 30000
+  "timeoutMs": 60000
 }
 ```
 
@@ -122,7 +122,7 @@ outside that shape.
 ```jsonc
 {
   "status": "success" | "blocked" | "failed",
-  "files": { "<relative.java path>": "<UTF-8 file body>" },
+  "files": { "<relative project path>": "<UTF-8 file body>" },
   "entryClass":     "Foo",
   "entryPackage":   "com.c2c.generated",
   "entryFilePath":  "src/main/java/com/c2c/generated/Foo.java",
@@ -138,16 +138,23 @@ outside that shape.
 Applied **before** the orchestrator persists or builds:
 
 - `status` must be one of `success`, `blocked`, `failed`.
+- The adapter accepts a provider-returned `completed` status as a narrow
+  synonym for `success`, but persisted agent responses always use
+  `success`.
 - For `success`:
   - `files` is non-empty.
-  - Every file path is a relative POSIX path ending in `.java`.
-  - At least one file contains a Java type declaration
-    (`class`/`interface`/`enum`/`record`).
-  - `entryClass` is a valid Java identifier.
-  - `entryPackage` is a valid dotted Java package; defaults to the
-    configured package base when omitted.
+  - Every file path is a safe relative POSIX path. Java sources must end in
+    `.java`; support files such as `pom.xml`, `README.md`, and JSON metadata
+    may be included when they are part of the generated project.
+  - At least one `.java` file is present and at least one Java file contains
+    a Java type declaration (`class`/`interface`/`enum`/`record`).
+  - `entryClass` is a valid Java identifier. If omitted, it is derived from
+    the entry Java file's top-level type declaration.
+  - `entryPackage` is a valid dotted Java package. If omitted, it is derived
+    from the entry Java file's `package` declaration.
   - `entryFilePath` is present in `files` and its body carries a
-    `package` declaration.
+    `package` declaration. If omitted and exactly one Java file is present,
+    that file is used as the entry file.
   - Total `files` byte size ≤ 1 MiB
     (`transformation_agent_max_output_bytes`).
 - For `blocked`: `unsupportedConstructs` non-empty; `failureCode` defaults
@@ -182,7 +189,7 @@ Every attempt writes the following artifacts under
 | `agent-request.json` | `transformation-agent-request` | validated `agent-invocation-request-v0` |
 | `agent-response.json` | `transformation-agent-response` | validated `agent-invocation-response-v0` |
 | `generated-project-manifest.json` | `transformation-agent-project-manifest` | manifest with `runId`, `attemptNumber`, `sourceProgramId`, `generationSource = "agent"`, `targetLanguage = "java"`, structured `modelInvocationRef` including ledger reference, `semanticIrRef`, `sourceProgramRef`, per-file sha256/byteSize, `entryClass`, `entryPackage`, `entryFilePath`, `unsupportedConstructs` |
-| `java/<path>.java` (each generated file) | `transformation-agent-java-file` | UTF-8 Java source |
+| `java/<path>` (each generated project file) | `transformation-agent-java-file` for Java sources; `transformation-agent-project-file` for support files | UTF-8 Java source or supporting project file |
 
 The manifest's URI/sha256/byteSize is the value used as `javaCandidateRef`
 on the agent response and as `generatedJavaRef` on the W0.2 run contract
@@ -245,7 +252,7 @@ ineffective prompt templates.
 |---------|---------|---------|
 | `ORCHESTRATOR_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID` | `c2c.transformation-agent.cobol-to-java.v0` | Stable id of the policy-controlled prompt template (registry-owned, never the body) |
 | `ORCHESTRATOR_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION` | `v0` | Version of the template the gateway will render |
-| `ORCHESTRATOR_TRANSFORMATION_AGENT_DEADLINE_MS` | `30000` | Per-attempt deadline forwarded to the gateway |
+| `ORCHESTRATOR_TRANSFORMATION_AGENT_DEADLINE_MS` | `60000` | Per-attempt deadline forwarded to the gateway |
 | `ORCHESTRATOR_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES` | `1048576` | Maximum total byte size of generated Java files |
 | `ORCHESTRATOR_TRANSFORMATION_AGENT_PACKAGE_BASE` | `com.c2c.generated` | Default Java package when the model omits `entryPackage` |
 | `ORCHESTRATOR_TRANSFORMATION_AGENT_JAVA_VERSION` | `21` | Target Java version stamped on the prompt envelope |
