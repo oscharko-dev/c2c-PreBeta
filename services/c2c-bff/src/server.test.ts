@@ -1,16 +1,19 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import * as http from 'node:http';
-import { createHash } from 'node:crypto';
-import * as net from 'node:net';
-import { AddressInfo } from 'node:net';
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as http from "node:http";
+import { createHash } from "node:crypto";
+import * as net from "node:net";
+import { AddressInfo } from "node:net";
 
-import { createApp } from './server';
-import { createRunStore } from './run-store';
-import { PLACEHOLDER_JAVA_MARKERS, findPlaceholderMarker } from './placeholder-markers';
-import * as path from 'node:path';
-import * as fs from 'node:fs';
-import type { SampleDetail, SampleRegistry, SampleSummary } from './samples';
+import { createApp } from "./server";
+import { createRunStore } from "./run-store";
+import {
+  PLACEHOLDER_JAVA_MARKERS,
+  findPlaceholderMarker,
+} from "./placeholder-markers";
+import * as path from "node:path";
+import * as fs from "node:fs";
+import type { SampleDetail, SampleRegistry, SampleSummary } from "./samples";
 import {
   createEvidenceClient,
   createOrchestratorClient,
@@ -19,30 +22,31 @@ import {
   type HttpRequestOptions,
   type OrchestratorClient,
   type UpstreamResponse,
-} from './upstream';
-import { loadConfig, type BffConfig } from './config';
+} from "./upstream";
+import { loadConfig, type BffConfig } from "./config";
 
 const FIXED_SAMPLE: SampleDetail = {
-  programId: 'BRNCH01',
-  title: 'Branch approval guard',
-  description: 'fixture sample',
+  programId: "BRNCH01",
+  title: "Branch approval guard",
+  description: "fixture sample",
   knownDivergenceAtW0: false,
   supportedInProductMode: true,
-  w0Subset: ['MOVE', 'PERFORM', 'EVALUATE', 'ADD', 'DISPLAY'],
-  oracleMode: 'cobol-runtime',
+  w0Subset: ["MOVE", "PERFORM", "EVALUATE", "ADD", "DISPLAY"],
+  oracleMode: "cobol-runtime",
   knownLimitations: [],
-  cobolSource: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. BRNCH01.\n',
-  cobolSourcePath: 'corpus/synthetic/programs/branch-account-guard.cbl',
-  expectedOutput: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n',
-  expectedOutputPath: 'corpus/synthetic/fixtures/branch-account-guard-output.txt',
+  cobolSource: "IDENTIFICATION DIVISION.\nPROGRAM-ID. BRNCH01.\n",
+  cobolSourcePath: "corpus/synthetic/programs/branch-account-guard.cbl",
+  expectedOutput: "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+  expectedOutputPath:
+    "corpus/synthetic/fixtures/branch-account-guard-output.txt",
 };
 
 const FIXED_SAMPLE_2: SampleDetail = {
   ...FIXED_SAMPLE,
-  programId: 'BATCH01',
+  programId: "BATCH01",
   knownDivergenceAtW0: false,
-  w0Subset: ['PERFORM', 'COMPUTE', 'ADD', 'DISPLAY'],
-  oracleMode: 'synthetic-fixture',
+  w0Subset: ["PERFORM", "COMPUTE", "ADD", "DISPLAY"],
+  oracleMode: "synthetic-fixture",
 };
 
 function stubSamples(items: SampleDetail[]): SampleRegistry {
@@ -80,7 +84,9 @@ function stubSamples(items: SampleDetail[]): SampleRegistry {
 interface ArtifactStubResponses {
   generated?: UpstreamResponse;
   generatedFiles?: UpstreamResponse;
-  generatedFile?: UpstreamResponse | ((path: string) => UpstreamResponse | undefined);
+  generatedFile?:
+    | UpstreamResponse
+    | ((path: string) => UpstreamResponse | undefined);
   buildTest?: UpstreamResponse;
   evidence?: UpstreamResponse;
   events?: UpstreamResponse;
@@ -151,15 +157,15 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
         status: 201,
         body: {
           run: {
-            runId: 'live-run-1',
-            workflowId: 'w0-migration-v0',
-            status: 'updating',
-            policyDecision: 'allow',
-            message: 'orchestrator accepted',
-            evidenceRefs: ['urn:evidence/live-1'],
+            runId: "live-run-1",
+            workflowId: "w0-migration-v0",
+            status: "updating",
+            policyDecision: "allow",
+            message: "orchestrator accepted",
+            evidenceRefs: ["urn:evidence/live-1"],
           },
-          status: 'started',
-          message: 'orchestrator run started',
+          status: "started",
+          message: "orchestrator run started",
         },
       };
       return response;
@@ -169,12 +175,12 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       return {
         status: 200,
         body: {
-          runId: 'live-run-1',
-          workflowId: 'w0-migration-v0',
-          status: 'completed',
-          policyDecision: 'allow',
-          message: 'orchestrator finished',
-          evidenceRefs: ['urn:evidence/live-1'],
+          runId: "live-run-1",
+          workflowId: "w0-migration-v0",
+          status: "completed",
+          policyDecision: "allow",
+          message: "orchestrator finished",
+          evidenceRefs: ["urn:evidence/live-1"],
         },
       };
     },
@@ -184,15 +190,15 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
         status: 201,
         body: {
           run: {
-            runId: 'live-transform-1',
-            workflowId: 'w0-migration-v0',
-            status: 'updating',
-            policyDecision: 'allow',
-            message: 'orchestrator accepted transform',
-            evidenceRefs: ['urn:evidence/live-transform-1'],
+            runId: "live-transform-1",
+            workflowId: "w0-migration-v0",
+            status: "updating",
+            policyDecision: "allow",
+            message: "orchestrator accepted transform",
+            evidenceRefs: ["urn:evidence/live-transform-1"],
           },
-          status: 'started',
-          message: 'orchestrator transform started',
+          status: "started",
+          message: "orchestrator transform started",
         },
       };
     },
@@ -211,7 +217,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     async getGeneratedFile(runId: string, filePath: string) {
       calls.getGeneratedFile.push({ runId, path: filePath });
       const responder = artifactResponses.generatedFile;
-      if (typeof responder === 'function') {
+      if (typeof responder === "function") {
         return responder(filePath);
       }
       return responder;
@@ -302,34 +308,38 @@ function liveEvidence(): EvidenceClient {
   return {
     enabled: true,
     async getPack() {
-      return { status: 200, body: { packId: 'epk-live-1' } };
+      return { status: 200, body: { packId: "epk-live-1" } };
     },
   };
 }
 
 const baseConfig: BffConfig = {
-  serviceName: 'c2c-bff',
+  serviceName: "c2c-bff",
   port: 0,
-  repoRoot: '/tmp/c2c-test-root',
-  staticRoot: '/tmp/c2c-test-static-does-not-exist',
-  orchestratorUrl: '',
-  orchestratorControlToken: '',
-  evidenceUrl: '',
-  experienceLearningUrl: '',
-  modelGatewayUrl: '',
-  harnessUrl: '',
+  repoRoot: "/tmp/c2c-test-root",
+  staticRoot: "/tmp/c2c-test-static-does-not-exist",
+  orchestratorUrl: "",
+  orchestratorControlToken: "",
+  evidenceUrl: "",
+  experienceLearningUrl: "",
+  modelGatewayUrl: "",
+  harnessUrl: "",
   upstreamTimeoutMs: 1_000,
   transformSourceMaxBytes: 1_000_000,
   artifactContentMaxBytes: 1_048_576,
   enableDiagnosticFixtures: false,
 };
 
-test('loadConfig rejects live orchestrator URL without a control token', () => {
+test("loadConfig rejects live orchestrator URL without a control token", () => {
   assert.throws(
-    () => loadConfig({
-      C2C_ORCHESTRATOR_URL: 'http://orchestrator',
-      C2C_REPO_ROOT: '/tmp/c2c-test-root',
-    } as NodeJS.ProcessEnv, __dirname),
+    () =>
+      loadConfig(
+        {
+          C2C_ORCHESTRATOR_URL: "http://orchestrator",
+          C2C_REPO_ROOT: "/tmp/c2c-test-root",
+        } as NodeJS.ProcessEnv,
+        __dirname,
+      ),
     /C2C_ORCHESTRATOR_CONTROL_TOKEN is required/,
   );
 });
@@ -339,9 +349,11 @@ interface RunningServer {
   close: () => Promise<void>;
 }
 
-async function startTestServer(handler: http.RequestListener): Promise<RunningServer> {
+async function startTestServer(
+  handler: http.RequestListener,
+): Promise<RunningServer> {
   const server = http.createServer(handler);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as AddressInfo;
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
@@ -352,26 +364,37 @@ async function startTestServer(handler: http.RequestListener): Promise<RunningSe
   };
 }
 
-async function fetchJson(url: string, init?: { method?: string; body?: unknown }): Promise<{ status: number; body: unknown }> {
+async function fetchJson(
+  url: string,
+  init?: { method?: string; body?: unknown },
+): Promise<{ status: number; body: unknown }> {
   const target = new URL(url);
-  const bodyBytes = init?.body === undefined ? undefined : Buffer.from(JSON.stringify(init.body));
+  const bodyBytes =
+    init?.body === undefined
+      ? undefined
+      : Buffer.from(JSON.stringify(init.body));
   return await new Promise((resolve, reject) => {
     const req = http.request(
       {
-        method: init?.method ?? 'GET',
+        method: init?.method ?? "GET",
         hostname: target.hostname,
         port: target.port,
         path: `${target.pathname}${target.search}`,
         headers: {
-          accept: 'application/json',
-          ...(bodyBytes ? { 'content-type': 'application/json', 'content-length': String(bodyBytes.length) } : {}),
+          accept: "application/json",
+          ...(bodyBytes
+            ? {
+                "content-type": "application/json",
+                "content-length": String(bodyBytes.length),
+              }
+            : {}),
         },
       },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => {
-          const raw = Buffer.concat(chunks).toString('utf-8');
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf-8");
           let parsed: unknown = raw;
           if (raw.length > 0) {
             try {
@@ -382,29 +405,44 @@ async function fetchJson(url: string, init?: { method?: string; body?: unknown }
           }
           resolve({ status: res.statusCode ?? 0, body: parsed });
         });
-        res.on('error', reject);
+        res.on("error", reject);
       },
     );
-    req.on('error', reject);
+    req.on("error", reject);
     if (bodyBytes) req.write(bodyBytes);
     req.end();
   });
 }
 
-test('placeholder marker list is non-empty and exposes the documented W0 stubs', () => {
+test("placeholder marker list is non-empty and exposes the documented W0 stubs", () => {
   assert.ok(PLACEHOLDER_JAVA_MARKERS.length >= 2);
-  assert.equal(findPlaceholderMarker('public class C {}'), null);
-  assert.equal(findPlaceholderMarker('// W0-STUB BRNCH01'), 'W0-STUB');
-  assert.equal(findPlaceholderMarker('Synthetic W0 generated-Java stub here'), 'Synthetic W0 generated-Java stub');
+  assert.equal(findPlaceholderMarker("public class C {}"), null);
+  assert.equal(findPlaceholderMarker("// W0-STUB BRNCH01"), "W0-STUB");
+  assert.equal(
+    findPlaceholderMarker("Synthetic W0 generated-Java stub here"),
+    "Synthetic W0 generated-Java stub",
+  );
 });
 
-test('BFF and UI placeholder marker lists are kept in sync', () => {
+test("BFF and UI placeholder marker lists are kept in sync", () => {
   // The UI ships its own copy of the placeholder marker list because the two
   // packages do not share a TypeScript module. The lists must remain byte
   // identical so the BFF safeguard matches the UI fallback exactly.
-  const uiCopyPath = path.resolve(__dirname, '..', '..', '..', 'apps', 'c2c-ui', 'src', 'placeholder-markers.ts');
-  assert.ok(fs.existsSync(uiCopyPath), `UI placeholder-markers.ts not found at ${uiCopyPath}`);
-  const uiSource = fs.readFileSync(uiCopyPath, 'utf8');
+  const uiCopyPath = path.resolve(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "apps",
+    "c2c-ui",
+    "src",
+    "placeholder-markers.ts",
+  );
+  assert.ok(
+    fs.existsSync(uiCopyPath),
+    `UI placeholder-markers.ts not found at ${uiCopyPath}`,
+  );
+  const uiSource = fs.readFileSync(uiCopyPath, "utf8");
   for (const marker of PLACEHOLDER_JAVA_MARKERS) {
     const literal = `'${marker}'`;
     assert.ok(
@@ -414,7 +452,7 @@ test('BFF and UI placeholder marker lists are kept in sync', () => {
   }
 });
 
-test('health endpoint reports service name', async () => {
+test("health endpoint reports service name", async () => {
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -426,13 +464,13 @@ test('health endpoint reports service name', async () => {
   try {
     const result = await fetchJson(`${server.baseUrl}/api/v0/health`);
     assert.equal(result.status, 200);
-    assert.deepEqual(result.body, { status: 'ok', service: 'c2c-bff' });
+    assert.deepEqual(result.body, { status: "ok", service: "c2c-bff" });
   } finally {
     await server.close();
   }
 });
 
-test('mode endpoint flips with upstream enabled-ness', async () => {
+test("mode endpoint flips with upstream enabled-ness", async () => {
   const { client: orch } = stubOrchestrator();
   const handler = createApp({
     config: baseConfig,
@@ -445,13 +483,13 @@ test('mode endpoint flips with upstream enabled-ness', async () => {
   try {
     const result = await fetchJson(`${server.baseUrl}/api/v0/mode`);
     assert.equal(result.status, 200);
-    assert.deepEqual(result.body, { orchestrator: 'live', evidence: 'live' });
+    assert.deepEqual(result.body, { orchestrator: "live", evidence: "live" });
   } finally {
     await server.close();
   }
 });
 
-test('API endpoints allow local split-server CORS requests from Studio', async () => {
+test("API endpoints allow local split-server CORS requests from Studio", async () => {
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -462,31 +500,43 @@ test('API endpoints allow local split-server CORS requests from Studio', async (
   const server = await startTestServer(handler);
   try {
     const preflight = await fetch(`${server.baseUrl}/api/v0/transform`, {
-      method: 'OPTIONS',
+      method: "OPTIONS",
       headers: {
-        Origin: 'http://127.0.0.1:3000',
-        'Access-Control-Request-Method': 'POST',
-        'Access-Control-Request-Headers': 'Content-Type',
+        Origin: "http://127.0.0.1:3000",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type",
       },
     });
     assert.equal(preflight.status, 204);
-    assert.equal(preflight.headers.get('access-control-allow-origin'), 'http://127.0.0.1:3000');
-    assert.match(preflight.headers.get('access-control-allow-methods') ?? '', /POST/);
-    assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /Content-Type/);
+    assert.equal(
+      preflight.headers.get("access-control-allow-origin"),
+      "http://127.0.0.1:3000",
+    );
+    assert.match(
+      preflight.headers.get("access-control-allow-methods") ?? "",
+      /POST/,
+    );
+    assert.match(
+      preflight.headers.get("access-control-allow-headers") ?? "",
+      /Content-Type/,
+    );
 
     const health = await fetch(`${server.baseUrl}/api/v0/health`, {
       headers: {
-        Origin: 'http://127.0.0.1:3000',
+        Origin: "http://127.0.0.1:3000",
       },
     });
     assert.equal(health.status, 200);
-    assert.equal(health.headers.get('access-control-allow-origin'), 'http://127.0.0.1:3000');
+    assert.equal(
+      health.headers.get("access-control-allow-origin"),
+      "http://127.0.0.1:3000",
+    );
   } finally {
     await server.close();
   }
 });
 
-test('samples list and detail return registry contents including reference-program contract', async () => {
+test("samples list and detail return registry contents including reference-program contract", async () => {
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE, FIXED_SAMPLE_2]),
@@ -505,15 +555,25 @@ test('samples list and detail return registry contents including reference-progr
       oracleMode: string | null;
       knownLimitations: string[];
     }>;
-    assert.deepEqual(summaries.map((entry) => entry.programId).sort(), ['BATCH01', 'BRNCH01']);
+    assert.deepEqual(summaries.map((entry) => entry.programId).sort(), [
+      "BATCH01",
+      "BRNCH01",
+    ]);
     for (const summary of summaries) {
       assert.equal(summary.supportedInProductMode, true);
-      assert.ok(summary.w0Subset.length > 0, `${summary.programId} must declare w0Subset`);
       assert.ok(
-        summary.oracleMode === 'cobol-runtime' || summary.oracleMode === 'synthetic-fixture',
+        summary.w0Subset.length > 0,
+        `${summary.programId} must declare w0Subset`,
+      );
+      assert.ok(
+        summary.oracleMode === "cobol-runtime" ||
+          summary.oracleMode === "synthetic-fixture",
         `${summary.programId} must declare oracleMode`,
       );
-      assert.ok(Array.isArray(summary.knownLimitations), `${summary.programId} knownLimitations array`);
+      assert.ok(
+        Array.isArray(summary.knownLimitations),
+        `${summary.programId} knownLimitations array`,
+      );
     }
 
     const detail = await fetchJson(`${server.baseUrl}/api/v0/samples/BRNCH01`);
@@ -525,11 +585,17 @@ test('samples list and detail return registry contents including reference-progr
       w0Subset: string[];
       oracleMode: string;
     };
-    assert.equal(body.programId, 'BRNCH01');
+    assert.equal(body.programId, "BRNCH01");
     assert.match(body.expectedOutput, /APPROVED-COUNT/);
     assert.equal(body.supportedInProductMode, true);
-    assert.deepEqual(body.w0Subset, ['MOVE', 'PERFORM', 'EVALUATE', 'ADD', 'DISPLAY']);
-    assert.equal(body.oracleMode, 'cobol-runtime');
+    assert.deepEqual(body.w0Subset, [
+      "MOVE",
+      "PERFORM",
+      "EVALUATE",
+      "ADD",
+      "DISPLAY",
+    ]);
+    assert.equal(body.oracleMode, "cobol-runtime");
 
     const missing = await fetchJson(`${server.baseUrl}/api/v0/samples/UNKNOWN`);
     assert.equal(missing.status, 404);
@@ -538,9 +604,9 @@ test('samples list and detail return registry contents including reference-progr
   }
 });
 
-test('GET /api/v0/acceptance-fixtures exposes W0.2 fixture oracle contract', async () => {
+test("GET /api/v0/acceptance-fixtures exposes W0.2 fixture oracle contract", async () => {
   const handler = createApp({
-    config: { ...baseConfig, repoRoot: path.resolve(__dirname, '../../..') },
+    config: { ...baseConfig, repoRoot: path.resolve(__dirname, "../../..") },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
@@ -548,19 +614,25 @@ test('GET /api/v0/acceptance-fixtures exposes W0.2 fixture oracle contract', asy
   });
   const server = await startTestServer(handler);
   try {
-    const list = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures`);
+    const list = await fetchJson(
+      `${server.baseUrl}/api/v0/acceptance-fixtures`,
+    );
     assert.equal(list.status, 200);
     const summaries = list.body as Array<{
       fixtureId: string;
       expectedFinalClassification: string;
       modes: string[];
     }>;
-    assert.ok(summaries.some((entry) => entry.fixtureId === 'HELLOW02'));
-    assert.ok(summaries.some((entry) => entry.fixtureId === 'FILEIO-UNSUPPORTED'));
-    assert.ok(summaries.every((entry) => entry.modes.includes('file-backed')));
-    assert.ok(summaries.every((entry) => entry.modes.includes('paste-mode')));
+    assert.ok(summaries.some((entry) => entry.fixtureId === "HELLOW02"));
+    assert.ok(
+      summaries.some((entry) => entry.fixtureId === "FILEIO-UNSUPPORTED"),
+    );
+    assert.ok(summaries.every((entry) => entry.modes.includes("file-backed")));
+    assert.ok(summaries.every((entry) => entry.modes.includes("paste-mode")));
 
-    const hello = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures/HELLOW02`);
+    const hello = await fetchJson(
+      `${server.baseUrl}/api/v0/acceptance-fixtures/HELLOW02`,
+    );
     assert.equal(hello.status, 200);
     const helloBody = hello.body as {
       fixtureId: string;
@@ -569,13 +641,15 @@ test('GET /api/v0/acceptance-fixtures exposes W0.2 fixture oracle contract', asy
       expectedOutputArtifactRef: { sha256: string; kind: string } | null;
       supportedSubset: string[];
     };
-    assert.equal(helloBody.fixtureId, 'HELLOW02');
-    assert.equal(helloBody.oracleGenerationMode, 'cobol-runtime');
-    assert.match(helloBody.expectedOutput ?? '', /HELLO-W02 DONE/);
-    assert.equal(helloBody.expectedOutputArtifactRef?.kind, 'golden-master');
-    assert.ok(helloBody.supportedSubset.includes('PERFORM-VARYING'));
+    assert.equal(helloBody.fixtureId, "HELLOW02");
+    assert.equal(helloBody.oracleGenerationMode, "cobol-runtime");
+    assert.match(helloBody.expectedOutput ?? "", /HELLO-W02 DONE/);
+    assert.equal(helloBody.expectedOutputArtifactRef?.kind, "golden-master");
+    assert.ok(helloBody.supportedSubset.includes("PERFORM-VARYING"));
 
-    const unsupported = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures/FILEIO-UNSUPPORTED`);
+    const unsupported = await fetchJson(
+      `${server.baseUrl}/api/v0/acceptance-fixtures/FILEIO-UNSUPPORTED`,
+    );
     assert.equal(unsupported.status, 200);
     const unsupportedBody = unsupported.body as {
       expectedOutput: string | null;
@@ -586,29 +660,35 @@ test('GET /api/v0/acceptance-fixtures exposes W0.2 fixture oracle contract', asy
     };
     assert.equal(unsupportedBody.expectedOutput, null);
     assert.equal(unsupportedBody.expectedOutputArtifactRef, null);
-    assert.equal(unsupportedBody.expectedFinalClassification, 'blocked');
-    assert.equal(unsupportedBody.expectedFailureCode, 'unsupported_cobol');
-    assert.ok(unsupportedBody.unsupportedConstructs.some((entry) => entry.construct === 'FILE SECTION'));
+    assert.equal(unsupportedBody.expectedFinalClassification, "blocked");
+    assert.equal(unsupportedBody.expectedFailureCode, "unsupported_cobol");
+    assert.ok(
+      unsupportedBody.unsupportedConstructs.some(
+        (entry) => entry.construct === "FILE SECTION",
+      ),
+    );
 
-    const missing = await fetchJson(`${server.baseUrl}/api/v0/acceptance-fixtures/UNKNOWN`);
+    const missing = await fetchJson(
+      `${server.baseUrl}/api/v0/acceptance-fixtures/UNKNOWN`,
+    );
     assert.equal(missing.status, 404);
   } finally {
     await server.close();
   }
 });
 
-test('transform refuses to dispatch a programId that maps to an unsupported reference', async () => {
+test("transform refuses to dispatch a programId that maps to an unsupported reference", async () => {
   const unsupported: SampleDetail = {
     ...FIXED_SAMPLE,
-    programId: 'UNSUP01',
+    programId: "UNSUP01",
     supportedInProductMode: false,
     w0Subset: [],
     oracleMode: null,
-    knownLimitations: ['no W0 coverage'],
+    knownLimitations: ["no W0 coverage"],
   };
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([unsupported]),
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -617,33 +697,41 @@ test('transform refuses to dispatch a programId that maps to an unsupported refe
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
+      method: "POST",
       body: {
-        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. UNSUP01.\n',
+        sourceText:
+          "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. UNSUP01.\n",
       },
     });
     assert.equal(response.status, 400);
     const body = response.body as { error: string };
     assert.match(body.error, /UNSUP01/);
     assert.match(body.error, /supportedInProductMode/i);
-    assert.equal(calls.startTransformRun.length, 0, 'orchestrator must not be called for unsupported reference');
+    assert.equal(
+      calls.startTransformRun.length,
+      0,
+      "orchestrator must not be called for unsupported reference",
+    );
   } finally {
     await server.close();
   }
 });
 
-test('every shipped reference program is loadable and routes its source through /api/v0/transform', async () => {
+test("every shipped reference program is loadable and routes its source through /api/v0/transform", async () => {
   // Service-level integration: prove the GET /samples/:id → POST /transform path
   // works for every shipped reference program (Issue #94 acceptance criterion).
-  const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  const { loadSampleRegistry } = await import('./samples');
+  const repoRoot = path.resolve(__dirname, "..", "..", "..");
+  const { loadSampleRegistry } = await import("./samples");
   const realRegistry = loadSampleRegistry(repoRoot);
   const summaries = realRegistry.list().filter((s) => s.supportedInProductMode);
-  assert.ok(summaries.length >= 4, `expected at least 4 runnable reference programs, got ${summaries.length}`);
+  assert.ok(
+    summaries.length >= 4,
+    `expected at least 4 runnable reference programs, got ${summaries.length}`,
+  );
 
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: realRegistry,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -652,24 +740,44 @@ test('every shipped reference program is loadable and routes its source through 
   const server = await startTestServer(handler);
   try {
     for (const summary of summaries) {
-      const detailResp = await fetchJson(`${server.baseUrl}/api/v0/samples/${encodeURIComponent(summary.programId)}`);
-      assert.equal(detailResp.status, 200, `GET /samples/${summary.programId} must return 200`);
-      const detail = detailResp.body as { cobolSource: string; programId: string };
-      assert.ok(detail.cobolSource.length > 0, `cobolSource must be present for ${summary.programId}`);
+      const detailResp = await fetchJson(
+        `${server.baseUrl}/api/v0/samples/${encodeURIComponent(summary.programId)}`,
+      );
+      assert.equal(
+        detailResp.status,
+        200,
+        `GET /samples/${summary.programId} must return 200`,
+      );
+      const detail = detailResp.body as {
+        cobolSource: string;
+        programId: string;
+      };
+      assert.ok(
+        detail.cobolSource.length > 0,
+        `cobolSource must be present for ${summary.programId}`,
+      );
 
       const before = calls.startTransformRun.length;
-      const transformResp = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-        method: 'POST',
-        body: { sourceText: detail.cobolSource, programId: detail.programId },
-      });
-      assert.equal(transformResp.status, 201, `POST /transform must accept ${summary.programId}`);
+      const transformResp = await fetchJson(
+        `${server.baseUrl}/api/v0/transform`,
+        {
+          method: "POST",
+          body: { sourceText: detail.cobolSource, programId: detail.programId },
+        },
+      );
+      assert.equal(
+        transformResp.status,
+        201,
+        `POST /transform must accept ${summary.programId}`,
+      );
       assert.equal(
         calls.startTransformRun.length,
         before + 1,
         `orchestrator.startTransformRun must be called exactly once for ${summary.programId}`,
       );
-      const lastCall = calls.startTransformRun[calls.startTransformRun.length - 1];
-      assert.ok(lastCall, 'expected a recorded call');
+      const lastCall =
+        calls.startTransformRun[calls.startTransformRun.length - 1];
+      assert.ok(lastCall, "expected a recorded call");
       assert.equal(lastCall.programId, detail.programId);
       assert.equal(
         lastCall.sourceText,
@@ -682,7 +790,7 @@ test('every shipped reference program is loadable and routes its source through 
   }
 });
 
-test('product mode rejects POST /api/v0/runs with 503 when orchestrator is missing and diagnostic fixtures are not enabled', async () => {
+test("product mode rejects POST /api/v0/runs with 503 when orchestrator is missing and diagnostic fixtures are not enabled", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const handler = createApp({
@@ -695,20 +803,29 @@ test('product mode rejects POST /api/v0/runs with 503 when orchestrator is missi
   const server = await startTestServer(handler);
   try {
     const blocked = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(blocked.status, 503);
-    assert.match((blocked.body as { error: string }).error, /product mode not ready/i);
-    assert.match((blocked.body as { error: string }).error, /C2C_ORCHESTRATOR_URL/);
-    assert.match((blocked.body as { error: string }).error, /C2C_ENABLE_DIAGNOSTIC_FIXTURES/);
+    assert.match(
+      (blocked.body as { error: string }).error,
+      /product mode not ready/i,
+    );
+    assert.match(
+      (blocked.body as { error: string }).error,
+      /C2C_ORCHESTRATOR_URL/,
+    );
+    assert.match(
+      (blocked.body as { error: string }).error,
+      /C2C_ENABLE_DIAGNOSTIC_FIXTURES/,
+    );
     assert.equal(runStore.list().length, 0);
   } finally {
     await server.close();
   }
 });
 
-test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, and productMode is unavailable', async () => {
+test("diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, and productMode is unavailable", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const handler = createApp({
@@ -721,8 +838,8 @@ test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
     const runBody = started.body as {
@@ -732,12 +849,14 @@ test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
       status: string;
       evidenceRefs: string[];
     };
-    assert.equal(runBody.mode, 'diagnostic-fixture');
-    assert.equal(runBody.productMode, 'unavailable');
-    assert.equal(runBody.status, 'completed');
+    assert.equal(runBody.mode, "diagnostic-fixture");
+    assert.equal(runBody.productMode, "unavailable");
+    assert.equal(runBody.status, "completed");
     assert.deepEqual(runBody.evidenceRefs, []);
 
-    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/generated`);
+    const generated = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runBody.runId}/generated`,
+    );
     assert.equal(generated.status, 200);
     const genBody = generated.body as {
       mode: string;
@@ -747,41 +866,56 @@ test('diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
       fileRefs: Array<{ path: string }>;
       unsupportedFeatures: string[];
     };
-    assert.equal(genBody.mode, 'diagnostic-fixture');
-    assert.equal(genBody.productMode, 'unavailable');
-    assert.equal(genBody.status, 'generated');
+    assert.equal(genBody.mode, "diagnostic-fixture");
+    assert.equal(genBody.productMode, "unavailable");
+    assert.equal(genBody.status, "generated");
     assert.deepEqual(genBody.files, {});
-    assert.ok(genBody.fileRefs.some((entry) => entry.path.endsWith('.java')));
+    assert.ok(genBody.fileRefs.some((entry) => entry.path.endsWith(".java")));
     assert.equal(genBody.unsupportedFeatures.length, 0);
 
-    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/build-test`);
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runBody.runId}/build-test`,
+    );
     assert.equal(buildTest.status, 200);
-    const btBody = buildTest.body as { mode: string; productMode: string; status: string; classification: string; expectedOutput: string };
-    assert.equal(btBody.mode, 'diagnostic-fixture');
-    assert.equal(btBody.productMode, 'unavailable');
-    assert.equal(btBody.status, 'ok');
-    assert.equal(btBody.classification, 'match');
+    const btBody = buildTest.body as {
+      mode: string;
+      productMode: string;
+      status: string;
+      classification: string;
+      expectedOutput: string;
+    };
+    assert.equal(btBody.mode, "diagnostic-fixture");
+    assert.equal(btBody.productMode, "unavailable");
+    assert.equal(btBody.status, "ok");
+    assert.equal(btBody.classification, "match");
     assert.match(btBody.expectedOutput, /APPROVED-COUNT/);
 
-    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${runBody.runId}/evidence`);
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runBody.runId}/evidence`,
+    );
     assert.equal(evidence.status, 200);
-    const evBody = evidence.body as { mode: string; productMode: string; packId: string; manifestUri?: string };
-    assert.equal(evBody.mode, 'diagnostic-fixture');
-    assert.equal(evBody.productMode, 'unavailable');
-    assert.ok(evBody.packId.startsWith('epk-'));
+    const evBody = evidence.body as {
+      mode: string;
+      productMode: string;
+      packId: string;
+      manifestUri?: string;
+    };
+    assert.equal(evBody.mode, "diagnostic-fixture");
+    assert.equal(evBody.productMode, "unavailable");
+    assert.ok(evBody.packId.startsWith("epk-"));
     assert.equal(evBody.manifestUri, undefined);
   } finally {
     await server.close();
   }
 });
 
-test('starting a run surfaces orchestrator failures instead of silently falling back to mock', async () => {
+test("starting a run surfaces orchestrator failures instead of silently falling back to mock", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const failingOrchestrator: OrchestratorClient = {
     enabled: true,
     async startRun() {
-      throw new Error('upstream offline');
+      throw new Error("upstream offline");
     },
     async startTransformRun() {
       return undefined;
@@ -821,7 +955,7 @@ test('starting a run surfaces orchestrator failures instead of silently falling 
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: failingOrchestrator,
     evidence: disabledEvidence(),
@@ -830,8 +964,8 @@ test('starting a run surfaces orchestrator failures instead of silently falling 
   const server = await startTestServer(handler);
   try {
     const failed = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(failed.status, 502);
     assert.match((failed.body as { error: string }).error, /upstream offline/);
@@ -841,13 +975,13 @@ test('starting a run surfaces orchestrator failures instead of silently falling 
   }
 });
 
-test('starting a run with orchestrator non-2xx response returns 502 and creates no run', async () => {
+test("starting a run with orchestrator non-2xx response returns 502 and creates no run", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const rejectingOrchestrator: OrchestratorClient = {
     enabled: true,
     async startRun() {
-      return { status: 500, body: { error: 'orchestrator internal error' } };
+      return { status: 500, body: { error: "orchestrator internal error" } };
     },
     async startTransformRun() {
       return undefined;
@@ -887,7 +1021,7 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: rejectingOrchestrator,
     evidence: disabledEvidence(),
@@ -896,8 +1030,8 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
   const server = await startTestServer(handler);
   try {
     const failed = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(failed.status, 502);
     assert.match((failed.body as { error: string }).error, /500/);
@@ -907,12 +1041,12 @@ test('starting a run with orchestrator non-2xx response returns 502 and creates 
   }
 });
 
-test('starting a run in live mode proxies the orchestrator, syncs status, and reports incomplete artifacts when orchestrator has no data yet', async () => {
+test("starting a run in live mode proxies the orchestrator, syncs status, and reports incomplete artifacts when orchestrator has no data yet", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -921,8 +1055,8 @@ test('starting a run in live mode proxies the orchestrator, syncs status, and re
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
     const startedBody = started.body as {
@@ -932,139 +1066,181 @@ test('starting a run in live mode proxies the orchestrator, syncs status, and re
       productMode: string;
       orchestratorRunId: string;
     };
-    assert.equal(startedBody.mode, 'live');
+    assert.equal(startedBody.mode, "live");
     // RunSummary.productMode is 'live' whenever stored mode is 'live'; per-artifact
     // productMode is downgraded to 'unavailable' when upstream payload is incomplete.
-    assert.equal(startedBody.productMode, 'live');
-    assert.equal(startedBody.orchestratorRunId, 'live-run-1');
+    assert.equal(startedBody.productMode, "live");
+    assert.equal(startedBody.orchestratorRunId, "live-run-1");
     assert.equal(calls.startRun, 1);
 
-    const fetched = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`);
+    const fetched = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+    );
     assert.equal(fetched.status, 200);
     const fetchedBody = fetched.body as { mode: string; status: string };
-    assert.equal(fetchedBody.mode, 'live');
-    assert.equal(fetchedBody.status, 'completed');
+    assert.equal(fetchedBody.mode, "live");
+    assert.equal(fetchedBody.status, "completed");
     assert.equal(calls.getRun, 1);
 
-    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    const generated = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+    );
     assert.equal(generated.status, 200);
-    const genBody = generated.body as { mode: string; status: string; missingArtifacts: string[] };
-    assert.equal(genBody.mode, 'live');
-    assert.equal(genBody.status, 'incomplete');
-    assert.deepEqual(genBody.missingArtifacts, ['generation-response']);
+    const genBody = generated.body as {
+      mode: string;
+      status: string;
+      missingArtifacts: string[];
+    };
+    assert.equal(genBody.mode, "live");
+    assert.equal(genBody.status, "incomplete");
+    assert.deepEqual(genBody.missingArtifacts, ["generation-response"]);
     assert.equal(calls.getGenerated, 1);
 
-    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+    );
     assert.equal(buildTest.status, 200);
-    const btBody = buildTest.body as { mode: string; status: string; classification: string; missingArtifacts: string[] };
-    assert.equal(btBody.mode, 'live');
-    assert.equal(btBody.status, 'incomplete');
-    assert.equal(btBody.classification, 'skipped-no-execution');
-    assert.deepEqual(btBody.missingArtifacts, ['build-test-result']);
+    const btBody = buildTest.body as {
+      mode: string;
+      status: string;
+      classification: string;
+      missingArtifacts: string[];
+    };
+    assert.equal(btBody.mode, "live");
+    assert.equal(btBody.status, "incomplete");
+    assert.equal(btBody.classification, "skipped-no-execution");
+    assert.deepEqual(btBody.missingArtifacts, ["build-test-result"]);
     assert.equal(calls.getBuildTest, 1);
 
-    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+    );
     assert.equal(evidence.status, 200);
-    const evBody = evidence.body as { mode: string; status: string; packId: string; missingArtifacts: string[] };
-    assert.equal(evBody.mode, 'live');
-    assert.equal(evBody.status, 'incomplete');
-    assert.equal(evBody.packId, '');
-    assert.deepEqual(evBody.missingArtifacts, ['evidence-pack-manifest']);
+    const evBody = evidence.body as {
+      mode: string;
+      status: string;
+      packId: string;
+      missingArtifacts: string[];
+    };
+    assert.equal(evBody.mode, "live");
+    assert.equal(evBody.status, "incomplete");
+    assert.equal(evBody.packId, "");
+    assert.deepEqual(evBody.missingArtifacts, ["evidence-pack-manifest"]);
     assert.equal(calls.getEvidence, 1);
   } finally {
     await server.close();
   }
 });
 
-test('live generated/build-test/evidence endpoints return real artifact contents when orchestrator has persisted them', async () => {
+test("live generated/build-test/evidence endpoints return real artifact contents when orchestrator has persisted them", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
-  const generatedJava = 'package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) {}\n}\n';
+  const generatedJava =
+    "package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) {}\n}\n";
   const buildResult = {
-    status: 'ok',
-    classification: 'match',
-    actualOutput: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n',
-    outputRef: { uri: 'file:///run/build-test/output.txt', sha256: 'b'.repeat(64), byteSize: 32 },
-    programId: 'CASE01',
+    status: "ok",
+    classification: "match",
+    actualOutput: "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+    outputRef: {
+      uri: "file:///run/build-test/output.txt",
+      sha256: "b".repeat(64),
+      byteSize: 32,
+    },
+    programId: "CASE01",
   };
   const evidenceManifest = {
-    runId: 'live-run-1',
-    workflowId: 'w0-migration-v0',
-    status: 'complete',
-    packId: 'epk-live-1',
-    artifacts: { sourceCobol: [], generatedJava: { uri: 'file:///run/generated.java' } },
+    runId: "live-run-1",
+    workflowId: "w0-migration-v0",
+    status: "complete",
+    packId: "epk-live-1",
+    artifacts: {
+      sourceCobol: [],
+      generatedJava: { uri: "file:///run/generated.java" },
+    },
   };
   const trajectoryEvents = [
     {
-      type: 'parse-cobol.executed',
-      status: 'ok',
-      message: 'parse complete',
-      createdAt: '2026-05-14T10:00:00Z',
-      payload: { input: { sourceText: 'IDENTIFICATION DIVISION.' } },
-      inputRef: { uri: 'file:///run/source.cbl', sha256: 'e'.repeat(64) },
+      type: "parse-cobol.executed",
+      status: "ok",
+      message: "parse complete",
+      createdAt: "2026-05-14T10:00:00Z",
+      payload: { input: { sourceText: "IDENTIFICATION DIVISION." } },
+      inputRef: { uri: "file:///run/source.cbl", sha256: "e".repeat(64) },
     },
     {
-      type: 'generate-java.executed',
-      status: 'ok',
-      message: 'java generated at http://internal.service/run',
-      createdAt: '2026-05-14T10:00:05Z',
-      outputRef: { uri: 'file:///run/generated.java', sha256: 'f'.repeat(64) },
+      type: "generate-java.executed",
+      status: "ok",
+      message: "java generated at http://internal.service/run",
+      createdAt: "2026-05-14T10:00:05Z",
+      outputRef: { uri: "file:///run/generated.java", sha256: "f".repeat(64) },
     },
   ];
   const { client: orch, calls } = stubOrchestrator({
     generated: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        entryClass: 'CASE01',
-        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        entryClass: "CASE01",
+        entryFilePath: "src/main/java/c2c/CASE01.java",
         fileCount: 1,
-        files: { 'src/main/java/c2c/CASE01.java': generatedJava },
+        files: { "src/main/java/c2c/CASE01.java": generatedJava },
         unsupportedFeatures: [],
         openAssumptions: [],
-        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+        generationResponseRef: {
+          uri: "file:///run/generation-response.json",
+          sha256: "a".repeat(64),
+          byteSize: 128,
+        },
       },
     },
     buildTest: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        kind: 'build-test-result',
+        kind: "build-test-result",
         data: buildResult,
-        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
+        artifactRef: {
+          uri: "file:///run/build-test-result.json",
+          sha256: "c".repeat(64),
+          byteSize: 256,
+        },
       },
     },
     evidence: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
         data: evidenceManifest,
-        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'd'.repeat(64), byteSize: 512 },
+        artifactRef: {
+          uri: "file:///run/evidence-pack-manifest.json",
+          sha256: "d".repeat(64),
+          byteSize: 512,
+        },
       },
     },
     events: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
         events: trajectoryEvents,
       },
@@ -1072,20 +1248,27 @@ test('live generated/build-test/evidence endpoints return real artifact contents
     artifacts: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
         artifacts: [
-          { uri: 'file:///run/source.cbl', sha256: 'a'.repeat(64), byteSize: 64, kind: 'source', path: 'source.cbl', name: 'source.cbl' },
+          {
+            uri: "file:///run/source.cbl",
+            sha256: "a".repeat(64),
+            byteSize: 64,
+            kind: "source",
+            path: "source.cbl",
+            name: "source.cbl",
+          },
         ],
-        createdAt: '2026-05-14T10:00:00Z',
-        updatedAt: '2026-05-14T10:00:30Z',
+        createdAt: "2026-05-14T10:00:00Z",
+        updatedAt: "2026-05-14T10:00:30Z",
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -1094,97 +1277,141 @@ test('live generated/build-test/evidence endpoints return real artifact contents
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
     const startedBody = started.body as { runId: string };
 
-    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    const generated = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+    );
     assert.equal(generated.status, 200);
-    const genBody = generated.body as { mode: string; status: string; files: Record<string, string>; entryClass: string };
-    assert.equal(genBody.mode, 'live');
-    assert.equal(genBody.status, 'generated');
-    assert.equal(genBody.entryClass, 'CASE01');
+    const genBody = generated.body as {
+      mode: string;
+      status: string;
+      files: Record<string, string>;
+      entryClass: string;
+    };
+    assert.equal(genBody.mode, "live");
+    assert.equal(genBody.status, "generated");
+    assert.equal(genBody.entryClass, "CASE01");
     assert.deepEqual(genBody.files, {});
     assert.equal(calls.getGenerated, 1);
 
-    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+    );
     assert.equal(buildTest.status, 200);
-    const btBody = buildTest.body as { mode: string; status: string; classification: string; actualOutput: string };
-    assert.equal(btBody.mode, 'live');
-    assert.equal(btBody.status, 'ok');
-    assert.equal(btBody.classification, 'match');
+    const btBody = buildTest.body as {
+      mode: string;
+      status: string;
+      classification: string;
+      actualOutput: string;
+    };
+    assert.equal(btBody.mode, "live");
+    assert.equal(btBody.status, "ok");
+    assert.equal(btBody.classification, "match");
     assert.match(btBody.actualOutput, /APPROVED-COUNT=2/);
 
-    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+    );
     assert.equal(evidence.status, 200);
-    const evBody = evidence.body as { mode: string; status: string; packId: string; manifestHash: string; missingArtifacts: string[]; manifestUri?: string };
-    assert.equal(evBody.mode, 'live');
-    assert.equal(evBody.status, 'complete');
-    assert.equal(evBody.packId, 'epk-live-1');
+    const evBody = evidence.body as {
+      mode: string;
+      status: string;
+      packId: string;
+      manifestHash: string;
+      missingArtifacts: string[];
+      manifestUri?: string;
+    };
+    assert.equal(evBody.mode, "live");
+    assert.equal(evBody.status, "complete");
+    assert.equal(evBody.packId, "epk-live-1");
     assert.equal(evBody.manifestUri, undefined);
-    assert.equal(evBody.manifestHash, 'd'.repeat(64));
+    assert.equal(evBody.manifestHash, "d".repeat(64));
     assert.deepEqual(evBody.missingArtifacts, []);
 
-    const events = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/events`);
+    const events = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/events`,
+    );
     assert.equal(events.status, 200);
-    const evtBody = events.body as { mode: string; events: Array<{ type: string }>; missingArtifacts: string[] };
-    assert.equal(evtBody.mode, 'live');
+    const evtBody = events.body as {
+      mode: string;
+      events: Array<{ type: string }>;
+      missingArtifacts: string[];
+    };
+    assert.equal(evtBody.mode, "live");
     assert.equal(evtBody.events.length, 2);
-    assert.equal(evtBody.events[0]?.type, 'parse-cobol.executed');
+    assert.equal(evtBody.events[0]?.type, "parse-cobol.executed");
     const serializedEvents = JSON.stringify(evtBody.events);
-    assert.ok(!serializedEvents.includes('sourceText'));
-    assert.ok(!serializedEvents.includes('inputRef'));
-    assert.ok(!serializedEvents.includes('outputRef'));
-    assert.ok(!serializedEvents.includes('file:///'));
-    assert.ok(serializedEvents.includes('[redacted]'));
+    assert.ok(!serializedEvents.includes("sourceText"));
+    assert.ok(!serializedEvents.includes("inputRef"));
+    assert.ok(!serializedEvents.includes("outputRef"));
+    assert.ok(!serializedEvents.includes("file:///"));
+    assert.ok(serializedEvents.includes("[redacted]"));
     assert.deepEqual(evtBody.missingArtifacts, []);
 
-    const artifacts = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts`);
+    const artifacts = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts`,
+    );
     assert.equal(artifacts.status, 200);
-    const artBody = artifacts.body as { mode: string; artifacts: Array<{ path: string }>; programId: string };
-    assert.equal(artBody.mode, 'live');
-    assert.equal(artBody.programId, 'BRNCH01');
+    const artBody = artifacts.body as {
+      mode: string;
+      artifacts: Array<{ path: string }>;
+      programId: string;
+    };
+    assert.equal(artBody.mode, "live");
+    assert.equal(artBody.programId, "BRNCH01");
     assert.equal(artBody.artifacts.length, 1);
-    assert.equal(artBody.artifacts[0]?.path, 'source.cbl');
+    assert.equal(artBody.artifacts[0]?.path, "source.cbl");
   } finally {
     await server.close();
   }
 });
 
-test('live generated endpoint exposes outputRef, diagnostics, and rejects placeholder markers from upstream payload', async () => {
+test("live generated endpoint exposes outputRef, diagnostics, and rejects placeholder markers from upstream payload", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
-  const generatedJava = 'package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); }\n}\n';
+  const generatedJava =
+    'package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); }\n}\n';
   const { client: orch } = stubOrchestrator({
     generated: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        entryClass: 'CASE01',
-        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        entryClass: "CASE01",
+        entryFilePath: "src/main/java/c2c/CASE01.java",
         fileCount: 1,
-        files: { 'src/main/java/c2c/CASE01.java': generatedJava },
+        files: { "src/main/java/c2c/CASE01.java": generatedJava },
         unsupportedFeatures: [],
-        openAssumptions: ['IO limited to stdout'],
+        openAssumptions: ["IO limited to stdout"],
         generationResponse: {
           diagnostics: [
-            { level: 'info', code: 'gen.start', message: 'generation started' },
-            { level: 'info', code: 'gen.complete', message: 'generation complete' },
+            { level: "info", code: "gen.start", message: "generation started" },
+            {
+              level: "info",
+              code: "gen.complete",
+              message: "generation complete",
+            },
           ],
         },
-        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+        generationResponseRef: {
+          uri: "file:///run/generation-response.json",
+          sha256: "a".repeat(64),
+          byteSize: 128,
+        },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -1193,11 +1420,13 @@ test('live generated endpoint exposes outputRef, diagnostics, and rejects placeh
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    const generated = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+    );
     assert.equal(generated.status, 200);
     const body = generated.body as {
       status: string;
@@ -1205,56 +1434,60 @@ test('live generated endpoint exposes outputRef, diagnostics, and rejects placeh
       diagnostics: Array<{ code?: string }>;
       files: Record<string, string>;
     };
-    assert.equal(body.status, 'generated');
-    assert.ok(body.outputRef, 'outputRef must be present for successful runs');
-    assert.equal(body.outputRef?.sha256, 'a'.repeat(64));
+    assert.equal(body.status, "generated");
+    assert.ok(body.outputRef, "outputRef must be present for successful runs");
+    assert.equal(body.outputRef?.sha256, "a".repeat(64));
     assert.equal(body.diagnostics.length, 2);
-    assert.equal(body.diagnostics[0]?.code, 'gen.start');
+    assert.equal(body.diagnostics[0]?.code, "gen.start");
     assert.deepEqual(body.files, {});
   } finally {
     await server.close();
   }
 });
 
-test('live generated endpoint never inlines upstream Java content', async () => {
+test("live generated endpoint never inlines upstream Java content", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
-  const oversizedJava = 'A'.repeat(1_200_000);
+  const oversizedJava = "A".repeat(1_200_000);
   const { client: orch } = stubOrchestrator({
     generated: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        entryClass: 'CASE01',
-        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        entryClass: "CASE01",
+        entryFilePath: "src/main/java/c2c/CASE01.java",
         fileCount: 1,
-        files: { 'src/main/java/c2c/CASE01.java': oversizedJava },
+        files: { "src/main/java/c2c/CASE01.java": oversizedJava },
         fileRefs: [
           {
-            path: 'src/main/java/c2c/CASE01.java',
-            absolutePath: '/var/lib/orchestrator/generated/CASE01.java',
-            uri: 'https://storage.internal/generated/CASE01.java?token=secret',
-            sha256: 'b'.repeat(64),
+            path: "src/main/java/c2c/CASE01.java",
+            absolutePath: "/var/lib/orchestrator/generated/CASE01.java",
+            uri: "https://storage.internal/generated/CASE01.java?token=secret",
+            sha256: "b".repeat(64),
             byteSize: oversizedJava.length,
           },
         ],
         unsupportedFeatures: [],
         openAssumptions: [],
         artifactRef: {
-          uri: 'https://storage.internal/generated-project-manifest.json?token=secret',
-          sha256: 'c'.repeat(64),
+          uri: "https://storage.internal/generated-project-manifest.json?token=secret",
+          sha256: "c".repeat(64),
           byteSize: 512,
-          kind: 'generated-project-manifest',
+          kind: "generated-project-manifest",
         },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream', artifactContentMaxBytes: 1024 },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      artifactContentMaxBytes: 1024,
+    },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -1263,11 +1496,13 @@ test('live generated endpoint never inlines upstream Java content', async () => 
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    const generated = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+    );
     assert.equal(generated.status, 200);
     const body = generated.body as {
       files: Record<string, string>;
@@ -1275,55 +1510,62 @@ test('live generated endpoint never inlines upstream Java content', async () => 
       artifactRef: { sha256: string; kind?: string } | null;
     };
     assert.deepEqual(body.files, {});
-    assert.equal(body.fileRefs[0]?.path, 'src/main/java/c2c/CASE01.java');
+    assert.equal(body.fileRefs[0]?.path, "src/main/java/c2c/CASE01.java");
     assert.equal(body.fileRefs[0]?.absolutePath, undefined);
     assert.equal(body.fileRefs[0]?.uri, undefined);
-    assert.equal(body.artifactRef?.sha256, 'c'.repeat(64));
+    assert.equal(body.artifactRef?.sha256, "c".repeat(64));
     const serialized = JSON.stringify(generated.body);
     assert.ok(!serialized.includes(oversizedJava.slice(0, 128)));
-    assert.doesNotMatch(serialized, /storage\.internal|\/var\/lib|token=secret/);
+    assert.doesNotMatch(
+      serialized,
+      /storage\.internal|\/var\/lib|token=secret/,
+    );
   } finally {
     await server.close();
   }
 });
 
-test('live generated endpoint downgrades successful runs containing placeholder Java to incomplete', async () => {
+test("live generated endpoint downgrades successful runs containing placeholder Java to incomplete", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   // Simulate a misbehaving upstream that returns a "complete" envelope but
   // the generated Java still contains the W0-STUB placeholder marker. The
   // BFF must refuse to surface this as `status: 'generated'`.
   const placeholderJava = [
-    '// Synthetic W0 generated-Java stub for programId=CASE01.',
-    'package c2c.w0.generated;',
-    'public final class CASE01 {',
-    '    public static void main(String[] args) {',
+    "// Synthetic W0 generated-Java stub for programId=CASE01.",
+    "package c2c.w0.generated;",
+    "public final class CASE01 {",
+    "    public static void main(String[] args) {",
     '        System.out.println("W0-STUB CASE01");',
-    '    }',
-    '}',
-  ].join('\n');
+    "    }",
+    "}",
+  ].join("\n");
   const { client: orch } = stubOrchestrator({
     generated: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        entryClass: 'CASE01',
-        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        entryClass: "CASE01",
+        entryFilePath: "src/main/java/c2c/CASE01.java",
         fileCount: 1,
-        files: { 'src/main/java/c2c/CASE01.java': placeholderJava },
+        files: { "src/main/java/c2c/CASE01.java": placeholderJava },
         unsupportedFeatures: [],
         openAssumptions: [],
-        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+        generationResponseRef: {
+          uri: "file:///run/generation-response.json",
+          sha256: "a".repeat(64),
+          byteSize: 128,
+        },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -1332,11 +1574,13 @@ test('live generated endpoint downgrades successful runs containing placeholder 
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    const generated = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+    );
     assert.equal(generated.status, 200);
     const body = generated.body as {
       status: string;
@@ -1344,65 +1588,86 @@ test('live generated endpoint downgrades successful runs containing placeholder 
       placeholderViolation: { path: string; marker: string };
       note: string;
     };
-    assert.equal(body.status, 'incomplete');
-    assert.ok(body.missingArtifacts.includes('real-generated-java'));
-    assert.equal(body.placeholderViolation.marker, 'W0-STUB');
-    assert.equal(body.placeholderViolation.path, 'src/main/java/c2c/CASE01.java');
+    assert.equal(body.status, "incomplete");
+    assert.ok(body.missingArtifacts.includes("real-generated-java"));
+    assert.equal(body.placeholderViolation.marker, "W0-STUB");
+    assert.equal(
+      body.placeholderViolation.path,
+      "src/main/java/c2c/CASE01.java",
+    );
     assert.match(body.note, /Placeholder marker/);
   } finally {
     await server.close();
   }
 });
 
-test('live build-test extracts execution.stdout, goldenMaster.expected, outputRef, diagnostics, and compile/execution status', async () => {
+test("live build-test extracts execution.stdout, goldenMaster.expected, outputRef, diagnostics, and compile/execution status", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const buildResult = {
-    status: 'ok',
-    classification: 'match',
+    status: "ok",
+    classification: "match",
     build: { compileOk: true, sourceCount: 1, diagnostics: [] },
-    execution: { ran: true, ok: true, exitCode: 0, stdout: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n', stderr: '', durationMs: 12 },
-    goldenMaster: { expected: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n', expectedOutputPath: 'corpus/expected.txt' },
+    execution: {
+      ran: true,
+      ok: true,
+      exitCode: 0,
+      stdout: "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+      stderr: "",
+      durationMs: 12,
+    },
+    goldenMaster: {
+      expected: "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+      expectedOutputPath: "corpus/expected.txt",
+    },
     comparison: {
       matched: true,
       expectedRef: {
-        uri: 'urn:build-test/expected',
-        sha256: 'e'.repeat(64),
+        uri: "urn:build-test/expected",
+        sha256: "e".repeat(64),
         byteSize: 36,
-        kind: 'cobol-oracle-stdout',
+        kind: "cobol-oracle-stdout",
       },
       actualRef: {
-        uri: 'urn:build-test/actual',
-        sha256: 'a'.repeat(64),
+        uri: "urn:build-test/actual",
+        sha256: "a".repeat(64),
         byteSize: 36,
-        kind: 'java-stdout',
+        kind: "java-stdout",
       },
     },
     diagnostics: [
-      { level: 'info', code: 'compile.ok', message: 'compile succeeded' },
-      { level: 'info', code: 'execution.ok', message: 'execution succeeded' },
+      { level: "info", code: "compile.ok", message: "compile succeeded" },
+      { level: "info", code: "execution.ok", message: "execution succeeded" },
     ],
-    outputRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
-    programId: 'CASE01',
+    outputRef: {
+      uri: "file:///run/build-test-result.json",
+      sha256: "c".repeat(64),
+      byteSize: 256,
+    },
+    programId: "CASE01",
   };
   const { client: orch } = stubOrchestrator({
     buildTest: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        kind: 'build-test-result',
+        kind: "build-test-result",
         data: buildResult,
-        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
+        artifactRef: {
+          uri: "file:///run/build-test-result.json",
+          sha256: "c".repeat(64),
+          byteSize: 256,
+        },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -1411,11 +1676,13 @@ test('live build-test extracts execution.stdout, goldenMaster.expected, outputRe
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+    );
     assert.equal(buildTest.status, 200);
     const body = buildTest.body as {
       status: string;
@@ -1429,54 +1696,68 @@ test('live build-test extracts execution.stdout, goldenMaster.expected, outputRe
       actualOutputRef: { sha256: string; kind: string } | null;
       diagnostics: Array<{ code?: string }>;
     };
-    assert.equal(body.status, 'ok');
-    assert.equal(body.classification, 'match');
-    assert.equal(body.compileStatus, 'ok');
-    assert.equal(body.executionStatus, 'ok');
+    assert.equal(body.status, "ok");
+    assert.equal(body.classification, "match");
+    assert.equal(body.compileStatus, "ok");
+    assert.equal(body.executionStatus, "ok");
     assert.match(body.actualOutput, /APPROVED-COUNT=2/);
     assert.match(body.expectedOutput, /APPROVED-COUNT=2/);
-    assert.equal(body.outputRef?.sha256, 'c'.repeat(64));
-    assert.equal(body.expectedOutputRef?.sha256, 'e'.repeat(64));
-    assert.equal(body.expectedOutputRef?.kind, 'cobol-oracle-stdout');
-    assert.equal(body.actualOutputRef?.sha256, 'a'.repeat(64));
-    assert.equal(body.actualOutputRef?.kind, 'java-stdout');
+    assert.equal(body.outputRef?.sha256, "c".repeat(64));
+    assert.equal(body.expectedOutputRef?.sha256, "e".repeat(64));
+    assert.equal(body.expectedOutputRef?.kind, "cobol-oracle-stdout");
+    assert.equal(body.actualOutputRef?.sha256, "a".repeat(64));
+    assert.equal(body.actualOutputRef?.kind, "java-stdout");
     assert.equal(body.diagnostics.length, 2);
-    assert.equal(body.diagnostics[0]?.code, 'compile.ok');
+    assert.equal(body.diagnostics[0]?.code, "compile.ok");
   } finally {
     await server.close();
   }
 });
 
-test('live build-test surfaces compile failure as compileStatus=failed and executionStatus=not-run', async () => {
+test("live build-test surfaces compile failure as compileStatus=failed and executionStatus=not-run", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const buildResult = {
-    status: 'compile-failed',
-    classification: 'compile-error',
-    build: { compileOk: false, sourceCount: 1, diagnostics: [{ level: 'error', code: 'javac', message: 'cannot resolve symbol' }] },
-    execution: { ran: false, ok: false, stdout: '', stderr: '' },
+    status: "compile-failed",
+    classification: "compile-error",
+    build: {
+      compileOk: false,
+      sourceCount: 1,
+      diagnostics: [
+        { level: "error", code: "javac", message: "cannot resolve symbol" },
+      ],
+    },
+    execution: { ran: false, ok: false, stdout: "", stderr: "" },
     goldenMaster: {},
     comparison: {},
-    diagnostics: [{ level: 'error', code: 'javac', message: 'cannot resolve symbol' }],
-    outputRef: { uri: 'file:///run/build-test-result.json', sha256: 'd'.repeat(64) },
+    diagnostics: [
+      { level: "error", code: "javac", message: "cannot resolve symbol" },
+    ],
+    outputRef: {
+      uri: "file:///run/build-test-result.json",
+      sha256: "d".repeat(64),
+    },
   };
   const { client: orch } = stubOrchestrator({
     buildTest: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        kind: 'build-test-result',
+        kind: "build-test-result",
         data: buildResult,
-        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'd'.repeat(64) },
+        artifactRef: {
+          uri: "file:///run/build-test-result.json",
+          sha256: "d".repeat(64),
+        },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -1485,65 +1766,77 @@ test('live build-test surfaces compile failure as compileStatus=failed and execu
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+    );
     const body = buildTest.body as {
       status: string;
       compileStatus: string;
       executionStatus: string;
       actualOutput: string;
     };
-    assert.equal(body.status, 'compile-failed');
-    assert.equal(body.compileStatus, 'failed');
-    assert.equal(body.executionStatus, 'not-run');
-    assert.equal(body.actualOutput, '');
+    assert.equal(body.status, "compile-failed");
+    assert.equal(body.compileStatus, "failed");
+    assert.equal(body.executionStatus, "not-run");
+    assert.equal(body.actualOutput, "");
   } finally {
     await server.close();
   }
 });
 
-test('live evidence exposes manifestHash, validationStatus, exportRef, and aggregates missing artifacts', async () => {
+test("live evidence exposes manifestHash, validationStatus, exportRef, and aggregates missing artifacts", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const manifest = {
-    schemaVersion: 'v0',
-    capability: 'evidence.pack',
-    service: 'evidence-service',
-    packId: 'epk-live-1',
-    runId: 'live-run-1',
-    wave: 'w0',
-    status: 'incomplete',
-    createdAt: '2026-05-14T10:00:30Z',
+    schemaVersion: "v0",
+    capability: "evidence.pack",
+    service: "evidence-service",
+    packId: "epk-live-1",
+    runId: "live-run-1",
+    wave: "w0",
+    status: "incomplete",
+    createdAt: "2026-05-14T10:00:30Z",
     artifacts: {},
     validation: {
-      status: 'incomplete',
-      requiredArtifacts: ['sourceCobol', 'semanticIr', 'generatedJava'],
-      missingArtifacts: ['semanticIr'],
+      status: "incomplete",
+      requiredArtifacts: ["sourceCobol", "semanticIr", "generatedJava"],
+      missingArtifacts: ["semanticIr"],
       messages: [],
     },
     exports: [
-      { format: 'tar.gz', uri: 'file:///run/evidence-pack.tar.gz', sha256: 'e'.repeat(64), byteSize: 1024, createdAt: '2026-05-14T10:00:30Z' },
+      {
+        format: "tar.gz",
+        uri: "file:///run/evidence-pack.tar.gz",
+        sha256: "e".repeat(64),
+        byteSize: 1024,
+        createdAt: "2026-05-14T10:00:30Z",
+      },
     ],
   };
   const { client: orch } = stubOrchestrator({
     evidence: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
         data: manifest,
-        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'f'.repeat(64), byteSize: 768 },
+        artifactRef: {
+          uri: "file:///run/evidence-pack-manifest.json",
+          sha256: "f".repeat(64),
+          byteSize: 768,
+        },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -1552,11 +1845,13 @@ test('live evidence exposes manifestHash, validationStatus, exportRef, and aggre
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+    );
     const body = evidence.body as {
       status: string;
       packId: string;
@@ -1566,24 +1861,24 @@ test('live evidence exposes manifestHash, validationStatus, exportRef, and aggre
       missingArtifacts: string[];
       exportRef: { sha256: string } | null;
     };
-    assert.equal(body.status, 'incomplete');
-    assert.equal(body.packId, 'epk-live-1');
+    assert.equal(body.status, "incomplete");
+    assert.equal(body.packId, "epk-live-1");
     assert.equal(body.manifestUri, undefined);
-    assert.equal(body.manifestHash, 'f'.repeat(64));
-    assert.equal(body.validationStatus, 'incomplete');
-    assert.deepEqual(body.missingArtifacts, ['semanticIr']);
-    assert.equal(body.exportRef?.sha256, 'e'.repeat(64));
+    assert.equal(body.manifestHash, "f".repeat(64));
+    assert.equal(body.validationStatus, "incomplete");
+    assert.deepEqual(body.missingArtifacts, ["semanticIr"]);
+    assert.equal(body.exportRef?.sha256, "e".repeat(64));
   } finally {
     await server.close();
   }
 });
 
-test('live evidence with missing manifest reports incomplete status and zero pack id; never claims complete', async () => {
+test("live evidence with missing manifest reports incomplete status and zero pack id; never claims complete", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator(); // no evidence stub => returns undefined
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -1592,23 +1887,31 @@ test('live evidence with missing manifest reports incomplete status and zero pac
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
-    const body = evidence.body as { status: string; packId: string; manifestUri?: string; missingArtifacts: string[]; validationStatus: string };
-    assert.equal(body.status, 'incomplete');
-    assert.equal(body.packId, '');
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+    );
+    const body = evidence.body as {
+      status: string;
+      packId: string;
+      manifestUri?: string;
+      missingArtifacts: string[];
+      validationStatus: string;
+    };
+    assert.equal(body.status, "incomplete");
+    assert.equal(body.packId, "");
     assert.equal(body.manifestUri, undefined);
-    assert.equal(body.validationStatus, 'unknown');
-    assert.deepEqual(body.missingArtifacts, ['evidence-pack-manifest']);
+    assert.equal(body.validationStatus, "unknown");
+    assert.deepEqual(body.missingArtifacts, ["evidence-pack-manifest"]);
   } finally {
     await server.close();
   }
 });
 
-test('transform rejects blank source text and does not create a run', async () => {
+test("transform rejects blank source text and does not create a run", async () => {
   const runStore = createRunStore();
   const handler = createApp({
     config: baseConfig,
@@ -1620,8 +1923,8 @@ test('transform rejects blank source text and does not create a run', async () =
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText: '   ' },
+      method: "POST",
+      body: { sourceText: "   " },
     });
     assert.equal(rejected.status, 400);
     assert.equal(runStore.list().length, 0);
@@ -1630,7 +1933,7 @@ test('transform rejects blank source text and does not create a run', async () =
   }
 });
 
-test('transform fails clearly when orchestrator url is missing', async () => {
+test("transform fails clearly when orchestrator url is missing", async () => {
   const runStore = createRunStore();
   const handler = createApp({
     config: baseConfig,
@@ -1642,22 +1945,25 @@ test('transform fails clearly when orchestrator url is missing', async () => {
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. TRANS01.\n' },
+      method: "POST",
+      body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. TRANS01.\n" },
     });
     assert.equal(rejected.status, 503);
-    assert.match((rejected.body as { error: string }).error, /orchestrator URL/i);
+    assert.match(
+      (rejected.body as { error: string }).error,
+      /orchestrator URL/i,
+    );
     assert.equal(runStore.list().length, 0);
   } finally {
     await server.close();
   }
 });
 
-test('transform derives program id, calls orchestrator, and returns the full transform contract', async () => {
+test("transform derives program id, calls orchestrator, and returns the full transform contract", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -1665,20 +1971,21 @@ test('transform derives program id, calls orchestrator, and returns the full tra
   });
   const server = await startTestServer(handler);
   try {
-    const sourceText = '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n';
+    const sourceText =
+      "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n";
     const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText, sourceName: 'hello.cbl', options: { explain: true } },
+      method: "POST",
+      body: { sourceText, sourceName: "hello.cbl", options: { explain: true } },
     });
     assert.equal(started.status, 201);
     assert.equal(calls.startTransformRun.length, 1);
     assert.deepEqual(calls.startTransformRun[0], {
-      programId: 'HELLO01',
+      programId: "HELLO01",
       sourceText,
-      requester: 'c2c-ui',
-      sourceName: 'hello.cbl',
+      requester: "c2c-ui",
+      sourceName: "hello.cbl",
       options: { explain: true },
-      targetLanguage: 'java',
+      targetLanguage: "java",
       expectedOutput: undefined,
       oracleInput: undefined,
     });
@@ -1693,12 +2000,12 @@ test('transform derives program id, calls orchestrator, and returns the full tra
       productMode: string;
       links: Record<string, string>;
     };
-    assert.equal(body.programId, 'HELLO01');
-    assert.equal(body.mode, 'live');
+    assert.equal(body.programId, "HELLO01");
+    assert.equal(body.mode, "live");
     // TransformResponse extends RunSummary; productMode follows stored mode.
-    assert.equal(body.productMode, 'live');
-    assert.equal(body.orchestratorRunId, 'live-transform-1');
-    assert.equal(body.status, 'updating');
+    assert.equal(body.productMode, "live");
+    assert.equal(body.orchestratorRunId, "live-transform-1");
+    assert.equal(body.status, "updating");
     assert.deepEqual(body.links, {
       self: `/api/v0/runs/${body.runId}`,
       generated: `/api/v0/runs/${body.runId}/generated`,
@@ -1717,11 +2024,11 @@ test('transform derives program id, calls orchestrator, and returns the full tra
   }
 });
 
-test('transform uses a deterministic fallback program id when none is provided', async () => {
+test("transform uses a deterministic fallback program id when none is provided", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -1729,22 +2036,26 @@ test('transform uses a deterministic fallback program id when none is provided',
   });
   const server = await startTestServer(handler);
   try {
-    const sourceText = '       IDENTIFICATION DIVISION.\n       DISPLAY "NO PROGRAM ID".\n';
-    const expectedProgramId = `SRC-${createHash('sha256').update(sourceText, 'utf8').digest('hex').slice(0, 12).toUpperCase()}`;
+    const sourceText =
+      '       IDENTIFICATION DIVISION.\n       DISPLAY "NO PROGRAM ID".\n';
+    const expectedProgramId = `SRC-${createHash("sha256").update(sourceText, "utf8").digest("hex").slice(0, 12).toUpperCase()}`;
     const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
+      method: "POST",
       body: { sourceText },
     });
     assert.equal(started.status, 201);
     assert.equal(calls.startTransformRun[0]?.programId, expectedProgramId);
-    assert.equal((started.body as { programId: string }).programId, expectedProgramId);
+    assert.equal(
+      (started.body as { programId: string }).programId,
+      expectedProgramId,
+    );
     assert.equal(runStore.list().length, 1);
   } finally {
     await server.close();
   }
 });
 
-test('transform does not create a run when the orchestrator returns a non-2xx status', async () => {
+test("transform does not create a run when the orchestrator returns a non-2xx status", async () => {
   const runStore = createRunStore();
   const client: OrchestratorClient = {
     enabled: true,
@@ -1752,7 +2063,7 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
       return undefined;
     },
     async startTransformRun() {
-      return { status: 502, body: { error: 'upstream rejected' } };
+      return { status: 502, body: { error: "upstream rejected" } };
     },
     async getRun() {
       return undefined;
@@ -1789,7 +2100,7 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: client,
     evidence: disabledEvidence(),
@@ -1798,8 +2109,8 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL01.\n' },
+      method: "POST",
+      body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL01.\n" },
     });
     assert.equal(rejected.status, 502);
     assert.equal(runStore.list().length, 0);
@@ -1808,7 +2119,7 @@ test('transform does not create a run when the orchestrator returns a non-2xx st
   }
 });
 
-test('transform does not create a run when the orchestrator throws', async () => {
+test("transform does not create a run when the orchestrator throws", async () => {
   const runStore = createRunStore();
   const client: OrchestratorClient = {
     enabled: true,
@@ -1816,7 +2127,7 @@ test('transform does not create a run when the orchestrator throws', async () =>
       return undefined;
     },
     async startTransformRun() {
-      throw new Error('boom');
+      throw new Error("boom");
     },
     async getRun() {
       return undefined;
@@ -1853,7 +2164,7 @@ test('transform does not create a run when the orchestrator throws', async () =>
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: client,
     evidence: disabledEvidence(),
@@ -1862,8 +2173,8 @@ test('transform does not create a run when the orchestrator throws', async () =>
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL02.\n' },
+      method: "POST",
+      body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL02.\n" },
     });
     assert.equal(rejected.status, 502);
     assert.equal(runStore.list().length, 0);
@@ -1872,11 +2183,15 @@ test('transform does not create a run when the orchestrator throws', async () =>
   }
 });
 
-test('transform rejects oversize source text before calling the orchestrator', async () => {
+test("transform rejects oversize source text before calling the orchestrator", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream', transformSourceMaxBytes: 32 },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      transformSourceMaxBytes: 32,
+    },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -1885,8 +2200,8 @@ test('transform rejects oversize source text before calling the orchestrator', a
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. BIG01.\n' },
+      method: "POST",
+      body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. BIG01.\n" },
     });
     assert.equal(rejected.status, 413);
     assert.equal(calls.startTransformRun.length, 0);
@@ -1896,32 +2211,39 @@ test('transform rejects oversize source text before calling the orchestrator', a
   }
 });
 
-test('product transform calls only orchestrator URL, never capability endpoints', async () => {
+test("product transform calls only orchestrator URL, never capability endpoints", async () => {
   const observed: Array<{ url: string; method: string }> = [];
   const recordingHttp: HttpClient = {
-    async request(targetUrl: string, options: HttpRequestOptions): Promise<UpstreamResponse> {
-      observed.push({ url: targetUrl, method: options.method ?? 'GET' });
+    async request(
+      targetUrl: string,
+      options: HttpRequestOptions,
+    ): Promise<UpstreamResponse> {
+      observed.push({ url: targetUrl, method: options.method ?? "GET" });
       return {
         status: 201,
         body: {
           run: {
-            runId: 'orch-isolation-1',
-            workflowId: 'w0-migration-v0',
-            status: 'updating',
-            policyDecision: 'allow',
-            message: 'orchestrator accepted',
+            runId: "orch-isolation-1",
+            workflowId: "w0-migration-v0",
+            status: "updating",
+            policyDecision: "allow",
+            message: "orchestrator accepted",
             evidenceRefs: [],
           },
-          status: 'started',
-          message: 'orchestrator run started',
+          status: "started",
+          message: "orchestrator run started",
         },
       };
     },
   };
 
-  const orchestratorUrl = 'http://orchestrator.test';
-  const evidenceUrl = 'http://evidence.test';
-  const orchestrator = createOrchestratorClient(orchestratorUrl, recordingHttp, 1_000);
+  const orchestratorUrl = "http://orchestrator.test";
+  const evidenceUrl = "http://evidence.test";
+  const orchestrator = createOrchestratorClient(
+    orchestratorUrl,
+    recordingHttp,
+    1_000,
+  );
   const evidence = createEvidenceClient(evidenceUrl, recordingHttp, 1_000);
 
   const handler = createApp({
@@ -1934,25 +2256,35 @@ test('product transform calls only orchestrator URL, never capability endpoints'
   const server = await startTestServer(handler);
   try {
     const transformed = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. ISO01.\n' },
+      method: "POST",
+      body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. ISO01.\n" },
     });
     assert.equal(transformed.status, 201);
 
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
 
-    assert.ok(observed.length >= 2, `expected upstream calls, observed=${observed.length}`);
+    assert.ok(
+      observed.length >= 2,
+      `expected upstream calls, observed=${observed.length}`,
+    );
     for (const call of observed) {
       assert.ok(
-        call.url.startsWith(orchestratorUrl) || call.url.startsWith(evidenceUrl),
+        call.url.startsWith(orchestratorUrl) ||
+          call.url.startsWith(evidenceUrl),
         `BFF must only call orchestrator or evidence URLs in product mode, observed ${call.method} ${call.url}`,
       );
     }
-    const capabilityHints = ['/v0/parse', '/v0/ir', '/v0/generate', '/v0/run-verification', '/v0/invoke'];
+    const capabilityHints = [
+      "/v0/parse",
+      "/v0/ir",
+      "/v0/generate",
+      "/v0/run-verification",
+      "/v0/invoke",
+    ];
     for (const call of observed) {
       for (const hint of capabilityHints) {
         assert.ok(
@@ -1966,7 +2298,7 @@ test('product transform calls only orchestrator URL, never capability endpoints'
   }
 });
 
-test('rejects malformed run start bodies', async () => {
+test("rejects malformed run start bodies", async () => {
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -1976,17 +2308,23 @@ test('rejects malformed run start bodies', async () => {
   });
   const server = await startTestServer(handler);
   try {
-    const missing = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: {} });
+    const missing = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: {},
+    });
     assert.equal(missing.status, 400);
 
-    const unknown = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'NOPE' } });
+    const unknown = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "NOPE" },
+    });
     assert.equal(unknown.status, 404);
   } finally {
     await server.close();
   }
 });
 
-test('returns 404 for unknown api paths and run ids', async () => {
+test("returns 404 for unknown api paths and run ids", async () => {
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -1999,7 +2337,9 @@ test('returns 404 for unknown api paths and run ids', async () => {
     const unknownApi = await fetchJson(`${server.baseUrl}/api/v0/nope`);
     assert.equal(unknownApi.status, 404);
 
-    const unknownRun = await fetchJson(`${server.baseUrl}/api/v0/runs/run-bogus`);
+    const unknownRun = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/run-bogus`,
+    );
     assert.equal(unknownRun.status, 404);
   } finally {
     await server.close();
@@ -2008,19 +2348,23 @@ test('returns 404 for unknown api paths and run ids', async () => {
 
 // Issue #96: progress + learning route contracts.
 
-function disabledLearning(): { enabled: boolean; baseUrl: string; getRunSummary: () => Promise<undefined> } {
+function disabledLearning(): {
+  enabled: boolean;
+  baseUrl: string;
+  getRunSummary: () => Promise<undefined>;
+} {
   return {
     enabled: false,
-    baseUrl: '',
+    baseUrl: "",
     async getRunSummary() {
       return undefined;
     },
   };
 }
 
-test('model gateway health route normalizes upstream service payload to the Studio contract', async () => {
+test("model gateway health route normalizes upstream service payload to the Studio contract", async () => {
   const handler = createApp({
-    config: { ...baseConfig, modelGatewayUrl: 'http://gateway' },
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
@@ -2031,16 +2375,16 @@ test('model gateway health route normalizes upstream service payload to the Stud
         return {
           status: 200,
           body: {
-            status: 'ok',
-            service: 'model-gateway',
-            schema: 'v0',
-            providers: ['foundry'],
+            status: "ok",
+            service: "model-gateway",
+            schema: "v0",
+            providers: ["foundry"],
             activeModels: 2,
             configured: {
-              mode: 'foundry-dev',
-              dataPolicy: 'model-gateway',
-              invocationLedgerEnabled: 'true',
-              harnessEventEmissionEnabled: 'false',
+              mode: "foundry-dev",
+              dataPolicy: "model-gateway",
+              invocationLedgerEnabled: "true",
+              harnessEventEmissionEnabled: "false",
             },
           },
         };
@@ -2052,18 +2396,18 @@ test('model gateway health route normalizes upstream service payload to the Stud
         return {
           status: 200,
           body: {
-            schema: 'v0',
-            service: 'model-gateway-service',
-            status: 'ok',
-            provider: 'foundry-development',
-            policyId: 'foundry-development-v0',
+            schema: "v0",
+            service: "model-gateway-service",
+            status: "ok",
+            provider: "foundry-development",
+            policyId: "foundry-development-v0",
             roles: [
               {
-                role: 'transformation',
-                status: 'ok',
-                policyId: 'foundry-development-v0',
-                availableModels: ['gpt-oss-120b'],
-                configuredModels: ['gpt-oss-120b'],
+                role: "transformation",
+                status: "ok",
+                policyId: "foundry-development-v0",
+                availableModels: ["gpt-oss-120b"],
+                configuredModels: ["gpt-oss-120b"],
               },
             ],
           },
@@ -2073,24 +2417,26 @@ test('model gateway health route normalizes upstream service payload to the Stud
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/model-gateway/health`);
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/model-gateway/health`,
+    );
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, {
-      status: 'ok',
-      providerMode: 'foundry-dev',
+      status: "ok",
+      providerMode: "foundry-dev",
       activeModelCount: 2,
-      dataPolicy: 'model-gateway',
+      dataPolicy: "model-gateway",
       ledgerEnabled: true,
       eventEmission: false,
-      policyId: '',
+      policyId: "",
       roleAvailability: [
         {
-          role: 'transformation',
-          status: 'ok',
-          policyId: 'foundry-development-v0',
-          availableModels: ['gpt-oss-120b'],
-          configuredModels: ['gpt-oss-120b'],
-          reason: '',
+          role: "transformation",
+          status: "ok",
+          policyId: "foundry-development-v0",
+          availableModels: ["gpt-oss-120b"],
+          configuredModels: ["gpt-oss-120b"],
+          reason: "",
         },
       ],
     });
@@ -2099,9 +2445,9 @@ test('model gateway health route normalizes upstream service payload to the Stud
   }
 });
 
-test('model gateway models route normalizes upstream registry payload to the Studio contract', async () => {
+test("model gateway models route normalizes upstream registry payload to the Studio contract", async () => {
   const handler = createApp({
-    config: { ...baseConfig, modelGatewayUrl: 'http://gateway' },
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
@@ -2115,8 +2461,12 @@ test('model gateway models route normalizes upstream registry payload to the Stu
         return {
           status: 200,
           body: [
-            { id: 'gpt-4.1', displayName: 'GPT 4.1', provider: 'foundry' },
-            { ID: 'internal-a', DisplayName: 'Internal A', Provider: 'customer-internal' },
+            { id: "gpt-4.1", displayName: "GPT 4.1", provider: "foundry" },
+            {
+              ID: "internal-a",
+              DisplayName: "Internal A",
+              Provider: "customer-internal",
+            },
           ],
         };
       },
@@ -2127,12 +2477,14 @@ test('model gateway models route normalizes upstream registry payload to the Stu
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/model-gateway/models`);
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/model-gateway/models`,
+    );
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, {
       models: [
-        { id: 'gpt-4.1', name: 'GPT 4.1', provider: 'foundry' },
-        { id: 'internal-a', name: 'Internal A', provider: 'customer-internal' },
+        { id: "gpt-4.1", name: "GPT 4.1", provider: "foundry" },
+        { id: "internal-a", name: "Internal A", provider: "customer-internal" },
       ],
     });
   } finally {
@@ -2140,9 +2492,9 @@ test('model gateway models route normalizes upstream registry payload to the Stu
   }
 });
 
-test('model gateway capabilities route exposes per-role availability for blocked-state UI', async () => {
+test("model gateway capabilities route exposes per-role availability for blocked-state UI", async () => {
   const handler = createApp({
-    config: { ...baseConfig, modelGatewayUrl: 'http://gateway' },
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
@@ -2159,26 +2511,26 @@ test('model gateway capabilities route exposes per-role availability for blocked
         return {
           status: 200,
           body: {
-            schema: 'v0',
-            service: 'model-gateway-service',
-            status: 'degraded',
-            provider: 'foundry-development',
-            policyId: 'foundry-development-v0',
+            schema: "v0",
+            service: "model-gateway-service",
+            status: "degraded",
+            provider: "foundry-development",
+            policyId: "foundry-development-v0",
             roles: [
               {
-                role: 'transformation',
-                status: 'ok',
-                policyId: 'foundry-development-v0',
-                availableModels: ['gpt-oss-120b'],
-                configuredModels: ['gpt-oss-120b'],
+                role: "transformation",
+                status: "ok",
+                policyId: "foundry-development-v0",
+                availableModels: ["gpt-oss-120b"],
+                configuredModels: ["gpt-oss-120b"],
               },
               {
-                role: 'verification-repair',
-                status: 'unavailable',
-                policyId: 'foundry-development-v0',
+                role: "verification-repair",
+                status: "unavailable",
+                policyId: "foundry-development-v0",
                 availableModels: [],
-                configuredModels: ['missing-model'],
-                reason: 'no approved active model for role',
+                configuredModels: ["missing-model"],
+                reason: "no approved active model for role",
               },
             ],
           },
@@ -2188,28 +2540,30 @@ test('model gateway capabilities route exposes per-role availability for blocked
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/model-gateway/capabilities`);
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/model-gateway/capabilities`,
+    );
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, {
-      status: 'degraded',
-      providerMode: 'foundry-development',
-      policyId: 'foundry-development-v0',
+      status: "degraded",
+      providerMode: "foundry-development",
+      policyId: "foundry-development-v0",
       roles: [
         {
-          role: 'transformation',
-          status: 'ok',
-          policyId: 'foundry-development-v0',
-          availableModels: ['gpt-oss-120b'],
-          configuredModels: ['gpt-oss-120b'],
-          reason: '',
+          role: "transformation",
+          status: "ok",
+          policyId: "foundry-development-v0",
+          availableModels: ["gpt-oss-120b"],
+          configuredModels: ["gpt-oss-120b"],
+          reason: "",
         },
         {
-          role: 'verification-repair',
-          status: 'unavailable',
-          policyId: 'foundry-development-v0',
+          role: "verification-repair",
+          status: "unavailable",
+          policyId: "foundry-development-v0",
           availableModels: [],
-          configuredModels: ['missing-model'],
-          reason: 'no approved active model for role',
+          configuredModels: ["missing-model"],
+          reason: "no approved active model for role",
         },
       ],
     });
@@ -2218,9 +2572,9 @@ test('model gateway capabilities route exposes per-role availability for blocked
   }
 });
 
-test('harness ready route keeps upstream ready payload parser-compatible for the Studio', async () => {
+test("harness ready route keeps upstream ready payload parser-compatible for the Studio", async () => {
   const handler = createApp({
-    config: { ...baseConfig, harnessUrl: 'http://harness' },
+    config: { ...baseConfig, harnessUrl: "http://harness" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
@@ -2231,10 +2585,10 @@ test('harness ready route keeps upstream ready payload parser-compatible for the
         return {
           status: 200,
           body: {
-            status: 'ready',
+            status: "ready",
             capabilities: 2,
             runs: 1,
-            policyGateway: 'enabled',
+            policyGateway: "enabled",
           },
         };
       },
@@ -2244,67 +2598,70 @@ test('harness ready route keeps upstream ready payload parser-compatible for the
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/harness/ready`);
     assert.equal(response.status, 200);
-    assert.equal((response.body as { status: string }).status, 'ok');
-    assert.match((response.body as { summary: string }).summary, /2 capabilities registered/i);
+    assert.equal((response.body as { status: string }).status, "ok");
+    assert.match(
+      (response.body as { summary: string }).summary,
+      /2 capabilities registered/i,
+    );
   } finally {
     await server.close();
   }
 });
 
-test('progress route proxies orchestrator step timeline for live runs', async () => {
+test("progress route proxies orchestrator step timeline for live runs", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator({
     progress: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        runStatus: 'updating',
-        currentStep: 'generate-java',
+        runId: "live-run-1",
+        runStatus: "updating",
+        currentStep: "generate-java",
         failedStep: null,
-        completedSteps: ['accepted', 'parse-cobol', 'generate-ir'],
+        completedSteps: ["accepted", "parse-cobol", "generate-ir"],
         stepCount: 4,
         steps: [
           {
             stepId: 1,
-            name: 'accepted',
-            capabilityId: 'orchestrator-service',
-            service: 'orchestrator-service',
-            actor: 'orchestrator-service',
-            status: 'ok',
-            startedAt: '2026-05-15T00:00:00Z',
-            finishedAt: '2026-05-15T00:00:00Z',
+            name: "accepted",
+            capabilityId: "orchestrator-service",
+            service: "orchestrator-service",
+            actor: "orchestrator-service",
+            status: "ok",
+            startedAt: "2026-05-15T00:00:00Z",
+            finishedAt: "2026-05-15T00:00:00Z",
           },
           {
             stepId: 2,
-            name: 'parse-cobol',
-            capabilityId: 'cobol.parse',
-            service: 'orchestrator-service',
-            actor: 'parser-service',
-            status: 'ok',
-            startedAt: '2026-05-15T00:00:01Z',
-            finishedAt: '2026-05-15T00:00:02Z',
-            inputRef: { uri: 'urn:in', sha256: 'a'.repeat(64), byteSize: 12 },
-            outputRef: { uri: 'urn:out', sha256: 'b'.repeat(64), byteSize: 24 },
+            name: "parse-cobol",
+            capabilityId: "cobol.parse",
+            service: "orchestrator-service",
+            actor: "parser-service",
+            status: "ok",
+            startedAt: "2026-05-15T00:00:01Z",
+            finishedAt: "2026-05-15T00:00:02Z",
+            inputRef: { uri: "urn:in", sha256: "a".repeat(64), byteSize: 12 },
+            outputRef: { uri: "urn:out", sha256: "b".repeat(64), byteSize: 24 },
           },
           {
             stepId: 3,
-            name: 'generate-ir',
-            capabilityId: 'cobol.ir',
-            service: 'orchestrator-service',
-            actor: 'ir-service',
-            status: 'ok',
-            startedAt: '2026-05-15T00:00:03Z',
-            finishedAt: '2026-05-15T00:00:04Z',
+            name: "generate-ir",
+            capabilityId: "cobol.ir",
+            service: "orchestrator-service",
+            actor: "ir-service",
+            status: "ok",
+            startedAt: "2026-05-15T00:00:03Z",
+            finishedAt: "2026-05-15T00:00:04Z",
           },
           {
             stepId: 4,
-            name: 'generate-java',
-            capabilityId: 'java.generator',
-            service: 'orchestrator-service',
-            actor: 'generator-service',
-            status: 'running',
-            startedAt: '2026-05-15T00:00:05Z',
+            name: "generate-java",
+            capabilityId: "java.generator",
+            service: "orchestrator-service",
+            actor: "generator-service",
+            status: "running",
+            startedAt: "2026-05-15T00:00:05Z",
           },
         ],
         missingArtifacts: [],
@@ -2312,7 +2669,7 @@ test('progress route proxies orchestrator step timeline for live runs', async ()
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -2322,13 +2679,15 @@ test('progress route proxies orchestrator step timeline for live runs', async ()
   const server = await startTestServer(handler);
   try {
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(created.status, 201);
     const runId = (created.body as { runId: string }).runId;
 
-    const progress = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/progress`);
+    const progress = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runId}/progress`,
+    );
     assert.equal(progress.status, 200);
     const body = progress.body as {
       status: string;
@@ -2336,15 +2695,22 @@ test('progress route proxies orchestrator step timeline for live runs', async ()
       currentStep: string | null;
       failedStep: string | null;
       stepCount: number;
-      steps: Array<{ name: string; status: string; capabilityId: string; stepId: number; inputRef?: { uri?: string }; outputRef?: { uri?: string } }>;
+      steps: Array<{
+        name: string;
+        status: string;
+        capabilityId: string;
+        stepId: number;
+        inputRef?: { uri?: string };
+        outputRef?: { uri?: string };
+      }>;
     };
-    assert.equal(body.status, 'complete');
-    assert.equal(body.runStatus, 'updating');
-    assert.equal(body.currentStep, 'generate-java');
+    assert.equal(body.status, "complete");
+    assert.equal(body.runStatus, "updating");
+    assert.equal(body.currentStep, "generate-java");
     assert.equal(body.failedStep, null);
     assert.equal(body.stepCount, 4);
-    assert.equal(body.steps[3]?.status, 'running');
-    assert.equal(body.steps[1]?.capabilityId, 'cobol.parse');
+    assert.equal(body.steps[3]?.status, "running");
+    assert.equal(body.steps[1]?.capabilityId, "cobol.parse");
     assert.equal(body.steps[1]?.inputRef?.uri, undefined);
     assert.equal(body.steps[1]?.outputRef?.uri, undefined);
     assert.equal(calls.getProgress, 1);
@@ -2353,50 +2719,73 @@ test('progress route proxies orchestrator step timeline for live runs', async ()
   }
 });
 
-test('progress route sanitizes failed step diagnostics and never reports success', async () => {
+test("progress route sanitizes failed step diagnostics and never reports success", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator({
     progress: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        runStatus: 'failed',
+        runId: "live-run-1",
+        runStatus: "failed",
         currentStep: null,
-        failedStep: 'generate-java',
-        completedSteps: ['accepted', 'parse-cobol', 'generate-ir'],
+        failedStep: "generate-java",
+        completedSteps: ["accepted", "parse-cobol", "generate-ir"],
         stepCount: 5,
         steps: [
-          { stepId: 1, name: 'accepted', capabilityId: 'orch', service: 'orch', actor: 'orch', status: 'ok' },
-          { stepId: 2, name: 'parse-cobol', capabilityId: 'cobol.parse', service: 'orch', actor: 'parser', status: 'ok' },
-          { stepId: 3, name: 'generate-ir', capabilityId: 'cobol.ir', service: 'orch', actor: 'ir', status: 'ok' },
+          {
+            stepId: 1,
+            name: "accepted",
+            capabilityId: "orch",
+            service: "orch",
+            actor: "orch",
+            status: "ok",
+          },
+          {
+            stepId: 2,
+            name: "parse-cobol",
+            capabilityId: "cobol.parse",
+            service: "orch",
+            actor: "parser",
+            status: "ok",
+          },
+          {
+            stepId: 3,
+            name: "generate-ir",
+            capabilityId: "cobol.ir",
+            service: "orch",
+            actor: "ir",
+            status: "ok",
+          },
           {
             stepId: 4,
-            name: 'generate-java',
-            capabilityId: 'java.generator',
-            service: 'orch',
-            actor: 'generator',
-            status: 'failed',
-            diagnostic: 'generator backend unavailable at http://generator.internal/v0',
+            name: "generate-java",
+            capabilityId: "java.generator",
+            service: "orch",
+            actor: "generator",
+            status: "failed",
+            diagnostic:
+              "generator backend unavailable at http://generator.internal/v0",
           },
           {
             stepId: 5,
-            name: 'repair-java',
-            capabilityId: 'java.repair',
-            service: 'orch',
-            actor: 'repair',
-            status: 'failed',
+            name: "repair-java",
+            capabilityId: "java.repair",
+            service: "orch",
+            actor: "repair",
+            status: "failed",
             diagnostic:
               'repair rejected payload {"sourceText":"IDENTIFICATION DIVISION.","expectedOutput":"ok","inputRef":{"uri":"s3://internal/artifact"}}',
           },
           {
             stepId: 6,
-            name: 'failed',
-            capabilityId: 'orch',
-            service: 'orch',
-            actor: 'orch',
-            status: 'failed',
-            diagnostic: 'W0 migration workflow failed: step generate-java failed',
+            name: "failed",
+            capabilityId: "orch",
+            service: "orch",
+            actor: "orch",
+            status: "failed",
+            diagnostic:
+              "W0 migration workflow failed: step generate-java failed",
           },
         ],
         missingArtifacts: [],
@@ -2404,7 +2793,7 @@ test('progress route sanitizes failed step diagnostics and never reports success
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -2413,66 +2802,80 @@ test('progress route sanitizes failed step diagnostics and never reports success
   });
   const server = await startTestServer(handler);
   try {
-    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
     const runId = (created.body as { runId: string }).runId;
-    const progress = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/progress`);
+    const progress = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runId}/progress`,
+    );
     const body = progress.body as {
       runStatus: string;
       failedStep: string | null;
       steps: Array<{ name: string; status: string; diagnostic?: string }>;
     };
-    assert.equal(body.runStatus, 'failed');
-    assert.equal(body.failedStep, 'generate-java');
-    const failedStep = body.steps.find((entry) => entry.name === 'generate-java');
-    assert.ok(failedStep, 'failed step must be present in payload');
-    assert.equal(failedStep?.status, 'failed');
+    assert.equal(body.runStatus, "failed");
+    assert.equal(body.failedStep, "generate-java");
+    const failedStep = body.steps.find(
+      (entry) => entry.name === "generate-java",
+    );
+    assert.ok(failedStep, "failed step must be present in payload");
+    assert.equal(failedStep?.status, "failed");
     assert.equal(
       failedStep?.diagnostic,
-      'generator backend unavailable at [redacted]',
+      "generator backend unavailable at [redacted]",
     );
-    const payloadStep = body.steps.find((entry) => entry.name === 'repair-java');
+    const payloadStep = body.steps.find(
+      (entry) => entry.name === "repair-java",
+    );
     assert.equal(
       payloadStep?.diagnostic,
-      'Step failed. See workflow failure details for the classified reason.',
+      "Step failed. See workflow failure details for the classified reason.",
     );
-    const workflowFailureStep = body.steps.find((entry) => entry.name === 'failed');
-    assert.equal(workflowFailureStep?.diagnostic, 'W0 migration workflow failed: step generate-java failed');
+    const workflowFailureStep = body.steps.find(
+      (entry) => entry.name === "failed",
+    );
+    assert.equal(
+      workflowFailureStep?.diagnostic,
+      "W0 migration workflow failed: step generate-java failed",
+    );
     const serialized = JSON.stringify(body.steps);
-    assert.ok(!serialized.includes('http://generator.internal'));
-    assert.ok(!serialized.includes('sourceText'));
-    assert.ok(!serialized.includes('s3://internal'));
+    assert.ok(!serialized.includes("http://generator.internal"));
+    assert.ok(!serialized.includes("sourceText"));
+    assert.ok(!serialized.includes("s3://internal"));
   } finally {
     await server.close();
   }
 });
 
-test('learning route prefers live experience-learning client when configured', async () => {
+test("learning route prefers live experience-learning client when configured", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   let learningCalls = 0;
   const liveLearning = {
     enabled: true,
-    baseUrl: 'http://el.test',
+    baseUrl: "http://el.test",
     async getRunSummary(runId: string) {
       learningCalls += 1;
       return {
         status: 200,
         body: {
           runId,
-          runStatus: 'completed',
+          runStatus: "completed",
           candidateCount: 2,
           candidateByPattern: { accepted_pattern: 2 },
-          experienceEventIds: ['evt-1', 'evt-2'],
-          observedPatterns: ['accepted_pattern'],
+          experienceEventIds: ["evt-1", "evt-2"],
+          observedPatterns: ["accepted_pattern"],
           observationOnly: true,
-          policyVersion: 'v0',
+          policyVersion: "v0",
         },
       };
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -2481,59 +2884,75 @@ test('learning route prefers live experience-learning client when configured', a
   });
   const server = await startTestServer(handler);
   try {
-    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
     const runId = (created.body as { runId: string }).runId;
-    const learning = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/learning`);
+    const learning = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runId}/learning`,
+    );
     assert.equal(learning.status, 200);
-    const body = learning.body as { source: string; status: string; summary: { candidateCount: number; observedPatterns: string[] } | null; endpoint?: string };
-    assert.equal(body.source, 'live');
-    assert.equal(body.status, 'complete');
+    const body = learning.body as {
+      source: string;
+      status: string;
+      summary: { candidateCount: number; observedPatterns: string[] } | null;
+      endpoint?: string;
+    };
+    assert.equal(body.source, "live");
+    assert.equal(body.status, "complete");
     assert.equal(body.summary?.candidateCount, 2);
-    assert.deepEqual(body.summary?.observedPatterns, ['accepted_pattern']);
+    assert.deepEqual(body.summary?.observedPatterns, ["accepted_pattern"]);
     assert.equal(body.endpoint, undefined);
     assert.equal(learningCalls, 1);
-    assert.equal(calls.getLearning, 0, 'orchestrator fallback must not be called when EL is live');
+    assert.equal(
+      calls.getLearning,
+      0,
+      "orchestrator fallback must not be called when EL is live",
+    );
   } finally {
     await server.close();
   }
 });
 
-test('experience route maps live learning summaries into the Studio contract', async () => {
+test("experience route maps live learning summaries into the Studio contract", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator();
   const liveLearning = {
     enabled: true,
-    baseUrl: 'http://el.test',
+    baseUrl: "http://el.test",
     async getRunSummary(runId: string) {
       return {
         status: 200,
         body: {
           runId,
-          runStatus: 'completed',
+          runStatus: "completed",
           sourceEventCount: 4,
           sourceLedgerCount: 2,
           candidateCount: 2,
           candidateByPattern: { repeated_action: 2 },
-          experienceEventIds: ['evt-1', 'evt-2'],
-          observedPatterns: ['repeated_action'],
-          signals: [{
-            key: 'model_invocation_outcome',
-            label: 'Model invocation outcome',
-            status: 'observed',
-            summary: '1 model-gateway outcome observed.',
-            count: 1,
-            evidenceRefs: ['evt-model'],
-          }],
+          experienceEventIds: ["evt-1", "evt-2"],
+          observedPatterns: ["repeated_action"],
+          signals: [
+            {
+              key: "model_invocation_outcome",
+              label: "Model invocation outcome",
+              status: "observed",
+              summary: "1 model-gateway outcome observed.",
+              count: 1,
+              evidenceRefs: ["evt-model"],
+            },
+          ],
           observationOnly: true,
-          policyVersion: 'v0',
-          policyFingerprint: 'fp-1',
+          policyVersion: "v0",
+          policyFingerprint: "fp-1",
         },
       };
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -2542,49 +2961,61 @@ test('experience route maps live learning summaries into the Studio contract', a
   });
   const server = await startTestServer(handler);
   try {
-    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
     const runId = (created.body as { runId: string }).runId;
-    const response = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/experience`);
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runId}/experience`,
+    );
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, {
       runId,
-      programId: 'BRNCH01',
-      mode: 'live',
-      productMode: 'live',
-      summary: '2 learning candidates observed • from 4 source events • 2 source ledgers considered • observation-only mode',
-      observationPolicy: 'v0 / fp-1',
-      learningSignals: [{
-        key: 'model_invocation_outcome',
-        label: 'Model invocation outcome',
-        status: 'observed',
-        summary: '1 model-gateway outcome observed.',
-        count: 1,
-        evidenceRefs: ['evt-model'],
-      }],
-      detectedPatterns: ['repeated_action', 'repeated_action: 2'],
-      artifactRefs: ['evt-1', 'evt-2'],
+      programId: "BRNCH01",
+      mode: "live",
+      productMode: "live",
+      summary:
+        "2 learning candidates observed • from 4 source events • 2 source ledgers considered • observation-only mode",
+      observationPolicy: "v0 / fp-1",
+      learningSignals: [
+        {
+          key: "model_invocation_outcome",
+          label: "Model invocation outcome",
+          status: "observed",
+          summary: "1 model-gateway outcome observed.",
+          count: 1,
+          evidenceRefs: ["evt-model"],
+        },
+      ],
+      detectedPatterns: ["repeated_action", "repeated_action: 2"],
+      artifactRefs: ["evt-1", "evt-2"],
     });
   } finally {
     await server.close();
   }
 });
 
-test('learning route falls back to orchestrator-cached summary when EL is unavailable', async () => {
+test("learning route falls back to orchestrator-cached summary when EL is unavailable", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator({
     learning: {
       status: 200,
       body: {
-        summary: { runId: 'live-run-1', candidateCount: 1, observedPatterns: ['repeat_action'] },
-        endpoint: 'http://el.test/v0/runs/live-run-1/summary',
-        source: 'cached',
+        summary: {
+          runId: "live-run-1",
+          candidateCount: 1,
+          observedPatterns: ["repeat_action"],
+        },
+        endpoint: "http://el.test/v0/runs/live-run-1/summary",
+        source: "cached",
         missingArtifacts: [],
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -2593,11 +3024,20 @@ test('learning route falls back to orchestrator-cached summary when EL is unavai
   });
   const server = await startTestServer(handler);
   try {
-    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
     const runId = (created.body as { runId: string }).runId;
-    const learning = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/learning`);
-    const body = learning.body as { source: string; summary: { candidateCount: number } | null; endpoint?: string };
-    assert.equal(body.source, 'cached');
+    const learning = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runId}/learning`,
+    );
+    const body = learning.body as {
+      source: string;
+      summary: { candidateCount: number } | null;
+      endpoint?: string;
+    };
+    assert.equal(body.source, "cached");
     assert.equal(body.summary?.candidateCount, 1);
     assert.equal(body.endpoint, undefined);
     assert.equal(calls.getLearning, 1);
@@ -2606,7 +3046,7 @@ test('learning route falls back to orchestrator-cached summary when EL is unavai
   }
 });
 
-test('progress route is unavailable for diagnostic-fixture runs', async () => {
+test("progress route is unavailable for diagnostic-fixture runs", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const handler = createApp({
@@ -2619,93 +3059,133 @@ test('progress route is unavailable for diagnostic-fixture runs', async () => {
   });
   const server = await startTestServer(handler);
   try {
-    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
+    const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
     const runId = (created.body as { runId: string }).runId;
-    const progress = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/progress`);
+    const progress = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${runId}/progress`,
+    );
     assert.equal(progress.status, 200);
-    const body = progress.body as { mode: string; productMode: string; status: string };
-    assert.equal(body.mode, 'diagnostic-fixture');
-    assert.equal(body.productMode, 'unavailable');
-    assert.equal(body.status, 'incomplete');
+    const body = progress.body as {
+      mode: string;
+      productMode: string;
+      status: string;
+    };
+    assert.equal(body.mode, "diagnostic-fixture");
+    assert.equal(body.productMode, "unavailable");
+    assert.equal(body.status, "incomplete");
   } finally {
     await server.close();
   }
 });
 
-test('upstream experienceLearning client encodes run id and proxies summary', async () => {
-  const { createNodeHttpClient, createExperienceLearningClient } = await import('./upstream');
+test("upstream experienceLearning client encodes run id and proxies summary", async () => {
+  const { createNodeHttpClient, createExperienceLearningClient } =
+    await import("./upstream");
   const httpClient = createNodeHttpClient();
   const observed: Array<{ url: string; method: string }> = [];
   const target = http.createServer((req, res) => {
-    observed.push({ url: req.url ?? '', method: req.method ?? 'GET' });
-    const body = JSON.stringify({ runId: 'r-1', candidateCount: 7 });
-    res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+    observed.push({ url: req.url ?? "", method: req.method ?? "GET" });
+    const body = JSON.stringify({ runId: "r-1", candidateCount: 7 });
+    res.writeHead(200, {
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(body),
+    });
     res.end(body);
   });
-  await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
   try {
     const address = target.address() as net.AddressInfo;
-    const client = createExperienceLearningClient(`http://127.0.0.1:${address.port}`, httpClient, 1_000);
+    const client = createExperienceLearningClient(
+      `http://127.0.0.1:${address.port}`,
+      httpClient,
+      1_000,
+    );
     assert.equal(client.enabled, true);
-    const result = await client.getRunSummary('run a/b');
+    const result = await client.getRunSummary("run a/b");
     assert.equal(result?.status, 200);
-    assert.equal(observed[0]?.url, '/v0/runs/run%20a%2Fb/summary');
+    assert.equal(observed[0]?.url, "/v0/runs/run%20a%2Fb/summary");
   } finally {
-    await new Promise<void>((resolve, reject) => target.close((err) => (err ? reject(err) : resolve())));
+    await new Promise<void>((resolve, reject) =>
+      target.close((err) => (err ? reject(err) : resolve())),
+    );
   }
 });
 
-test('product-mode responses never advertise diagnostic-fixture mode or unavailable productMode as a success', async () => {
+test("product-mode responses never advertise diagnostic-fixture mode or unavailable productMode as a success", async () => {
   // Configure a live orchestrator that returns persisted artifacts so the BFF
   // can build a complete product-mode response. The guard scans every payload
   // for placeholder execution markers and verifies the contained productMode
   // signal is consistent with the artifact status.
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
-  const generatedJava = 'package c2c;\npublic final class CASE01 { public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); } }\n';
+  const generatedJava =
+    'package c2c;\npublic final class CASE01 { public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); } }\n';
   const { client: orch } = stubOrchestrator({
     generated: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        programId: 'CASE01',
-        runStatus: 'completed',
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
         missingArtifacts: [],
-        entryClass: 'CASE01',
-        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        entryClass: "CASE01",
+        entryFilePath: "src/main/java/c2c/CASE01.java",
         fileCount: 1,
-        files: { 'src/main/java/c2c/CASE01.java': generatedJava },
+        files: { "src/main/java/c2c/CASE01.java": generatedJava },
         unsupportedFeatures: [],
         openAssumptions: [],
-        generationResponseRef: { uri: 'file:///run/generation-response.json', sha256: 'a'.repeat(64), byteSize: 128 },
+        generationResponseRef: {
+          uri: "file:///run/generation-response.json",
+          sha256: "a".repeat(64),
+          byteSize: 128,
+        },
       },
     },
     buildTest: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        programId: 'CASE01',
-        runStatus: 'completed',
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
         missingArtifacts: [],
-        kind: 'build-test-result',
-        data: { status: 'ok', classification: 'match', actualOutput: 'APPROVED-COUNT=2\n' },
-        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'b'.repeat(64), byteSize: 32 },
+        kind: "build-test-result",
+        data: {
+          status: "ok",
+          classification: "match",
+          actualOutput: "APPROVED-COUNT=2\n",
+        },
+        artifactRef: {
+          uri: "file:///run/build-test-result.json",
+          sha256: "b".repeat(64),
+          byteSize: 32,
+        },
       },
     },
     evidence: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        programId: 'CASE01',
-        runStatus: 'completed',
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
         missingArtifacts: [],
-        data: { packId: 'epk-1', validation: { status: 'valid', missingArtifacts: [] }, exports: [] },
-        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'c'.repeat(64), byteSize: 64 },
+        data: {
+          packId: "epk-1",
+          validation: { status: "valid", missingArtifacts: [] },
+          exports: [],
+        },
+        artifactRef: {
+          uri: "file:///run/evidence-pack-manifest.json",
+          sha256: "c".repeat(64),
+          byteSize: 64,
+        },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -2714,20 +3194,40 @@ test('product-mode responses never advertise diagnostic-fixture mode or unavaila
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
-    const startedBody = started.body as { runId: string; mode: string; productMode: string };
-    assert.equal(startedBody.mode, 'live');
-    assert.equal(startedBody.productMode, 'live');
+    const startedBody = started.body as {
+      runId: string;
+      mode: string;
+      productMode: string;
+    };
+    assert.equal(startedBody.mode, "live");
+    assert.equal(startedBody.productMode, "live");
 
-    const endpoints = ['generated', 'build-test', 'evidence', 'events', 'artifacts'];
+    const endpoints = [
+      "generated",
+      "build-test",
+      "evidence",
+      "events",
+      "artifacts",
+    ];
     for (const endpoint of endpoints) {
-      const response = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/${endpoint}`);
-      assert.equal(response.status, 200, `${endpoint} must respond 200 for a product run`);
+      const response = await fetchJson(
+        `${server.baseUrl}/api/v0/runs/${startedBody.runId}/${endpoint}`,
+      );
+      assert.equal(
+        response.status,
+        200,
+        `${endpoint} must respond 200 for a product run`,
+      );
       const payload = response.body as Record<string, unknown>;
-      assert.equal(payload.mode, 'live', `${endpoint} must report mode=live for a product run`);
+      assert.equal(
+        payload.mode,
+        "live",
+        `${endpoint} must report mode=live for a product run`,
+      );
       // Scan the serialized payload for placeholder execution markers.
       const serialized = JSON.stringify(payload);
       for (const marker of PLACEHOLDER_JAVA_MARKERS) {
@@ -2737,7 +3237,7 @@ test('product-mode responses never advertise diagnostic-fixture mode or unavaila
         );
       }
       assert.ok(
-        !serialized.includes('diagnostic-fixture'),
+        !serialized.includes("diagnostic-fixture"),
         `${endpoint} product-mode response must not contain the literal "diagnostic-fixture"`,
       );
       assert.doesNotMatch(
@@ -2751,22 +3251,22 @@ test('product-mode responses never advertise diagnostic-fixture mode or unavaila
   }
 });
 
-test('mock-data module has been quarantined and is not reachable through the product-mode server module graph', () => {
+test("mock-data module has been quarantined and is not reachable through the product-mode server module graph", () => {
   // Issue #93: `mock-data.ts` must be deleted or moved into a quarantined
   // subdirectory so it cannot be imported by product-mode server code.
-  const bffSrc = path.resolve(__dirname, '..', '..', 'c2c-bff', 'src');
+  const bffSrc = path.resolve(__dirname, "..", "..", "c2c-bff", "src");
   // The flat `src/mock-data.ts` is gone.
   assert.equal(
-    fs.existsSync(path.join(bffSrc, 'mock-data.ts')),
+    fs.existsSync(path.join(bffSrc, "mock-data.ts")),
     false,
-    'services/c2c-bff/src/mock-data.ts must be removed; diagnostic fixtures live under diagnostic-fixtures/',
+    "services/c2c-bff/src/mock-data.ts must be removed; diagnostic fixtures live under diagnostic-fixtures/",
   );
   // Product-mode files (server.ts, index.ts) must not import the fixture module.
-  const productFiles = ['server.ts', 'index.ts', 'config.ts', 'upstream.ts'];
+  const productFiles = ["server.ts", "index.ts", "config.ts", "upstream.ts"];
   for (const file of productFiles) {
     const absolute = path.join(bffSrc, file);
     if (!fs.existsSync(absolute)) continue;
-    const source = fs.readFileSync(absolute, 'utf8');
+    const source = fs.readFileSync(absolute, "utf8");
     assert.ok(
       !/diagnostic-fixtures\/fixture-data/.test(source),
       `${file} must not import diagnostic-fixtures/fixture-data; only run-store may do so`,
@@ -2778,16 +3278,16 @@ test('mock-data module has been quarantined and is not reachable through the pro
   }
 });
 
-test('W0 browser acceptance fixtures do not enable diagnostic fixtures', () => {
+test("W0 browser acceptance fixtures do not enable diagnostic fixtures", () => {
   // Issue #93: diagnostic fixture mode must not be used by W0 acceptance tests.
   // We scan likely browser/playwright config locations at the repo root.
-  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  const repoRoot = path.resolve(__dirname, "..", "..", "..");
   const candidates = [
-    path.join(repoRoot, '.github', 'workflows'),
-    path.join(repoRoot, 'apps', 'c2c-studio', 'tests'),
-    path.join(repoRoot, 'apps', 'c2c-ui', 'tests'),
-    path.join(repoRoot, 'tests'),
-    path.join(repoRoot, 'e2e'),
+    path.join(repoRoot, ".github", "workflows"),
+    path.join(repoRoot, "apps", "c2c-studio", "tests"),
+    path.join(repoRoot, "apps", "c2c-ui", "tests"),
+    path.join(repoRoot, "tests"),
+    path.join(repoRoot, "e2e"),
   ];
   for (const dir of candidates) {
     if (!fs.existsSync(dir)) continue;
@@ -2798,73 +3298,93 @@ test('W0 browser acceptance fixtures do not enable diagnostic fixtures', () => {
       const stat = fs.statSync(next);
       if (stat.isDirectory()) {
         for (const entry of fs.readdirSync(next)) {
-          if (entry === 'node_modules' || entry === 'dist' || entry === 'dist-test') continue;
+          if (
+            entry === "node_modules" ||
+            entry === "dist" ||
+            entry === "dist-test"
+          )
+            continue;
           stack.push(path.join(next, entry));
         }
         continue;
       }
       if (!/\.(ya?ml|json|ts|tsx|js|mjs|cjs|sh)$/.test(next)) continue;
-      const text = fs.readFileSync(next, 'utf8');
+      const text = fs.readFileSync(next, "utf8");
       assert.ok(
-        !/C2C_ENABLE_DIAGNOSTIC_FIXTURES\s*[:=]\s*['"]?(?:1|true|yes|on)['"]?/.test(text),
+        !/C2C_ENABLE_DIAGNOSTIC_FIXTURES\s*[:=]\s*['"]?(?:1|true|yes|on)['"]?/.test(
+          text,
+        ),
         `${next} must not enable C2C_ENABLE_DIAGNOSTIC_FIXTURES for browser/acceptance flows`,
       );
     }
   }
 });
 
-test('Issue #97: generated/files index proxies orchestrator response and exposes artifactRef', async () => {
+test("Issue #97: generated/files index proxies orchestrator response and exposes artifactRef", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
-  const javaContent = 'package c2c;\npublic final class CASE01 {}\n';
+  const javaContent = "package c2c;\npublic final class CASE01 {}\n";
   const filesIndex = [
-    { path: 'pom.xml', sha256: 'a'.repeat(64), byteSize: 16, mimeType: 'application/xml' },
     {
-      path: 'src/main/java/c2c/CASE01.java',
-      absolutePath: '/var/lib/orchestrator/generated/src/main/java/c2c/CASE01.java',
-      uri: 'https://storage.internal/generated/CASE01.java?token=secret',
-      sha256: 'b'.repeat(64),
+      path: "pom.xml",
+      sha256: "a".repeat(64),
+      byteSize: 16,
+      mimeType: "application/xml",
+    },
+    {
+      path: "src/main/java/c2c/CASE01.java",
+      absolutePath:
+        "/var/lib/orchestrator/generated/src/main/java/c2c/CASE01.java",
+      uri: "https://storage.internal/generated/CASE01.java?token=secret",
+      sha256: "b".repeat(64),
       byteSize: javaContent.length,
-      mimeType: 'text/x-java-source',
+      mimeType: "text/x-java-source",
     },
   ];
   const { client: orch, calls } = stubOrchestrator({
     generatedFiles: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
         files: filesIndex,
         fileCount: filesIndex.length,
-        entryFilePath: 'src/main/java/c2c/CASE01.java',
-        artifactRef: { uri: 'file:///run/generated-project-manifest.json', sha256: 'c'.repeat(64), byteSize: 512 },
+        entryFilePath: "src/main/java/c2c/CASE01.java",
+        artifactRef: {
+          uri: "file:///run/generated-project-manifest.json",
+          sha256: "c".repeat(64),
+          byteSize: 512,
+        },
       },
     },
     generatedFile: (filePath) => {
-      if (filePath === 'src/main/java/c2c/CASE01.java') {
+      if (filePath === "src/main/java/c2c/CASE01.java") {
         return {
           status: 200,
           body: {
             path: filePath,
-            absolutePath: 'generated-project/src/main/java/c2c/CASE01.java',
+            absolutePath: "generated-project/src/main/java/c2c/CASE01.java",
             content: javaContent,
-            sha256: 'b'.repeat(64),
+            sha256: "b".repeat(64),
             byteSize: javaContent.length,
-            mimeType: 'text/x-java-source',
-            uri: 'file:///run/generated-project/CASE01.java',
-            kind: 'generated-project-file',
+            mimeType: "text/x-java-source",
+            uri: "file:///run/generated-project/CASE01.java",
+            kind: "generated-project-file",
           },
         };
       }
-      return { status: 404, body: { error: 'generated file not found', path: filePath } };
+      return {
+        status: 404,
+        body: { error: "generated file not found", path: filePath },
+      };
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -2873,8 +3393,8 @@ test('Issue #97: generated/files index proxies orchestrator response and exposes
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
     const startedBody = started.body as { runId: string };
@@ -2891,25 +3411,39 @@ test('Issue #97: generated/files index proxies orchestrator response and exposes
       entryFilePath: string;
       artifactRef: { sha256: string; byteSize: number } | null;
     };
-    assert.equal(indexBody.status, 'complete');
-    assert.equal(indexBody.productMode, 'live');
+    assert.equal(indexBody.status, "complete");
+    assert.equal(indexBody.productMode, "live");
     assert.equal(indexBody.fileCount, 2);
-    assert.equal(indexBody.entryFilePath, 'src/main/java/c2c/CASE01.java');
-    assert.equal(indexBody.artifactRef?.sha256, 'c'.repeat(64));
-    assert.doesNotMatch(JSON.stringify(index.body), /storage\.internal|\/var\/lib|file:\/\//);
+    assert.equal(indexBody.entryFilePath, "src/main/java/c2c/CASE01.java");
+    assert.equal(indexBody.artifactRef?.sha256, "c".repeat(64));
+    assert.doesNotMatch(
+      JSON.stringify(index.body),
+      /storage\.internal|\/var\/lib|file:\/\//,
+    );
     assert.equal(calls.getGeneratedFiles, 1);
 
     const file = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/CASE01.java`,
     );
     assert.equal(file.status, 200);
-    const fileBody = file.body as { path: string; content: string; sha256: string; byteSize: number };
-    assert.equal(fileBody.path, 'src/main/java/c2c/CASE01.java');
+    const fileBody = file.body as {
+      path: string;
+      content: string;
+      sha256: string;
+      byteSize: number;
+    };
+    assert.equal(fileBody.path, "src/main/java/c2c/CASE01.java");
     assert.equal(fileBody.content, javaContent);
     assert.equal(fileBody.byteSize, javaContent.length);
-    assert.doesNotMatch(JSON.stringify(file.body), /storage\.internal|\/var\/lib|file:\/\//);
+    assert.doesNotMatch(
+      JSON.stringify(file.body),
+      /storage\.internal|\/var\/lib|file:\/\//,
+    );
     assert.equal(calls.getGeneratedFile.length, 1);
-    assert.equal(calls.getGeneratedFile[0]?.path, 'src/main/java/c2c/CASE01.java');
+    assert.equal(
+      calls.getGeneratedFile[0]?.path,
+      "src/main/java/c2c/CASE01.java",
+    );
 
     // Path traversal attempts are rejected by the BFF before reaching the orchestrator.
     const traversal = await fetchJson(
@@ -2927,13 +3461,14 @@ test('Issue #97: generated/files index proxies orchestrator response and exposes
   }
 });
 
-test('Issue #97: /generated, /build-test, and /evidence all carry the same generated artifact hash', async () => {
+test("Issue #97: /generated, /build-test, and /evidence all carry the same generated artifact hash", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
-  const javaContent = 'package c2c;\npublic final class CASE01 { public static void main(String[] a) {} }\n';
-  const manifestHash = 'f'.repeat(64);
+  const javaContent =
+    "package c2c;\npublic final class CASE01 { public static void main(String[] a) {} }\n";
+  const manifestHash = "f".repeat(64);
   const generatedArtifactRef = {
-    uri: 'file:///run/generated-project-manifest.json',
+    uri: "file:///run/generated-project-manifest.json",
     sha256: manifestHash,
     byteSize: 512,
   };
@@ -2941,53 +3476,70 @@ test('Issue #97: /generated, /build-test, and /evidence all carry the same gener
     generated: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        entryClass: 'CASE01',
-        entryFilePath: 'src/main/java/c2c/CASE01.java',
+        entryClass: "CASE01",
+        entryFilePath: "src/main/java/c2c/CASE01.java",
         fileCount: 1,
-        files: { 'src/main/java/c2c/CASE01.java': javaContent },
+        files: { "src/main/java/c2c/CASE01.java": javaContent },
         unsupportedFeatures: [],
         openAssumptions: [],
         artifactRef: generatedArtifactRef,
-        traceability: { programId: 'CASE01', irId: 'ir-CASE01', sourceHash: 'aa' },
+        traceability: {
+          programId: "CASE01",
+          irId: "ir-CASE01",
+          sourceHash: "aa",
+        },
       },
     },
     buildTest: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        data: { status: 'ok', classification: 'match', actualOutput: '', outputRef: null },
-        artifactRef: { uri: 'file:///run/build-test-result.json', sha256: 'c'.repeat(64), byteSize: 256 },
+        data: {
+          status: "ok",
+          classification: "match",
+          actualOutput: "",
+          outputRef: null,
+        },
+        artifactRef: {
+          uri: "file:///run/build-test-result.json",
+          sha256: "c".repeat(64),
+          byteSize: 256,
+        },
         generatedArtifactRef,
       },
     },
     evidence: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'CASE01',
-        runStatus: 'completed',
-        status: 'complete',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
         missingArtifacts: [],
-        data: { packId: 'epk-1', status: 'complete' },
-        artifactRef: { uri: 'file:///run/evidence-pack-manifest.json', sha256: 'd'.repeat(64), byteSize: 512 },
+        data: { packId: "epk-1", status: "complete" },
+        artifactRef: {
+          uri: "file:///run/evidence-pack-manifest.json",
+          sha256: "d".repeat(64),
+          byteSize: 512,
+        },
         generatedArtifactRef,
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
@@ -2996,26 +3548,36 @@ test('Issue #97: /generated, /build-test, and /evidence all carry the same gener
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
-    const generated = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`);
+    const generated = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+    );
     const genBody = generated.body as {
       artifactRef: { sha256: string } | null;
       traceability: { programId: string; irId: string; sourceHash: string };
     };
     assert.equal(genBody.artifactRef?.sha256, manifestHash);
-    assert.equal(genBody.traceability.programId, 'CASE01');
-    assert.equal(genBody.traceability.irId, 'ir-CASE01');
+    assert.equal(genBody.traceability.programId, "CASE01");
+    assert.equal(genBody.traceability.irId, "ir-CASE01");
 
-    const buildTest = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`);
-    const btBody = buildTest.body as { generatedArtifactRef: { sha256: string } | null };
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+    );
+    const btBody = buildTest.body as {
+      generatedArtifactRef: { sha256: string } | null;
+    };
     assert.equal(btBody.generatedArtifactRef?.sha256, manifestHash);
 
-    const evidence = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`);
-    const evBody = evidence.body as { generatedArtifactRef: { sha256: string } | null };
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+    );
+    const evBody = evidence.body as {
+      generatedArtifactRef: { sha256: string } | null;
+    };
     assert.equal(evBody.generatedArtifactRef?.sha256, manifestHash);
   } finally {
     await server.close();
@@ -3029,51 +3591,69 @@ test('Issue #97: /generated, /build-test, and /evidence all carry the same gener
 // stack traces, raw URLs, or unknown failure codes.
 // ---------------------------------------------------------------------------
 
-test('GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps the failure code', async () => {
+test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps the failure code", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'BRNCH01',
-        runStatus: 'failed',
-        status: 'complete',
-        source: 'live',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        runStatus: "failed",
+        status: "complete",
+        source: "live",
         contract: {
           schemaVersion: 1,
-          runId: 'live-run-1',
-          currentState: 'final_classification',
-          activeStep: 'verification_repair_agent',
+          runId: "live-run-1",
+          currentState: "final_classification",
+          activeStep: "verification_repair_agent",
           agentAttemptCount: 2,
           repairBudget: { limit: 2, used: 2, remaining: 0 },
           repairAttempts: [
             {
               attemptNumber: 1,
-              repairDecision: 'propose_candidate',
-              failureCategory: 'java_compile_failed',
-              createdAt: '2026-05-16T12:00:00Z',
-              modelInvocationRef: { uri: 'urn:mg/invocation/123', sha256: 'a'.repeat(64) },
-              repairInputRef: { uri: 'urn:repair/input/1' },
-              javaCandidateRef: { uri: 'urn:java/cand/1' },
-              rationale: 'compile error in line 12',
+              repairDecision: "propose_candidate",
+              failureCategory: "java_compile_failed",
+              createdAt: "2026-05-16T12:00:00Z",
+              modelInvocationRef: {
+                uri: "urn:mg/invocation/123",
+                sha256: "a".repeat(64),
+              },
+              repairInputRef: { uri: "urn:repair/input/1" },
+              javaCandidateRef: { uri: "urn:java/cand/1" },
+              rationale: "compile error in line 12",
             },
             {
               attemptNumber: 2,
-              repairDecision: 'no_change',
-              failureCategory: 'java_compile_failed',
-              createdAt: '2026-05-16T12:01:00Z',
+              repairDecision: "no_change",
+              failureCategory: "java_compile_failed",
+              createdAt: "2026-05-16T12:01:00Z",
             },
           ],
-          finalClassification: 'blocked',
-          failureCode: 'java_compile_failed',
+          finalClassification: "blocked",
+          failureCode: "java_compile_failed",
           failureMessage:
-            'compile at http://orchestrator.internal:18088/v0/runs/live-run-1 failed at module.fn (/Users/me/repo/file.java:10:5)',
-          generatedJavaRef: { uri: 'urn:c2c/gen/1', sha256: 'b'.repeat(64), byteSize: 1024, kind: 'generated-project-manifest' },
-          buildTestResultRef: { uri: 'urn:c2c/bt/1', sha256: 'c'.repeat(64), byteSize: 256, kind: 'build-test-result' },
-          evidencePackRef: { uri: 'urn:c2c/ev/1', sha256: 'd'.repeat(64), byteSize: 512, kind: 'evidence-pack-manifest' },
+            "compile at http://orchestrator.internal:18088/v0/runs/live-run-1 failed at module.fn (/Users/me/repo/file.java:10:5)",
+          generatedJavaRef: {
+            uri: "urn:c2c/gen/1",
+            sha256: "b".repeat(64),
+            byteSize: 1024,
+            kind: "generated-project-manifest",
+          },
+          buildTestResultRef: {
+            uri: "urn:c2c/bt/1",
+            sha256: "c".repeat(64),
+            byteSize: 256,
+            kind: "build-test-result",
+          },
+          evidencePackRef: {
+            uri: "urn:c2c/ev/1",
+            sha256: "d".repeat(64),
+            byteSize: 512,
+            kind: "evidence-pack-manifest",
+          },
         },
         contractRef: null,
         missingArtifacts: [],
@@ -3081,7 +3661,7 @@ test('GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3090,12 +3670,14 @@ test('GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
-    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
     assert.equal(workflow.status, 200);
     const wfBody = workflow.body as {
       mode: string;
@@ -3118,45 +3700,66 @@ test('GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
       finalClassification: string;
       failureCode: string;
       failureMessage: string;
-      generatedJavaRef: { sha256: string; byteSize: number; kind: string } | null;
-      buildTestResultRef: { sha256: string; byteSize: number; kind: string } | null;
-      evidencePackRef: { sha256: string; byteSize: number; kind: string } | null;
+      generatedJavaRef: {
+        sha256: string;
+        byteSize: number;
+        kind: string;
+      } | null;
+      buildTestResultRef: {
+        sha256: string;
+        byteSize: number;
+        kind: string;
+      } | null;
+      evidencePackRef: {
+        sha256: string;
+        byteSize: number;
+        kind: string;
+      } | null;
     };
-    assert.equal(wfBody.mode, 'live');
-    assert.equal(wfBody.productMode, 'live');
-    assert.equal(wfBody.source, 'live');
-    assert.equal(wfBody.state, 'final_classification');
-    assert.equal(wfBody.activeStep, 'verification_repair_agent');
-    assert.equal(wfBody.activeAgent, 'verification_repair_agent');
+    assert.equal(wfBody.mode, "live");
+    assert.equal(wfBody.productMode, "live");
+    assert.equal(wfBody.source, "live");
+    assert.equal(wfBody.state, "final_classification");
+    assert.equal(wfBody.activeStep, "verification_repair_agent");
+    assert.equal(wfBody.activeAgent, "verification_repair_agent");
     assert.equal(wfBody.agentAttemptCount, 2);
     assert.deepEqual(wfBody.repairBudget, { limit: 2, used: 2, remaining: 0 });
     assert.equal(wfBody.repairAttempts.length, 2);
     assert.deepEqual(wfBody.repairAttempts[0], {
       attemptNumber: 1,
-      repairDecision: 'propose_candidate',
-      failureCategory: 'java_compile_failed',
+      repairDecision: "propose_candidate",
+      failureCategory: "java_compile_failed",
       hasModelInvocation: true,
       hasRepairInput: true,
       hasJavaCandidate: true,
-      rationale: 'compile error in line 12',
+      rationale: "compile error in line 12",
     });
-    assert.equal(wfBody.repairAttempts[1]?.repairDecision, 'no_change');
-    assert.equal(wfBody.finalClassification, 'blocked');
-    assert.equal(wfBody.failureCode, 'java_compile_failed');
-    assert.ok(!wfBody.failureMessage.includes('http://'), 'failureMessage must not leak orchestrator URL');
-    assert.ok(!wfBody.failureMessage.includes('/Users/'), 'failureMessage must not leak filesystem paths');
-    assert.equal(wfBody.generatedJavaRef?.sha256, 'b'.repeat(64));
-    assert.equal(wfBody.buildTestResultRef?.sha256, 'c'.repeat(64));
-    assert.equal(wfBody.evidencePackRef?.sha256, 'd'.repeat(64));
+    assert.equal(wfBody.repairAttempts[1]?.repairDecision, "no_change");
+    assert.equal(wfBody.finalClassification, "blocked");
+    assert.equal(wfBody.failureCode, "java_compile_failed");
+    assert.ok(
+      !wfBody.failureMessage.includes("http://"),
+      "failureMessage must not leak orchestrator URL",
+    );
+    assert.ok(
+      !wfBody.failureMessage.includes("/Users/"),
+      "failureMessage must not leak filesystem paths",
+    );
+    assert.equal(wfBody.generatedJavaRef?.sha256, "b".repeat(64));
+    assert.equal(wfBody.buildTestResultRef?.sha256, "c".repeat(64));
+    assert.equal(wfBody.evidencePackRef?.sha256, "d".repeat(64));
     // None of the contract response must carry the raw modelInvocationRef URI.
     const serialised = JSON.stringify(wfBody);
-    assert.ok(!serialised.includes('urn:mg/invocation/123'), 'model invocation ref must be sanitized out');
+    assert.ok(
+      !serialised.includes("urn:mg/invocation/123"),
+      "model invocation ref must be sanitized out",
+    );
   } finally {
     await server.close();
   }
 });
 
-test('GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate when present', async () => {
+test("GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate when present", async () => {
   // W0.3 (#214): consumers must be able to read the assist decision (outcome,
   // reason code, selected agent role, budget snapshot, affected artifacts)
   // directly from the workflow envelope without inferring from
@@ -3167,28 +3770,33 @@ test('GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate w
     workflow: {
       status: 200,
       body: {
-        runId: 'live-run-2',
-        workflowId: 'w0-migration-v0',
-        programId: 'BRNCH01',
-        runStatus: 'in-progress',
-        status: 'complete',
-        source: 'live',
+        runId: "live-run-2",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        runStatus: "in-progress",
+        status: "complete",
+        source: "live",
         contract: {
-          currentState: 'transformation_agent_invoked',
-          activeStep: 'transformation-agent',
+          currentState: "transformation_agent_invoked",
+          activeStep: "transformation-agent",
           agentAttemptCount: 1,
           repairBudget: { limit: 2, used: 0, remaining: 2 },
           repairAttempts: [],
           assistDecision: {
-            outcome: 'assist_required',
-            reasonCode: 'caller_explicit_opt_in',
-            decidedAt: '2026-05-17T12:00:00Z',
-            selectedAgentRole: 'transformation_agent',
+            outcome: "assist_required",
+            reasonCode: "caller_explicit_opt_in",
+            decidedAt: "2026-05-17T12:00:00Z",
+            selectedAgentRole: "transformation_agent",
             affectedArtifactRefs: [
-              { sha256: 'a'.repeat(64), byteSize: 4096, kind: 'generated-project-manifest', path: 'baseline.json' },
+              {
+                sha256: "a".repeat(64),
+                byteSize: 4096,
+                kind: "generated-project-manifest",
+                path: "baseline.json",
+              },
             ],
             repairBudgetSnapshot: { limit: 2, used: 0, remaining: 2 },
-            rationale: 'caller opted in',
+            rationale: "caller opted in",
           },
           finalClassification: null,
           failureCode: null,
@@ -3200,7 +3808,7 @@ test('GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate w
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3209,29 +3817,43 @@ test('GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate w
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
     assert.equal(workflow.status, 200);
-    const body = workflow.body as { assistDecision: Record<string, unknown> | null };
-    assert.ok(body.assistDecision, 'assistDecision must be exposed on the workflow envelope');
-    assert.equal(body.assistDecision.outcome, 'assist_required');
-    assert.equal(body.assistDecision.reasonCode, 'caller_explicit_opt_in');
-    assert.equal(body.assistDecision.selectedAgentRole, 'transformation_agent');
-    assert.equal(body.assistDecision.decidedAt, '2026-05-17T12:00:00Z');
-    assert.equal(body.assistDecision.rationale, 'caller opted in');
-    assert.deepEqual(body.assistDecision.repairBudgetSnapshot, { limit: 2, used: 0, remaining: 2 });
-    const refs = body.assistDecision.affectedArtifactRefs as Array<{ sha256?: string; kind?: string }>;
+    const body = workflow.body as {
+      assistDecision: Record<string, unknown> | null;
+    };
+    assert.ok(
+      body.assistDecision,
+      "assistDecision must be exposed on the workflow envelope",
+    );
+    assert.equal(body.assistDecision.outcome, "assist_required");
+    assert.equal(body.assistDecision.reasonCode, "caller_explicit_opt_in");
+    assert.equal(body.assistDecision.selectedAgentRole, "transformation_agent");
+    assert.equal(body.assistDecision.decidedAt, "2026-05-17T12:00:00Z");
+    assert.equal(body.assistDecision.rationale, "caller opted in");
+    assert.deepEqual(body.assistDecision.repairBudgetSnapshot, {
+      limit: 2,
+      used: 0,
+      remaining: 2,
+    });
+    const refs = body.assistDecision.affectedArtifactRefs as Array<{
+      sha256?: string;
+      kind?: string;
+    }>;
     assert.equal(refs.length, 1);
-    assert.equal(refs[0]?.kind, 'generated-project-manifest');
+    assert.equal(refs[0]?.kind, "generated-project-manifest");
   } finally {
     await server.close();
   }
 });
 
-test('GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty reason codes', async () => {
+test("GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty reason codes", async () => {
   // W0.3-4 (#215): the deterministic uncertainty reason codes — semantic
   // IR bounded ambiguity, translation unsupported-but-repairable, baseline
   // open assumptions, and deterministic candidate low-confidence — are
@@ -3239,10 +3861,10 @@ test('GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty
   // sanitiser unchanged. The UI consumers depend on the specific code to
   // render a causal "why AI was used" surface.
   const uncertaintyCodes = [
-    'semantic_ir_bounded_ambiguity',
-    'translation_unsupported_repairable',
-    'baseline_open_assumptions',
-    'deterministic_candidate_low_confidence',
+    "semantic_ir_bounded_ambiguity",
+    "translation_unsupported_repairable",
+    "baseline_open_assumptions",
+    "deterministic_candidate_low_confidence",
   ] as const;
   for (const reasonCode of uncertaintyCodes) {
     const runStore = createRunStore();
@@ -3251,25 +3873,29 @@ test('GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty
       workflow: {
         status: 200,
         body: {
-          runId: 'live-run-uncertain',
-          workflowId: 'w0-migration-v0',
-          programId: 'BRNCH01',
-          runStatus: 'in-progress',
-          status: 'complete',
-          source: 'live',
+          runId: "live-run-uncertain",
+          workflowId: "w0-migration-v0",
+          programId: "BRNCH01",
+          runStatus: "in-progress",
+          status: "complete",
+          source: "live",
           contract: {
-            currentState: 'transformation_agent_invoked',
-            activeStep: 'transformation-agent',
+            currentState: "transformation_agent_invoked",
+            activeStep: "transformation-agent",
             agentAttemptCount: 1,
             repairBudget: { limit: 2, used: 0, remaining: 2 },
             repairAttempts: [],
             assistDecision: {
-              outcome: 'assist_required',
+              outcome: "assist_required",
               reasonCode,
-              decidedAt: '2026-05-17T12:00:00Z',
-              selectedAgentRole: 'transformation_agent',
+              decidedAt: "2026-05-17T12:00:00Z",
+              selectedAgentRole: "transformation_agent",
               affectedArtifactRefs: [
-                { sha256: 'b'.repeat(64), byteSize: 4096, kind: 'generated-project-manifest' },
+                {
+                  sha256: "b".repeat(64),
+                  byteSize: 4096,
+                  kind: "generated-project-manifest",
+                },
               ],
               repairBudgetSnapshot: { limit: 2, used: 0, remaining: 2 },
               rationale: `deterministic uncertainty marker: ${reasonCode}`,
@@ -3284,7 +3910,7 @@ test('GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty
       },
     });
     const handler = createApp({
-      config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+      config: { ...baseConfig, orchestratorUrl: "http://upstream" },
       samples,
       orchestrator: orch,
       evidence: disabledEvidence(),
@@ -3293,28 +3919,33 @@ test('GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty
     const server = await startTestServer(handler);
     try {
       const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-        method: 'POST',
-        body: { programId: 'BRNCH01' },
+        method: "POST",
+        body: { programId: "BRNCH01" },
       });
       const startedBody = started.body as { runId: string };
       const workflow = await fetchJson(
-        `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`
+        `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
       );
-      const body = workflow.body as { assistDecision: Record<string, unknown> | null };
+      const body = workflow.body as {
+        assistDecision: Record<string, unknown> | null;
+      };
       assert.ok(
         body.assistDecision,
-        `assistDecision must survive sanitisation for ${reasonCode}`
+        `assistDecision must survive sanitisation for ${reasonCode}`,
       );
       assert.equal(body.assistDecision.reasonCode, reasonCode);
-      assert.equal(body.assistDecision.outcome, 'assist_required');
-      assert.equal(body.assistDecision.selectedAgentRole, 'transformation_agent');
+      assert.equal(body.assistDecision.outcome, "assist_required");
+      assert.equal(
+        body.assistDecision.selectedAgentRole,
+        "transformation_agent",
+      );
     } finally {
       await server.close();
     }
   }
 });
 
-test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason code', async () => {
+test("GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason code", async () => {
   // W0.3-4 (#215): every reason code outside the closed set MUST be
   // sanitised to ``assistDecision: null`` so the UI cannot render an
   // unrecognised reason silently. The check is symmetrical with the
@@ -3325,18 +3956,18 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason
     workflow: {
       status: 200,
       body: {
-        status: 'complete',
+        status: "complete",
         contract: {
-          currentState: 'baseline_generation_attempted',
-          activeStep: 'assist-decision',
+          currentState: "baseline_generation_attempted",
+          activeStep: "assist-decision",
           agentAttemptCount: 0,
           repairBudget: { limit: 2, used: 0, remaining: 2 },
           repairAttempts: [],
           assistDecision: {
-            outcome: 'assist_required',
-            reasonCode: 'generator_felt_unsure',
-            decidedAt: '2026-05-17T12:00:00Z',
-            selectedAgentRole: 'transformation_agent',
+            outcome: "assist_required",
+            reasonCode: "generator_felt_unsure",
+            decidedAt: "2026-05-17T12:00:00Z",
+            selectedAgentRole: "transformation_agent",
           },
           finalClassification: null,
           failureCode: null,
@@ -3346,7 +3977,7 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3355,12 +3986,12 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
-      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
     );
     const body = workflow.body as { assistDecision: unknown };
     assert.equal(body.assistDecision, null);
@@ -3369,7 +4000,7 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason
   }
 });
 
-test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcome', async () => {
+test("GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcome", async () => {
   // W0.3 (#214): the BFF must never surface an unrecognised assist-decision
   // outcome to the UI. Any contract that carries an unknown outcome is
   // sanitised to ``assistDecision: null`` so the UI cannot render an
@@ -3380,17 +4011,17 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcom
     workflow: {
       status: 200,
       body: {
-        status: 'complete',
+        status: "complete",
         contract: {
-          currentState: 'baseline_generation_attempted',
-          activeStep: 'assist-decision',
+          currentState: "baseline_generation_attempted",
+          activeStep: "assist-decision",
           agentAttemptCount: 0,
           repairBudget: { limit: 2, used: 0, remaining: 2 },
           repairAttempts: [],
           assistDecision: {
-            outcome: 'maybe_later',
-            reasonCode: 'caller_explicit_opt_in',
-            decidedAt: '2026-05-17T12:00:00Z',
+            outcome: "maybe_later",
+            reasonCode: "caller_explicit_opt_in",
+            decidedAt: "2026-05-17T12:00:00Z",
           },
           finalClassification: null,
           failureCode: null,
@@ -3400,7 +4031,7 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcom
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3409,11 +4040,13 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcom
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
     const body = workflow.body as { assistDecision: unknown };
     assert.equal(body.assistDecision, null);
   } finally {
@@ -3421,17 +4054,17 @@ test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcom
   }
 });
 
-test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary', async () => {
+test("GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
       body: {
-        status: 'complete',
+        status: "complete",
         contract: {
-          currentState: 'transformation_agent_invoked',
-          activeStep: 'transformation_agent',
+          currentState: "transformation_agent_invoked",
+          activeStep: "transformation_agent",
           agentAttemptCount: 1,
           repairBudget: { limit: 2, used: 0, remaining: 2 },
           repairAttempts: [],
@@ -3443,7 +4076,7 @@ test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary'
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3452,11 +4085,13 @@ test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary'
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const run = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`);
+    const run = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+    );
     const body = run.body as {
       activeStep: string;
       agentAttemptCount: number;
@@ -3465,7 +4100,7 @@ test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary'
       failureCode: string | null;
       failureMessage: string | null;
     };
-    assert.equal(body.activeStep, 'transformation_agent');
+    assert.equal(body.activeStep, "transformation_agent");
     assert.equal(body.agentAttemptCount, 1);
     assert.deepEqual(body.repairBudget, { limit: 2, used: 0, remaining: 2 });
     assert.equal(body.finalClassification, null);
@@ -3476,33 +4111,48 @@ test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary'
   }
 });
 
-test('GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source', async () => {
+test("GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
       body: {
-        status: 'complete',
-        source: 'cached',
+        status: "complete",
+        source: "cached",
         contract: {
-          currentState: 'final_classification',
-          activeStep: 'write-evidence',
+          currentState: "final_classification",
+          activeStep: "write-evidence",
           agentAttemptCount: 1,
           repairBudget: { limit: 2, used: 0, remaining: 2 },
           repairAttempts: [],
-          finalClassification: 'success',
+          finalClassification: "success",
           failureCode: null,
           failureMessage: null,
-          generatedJavaRef: { uri: 'urn:c2c/gen/1', sha256: 'b'.repeat(64), byteSize: 1024, kind: 'generated-project-manifest' },
-          buildTestResultRef: { uri: 'urn:c2c/bt/1', sha256: 'c'.repeat(64), byteSize: 256, kind: 'build-test-result' },
-          evidencePackRef: { uri: 'urn:c2c/ev/1', sha256: 'd'.repeat(64), byteSize: 512, kind: 'evidence-pack-manifest' },
+          generatedJavaRef: {
+            uri: "urn:c2c/gen/1",
+            sha256: "b".repeat(64),
+            byteSize: 1024,
+            kind: "generated-project-manifest",
+          },
+          buildTestResultRef: {
+            uri: "urn:c2c/bt/1",
+            sha256: "c".repeat(64),
+            byteSize: 256,
+            kind: "build-test-result",
+          },
+          evidencePackRef: {
+            uri: "urn:c2c/ev/1",
+            sha256: "d".repeat(64),
+            byteSize: 512,
+            kind: "evidence-pack-manifest",
+          },
         },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3511,39 +4161,45 @@ test('GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source', 
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
     assert.equal(workflow.status, 200);
     const body = workflow.body as {
       source: string;
       activeStep: string;
       activeAgent: string;
       finalClassification: string;
-      generatedJavaRef: { sha256: string; byteSize: number; kind: string } | null;
+      generatedJavaRef: {
+        sha256: string;
+        byteSize: number;
+        kind: string;
+      } | null;
     };
-    assert.equal(body.source, 'cached');
-    assert.equal(body.activeStep, 'write-evidence');
-    assert.equal(body.activeAgent, 'evidence_service');
-    assert.equal(body.finalClassification, 'success');
+    assert.equal(body.source, "cached");
+    assert.equal(body.activeStep, "write-evidence");
+    assert.equal(body.activeAgent, "evidence_service");
+    assert.equal(body.finalClassification, "success");
     assert.deepEqual(body.generatedJavaRef, {
-      sha256: 'b'.repeat(64),
+      sha256: "b".repeat(64),
       byteSize: 1024,
-      kind: 'generated-project-manifest',
+      kind: "generated-project-manifest",
     });
   } finally {
     await server.close();
   }
 });
 
-test('GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable', async () => {
+test("GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
   const { client: orch } = stubOrchestrator(); // no workflow stub -> undefined
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3552,11 +4208,13 @@ test('GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the 
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
     assert.equal(workflow.status, 200);
     const body = workflow.body as {
       source: string;
@@ -3568,7 +4226,7 @@ test('GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the 
       finalClassification: string | null;
       failureCode: string | null;
     };
-    assert.equal(body.source, 'unavailable');
+    assert.equal(body.source, "unavailable");
     assert.equal(body.state, null);
     assert.equal(body.activeStep, null);
     assert.equal(body.activeAgent, null);
@@ -3581,29 +4239,29 @@ test('GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the 
   }
 });
 
-test('GET /api/v0/runs/{runId}/workflow returns internal_error when contract reports a blocked run without a canonical code', async () => {
+test("GET /api/v0/runs/{runId}/workflow returns internal_error when contract reports a blocked run without a canonical code", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
       body: {
-        status: 'complete',
+        status: "complete",
         contract: {
-          currentState: 'final_classification',
+          currentState: "final_classification",
           activeStep: null,
           agentAttemptCount: 1,
           repairBudget: { limit: 1, used: 1, remaining: 0 },
           repairAttempts: [],
-          finalClassification: 'blocked',
-          failureCode: '__never_existed__',
-          failureMessage: 'some upstream error',
+          finalClassification: "blocked",
+          failureCode: "__never_existed__",
+          failureMessage: "some upstream error",
         },
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3612,23 +4270,25 @@ test('GET /api/v0/runs/{runId}/workflow returns internal_error when contract rep
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
-    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
     const body = workflow.body as { failureCode: string };
-    assert.equal(body.failureCode, 'internal_error');
+    assert.equal(body.failureCode, "internal_error");
   } finally {
     await server.close();
   }
 });
 
-test('POST /api/v0/transform rejects unsupported targetLanguage', async () => {
+test("POST /api/v0/transform rejects unsupported targetLanguage", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3637,10 +4297,10 @@ test('POST /api/v0/transform rejects unsupported targetLanguage', async () => {
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
+      method: "POST",
       body: {
-        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
-        targetLanguage: 'python',
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        targetLanguage: "python",
       },
     });
     assert.equal(response.status, 400);
@@ -3651,11 +4311,11 @@ test('POST /api/v0/transform rejects unsupported targetLanguage', async () => {
   }
 });
 
-test('POST /api/v0/transform forwards expectedOutput and oracleInput to the orchestrator client', async () => {
+test("POST /api/v0/transform forwards expectedOutput and oracleInput to the orchestrator client", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3664,19 +4324,19 @@ test('POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
+      method: "POST",
       body: {
-        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
-        targetLanguage: 'java',
-        expectedOutput: 'HELLO WORLD\n',
-        oracleInput: '',
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        targetLanguage: "java",
+        expectedOutput: "HELLO WORLD\n",
+        oracleInput: "",
       },
     });
     assert.equal(response.status, 201);
     assert.equal(calls.startTransformRun.length, 1);
-    assert.equal(calls.startTransformRun[0]?.targetLanguage, 'java');
-    assert.equal(calls.startTransformRun[0]?.expectedOutput, 'HELLO WORLD\n');
-    assert.equal(calls.startTransformRun[0]?.oracleInput, '');
+    assert.equal(calls.startTransformRun[0]?.targetLanguage, "java");
+    assert.equal(calls.startTransformRun[0]?.expectedOutput, "HELLO WORLD\n");
+    assert.equal(calls.startTransformRun[0]?.oracleInput, "");
     // W0.3 (#213): with the Model Gateway unconfigured, the productive
     // Transformation Agent must not be activated.
     assert.equal(calls.startTransformRun[0]?.useTransformationAgent, undefined);
@@ -3685,7 +4345,7 @@ test('POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
   }
 });
 
-test('POST /api/v0/transform does not implicitly activate the transformation agent when Model Gateway is enabled', async () => {
+test("POST /api/v0/transform does not implicitly activate the transformation agent when Model Gateway is enabled", async () => {
   // W0.3 deterministic-first hardening (#213): Model Gateway availability is
   // infrastructure, not a decision. The BFF must not opt the productive
   // Transformation Agent in just because a gateway URL is configured. The
@@ -3695,7 +4355,11 @@ test('POST /api/v0/transform does not implicitly activate the transformation age
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream', modelGatewayUrl: 'http://gateway' },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      modelGatewayUrl: "http://gateway",
+    },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3704,10 +4368,10 @@ test('POST /api/v0/transform does not implicitly activate the transformation age
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
+      method: "POST",
       body: {
-        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
-        targetLanguage: 'java',
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        targetLanguage: "java",
       },
     });
     assert.equal(response.status, 201);
@@ -3718,11 +4382,11 @@ test('POST /api/v0/transform does not implicitly activate the transformation age
   }
 });
 
-test('POST /api/v0/transform rejects expectedOutput when it is not a string', async () => {
+test("POST /api/v0/transform rejects expectedOutput when it is not a string", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3731,9 +4395,9 @@ test('POST /api/v0/transform rejects expectedOutput when it is not a string', as
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
+      method: "POST",
       body: {
-        sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n',
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         expectedOutput: 42,
       },
     });
@@ -3744,29 +4408,33 @@ test('POST /api/v0/transform rejects expectedOutput when it is not a string', as
   }
 });
 
-test('GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact exceeds configured limit', async () => {
+test("GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact exceeds configured limit", async () => {
   const runStore = createRunStore();
-  const oversizedContent = 'A'.repeat(2048);
+  const oversizedContent = "A".repeat(2048);
   const samples = stubSamples([FIXED_SAMPLE]);
   const { client: orch } = stubOrchestrator({
     generatedFile: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'BRNCH01',
-        path: 'src/main/java/c2c/BRNCH01.java',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        path: "src/main/java/c2c/BRNCH01.java",
         content: oversizedContent,
-        sha256: 'a'.repeat(64),
+        sha256: "a".repeat(64),
         byteSize: oversizedContent.length,
-        mimeType: 'text/x-java',
-        uri: 'urn:c2c/gen/1',
-        kind: 'generated-project-file',
+        mimeType: "text/x-java",
+        uri: "urn:c2c/gen/1",
+        kind: "generated-project-file",
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream', artifactContentMaxBytes: 1024 },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      artifactContentMaxBytes: 1024,
+    },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3775,16 +4443,20 @@ test('GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact 
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/BRNCH01.java`,
     );
     assert.equal(response.status, 413);
-    const body = response.body as { error: string; limit: number; byteSize: number };
-    assert.equal(body.error, 'artifact_too_large');
+    const body = response.body as {
+      error: string;
+      limit: number;
+      byteSize: number;
+    };
+    assert.equal(body.error, "artifact_too_large");
     assert.equal(body.limit, 1024);
     assert.equal(body.byteSize, oversizedContent.length);
   } finally {
@@ -3792,29 +4464,33 @@ test('GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact 
   }
 });
 
-test('GET /api/v0/runs/{runId}/generated/files/{path} measures content when upstream underreports byteSize', async () => {
+test("GET /api/v0/runs/{runId}/generated/files/{path} measures content when upstream underreports byteSize", async () => {
   const runStore = createRunStore();
-  const oversizedContent = 'A'.repeat(2048);
+  const oversizedContent = "A".repeat(2048);
   const samples = stubSamples([FIXED_SAMPLE]);
   const { client: orch } = stubOrchestrator({
     generatedFile: {
       status: 200,
       body: {
-        runId: 'live-run-1',
-        workflowId: 'w0-migration-v0',
-        programId: 'BRNCH01',
-        path: 'src/main/java/c2c/BRNCH01.java',
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        path: "src/main/java/c2c/BRNCH01.java",
         content: oversizedContent,
-        sha256: 'a'.repeat(64),
+        sha256: "a".repeat(64),
         byteSize: 1,
-        mimeType: 'text/x-java',
-        uri: 'urn:c2c/gen/1',
-        kind: 'generated-project-file',
+        mimeType: "text/x-java",
+        uri: "urn:c2c/gen/1",
+        kind: "generated-project-file",
       },
     },
   });
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream', artifactContentMaxBytes: 1024 },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      artifactContentMaxBytes: 1024,
+    },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3823,16 +4499,20 @@ test('GET /api/v0/runs/{runId}/generated/files/{path} measures content when upst
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/BRNCH01.java`,
     );
     assert.equal(response.status, 413);
-    const body = response.body as { error: string; limit: number; byteSize: number };
-    assert.equal(body.error, 'artifact_too_large');
+    const body = response.body as {
+      error: string;
+      limit: number;
+      byteSize: number;
+    };
+    assert.equal(body.error, "artifact_too_large");
     assert.equal(body.limit, 1024);
     assert.equal(body.byteSize, oversizedContent.length);
   } finally {
@@ -3840,7 +4520,7 @@ test('GET /api/v0/runs/{runId}/generated/files/{path} measures content when upst
   }
 });
 
-test('transform 502 response carries a UI-safe failureCode and never leaks orchestrator URL', async () => {
+test("transform 502 response carries a UI-safe failureCode and never leaks orchestrator URL", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
   const failingOrchestrator: OrchestratorClient = {
@@ -3849,7 +4529,9 @@ test('transform 502 response carries a UI-safe failureCode and never leaks orche
       return undefined;
     },
     async startTransformRun() {
-      throw new Error('connect ECONNREFUSED 127.0.0.1:18088 to http://orchestrator.internal:18088/v0/runs');
+      throw new Error(
+        "connect ECONNREFUSED 127.0.0.1:18088 to http://orchestrator.internal:18088/v0/runs",
+      );
     },
     async getRun() {
       return undefined;
@@ -3886,7 +4568,7 @@ test('transform 502 response carries a UI-safe failureCode and never leaks orche
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: failingOrchestrator,
     evidence: disabledEvidence(),
@@ -3895,20 +4577,23 @@ test('transform 502 response carries a UI-safe failureCode and never leaks orche
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
-      method: 'POST',
-      body: { sourceText: 'IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n' },
+      method: "POST",
+      body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n" },
     });
     assert.equal(response.status, 502);
     const body = response.body as { error: string; failureCode: string };
-    assert.equal(body.failureCode, 'service_unavailable');
-    assert.ok(!body.error.includes('http://orchestrator'), `error must not leak upstream url: ${body.error}`);
+    assert.equal(body.failureCode, "service_unavailable");
+    assert.ok(
+      !body.error.includes("http://orchestrator"),
+      `error must not leak upstream url: ${body.error}`,
+    );
     assert.equal(runStore.list().length, 0);
   } finally {
     await server.close();
   }
 });
 
-test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached W0.2 snapshot', async () => {
+test("concurrent /api/v0/runs/{runId} polls produce a deterministic final cached W0.2 snapshot", async () => {
   // Issue #172 follow-up: every poll of /api/v0/runs/{runId} also fetches
   // the workflow contract and writes it back into the run store. The Node
   // event loop is single-threaded but async tasks can interleave: while
@@ -3920,26 +4605,34 @@ test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
   let workflowCallCount = 0;
-  const failureCode = 'java_compile_failed';
+  const failureCode = "java_compile_failed";
   const contract = {
-    currentState: 'final_classification',
-    activeStep: 'verification_repair_agent',
+    currentState: "final_classification",
+    activeStep: "verification_repair_agent",
     agentAttemptCount: 3,
     repairBudget: { limit: 2, used: 2, remaining: 0 },
     repairAttempts: [
-      { attemptNumber: 1, repairDecision: 'propose_candidate', createdAt: '2026-05-16T12:00:00Z' },
-      { attemptNumber: 2, repairDecision: 'no_change', createdAt: '2026-05-16T12:01:00Z' },
+      {
+        attemptNumber: 1,
+        repairDecision: "propose_candidate",
+        createdAt: "2026-05-16T12:00:00Z",
+      },
+      {
+        attemptNumber: 2,
+        repairDecision: "no_change",
+        createdAt: "2026-05-16T12:01:00Z",
+      },
     ],
-    finalClassification: 'blocked',
+    finalClassification: "blocked",
     failureCode,
-    failureMessage: 'compile error',
+    failureMessage: "compile error",
   };
   const orch: OrchestratorClient = {
     enabled: true,
     async startRun() {
       return {
         status: 201,
-        body: { run: { runId: 'live-run-1', status: 'updating' } },
+        body: { run: { runId: "live-run-1", status: "updating" } },
       };
     },
     async startTransformRun() {
@@ -3951,33 +4644,51 @@ test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
       return {
         status: 200,
         body: {
-          runId: 'live-run-1',
-          status: 'completed',
-          message: 'orchestrator completed',
+          runId: "live-run-1",
+          status: "completed",
+          message: "orchestrator completed",
         },
       };
     },
-    async getArtifacts() { return undefined; },
-    async getGenerated() { return undefined; },
-    async getGeneratedFiles() { return undefined; },
-    async getGeneratedFile() { return undefined; },
-    async getBuildTest() { return undefined; },
-    async getEvidence() { return undefined; },
-    async getEvents() { return undefined; },
-    async getProgress() { return undefined; },
-    async getLearning() { return undefined; },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated() {
+      return undefined;
+    },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
+      return undefined;
+    },
+    async getBuildTest() {
+      return undefined;
+    },
+    async getEvidence() {
+      return undefined;
+    },
+    async getEvents() {
+      return undefined;
+    },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
+      return undefined;
+    },
     async getWorkflow() {
       workflowCallCount += 1;
       // jitter to maximize interleave between concurrent polls
       await new Promise((r) => setTimeout(r, 1 + (workflowCallCount % 3)));
       return {
         status: 200,
-        body: { status: 'complete', source: 'live', contract },
+        body: { status: "complete", source: "live", contract },
       };
     },
   };
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -3986,8 +4697,8 @@ test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
-      method: 'POST',
-      body: { programId: 'BRNCH01' },
+      method: "POST",
+      body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
@@ -3996,7 +4707,9 @@ test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
     // cached state must reflect the upstream contract exactly, with no
     // half-applied patch.
     const polls = await Promise.all(
-      Array.from({ length: 12 }, () => fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`)),
+      Array.from({ length: 12 }, () =>
+        fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`),
+      ),
     );
     for (const poll of polls) {
       const body = poll.body as {
@@ -4006,10 +4719,10 @@ test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
         finalClassification: string;
         failureCode: string;
       };
-      assert.equal(body.activeStep, 'verification_repair_agent');
+      assert.equal(body.activeStep, "verification_repair_agent");
       assert.equal(body.agentAttemptCount, 3);
       assert.deepEqual(body.repairBudget, { limit: 2, used: 2, remaining: 0 });
-      assert.equal(body.finalClassification, 'blocked');
+      assert.equal(body.finalClassification, "blocked");
       assert.equal(body.failureCode, failureCode);
     }
     // Each poll triggered exactly one workflow fetch.
@@ -4017,11 +4730,272 @@ test('concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
     // The run store retains the latest snapshot deterministically.
     const stored = runStore.get(startedBody.runId);
     assert.ok(stored);
-    assert.equal(stored?.activeStep, 'verification_repair_agent');
+    assert.equal(stored?.activeStep, "verification_repair_agent");
     assert.equal(stored?.agentAttemptCount, 3);
     assert.deepEqual(stored?.repairBudget, { limit: 2, used: 2, remaining: 0 });
-    assert.equal(stored?.finalClassification, 'blocked');
+    assert.equal(stored?.finalClassification, "blocked");
     assert.equal(stored?.failureCode, failureCode);
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// W0.3-5 (#216) — Budget hardening: assist + model invocation budgets and the
+// ``assist_budget_exhausted`` reason code surfacing through the BFF envelope.
+// ---------------------------------------------------------------------------
+
+test("GET /api/v0/runs/{runId}/workflow surfaces the W0.3-5 assist + model invocation budgets", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: "complete",
+        contract: {
+          currentState: "transformation_agent_invoked",
+          activeStep: "transformation-agent",
+          agentAttemptCount: 1,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          assistBudget: { limit: 1, used: 1, remaining: 0 },
+          modelInvocationBudget: { limit: 6, used: 2, remaining: 4 },
+          repairAttempts: [],
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+        contractRef: null,
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
+    assert.equal(workflow.status, 200);
+    const body = workflow.body as {
+      repairBudget: { limit: number; used: number; remaining: number };
+      assistBudget: { limit: number; used: number; remaining: number };
+      modelInvocationBudget: { limit: number; used: number; remaining: number };
+    };
+    assert.deepEqual(body.repairBudget, { limit: 2, used: 0, remaining: 2 });
+    assert.deepEqual(body.assistBudget, { limit: 1, used: 1, remaining: 0 });
+    assert.deepEqual(body.modelInvocationBudget, {
+      limit: 6,
+      used: 2,
+      remaining: 4,
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId}/workflow rejects malformed budget shapes", async () => {
+  // The BFF must drop budgets whose limit/used/remaining are missing or
+  // negative so the UI never renders a corrupt {limit: NaN} budget.
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: "complete",
+        contract: {
+          currentState: "transformation_agent_invoked",
+          activeStep: "transformation-agent",
+          agentAttemptCount: 0,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          assistBudget: { limit: -1, used: 0, remaining: 0 },
+          modelInvocationBudget: { limit: "six", used: 0, remaining: 6 },
+          repairAttempts: [],
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+        contractRef: null,
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
+    const body = workflow.body as {
+      assistBudget: unknown;
+      modelInvocationBudget: unknown;
+    };
+    assert.equal(body.assistBudget, null, "negative limit must be dropped");
+    assert.equal(
+      body.modelInvocationBudget,
+      null,
+      "non-numeric limit must be dropped",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId}/workflow accepts the assist_budget_exhausted reason code", async () => {
+  // Issue #216 adds ``assist_budget_exhausted`` to the closed reason-code
+  // set. The BFF must pass it through unchanged so the UI can render the
+  // hard-termination signal causally.
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: "complete",
+        contract: {
+          currentState: "baseline_generation_attempted",
+          activeStep: "assist-decision",
+          agentAttemptCount: 0,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          assistBudget: { limit: 1, used: 1, remaining: 0 },
+          modelInvocationBudget: { limit: 6, used: 0, remaining: 6 },
+          repairAttempts: [],
+          assistDecision: {
+            outcome: "assist_not_required",
+            reasonCode: "assist_budget_exhausted",
+            decidedAt: "2026-05-17T12:00:00Z",
+            selectedAgentRole: null,
+            affectedArtifactRefs: [],
+            repairBudgetSnapshot: { limit: 2, used: 0, remaining: 2 },
+            assistBudgetSnapshot: { limit: 1, used: 1, remaining: 0 },
+            modelInvocationBudgetSnapshot: { limit: 6, used: 0, remaining: 6 },
+            rationale: "caller opted in but assist budget exhausted",
+          },
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+        contractRef: null,
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
+    const body = workflow.body as {
+      assistDecision: Record<string, unknown> | null;
+    };
+    assert.ok(body.assistDecision);
+    assert.equal(body.assistDecision.outcome, "assist_not_required");
+    assert.equal(body.assistDecision.reasonCode, "assist_budget_exhausted");
+    assert.equal(body.assistDecision.selectedAgentRole, null);
+    assert.deepEqual(body.assistDecision.assistBudgetSnapshot, {
+      limit: 1,
+      used: 1,
+      remaining: 0,
+    });
+    assert.deepEqual(body.assistDecision.modelInvocationBudgetSnapshot, {
+      limit: 6,
+      used: 0,
+      remaining: 6,
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId} surfaces the W0.3-5 budgets on the run summary", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: "complete",
+        contract: {
+          currentState: "transformation_agent_invoked",
+          activeStep: "transformation-agent",
+          agentAttemptCount: 1,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          assistBudget: { limit: 1, used: 1, remaining: 0 },
+          modelInvocationBudget: { limit: 6, used: 1, remaining: 5 },
+          repairAttempts: [],
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    // Drive the workflow fetch so the BFF caches the budgets on the run.
+    await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+    );
+    const summary = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+    );
+    const body = summary.body as {
+      assistBudget: { limit: number; used: number; remaining: number };
+      modelInvocationBudget: { limit: number; used: number; remaining: number };
+    };
+    assert.deepEqual(body.assistBudget, { limit: 1, used: 1, remaining: 0 });
+    assert.deepEqual(body.modelInvocationBudget, {
+      limit: 6,
+      used: 1,
+      remaining: 5,
+    });
   } finally {
     await server.close();
   }

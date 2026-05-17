@@ -235,6 +235,26 @@ class RepairBudgetExhaustedError(WorkflowContractError):
     """Raised when the repair loop exceeds the configured iteration limit."""
 
 
+class AssistBudgetExhaustedError(WorkflowContractError):
+    """Raised when the assist-decision gate has no productive-assist budget left.
+
+    Issue #216 (W0.3-5): assist activations are budgeted per run alongside
+    the existing repair-iteration budget. Exhaustion forces the gate to
+    decide ``assist_not_required`` with reason ``assist_budget_exhausted``
+    rather than silently proceeding with a productive AI activation.
+    """
+
+
+class ModelInvocationBudgetExhaustedError(WorkflowContractError):
+    """Raised when a productive agent step would exceed the Model Gateway budget.
+
+    Issue #216 (W0.3-5): every productive call routed through the Model
+    Gateway consumes one unit of this run-scoped budget. Exhaustion blocks
+    further productive agent invocations with a hard termination semantics
+    — there is no hidden retry once the budget is gone.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Repair budget
 # ---------------------------------------------------------------------------
@@ -287,6 +307,160 @@ class RepairBudget:
         if self.exhausted:
             raise RepairBudgetExhaustedError(
                 f"repair budget exhausted (limit={self.limit}, used={self.used})"
+            )
+        self.used += 1
+        return self.used
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "limit": self.limit,
+            "used": self.used,
+            "remaining": self.remaining,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Assist budget (Issue #216 / W0.3-5)
+# ---------------------------------------------------------------------------
+
+# Productive AI assist activations are budgeted per run alongside the
+# existing repair-iteration budget. W0.3 today invokes the productive
+# Transformation Agent once per run, so the default is one activation;
+# the contract leaves headroom up to three so future waves can add
+# additional productive agent roles without contract surgery.
+ASSIST_BUDGET_MIN = 1
+ASSIST_BUDGET_MAX = 3
+DEFAULT_ASSIST_BUDGET = 1
+
+
+def clamp_assist_budget(value: int) -> int:
+    """Clamp an assist-budget value to the W0.3-allowed range [1, 3]."""
+    if value < ASSIST_BUDGET_MIN:
+        return ASSIST_BUDGET_MIN
+    if value > ASSIST_BUDGET_MAX:
+        return ASSIST_BUDGET_MAX
+    return value
+
+
+# noinspection PyClassHasNoInitInspection
+@dataclass
+class AssistBudget:
+    """Tracks productive-assist activations against a bounded per-run limit.
+
+    Issue #216 (W0.3-5): every productive AI activation decided by the
+    assist-decision gate (Issue #214) consumes one unit. When exhausted,
+    the gate must degrade to ``assist_not_required`` with reason
+    ``assist_budget_exhausted`` so the deterministic baseline becomes the
+    final candidate — there is no hidden continuation.
+    """
+
+    limit: int
+    used: int = 0
+
+    def __post_init__(self) -> None:
+        if self.limit < ASSIST_BUDGET_MIN or self.limit > ASSIST_BUDGET_MAX:
+            raise ValueError(
+                f"assist budget must be within [{ASSIST_BUDGET_MIN}, {ASSIST_BUDGET_MAX}], got {self.limit}"
+            )
+        if self.used < 0:
+            raise ValueError("assist budget used must be non-negative")
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.limit - self.used)
+
+    @property
+    def exhausted(self) -> bool:
+        return self.used >= self.limit
+
+    def consume(self) -> int:
+        """Consume one assist activation and return the new ``used`` counter.
+
+        Raises ``AssistBudgetExhaustedError`` if no budget remains.
+        """
+        if self.exhausted:
+            raise AssistBudgetExhaustedError(
+                f"assist budget exhausted (limit={self.limit}, used={self.used})"
+            )
+        self.used += 1
+        return self.used
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "limit": self.limit,
+            "used": self.used,
+            "remaining": self.remaining,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Model invocation budget (Issue #216 / W0.3-5)
+# ---------------------------------------------------------------------------
+
+# Counts productive Model Gateway calls across all agent roles in one
+# run. Default covers the worst case of the W0.3 product path: one
+# transformation activation + up to three repair iterations, with two
+# units of headroom for additional bounded steps a future wave may
+# introduce.
+MODEL_INVOCATION_BUDGET_MIN = 1
+MODEL_INVOCATION_BUDGET_MAX = 20
+DEFAULT_MODEL_INVOCATION_BUDGET = 6
+
+
+def clamp_model_invocation_budget(value: int) -> int:
+    """Clamp a model-invocation-budget value to the W0.3-allowed range."""
+    if value < MODEL_INVOCATION_BUDGET_MIN:
+        return MODEL_INVOCATION_BUDGET_MIN
+    if value > MODEL_INVOCATION_BUDGET_MAX:
+        return MODEL_INVOCATION_BUDGET_MAX
+    return value
+
+
+# noinspection PyClassHasNoInitInspection
+@dataclass
+class ModelInvocationBudget:
+    """Tracks Model Gateway calls against a bounded per-run cap.
+
+    Issue #216 (W0.3-5): the budget covers every productive call routed
+    through the Model Gateway (transformation agent and each repair
+    iteration). The Orchestrator consumes one unit immediately *before*
+    each call so an exhausted budget hard-terminates the productive path
+    without a hidden retry.
+    """
+
+    limit: int
+    used: int = 0
+
+    def __post_init__(self) -> None:
+        if (
+            self.limit < MODEL_INVOCATION_BUDGET_MIN
+            or self.limit > MODEL_INVOCATION_BUDGET_MAX
+        ):
+            raise ValueError(
+                f"model invocation budget must be within "
+                f"[{MODEL_INVOCATION_BUDGET_MIN}, {MODEL_INVOCATION_BUDGET_MAX}], "
+                f"got {self.limit}"
+            )
+        if self.used < 0:
+            raise ValueError("model invocation budget used must be non-negative")
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.limit - self.used)
+
+    @property
+    def exhausted(self) -> bool:
+        return self.used >= self.limit
+
+    def consume(self) -> int:
+        """Consume one model invocation and return the new ``used`` counter.
+
+        Raises ``ModelInvocationBudgetExhaustedError`` if no budget remains.
+        """
+        if self.exhausted:
+            raise ModelInvocationBudgetExhaustedError(
+                f"model invocation budget exhausted "
+                f"(limit={self.limit}, used={self.used})"
             )
         self.used += 1
         return self.used
@@ -449,12 +623,18 @@ ASSIST_OUTCOMES: tuple[str, ...] = (
 #      caller asked, not because of detected uncertainty.
 #   6. ``caller_did_not_opt_in`` — caller did not opt into productive
 #      assist; deterministic baseline is the final candidate.
+#   7. ``assist_budget_exhausted`` (Issue #216 / W0.3-5) — caller opted in
+#      but the per-run assist budget has no units left, so the gate cannot
+#      activate a productive agent. The deterministic baseline is the
+#      final candidate. The outcome is always ``assist_not_required`` for
+#      this code.
 ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY = "semantic_ir_bounded_ambiguity"
 ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE = "translation_unsupported_repairable"
 ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS = "baseline_open_assumptions"
 ASSIST_REASON_DETERMINISTIC_CANDIDATE_LOW_CONFIDENCE = "deterministic_candidate_low_confidence"
 ASSIST_REASON_CALLER_EXPLICIT_OPT_IN = "caller_explicit_opt_in"
 ASSIST_REASON_CALLER_DID_NOT_OPT_IN = "caller_did_not_opt_in"
+ASSIST_REASON_ASSIST_BUDGET_EXHAUSTED = "assist_budget_exhausted"
 
 # Deterministic uncertainty reason codes in priority order (most specific
 # first). The workflow scans markers from the IR and the generated baseline
@@ -471,6 +651,7 @@ ASSIST_REASON_CODES: tuple[str, ...] = (
     *ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES,
     ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
     ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+    ASSIST_REASON_ASSIST_BUDGET_EXHAUSTED,
 )
 
 # Closed set of agent roles the gate may select. W0.3-3 only authorises
@@ -500,6 +681,13 @@ class AssistDecision:
     selected_agent_role: str | None = None
     affected_artifact_refs: tuple[JsonObject, ...] = ()
     repair_budget_snapshot: JsonObject | None = None
+    # Issue #216 (W0.3-5): extend the gate snapshot with assist and model
+    # invocation budgets so consumers can audit the budgets that were
+    # available at the moment the gate fired. Kept optional so that
+    # contract-shape consumers that pre-date W0.3-5 still parse a gate
+    # recorded before these fields were populated.
+    assist_budget_snapshot: JsonObject | None = None
+    model_invocation_budget_snapshot: JsonObject | None = None
     rationale: str | None = None
 
     def __post_init__(self) -> None:
@@ -547,6 +735,12 @@ class AssistDecision:
             ]
         if self.repair_budget_snapshot is not None:
             payload["repairBudgetSnapshot"] = dict(self.repair_budget_snapshot)
+        if self.assist_budget_snapshot is not None:
+            payload["assistBudgetSnapshot"] = dict(self.assist_budget_snapshot)
+        if self.model_invocation_budget_snapshot is not None:
+            payload["modelInvocationBudgetSnapshot"] = dict(
+                self.model_invocation_budget_snapshot
+            )
         if self.rationale is not None:
             payload["rationale"] = self.rationale
         return payload
@@ -572,6 +766,19 @@ class W02RunContract:
     source_ref: JsonObject
     state_machine: WorkflowStateMachine
     repair_budget: RepairBudget
+    # Issue #216 (W0.3-5): per-run productive-assist activation budget
+    # (consumed when the assist-decision gate decides ``assist_required``)
+    # and the per-run Model Gateway invocation budget (consumed before
+    # every productive gateway call). Both surface remaining/used counts
+    # on every contract snapshot for UI-safe auditing.
+    assist_budget: AssistBudget = field(
+        default_factory=lambda: AssistBudget(limit=DEFAULT_ASSIST_BUDGET)
+    )
+    model_invocation_budget: ModelInvocationBudget = field(
+        default_factory=lambda: ModelInvocationBudget(
+            limit=DEFAULT_MODEL_INVOCATION_BUDGET
+        )
+    )
     active_step: str | None = None
     agent_attempt_count: int = 0
     generated_java_ref: JsonObject | None = None
@@ -736,6 +943,8 @@ class W02RunContract:
             "activeStep": self.active_step,
             "agentAttemptCount": self.agent_attempt_count,
             "repairBudget": self.repair_budget.to_dict(),
+            "assistBudget": self.assist_budget.to_dict(),
+            "modelInvocationBudget": self.model_invocation_budget.to_dict(),
             "generatedJavaRef": dict(self.generated_java_ref) if self.generated_java_ref else None,
             "buildTestResultRef": dict(self.build_test_result_ref) if self.build_test_result_ref else None,
             "evidencePackRef": dict(self.evidence_pack_ref) if self.evidence_pack_ref else None,
@@ -757,6 +966,8 @@ def new_run_contract(
     requester: str,
     source_ref: Mapping[str, JsonValue],
     repair_budget_limit: int = DEFAULT_REPAIR_BUDGET,
+    assist_budget_limit: int = DEFAULT_ASSIST_BUDGET,
+    model_invocation_budget_limit: int = DEFAULT_MODEL_INVOCATION_BUDGET,
     now: str | None = None,
 ) -> W02RunContract:
     """Construct a fresh W0.2 run contract in the ``run_accepted`` state."""
@@ -768,6 +979,10 @@ def new_run_contract(
         source_ref=dict(source_ref),
         state_machine=WorkflowStateMachine(initial_state=STATE_RUN_ACCEPTED, now=timestamp),
         repair_budget=RepairBudget(limit=clamp_repair_budget(repair_budget_limit)),
+        assist_budget=AssistBudget(limit=clamp_assist_budget(assist_budget_limit)),
+        model_invocation_budget=ModelInvocationBudget(
+            limit=clamp_model_invocation_budget(model_invocation_budget_limit)
+        ),
         active_step=STEP_ACCEPTED,
         created_at=timestamp,
         updated_at=timestamp,

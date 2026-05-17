@@ -361,6 +361,19 @@ jq -e --arg run "$positive_run_id" '
   and (.repairBudget.used | type == "number")
   and (.repairBudget.remaining | type == "number")
   and (.repairBudget.used + .repairBudget.remaining == .repairBudget.limit)
+  # Issue #216 (W0.3-5): the assist + Model Gateway budgets MUST be
+  # populated on every success-path workflow snapshot and obey the same
+  # invariants as the repair budget.
+  and (.assistBudget != null)
+  and (.assistBudget.limit | type == "number")
+  and (.assistBudget.used | type == "number")
+  and (.assistBudget.remaining | type == "number")
+  and (.assistBudget.used + .assistBudget.remaining == .assistBudget.limit)
+  and (.modelInvocationBudget != null)
+  and (.modelInvocationBudget.limit | type == "number")
+  and (.modelInvocationBudget.used | type == "number")
+  and (.modelInvocationBudget.remaining | type == "number")
+  and (.modelInvocationBudget.used + .modelInvocationBudget.remaining == .modelInvocationBudget.limit)
   and (.generatedJavaRef != null)
   and (.buildTestResultRef != null)
   and (.evidencePackRef != null)

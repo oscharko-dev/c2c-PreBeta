@@ -36,6 +36,20 @@ DEFAULT_REPAIR_BUDGET_MAX = 2
 REPAIR_BUDGET_MIN = 1
 REPAIR_BUDGET_MAX = 3
 
+# Issue #216 (W0.3-5): per-run productive-assist activation budget. W0.3 today
+# invokes the productive Transformation Agent once per run, so the default is
+# one activation. Clamped to [1, 3] so operators cannot escape the W0.3 cap.
+DEFAULT_ASSIST_BUDGET_MAX = 1
+ASSIST_BUDGET_MIN = 1
+ASSIST_BUDGET_MAX = 3
+
+# Issue #216 (W0.3-5): per-run Model Gateway invocation budget. Covers the
+# worst case of one transformation call + three repair-iteration calls plus
+# two units of headroom for future bounded steps. Clamped to [1, 20].
+DEFAULT_MODEL_INVOCATION_BUDGET_MAX = 6
+MODEL_INVOCATION_BUDGET_MIN = 1
+MODEL_INVOCATION_BUDGET_MAX = 20
+
 # Issue #169: defaults for the productive Transformation Agent.
 DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID = "c2c.transformation-agent.cobol-to-java.v0"
 DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION = "v0"
@@ -167,6 +181,11 @@ class OrchestratorConfig:
     run_artifact_root: str = DEFAULT_RUN_ARTIFACT_ROOT
     experience_learning_base_url: str = DEFAULT_EXPERIENCE_LEARNING_BASE_URL
     repair_budget_max: int = DEFAULT_REPAIR_BUDGET_MAX
+    # Issue #216 (W0.3-5): per-run assist and Model Gateway budgets surfaced
+    # to consumers via the W0.2 run contract; values are clamped at load
+    # time so config-time misconfiguration cannot widen the W0.3 caps.
+    assist_budget_max: int = DEFAULT_ASSIST_BUDGET_MAX
+    model_invocation_budget_max: int = DEFAULT_MODEL_INVOCATION_BUDGET_MAX
     # Issue #169: productive Transformation Agent defaults. The orchestrator
     # treats these as in-process configuration; values are stamped on the
     # agent invocation request and used to bound the model output.
@@ -272,6 +291,25 @@ def load_config() -> OrchestratorConfig:
         DEFAULT_REPAIR_BUDGET_MAX,
     )
     repair_budget_max = max(REPAIR_BUDGET_MIN, min(REPAIR_BUDGET_MAX, repair_budget_max_raw))
+
+    # Issue #216 (W0.3-5): assist + model invocation budgets follow the same
+    # clamp pattern as the repair budget so out-of-range environment values
+    # snap back to the W0.3 contract instead of crashing the runner.
+    assist_budget_max_raw = _read_env_int(
+        "ORCHESTRATOR_ASSIST_BUDGET_MAX",
+        DEFAULT_ASSIST_BUDGET_MAX,
+    )
+    assist_budget_max = max(
+        ASSIST_BUDGET_MIN, min(ASSIST_BUDGET_MAX, assist_budget_max_raw)
+    )
+    model_invocation_budget_max_raw = _read_env_int(
+        "ORCHESTRATOR_MODEL_INVOCATION_BUDGET_MAX",
+        DEFAULT_MODEL_INVOCATION_BUDGET_MAX,
+    )
+    model_invocation_budget_max = max(
+        MODEL_INVOCATION_BUDGET_MIN,
+        min(MODEL_INVOCATION_BUDGET_MAX, model_invocation_budget_max_raw),
+    )
 
     run_artifact_root_raw = os.environ.get(
         "C2C_RUN_ARTIFACT_ROOT",
@@ -407,6 +445,8 @@ def load_config() -> OrchestratorConfig:
         run_artifact_root=run_artifact_root,
         experience_learning_base_url=experience_learning_base_url,
         repair_budget_max=repair_budget_max,
+        assist_budget_max=assist_budget_max,
+        model_invocation_budget_max=model_invocation_budget_max,
         transformation_agent_prompt_template_id=transformation_agent_prompt_template_id,
         transformation_agent_prompt_template_version=transformation_agent_prompt_template_version,
         transformation_agent_deadline_ms=transformation_agent_deadline_ms,

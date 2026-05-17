@@ -1,22 +1,42 @@
-import { randomUUID } from 'node:crypto';
-import { diagnosticFixtureOutcomeFor, type DiagnosticFixtureOutcome } from './diagnostic-fixtures/fixture-data';
-import type { SampleDetail } from './samples';
-import type { W02UiErrorCode } from './error-codes';
+import { randomUUID } from "node:crypto";
+import {
+  diagnosticFixtureOutcomeFor,
+  type DiagnosticFixtureOutcome,
+} from "./diagnostic-fixtures/fixture-data";
+import type { SampleDetail } from "./samples";
+import type { W02UiErrorCode } from "./error-codes";
 
-export type RunStatus = 'starting' | 'updating' | 'completed' | 'failed';
+export type RunStatus = "starting" | "updating" | "completed" | "failed";
 
 // Issue #172: W0.2 final classification surfaced to the UI on /api/v0/runs/{runId}.
 // ``success`` corresponds to a deterministic verification pass; ``blocked``
 // and ``failed`` carry a UI-safe ``failureCode``; ``incomplete`` is the
 // non-terminal placeholder used while the orchestrator is still running.
 export type RunFinalClassification =
-  | 'success'
-  | 'blocked'
-  | 'failed'
-  | 'cancelled'
-  | 'incomplete';
+  | "success"
+  | "blocked"
+  | "failed"
+  | "cancelled"
+  | "incomplete";
 
 export interface StoredRepairBudget {
+  limit: number;
+  used: number;
+  remaining: number;
+}
+
+// Issue #216 (W0.3-5): per-run productive-assist activation budget surfaced
+// from the orchestrator. Shape mirrors ``StoredRepairBudget`` so the UI can
+// render any budget uniformly.
+export interface StoredAssistBudget {
+  limit: number;
+  used: number;
+  remaining: number;
+}
+
+// Issue #216 (W0.3-5): per-run Model Gateway invocation budget surfaced
+// from the orchestrator. Same shape as the other budgets.
+export interface StoredModelInvocationBudget {
   limit: number;
   used: number;
   remaining: number;
@@ -24,7 +44,7 @@ export interface StoredRepairBudget {
 // `diagnostic-fixture` is an opt-in developer mode (C2C_ENABLE_DIAGNOSTIC_FIXTURES).
 // It is never a product result and is contained out of product-facing DTOs by
 // `productMode` in server responses.
-export type RunMode = 'live' | 'diagnostic-fixture';
+export type RunMode = "live" | "diagnostic-fixture";
 
 export interface StoredRun {
   runId: string;
@@ -45,19 +65,31 @@ export interface StoredRun {
   activeStep?: string;
   agentAttemptCount?: number;
   repairBudget?: StoredRepairBudget;
+  // Issue #216 (W0.3-5): per-run productive-assist + Model Gateway budgets
+  // surfaced from the orchestrator's W0.2 contract view.
+  assistBudget?: StoredAssistBudget;
+  modelInvocationBudget?: StoredModelInvocationBudget;
   finalClassification?: RunFinalClassification;
   failureCode?: W02UiErrorCode;
   failureMessage?: string;
 }
 
 export interface RunStore {
-  create(sample: SampleDetail, mode: RunMode, liveRunId?: string, initial?: Partial<StoredRun>): StoredRun;
+  create(
+    sample: SampleDetail,
+    mode: RunMode,
+    liveRunId?: string,
+    initial?: Partial<StoredRun>,
+  ): StoredRun;
   get(runId: string): StoredRun | undefined;
   update(runId: string, patch: Partial<StoredRun>): StoredRun | undefined;
   list(): StoredRun[];
 }
 
-export function createRunStore(now: () => Date = () => new Date(), idFactory: () => string = randomUUID): RunStore {
+export function createRunStore(
+  now: () => Date = () => new Date(),
+  idFactory: () => string = randomUUID,
+): RunStore {
   const runs = new Map<string, StoredRun>();
   return {
     create(sample, mode, liveRunId, initial) {
@@ -66,19 +98,22 @@ export function createRunStore(now: () => Date = () => new Date(), idFactory: ()
       const stored: StoredRun = {
         runId,
         programId: sample.programId,
-        status: initial?.status ?? 'starting',
+        status: initial?.status ?? "starting",
         mode,
         message:
           initial?.message ??
-          (mode === 'diagnostic-fixture'
-            ? 'diagnostic fixture run; not a product result'
-            : 'run accepted by orchestrator'),
-        policyDecision: initial?.policyDecision ?? '',
+          (mode === "diagnostic-fixture"
+            ? "diagnostic fixture run; not a product result"
+            : "run accepted by orchestrator"),
+        policyDecision: initial?.policyDecision ?? "",
         evidenceRefs: initial?.evidenceRefs ?? [],
         createdAt,
         updatedAt: createdAt,
         sample,
-        fixture: mode === 'diagnostic-fixture' ? diagnosticFixtureOutcomeFor(sample, runId) : undefined,
+        fixture:
+          mode === "diagnostic-fixture"
+            ? diagnosticFixtureOutcomeFor(sample, runId)
+            : undefined,
         liveRunId,
       };
       runs.set(runId, stored);
@@ -105,9 +140,14 @@ export function createRunStore(now: () => Date = () => new Date(), idFactory: ()
 }
 
 function isAllowedStatus(value: unknown): value is RunStatus {
-  return value === 'starting' || value === 'updating' || value === 'completed' || value === 'failed';
+  return (
+    value === "starting" ||
+    value === "updating" ||
+    value === "completed" ||
+    value === "failed"
+  );
 }
 
 export function coerceLiveStatus(value: unknown): RunStatus {
-  return isAllowedStatus(value) ? value : 'updating';
+  return isAllowedStatus(value) ? value : "updating";
 }

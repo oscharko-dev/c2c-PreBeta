@@ -82,6 +82,7 @@ from .run_contract import (
     FAILURE_MODEL_POLICY_DENIED,
     FAILURE_UNSUPPORTED_COBOL,
     IllegalTransitionError,
+    ModelInvocationBudgetExhaustedError,
     RepairBudgetExhaustedError,
     STEP_COMPILE_TEST_JAVA as W02_STEP_COMPILE_TEST_JAVA,
     STEP_FINALIZE as W02_STEP_FINALIZE,
@@ -96,6 +97,7 @@ from .run_contract import (
     ASSIST_AGENT_ROLE_TRANSFORMATION,
     ASSIST_OUTCOME_NOT_REQUIRED,
     ASSIST_OUTCOME_REQUIRED,
+    ASSIST_REASON_ASSIST_BUDGET_EXHAUSTED,
     ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
     ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
     ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
@@ -804,6 +806,21 @@ class W0WorkflowRunner:
                 self.config,
                 "repair_budget_max",
                 w02.DEFAULT_REPAIR_BUDGET,
+            ),
+            # Issue #216 (W0.3-5): seed the new assist + model-invocation
+            # budgets from configuration so consumers (BFF, UI, evidence)
+            # see the same values the orchestrator enforces. ``getattr``
+            # keeps the runner compatible with older config dataclasses
+            # carried through tests that pre-date this issue.
+            assist_budget_limit=getattr(
+                self.config,
+                "assist_budget_max",
+                w02.DEFAULT_ASSIST_BUDGET,
+            ),
+            model_invocation_budget_limit=getattr(
+                self.config,
+                "model_invocation_budget_max",
+                w02.DEFAULT_MODEL_INVOCATION_BUDGET,
             ),
         )
         self._store_contract(contract)
@@ -1766,7 +1783,22 @@ class W0WorkflowRunner:
             # baseline. On success its Java candidate becomes the artifact
             # fed into build/test; the baseline is preserved as a traceable
             # artifact and as a fallback reference in the run contract.
-            if context.use_transformation_agent:
+            #
+            # Issue #216 (W0.3-5): the assist-decision gate above is the
+            # contract-level authority for productive activation. If the
+            # gate decided ``assist_not_required`` (caller opted out, or
+            # the assist budget is exhausted), the orchestrator must skip
+            # the productive transformation agent and proceed with the
+            # deterministic baseline as the final candidate. This prevents
+            # the implicit-activation regression that #213 closed and the
+            # budget-bypass regression #216 hardens against.
+            assist_authorised = (
+                w02_contract.assist_decision is not None
+                and w02_contract.assist_decision.outcome == ASSIST_OUTCOME_REQUIRED
+                and w02_contract.assist_decision.selected_agent_role
+                == ASSIST_AGENT_ROLE_TRANSFORMATION
+            )
+            if context.use_transformation_agent and assist_authorised:
                 # Drive the W0.2 state machine through the productive-agent
                 # transition before invoking the agent so the run contract
                 # accurately reflects what the orchestrator is doing.
@@ -1801,6 +1833,32 @@ class W0WorkflowRunner:
                         f"urn:orchestrator/{context.run_id}/oracle",
                         oracle_payload_for_agent,
                     )
+                # Issue #216 (W0.3-5): consume one Model Gateway unit
+                # before the productive transformation call so an
+                # exhausted budget hard-terminates *before* the gateway
+                # is contacted. Surface the exhaustion as a step failure
+                # using the canonical model-gateway-unavailable failure
+                # code so the existing classification path renders it
+                # without contract surgery.
+                try:
+                    w02_contract.model_invocation_budget.consume()
+                except ModelInvocationBudgetExhaustedError as exhausted_exc:
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_TRANSFORMATION_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="transformation-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=ir_output.output_ref,
+                        diagnostic=str(exhausted_exc),
+                        run_status="failed",
+                        failed_step=W02_STEP_TRANSFORMATION_AGENT,
+                    )
+                    raise StepExecutionError(
+                        f"transformation agent step {W02_STEP_TRANSFORMATION_AGENT} "
+                        f"blocked by model invocation budget exhaustion: "
+                        f"{exhausted_exc}"
+                    ) from exhausted_exc
                 try:
                     agent_result = self._invoke_transformation_agent(
                         context,
@@ -2151,6 +2209,52 @@ class W0WorkflowRunner:
                     actor="verification-repair-agent",
                     input_ref=build_test_output.output_ref,
                 )
+                # Issue #216 (W0.3-5): consume one Model Gateway unit
+                # before each repair-iteration call so an exhausted
+                # budget terminates the loop *before* the gateway is
+                # contacted. Records the exhaustion as a refused repair
+                # attempt on the trajectory and blocks the run with the
+                # last objective build-test failure code so consumers can
+                # distinguish budget exhaustion from agent-side failures.
+                try:
+                    w02_contract.model_invocation_budget.consume()
+                except ModelInvocationBudgetExhaustedError as exhausted_exc:
+                    self._record_step_finish(
+                        context,
+                        name=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                        capability_id=self.config.model_gateway_capability_id,
+                        actor="verification-repair-agent",
+                        status=STEP_STATUS_FAILED,
+                        input_ref=build_test_output.output_ref,
+                        diagnostic=str(exhausted_exc),
+                        run_status="failed",
+                        failed_step=W02_STEP_VERIFICATION_REPAIR_AGENT,
+                    )
+                    w02_contract.record_repair_attempt(
+                        {
+                            "attemptNumber": attempt,
+                            "repairDecision": "refuse",
+                            "failureCategory": build_failure_code,
+                            "refusalCode": "model_invocation_budget_exhausted",
+                            "rationale": str(exhausted_exc),
+                            "buildTestResultRef": build_test_result_ref_payload,
+                        }
+                    )
+                    w02_blocked = True
+                    w02_failure_code = build_failure_code
+                    w02_failure_message = (
+                        f"verification/repair agent blocked by model "
+                        f"invocation budget exhaustion: {exhausted_exc}"
+                    )
+                    self._advance_w02(
+                        context,
+                        w02_contract,
+                        STATE_RUN_BLOCKED,
+                        active_step=None,
+                        message=w02_failure_message,
+                        failure_code=build_failure_code,
+                    )
+                    break
                 try:
                     repair_result = self._invoke_repair_agent(
                         context,
@@ -3529,22 +3633,47 @@ class W0WorkflowRunner:
         )
 
         if context.use_transformation_agent:
-            outcome = ASSIST_OUTCOME_REQUIRED
-            selected_role: str | None = ASSIST_AGENT_ROLE_TRANSFORMATION
-            if detected_reason is not None:
-                reason_code = detected_reason
+            # Issue #216 (W0.3-5): the gate is the contract-level point at
+            # which the orchestrator commits to a productive assist
+            # activation. Consume one unit of the per-run assist budget
+            # here so the contract enforces the cap *before* any model
+            # gateway call. On exhaustion, hard-degrade to
+            # ``assist_not_required`` with the dedicated reason code so
+            # the deterministic baseline becomes the final candidate
+            # without a hidden continuation.
+            try:
+                contract.assist_budget.consume()
+            except w02.AssistBudgetExhaustedError:
+                outcome = ASSIST_OUTCOME_NOT_REQUIRED
+                reason_code = ASSIST_REASON_ASSIST_BUDGET_EXHAUSTED
+                selected_role: str | None = None
                 rationale = (
-                    f"caller opted into productive Transformation Agent and the "
-                    f"deterministic baseline produced uncertainty markers "
-                    f"({', '.join(detected_markers)})"
+                    "caller opted into productive Transformation Agent but the "
+                    f"per-run assist budget (limit={contract.assist_budget.limit}, "
+                    f"used={contract.assist_budget.used}) is exhausted; "
+                    "deterministic baseline is the final candidate"
                 )
+                if detected_markers:
+                    rationale += (
+                        f" (detected markers ignored: {', '.join(detected_markers)})"
+                    )
             else:
-                reason_code = ASSIST_REASON_CALLER_EXPLICIT_OPT_IN
-                rationale = (
-                    "caller opted into productive Transformation Agent via "
-                    "useTransformationAgent=true; no deterministic uncertainty "
-                    "markers detected on the baseline"
-                )
+                outcome = ASSIST_OUTCOME_REQUIRED
+                selected_role = ASSIST_AGENT_ROLE_TRANSFORMATION
+                if detected_reason is not None:
+                    reason_code = detected_reason
+                    rationale = (
+                        f"caller opted into productive Transformation Agent and the "
+                        f"deterministic baseline produced uncertainty markers "
+                        f"({', '.join(detected_markers)})"
+                    )
+                else:
+                    reason_code = ASSIST_REASON_CALLER_EXPLICIT_OPT_IN
+                    rationale = (
+                        "caller opted into productive Transformation Agent via "
+                        "useTransformationAgent=true; no deterministic uncertainty "
+                        "markers detected on the baseline"
+                    )
         else:
             outcome = ASSIST_OUTCOME_NOT_REQUIRED
             reason_code = ASSIST_REASON_CALLER_DID_NOT_OPT_IN
@@ -3568,6 +3697,13 @@ class W0WorkflowRunner:
             selected_agent_role=selected_role,
             affected_artifact_refs=affected_refs,
             repair_budget_snapshot=contract.repair_budget.to_dict(),
+            # Issue #216 (W0.3-5): snapshot the assist and model invocation
+            # budgets at gate time so consumers can audit the budget state
+            # the orchestrator observed when the assist decision was made.
+            assist_budget_snapshot=contract.assist_budget.to_dict(),
+            model_invocation_budget_snapshot=(
+                contract.model_invocation_budget.to_dict()
+            ),
             rationale=rationale,
         )
         contract.record_assist_decision(decision)

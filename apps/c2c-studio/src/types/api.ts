@@ -2,7 +2,7 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status?: number; message: string; details?: ApiErrorDetails };
 
-export type ApiErrorKind = 'config' | 'http' | 'network' | 'parse' | 'contract';
+export type ApiErrorKind = "config" | "http" | "network" | "parse" | "contract";
 
 export interface ApiErrorDetails {
   kind: ApiErrorKind;
@@ -15,7 +15,7 @@ export interface HealthResponse {
   [key: string]: unknown;
 }
 
-export type UpstreamMode = 'live' | 'mock';
+export type UpstreamMode = "live" | "mock";
 
 export interface ModeResponse {
   orchestrator: UpstreamMode;
@@ -40,30 +40,44 @@ export interface RunLinks {
 
 // Issue #172: closed set of UI-safe failure codes the BFF exposes.
 export type W02UiErrorCode =
-  | 'unsupported_cobol'
-  | 'parse_failed'
-  | 'semantic_ir_failed'
-  | 'model_gateway_unavailable'
-  | 'model_policy_denied'
-  | 'agent_timeout'
-  | 'agent_contract_invalid'
-  | 'java_generation_failed'
-  | 'java_compile_failed'
-  | 'java_runtime_failed'
-  | 'oracle_mismatch'
-  | 'evidence_incomplete'
-  | 'cancelled'
-  | 'service_unavailable'
-  | 'internal_error';
+  | "unsupported_cobol"
+  | "parse_failed"
+  | "semantic_ir_failed"
+  | "model_gateway_unavailable"
+  | "model_policy_denied"
+  | "agent_timeout"
+  | "agent_contract_invalid"
+  | "java_generation_failed"
+  | "java_compile_failed"
+  | "java_runtime_failed"
+  | "oracle_mismatch"
+  | "evidence_incomplete"
+  | "cancelled"
+  | "service_unavailable"
+  | "internal_error";
 
 export type RunFinalClassification =
-  | 'success'
-  | 'blocked'
-  | 'failed'
-  | 'cancelled'
-  | 'incomplete';
+  | "success"
+  | "blocked"
+  | "failed"
+  | "cancelled"
+  | "incomplete";
 
 export interface RepairBudget {
+  limit: number;
+  used: number;
+  remaining: number;
+}
+
+// Issue #216 (W0.3-5): per-run assist and Model Gateway invocation budgets.
+// Same shape as ``RepairBudget`` so the UI can render any budget uniformly.
+export interface AssistBudget {
+  limit: number;
+  used: number;
+  remaining: number;
+}
+
+export interface ModelInvocationBudget {
   limit: number;
   used: number;
   remaining: number;
@@ -74,6 +88,11 @@ export interface W02RunContractFields {
   activeStep?: string | null;
   agentAttemptCount?: number;
   repairBudget?: RepairBudget | null;
+  // Issue #216 (W0.3-5): assist + model invocation budgets surfaced on
+  // every BFF response so the UI can render budget pressure without an
+  // extra workflow fetch.
+  assistBudget?: AssistBudget | null;
+  modelInvocationBudget?: ModelInvocationBudget | null;
   finalClassification?: RunFinalClassification | null;
   failureCode?: W02UiErrorCode | null;
   failureMessage?: string | null;
@@ -83,9 +102,9 @@ export interface TransformResponse extends W02RunContractFields {
   runId: string;
   orchestratorRunId: string;
   programId: string;
-  status: 'starting' | 'updating' | 'completed' | 'failed';
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
+  status: "starting" | "updating" | "completed" | "failed";
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
   message?: string;
   evidenceRefs?: string[];
   policyDecision?: string;
@@ -97,9 +116,9 @@ export interface TransformResponse extends W02RunContractFields {
 export interface RunSummary extends W02RunContractFields {
   runId: string;
   programId: string;
-  status: 'starting' | 'updating' | 'completed' | 'failed';
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
+  status: "starting" | "updating" | "completed" | "failed";
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
   message?: string;
   evidenceRefs?: string[];
   policyDecision?: string;
@@ -147,9 +166,9 @@ export interface RunArtifactMetadata {
 export interface GeneratedView {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
-  status: 'generated' | 'unsupported' | 'skipped' | 'incomplete';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
+  status: "generated" | "unsupported" | "skipped" | "incomplete";
   entryClass?: string;
   entryFilePath?: string;
   fileCount?: number;
@@ -167,9 +186,9 @@ export interface GeneratedView {
 export interface GeneratedFilesIndex {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
-  status: 'complete' | 'incomplete';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
+  status: "complete" | "incomplete";
   files: GeneratedFileRef[];
   fileCount: number;
   entryFilePath?: string;
@@ -182,18 +201,26 @@ export interface GeneratedFilesIndex {
 export interface BuildTestView {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
-  status: 'ok' | 'compile-failed' | 'run-failed' | 'output-divergence' | 'golden-master-reproduction-failed' | 'missing-golden-master' | 'skipped' | 'incomplete';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
+  status:
+    | "ok"
+    | "compile-failed"
+    | "run-failed"
+    | "output-divergence"
+    | "golden-master-reproduction-failed"
+    | "missing-golden-master"
+    | "skipped"
+    | "incomplete";
   classification:
-    | 'match'
-    | 'divergence-known-w0-coverage-gap'
-    | 'divergence-unknown'
-    | 'true-golden-master-reproduction-error'
-    | 'true-golden-master-mismatch'
-    | 'compile-error'
-    | 'run-error'
-    | 'skipped-no-execution';
+    | "match"
+    | "divergence-known-w0-coverage-gap"
+    | "divergence-unknown"
+    | "true-golden-master-reproduction-error"
+    | "true-golden-master-mismatch"
+    | "compile-error"
+    | "run-error"
+    | "skipped-no-execution";
   expectedOutput?: string;
   actualOutput?: string;
   outputRef?: OutputRef | null;
@@ -206,12 +233,12 @@ export interface BuildTestView {
 export interface EvidenceView {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
-  status: 'complete' | 'incomplete' | 'invalid';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
+  status: "complete" | "incomplete" | "invalid";
   packId?: string;
   manifestHash?: string;
-  validationStatus?: 'valid' | 'invalid' | 'incomplete' | 'unknown';
+  validationStatus?: "valid" | "invalid" | "incomplete" | "unknown";
   missingArtifacts?: string[];
   orchestratorRunId?: string;
   artifactRef?: OutputRef | null;
@@ -230,12 +257,17 @@ export interface RunEvent {
 export interface RunEventsView {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
   events: RunEvent[];
 }
 
-export type RunProgressStepStatus = 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
+export type RunProgressStepStatus =
+  | "pending"
+  | "running"
+  | "ok"
+  | "failed"
+  | "skipped";
 
 export interface RunProgressStep {
   stepId: number;
@@ -255,10 +287,10 @@ export interface RunProgressStep {
 export interface RunProgressView {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
-  status: 'complete' | 'incomplete';
-  runStatus?: 'starting' | 'updating' | 'completed' | 'failed';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
+  status: "complete" | "incomplete";
+  runStatus?: "starting" | "updating" | "completed" | "failed";
   currentStep: string | null;
   failedStep: string | null;
   completedSteps: string[];
@@ -274,8 +306,8 @@ export interface RunProgressView {
 export interface RunArtifactsView {
   runId: string;
   programId?: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
   orchestratorRunId?: string;
   artifacts: RunArtifactMetadata[];
   summary?: Record<string, unknown>;
@@ -288,8 +320,8 @@ export interface RunArtifactsView {
 export interface GeneratedFileContent {
   runId: string;
   programId?: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
   path: string;
   content: string;
   sha256: string;
@@ -301,19 +333,19 @@ export interface GeneratedFileContent {
 
 // Issue #172: W0.2 workflow contract product-level view.
 export type W02ActiveAgent =
-  | 'transformation_agent'
-  | 'verification_repair_agent'
-  | 'cobol_parser'
-  | 'semantic_ir'
-  | 'java_generator'
-  | 'build_test_runner'
-  | 'evidence_service';
+  | "transformation_agent"
+  | "verification_repair_agent"
+  | "cobol_parser"
+  | "semantic_ir"
+  | "java_generator"
+  | "build_test_runner"
+  | "evidence_service";
 
 export type W02RepairDecision =
-  | 'propose_candidate'
-  | 'refuse'
-  | 'escalate'
-  | 'no_change';
+  | "propose_candidate"
+  | "refuse"
+  | "escalate"
+  | "no_change";
 
 export interface RepairAttemptSummary {
   attemptNumber: number;
@@ -334,14 +366,19 @@ export interface WorkflowArtifactRef {
 export interface RunWorkflowView {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
-  source: 'live' | 'cached' | 'unavailable';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
+  source: "live" | "cached" | "unavailable";
   state: string | null;
   activeStep: string | null;
   activeAgent: W02ActiveAgent | null;
   agentAttemptCount: number;
   repairBudget: RepairBudget | null;
+  // Issue #216 (W0.3-5): per-run assist + Model Gateway budgets surfaced
+  // on the workflow envelope so the UI can render budget pressure
+  // alongside the existing repair budget.
+  assistBudget: AssistBudget | null;
+  modelInvocationBudget: ModelInvocationBudget | null;
   repairAttempts: RepairAttemptSummary[];
   finalClassification: RunFinalClassification | null;
   failureCode: W02UiErrorCode | null;

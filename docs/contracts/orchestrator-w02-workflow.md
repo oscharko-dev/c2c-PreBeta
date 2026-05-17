@@ -37,23 +37,23 @@ The W0.2 workflow defines a closed set of states. The state machine in
 [`orchestrator_service/run_contract.py`][run_contract] enforces the allowed
 transitions; any non-listed transition raises `IllegalTransitionError`.
 
-| # | State | Meaning |
-|---|-------|---------|
-| 1 | `run_accepted` | Run created; BFF returned `201 Created`. |
-| 2 | `source_normalized` | Source COBOL persisted to the run artifact store. |
-| 3 | `cobol_parse_attempted` | Parser invoked through the Harness capability gateway. |
-| 4a | `semantic_ir_ready` | Parser returned an IR the runner can consume. |
-| 4b | `semantic_ir_blocked` | Source is unsupported or IR generation failed. |
-| 5 | `baseline_generation_attempted` | Deterministic target-Java generator invoked. |
-| 6 | `transformation_agent_invoked` | Transformation Agent invoked to produce or improve a Java candidate before deterministic verification. Reached only when the run was started with an explicit `useTransformationAgent = true` request; as of W0.3 (#213) the BFF no longer sets this flag implicitly from Model Gateway availability, and the explicit assist-decision gate that authorizes opt-in is owned by #214. |
-| 7 | `java_candidate_persisted` | Generated Java written to the artifact store. |
-| 8 | `build_test_running` | Build-test runner invoked. |
-| 9 | `verification_repair_invoked` | Build-test failed; orchestrator entered the verification/repair loop. |
-| 10a | `final_java_selected` | Build-test verified the candidate Java. |
-| 10b | `run_blocked` | Verification could not be completed within the repair budget. |
-| 11a | `evidence_materialized` | Evidence Pack fully assembled. |
-| 11b | `evidence_incomplete` | Evidence Pack assembled with missing artifacts. |
-| 12 | `final_classification` | Terminal state — `finalClassification` carries the outcome. |
+| #   | State                           | Meaning                                                                                                                                                                                                                                                                                                                                                                              |
+| --- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `run_accepted`                  | Run created; BFF returned `201 Created`.                                                                                                                                                                                                                                                                                                                                             |
+| 2   | `source_normalized`             | Source COBOL persisted to the run artifact store.                                                                                                                                                                                                                                                                                                                                    |
+| 3   | `cobol_parse_attempted`         | Parser invoked through the Harness capability gateway.                                                                                                                                                                                                                                                                                                                               |
+| 4a  | `semantic_ir_ready`             | Parser returned an IR the runner can consume.                                                                                                                                                                                                                                                                                                                                        |
+| 4b  | `semantic_ir_blocked`           | Source is unsupported or IR generation failed.                                                                                                                                                                                                                                                                                                                                       |
+| 5   | `baseline_generation_attempted` | Deterministic target-Java generator invoked.                                                                                                                                                                                                                                                                                                                                         |
+| 6   | `transformation_agent_invoked`  | Transformation Agent invoked to produce or improve a Java candidate before deterministic verification. Reached only when the run was started with an explicit `useTransformationAgent = true` request; as of W0.3 (#213) the BFF no longer sets this flag implicitly from Model Gateway availability, and the explicit assist-decision gate that authorizes opt-in is owned by #214. |
+| 7   | `java_candidate_persisted`      | Generated Java written to the artifact store.                                                                                                                                                                                                                                                                                                                                        |
+| 8   | `build_test_running`            | Build-test runner invoked.                                                                                                                                                                                                                                                                                                                                                           |
+| 9   | `verification_repair_invoked`   | Build-test failed; orchestrator entered the verification/repair loop.                                                                                                                                                                                                                                                                                                                |
+| 10a | `final_java_selected`           | Build-test verified the candidate Java.                                                                                                                                                                                                                                                                                                                                              |
+| 10b | `run_blocked`                   | Verification could not be completed within the repair budget.                                                                                                                                                                                                                                                                                                                        |
+| 11a | `evidence_materialized`         | Evidence Pack fully assembled.                                                                                                                                                                                                                                                                                                                                                       |
+| 11b | `evidence_incomplete`           | Evidence Pack assembled with missing artifacts.                                                                                                                                                                                                                                                                                                                                      |
+| 12  | `final_classification`          | Terminal state — `finalClassification` carries the outcome.                                                                                                                                                                                                                                                                                                                          |
 
 The Orchestrator emits a Harness event for every state change with
 `eventType = "orchestrator.workflow.state.<state>"`.
@@ -63,48 +63,48 @@ The Orchestrator emits a Harness event for every state change with
 The state machine is a directed graph. The full table lives in
 [`run_contract.py`][run_contract] (`_ALLOWED_TRANSITIONS`). Key invariants:
 
-* `run_accepted` may only transition to `source_normalized` or `run_blocked`.
-* `final_java_selected` may only transition to `evidence_materialized` or
+- `run_accepted` may only transition to `source_normalized` or `run_blocked`.
+- `final_java_selected` may only transition to `evidence_materialized` or
   `evidence_incomplete` — there is no path from `final_java_selected` back
   to `run_blocked`.
-* `verification_repair_invoked` may advance to `java_candidate_persisted`
+- `verification_repair_invoked` may advance to `java_candidate_persisted`
   when the Verification/Repair Agent proposes a repaired candidate, or to
   `run_blocked` when the agent refuses, escalates, returns no usable change,
   fails its contract, or the repair budget is exhausted. The state machine
   also keeps the older `transformation_agent_invoked` re-entry valid for
   compatibility with consumers that still model repair as a transformation
   sub-step.
-* `final_classification` is terminal; no further transitions are allowed.
+- `final_classification` is terminal; no further transitions are allowed.
 
 ## Failure codes
 
 A non-success run MUST carry exactly one failure code from this closed set:
 
-| Code | When the Orchestrator surfaces it |
-|------|-----------------------------------|
-| `unsupported_cobol` | Parseable but outside the W0/W0.2 supported subset. |
-| `parse_failed` | Parser capability returned a non-success outcome. |
-| `semantic_ir_failed` | IR generation capability failed. |
-| `model_gateway_unavailable` | Model gateway endpoint unreachable or returned 5xx after retries. |
-| `model_policy_denied` | Model invocation rejected by policy (`policyDecision != "policy allow"`). |
-| `agent_timeout` | A productive agent exceeded its allotted time. |
-| `agent_contract_invalid` | A productive agent returned a payload that fails the W0.2 agent I/O contract — missing model-invocation or Java-candidate reference, malformed JSON, oversized output, unapproved artifact reference, invalid role/status, or other schema violation. See [Agent I/O Contracts](agent-io-contracts.md). |
-| `java_generation_failed` | Generator capability returned a non-success outcome. |
-| `java_compile_failed` | Build-test reported `compile_failed` (or unstructured failure). |
-| `java_runtime_failed` | Build-test reported a runtime failure of the generated Java. |
-| `oracle_mismatch` | Generated Java compiled and ran but produced output that does not match the COBOL oracle / Golden Master. |
-| `evidence_incomplete` | Evidence Pack assembled with missing required artifacts. |
-| `cancelled` | Run cancelled by user, policy, or hard repair-loop limit. |
+| Code                        | When the Orchestrator surfaces it                                                                                                                                                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unsupported_cobol`         | Parseable but outside the W0/W0.2 supported subset.                                                                                                                                                                                                                                                     |
+| `parse_failed`              | Parser capability returned a non-success outcome.                                                                                                                                                                                                                                                       |
+| `semantic_ir_failed`        | IR generation capability failed.                                                                                                                                                                                                                                                                        |
+| `model_gateway_unavailable` | Model gateway endpoint unreachable or returned 5xx after retries.                                                                                                                                                                                                                                       |
+| `model_policy_denied`       | Model invocation rejected by policy (`policyDecision != "policy allow"`).                                                                                                                                                                                                                               |
+| `agent_timeout`             | A productive agent exceeded its allotted time.                                                                                                                                                                                                                                                          |
+| `agent_contract_invalid`    | A productive agent returned a payload that fails the W0.2 agent I/O contract — missing model-invocation or Java-candidate reference, malformed JSON, oversized output, unapproved artifact reference, invalid role/status, or other schema violation. See [Agent I/O Contracts](agent-io-contracts.md). |
+| `java_generation_failed`    | Generator capability returned a non-success outcome.                                                                                                                                                                                                                                                    |
+| `java_compile_failed`       | Build-test reported `compile_failed` (or unstructured failure).                                                                                                                                                                                                                                         |
+| `java_runtime_failed`       | Build-test reported a runtime failure of the generated Java.                                                                                                                                                                                                                                            |
+| `oracle_mismatch`           | Generated Java compiled and ran but produced output that does not match the COBOL oracle / Golden Master.                                                                                                                                                                                               |
+| `evidence_incomplete`       | Evidence Pack assembled with missing required artifacts.                                                                                                                                                                                                                                                |
+| `cancelled`                 | Run cancelled by user, policy, or hard repair-loop limit.                                                                                                                                                                                                                                               |
 
 ## Final classifications
 
-| Classification | Meaning |
-|---------------|---------|
-| `success` | Generated Java compiled, ran, and matched the oracle; evidence materialised. |
-| `blocked` | Workflow gate failed (verification, deterministic check). Carries a failure code. |
-| `failed` | An unexpected exception interrupted the workflow. Carries a failure code. |
-| `cancelled` | Caller, policy, or hard limit cancelled the run. Carries `cancelled`. |
-| `incomplete` | Evidence Pack could not be fully materialised. Carries `evidence_incomplete`. |
+| Classification | Meaning                                                                           |
+| -------------- | --------------------------------------------------------------------------------- |
+| `success`      | Generated Java compiled, ran, and matched the oracle; evidence materialised.      |
+| `blocked`      | Workflow gate failed (verification, deterministic check). Carries a failure code. |
+| `failed`       | An unexpected exception interrupted the workflow. Carries a failure code.         |
+| `cancelled`    | Caller, policy, or hard limit cancelled the run. Carries `cancelled`.             |
+| `incomplete`   | Evidence Pack could not be fully materialised. Carries `evidence_incomplete`.     |
 
 Any non-`success` classification **must** carry a `failureCode`; the
 contract refuses to finalise otherwise.
@@ -118,7 +118,7 @@ contract, persists the updated contract to the artifact store, and emits a
 Harness event so consumers do not have to infer AI activation from
 `agentAttemptCount > 0` or Model Gateway state.
 
-The W0.3-3 gate captured the *current* caller-opt-in semantics in a stable,
+The W0.3-3 gate captured the _current_ caller-opt-in semantics in a stable,
 recordable shape. Issue #215 (W0.3-4) extends the closed reason-code set
 with deterministic uncertainty criteria sourced from the Semantic IR and
 the deterministic baseline; the contract shape, outcomes, and event types
@@ -138,6 +138,8 @@ The contract carries one additional field:
     { "uri": "...", "sha256": "...", "kind": "generated-project-manifest" }
   ],
   "repairBudgetSnapshot": { "limit": 2, "used": 0, "remaining": 2 },
+  "assistBudgetSnapshot": { "limit": 1, "used": 1, "remaining": 0 },
+  "modelInvocationBudgetSnapshot": { "limit": 6, "used": 0, "remaining": 6 },
   "rationale": "caller opted into productive Transformation Agent via useTransformationAgent=true"
 }
 ```
@@ -147,11 +149,11 @@ failed before the deterministic baseline).
 
 ### Closed sets
 
-| Field | Values |
-|-------|--------|
-| `outcome` | `assist_required`, `assist_not_required` |
-| `reasonCode` | `semantic_ir_bounded_ambiguity`, `translation_unsupported_repairable`, `baseline_open_assumptions`, `deterministic_candidate_low_confidence`, `caller_explicit_opt_in`, `caller_did_not_opt_in` |
-| `selectedAgentRole` | `transformation_agent`, or omitted when `outcome = assist_not_required` |
+| Field               | Values                                                                                                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `outcome`           | `assist_required`, `assist_not_required`                                                                                                                                                                                   |
+| `reasonCode`        | `semantic_ir_bounded_ambiguity`, `translation_unsupported_repairable`, `baseline_open_assumptions`, `deterministic_candidate_low_confidence`, `caller_explicit_opt_in`, `caller_did_not_opt_in`, `assist_budget_exhausted` |
+| `selectedAgentRole` | `transformation_agent`, or omitted when `outcome = assist_not_required`                                                                                                                                                    |
 
 Consumers MUST drop any value outside these closed sets rather than rendering
 it. The BFF enforces this on `GET /api/v0/runs/{runId}/workflow`.
@@ -167,12 +169,12 @@ records `caller_did_not_opt_in` and surfaces any detected markers on the
 decision `rationale` only — the deterministic baseline remains the final
 candidate.
 
-| Priority | Reason code | Detected when |
-|----------|-------------|---------------|
-| 1 | `semantic_ir_bounded_ambiguity` | `ir.ambiguityMarkers` is a non-empty list — the Semantic IR has a bounded-ambiguity marker. |
-| 2 | `translation_unsupported_repairable` | `generatedProject.unsupportedFeatures` is a non-empty list — the deterministic generator could not lower one or more constructs but the run is otherwise repairable. |
-| 3 | `baseline_open_assumptions` | `generatedProject.openAssumptions` is a non-empty list — the deterministic baseline emitted explicit assumptions. |
-| 4 | `deterministic_candidate_low_confidence` | `generatedProject.lowConfidenceMarkers` is a non-empty list — the baseline annotated regions of its candidate as low-confidence. |
+| Priority | Reason code                              | Detected when                                                                                                                                                        |
+| -------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | `semantic_ir_bounded_ambiguity`          | `ir.ambiguityMarkers` is a non-empty list — the Semantic IR has a bounded-ambiguity marker.                                                                          |
+| 2        | `translation_unsupported_repairable`     | `generatedProject.unsupportedFeatures` is a non-empty list — the deterministic generator could not lower one or more constructs but the run is otherwise repairable. |
+| 3        | `baseline_open_assumptions`              | `generatedProject.openAssumptions` is a non-empty list — the deterministic baseline emitted explicit assumptions.                                                    |
+| 4        | `deterministic_candidate_low_confidence` | `generatedProject.lowConfidenceMarkers` is a non-empty list — the baseline annotated regions of its candidate as low-confidence.                                     |
 
 The Orchestrator never invents an uncertainty marker on behalf of an
 upstream capability: every recorded reason code is backed by a real payload
@@ -235,6 +237,56 @@ When build-test reports failure, the Orchestrator:
 The budget is never used on the success path — a passing first build-test
 keeps `used = 0`.
 
+## Assist and model invocation budgets (W0.3-5 / Issue #216)
+
+Two additional per-run budgets sit alongside the repair budget so the
+contract enforces operationally clear caps on every productive AI activity:
+
+| Budget                        | Field                   | Range     | Default | Env var                                    |
+| ----------------------------- | ----------------------- | --------- | ------- | ------------------------------------------ |
+| Productive-assist activations | `assistBudget`          | `[1, 3]`  | `1`     | `ORCHESTRATOR_ASSIST_BUDGET_MAX`           |
+| Model Gateway invocations     | `modelInvocationBudget` | `[1, 20]` | `6`     | `ORCHESTRATOR_MODEL_INVOCATION_BUDGET_MAX` |
+
+Both follow the same `{ limit, used, remaining }` shape as the existing
+repair budget and are clamped at config-load time so a mis-set environment
+value cannot escape the W0.3 cap.
+
+```json
+"assistBudget":            { "limit": 1, "used": 0, "remaining": 1 },
+"modelInvocationBudget":   { "limit": 6, "used": 0, "remaining": 6 }
+```
+
+### Consumption rules
+
+- **`assistBudget`** is consumed once by the assist-decision gate when it
+  decides `assist_required`. When the budget is exhausted at gate time the
+  gate **hard-degrades** to `assist_not_required` with the dedicated
+  closed-set reason code `assist_budget_exhausted`; the deterministic
+  baseline becomes the final candidate without a hidden continuation.
+- **`modelInvocationBudget`** is consumed _before_ every productive call
+  routed through the Model Gateway — the productive Transformation Agent
+  call and each repair-iteration call. Exhaustion blocks the next call
+  before it reaches the gateway; the run finalises as `blocked`, the
+  repair loop records a `refuse` trajectory entry tagged
+  `model_invocation_budget_exhausted`, and the originating build-test
+  failure code is preserved on `failureCode`.
+
+### Deterministic-only invariant
+
+Neither budget is consumed on the deterministic-only success path. A run
+that does not opt into productive assist completes with both budgets at
+`used = 0`. Deterministic build/test/oracle verification remains the only
+path to `finalClassification = "success"` regardless of budget state.
+
+### Assist-decision snapshot
+
+The `assistDecision` payload (see [Assist-decision gate](#assist-decision-gate-w03--issue-214))
+captures the live budget state at gate time on
+`assistBudgetSnapshot` and `modelInvocationBudgetSnapshot` (alongside the
+pre-existing `repairBudgetSnapshot`). Consumers can audit the budgets the
+orchestrator observed without correlating the live counters with the
+gate's `decidedAt` timestamp.
+
 ## Agent-team extension rule
 
 Later waves may add a larger module-level agent team, including an LLM-based
@@ -271,7 +323,7 @@ persisted `w02-run-contract.json` artifact when one is available.
   "contract": {
     // W02RunContract shape shown below
   },
-  "contractRef": { "uri": "…", "sha256": "…", "byteSize": 2048 }
+  "contractRef": { "uri": "…", "sha256": "…", "byteSize": 2048 },
 }
 ```
 
@@ -288,27 +340,46 @@ field have this shape:
 
   "currentState": "final_classification",
   "stateHistory": [
-    { "state": "run_accepted",       "at": "2026-05-16T14:30:00Z", "message": "run accepted" },
-    { "state": "source_normalized",  "at": "2026-05-16T14:30:00Z", "message": "source persisted to artifact store" },
-    { "state": "cobol_parse_attempted", "at": "2026-05-16T14:30:01Z", "message": "cobol parser returned ok" }
+    {
+      "state": "run_accepted",
+      "at": "2026-05-16T14:30:00Z",
+      "message": "run accepted",
+    },
+    {
+      "state": "source_normalized",
+      "at": "2026-05-16T14:30:00Z",
+      "message": "source persisted to artifact store",
+    },
+    {
+      "state": "cobol_parse_attempted",
+      "at": "2026-05-16T14:30:01Z",
+      "message": "cobol parser returned ok",
+    },
     // …
   ],
 
   "activeStep": null,
   "agentAttemptCount": 0,
   "repairBudget": { "limit": 2, "used": 0, "remaining": 2 },
+  "assistBudget": { "limit": 1, "used": 0, "remaining": 1 },
+  "modelInvocationBudget": { "limit": 6, "used": 0, "remaining": 6 },
   "repairAttempts": [],
 
-  "generatedJavaRef":   { "uri": "…", "sha256": "…", "byteSize": 1024, "kind": "generated-project-manifest" },
-  "buildTestResultRef": { "uri": "…", "sha256": "…", "byteSize":  512 },
-  "evidencePackRef":    { "uri": "…", "sha256": "…", "byteSize": 4096 },
+  "generatedJavaRef": {
+    "uri": "…",
+    "sha256": "…",
+    "byteSize": 1024,
+    "kind": "generated-project-manifest",
+  },
+  "buildTestResultRef": { "uri": "…", "sha256": "…", "byteSize": 512 },
+  "evidencePackRef": { "uri": "…", "sha256": "…", "byteSize": 4096 },
 
   "finalClassification": "success",
-  "failureCode":         null,
-  "failureMessage":      null,
+  "failureCode": null,
+  "failureMessage": null,
 
   "createdAt": "2026-05-16T14:30:00Z",
-  "updatedAt": "2026-05-16T14:30:42Z"
+  "updatedAt": "2026-05-16T14:30:42Z",
 }
 ```
 
@@ -336,15 +407,15 @@ history only.
 
 ## Harness boundary
 
-* **Capability discovery, Tool Registry, MCP, Model Gateway, policy hooks**
+- **Capability discovery, Tool Registry, MCP, Model Gateway, policy hooks**
   — consumed by the Orchestrator through the existing
   [`HarnessGateway`][harness] client.
-* **Event Ledger** — every state change is posted as an
+- **Event Ledger** — every state change is posted as an
   `orchestrator.workflow.state.<state>` event. The Harness writes the event
   to its ledger.
-* **Model Invocation Ledger** — recorded by the existing
+- **Model Invocation Ledger** — recorded by the existing
   `model-invocation-ledger.json` artifact (unchanged in this issue).
-* **Agent Trajectory Ledger** — fetched via
+- **Agent Trajectory Ledger** — fetched via
   `HarnessGateway.get_trajectory_ledger()` and embedded into the Evidence
   Pack (unchanged in this issue).
 
