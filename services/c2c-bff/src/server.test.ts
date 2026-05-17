@@ -2261,7 +2261,7 @@ test('progress route proxies orchestrator step timeline for live runs', async ()
   }
 });
 
-test('progress route surfaces failed step diagnostic and never reports success', async () => {
+test('progress route sanitizes failed step diagnostics and never reports success', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator({
@@ -2289,6 +2289,16 @@ test('progress route surfaces failed step diagnostic and never reports success',
           },
           {
             stepId: 5,
+            name: 'repair-java',
+            capabilityId: 'java.repair',
+            service: 'orch',
+            actor: 'repair',
+            status: 'failed',
+            diagnostic:
+              'repair rejected payload {"sourceText":"IDENTIFICATION DIVISION.","expectedOutput":"ok","inputRef":{"uri":"s3://internal/artifact"}}',
+          },
+          {
+            stepId: 6,
             name: 'failed',
             capabilityId: 'orch',
             service: 'orch',
@@ -2326,9 +2336,19 @@ test('progress route surfaces failed step diagnostic and never reports success',
     assert.equal(failedStep?.status, 'failed');
     assert.equal(
       failedStep?.diagnostic,
+      'generator backend unavailable at [redacted]',
+    );
+    const payloadStep = body.steps.find((entry) => entry.name === 'repair-java');
+    assert.equal(
+      payloadStep?.diagnostic,
       'Step failed. See workflow failure details for the classified reason.',
     );
-    assert.ok(!JSON.stringify(body.steps).includes('http://generator.internal'));
+    const workflowFailureStep = body.steps.find((entry) => entry.name === 'failed');
+    assert.equal(workflowFailureStep?.diagnostic, 'W0 migration workflow failed: step generate-java failed');
+    const serialized = JSON.stringify(body.steps);
+    assert.ok(!serialized.includes('http://generator.internal'));
+    assert.ok(!serialized.includes('sourceText'));
+    assert.ok(!serialized.includes('s3://internal'));
   } finally {
     await server.close();
   }

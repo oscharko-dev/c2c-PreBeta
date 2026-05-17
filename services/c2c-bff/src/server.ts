@@ -1069,6 +1069,15 @@ const PIPELINE_STEP_STATUSES: ReadonlyArray<PipelineStepStatus> = [
   'skipped',
 ];
 
+const FAILED_STEP_DIAGNOSTIC_FALLBACK = 'Step failed. See workflow failure details for the classified reason.';
+const SKIPPED_STEP_DIAGNOSTIC_FALLBACK = 'Step skipped by workflow policy.';
+const UNSAFE_PROGRESS_DIAGNOSTIC_PATTERNS: ReadonlyArray<RegExp> = [
+  /["']?(sourceText|expectedOutput|oracleInput|baselineFiles|previousJavaFiles|buildTestPayload|inputRef|outputRef)["']?\s*:/i,
+  /\bIDENTIFICATION\s+DIVISION\b/i,
+  /\bPROCEDURE\s+DIVISION\b/i,
+  /\bpublic\s+class\b/i,
+];
+
 function asPipelineStepStatus(value: unknown): PipelineStepStatus {
   if (typeof value === 'string') {
     for (const candidate of PIPELINE_STEP_STATUSES) {
@@ -1076,6 +1085,18 @@ function asPipelineStepStatus(value: unknown): PipelineStepStatus {
     }
   }
   return 'pending';
+}
+
+function sanitizeProgressDiagnostic(diagnostic: string, status: PipelineStepStatus): string {
+  if (status === 'skipped') return SKIPPED_STEP_DIAGNOSTIC_FALLBACK;
+  const fallback = status === 'failed' ? FAILED_STEP_DIAGNOSTIC_FALLBACK : 'Step diagnostic unavailable.';
+  const sanitized = sanitizeUpstreamMessage(diagnostic, fallback);
+  if (status !== 'failed') return sanitized;
+  if (sanitized === fallback) return fallback;
+  if (UNSAFE_PROGRESS_DIAGNOSTIC_PATTERNS.some((pattern) => pattern.test(sanitized))) {
+    return fallback;
+  }
+  return sanitized;
 }
 
 function normalizePipelineStep(raw: unknown): PipelineStep | null {
@@ -1100,13 +1121,7 @@ function normalizePipelineStep(raw: unknown): PipelineStep | null {
   if (finishedAt) step.finishedAt = finishedAt;
   const diagnostic = asString(record.diagnostic);
   if (diagnostic) {
-    if (step.status === 'failed') {
-      step.diagnostic = 'Step failed. See workflow failure details for the classified reason.';
-    } else if (step.status === 'skipped') {
-      step.diagnostic = 'Step skipped by workflow policy.';
-    } else {
-      step.diagnostic = sanitizeUpstreamMessage(diagnostic, 'Step diagnostic unavailable.');
-    }
+    step.diagnostic = sanitizeProgressDiagnostic(diagnostic, step.status);
   }
   if (inputRef) step.inputRef = inputRef;
   if (outputRef) step.outputRef = outputRef;

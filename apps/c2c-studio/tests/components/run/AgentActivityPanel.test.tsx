@@ -141,7 +141,7 @@ describe('AgentActivityPanel', () => {
     });
     render(<AgentActivityPanel emptyState={{ title: 'Empty', message: 'Empty' }} />);
     const list = screen.getByTestId('agent-activity-repair-attempts');
-    expect(screen.getByTestId('agent-activity-workflow-status').textContent).toContain('1 invocation observed');
+    expect(screen.getByTestId('agent-activity-workflow-status').textContent).toContain('1 invocation record observed');
     expect(within(list).getByText('Repair attempts (2)')).toBeDefined();
     expect(within(list).getByText('Attempt #1')).toBeDefined();
     expect(within(list).getByText('Proposed candidate')).toBeDefined();

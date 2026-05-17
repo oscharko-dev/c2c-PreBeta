@@ -1247,7 +1247,7 @@ test.describe('c2c Studio browser acceptance', () => {
     const agentPanel = page.getByTestId('agent-activity-panel');
     await expect(agentPanel).toBeVisible();
     await expect(agentPanel.getByTestId('agent-activity-workflow-status')).toContainText('blocked_policy');
-    await expect(agentPanel.getByTestId('agent-activity-workflow-status')).toContainText('1 invocation observed');
+    await expect(agentPanel.getByTestId('agent-activity-workflow-status')).toContainText('1 invocation record observed');
     await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('Final Java');
     await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('not published');
     await expect(agentPanel.getByText('Verification & Repair Agent')).toBeVisible();

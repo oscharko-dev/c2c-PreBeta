@@ -110,7 +110,7 @@ function WorkflowStatusRow({
           Model metadata:{' '}
           <span className="font-mono text-text">
             {modelInvocationCount > 0
-              ? `${modelInvocationCount} invocation ${modelInvocationCount === 1 ? 'observed' : 'records observed'}`
+              ? `${modelInvocationCount} invocation record${modelInvocationCount === 1 ? '' : 's'} observed`
               : 'no invocation record yet'}
           </span>
         </span>
