@@ -1011,3 +1011,69 @@ class AssistDecisionTests(unittest.TestCase):
         self.assertIsNotNone(payload["assistDecision"])
         self.assertEqual(payload["assistDecision"]["outcome"], "assist_required")
 
+
+class DeterministicUncertaintyReasonCodesTests(unittest.TestCase):
+    """W0.3-4 (#215): deterministic uncertainty reason codes."""
+
+    def test_closed_set_includes_uncertainty_codes_in_priority_order(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES,
+            ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+            ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+            ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+            ASSIST_REASON_CODES,
+            ASSIST_REASON_DETERMINISTIC_CANDIDATE_LOW_CONFIDENCE,
+            ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY,
+            ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE,
+        )
+
+        # The priority order is a contract: changes are a v1 bump.
+        self.assertEqual(
+            ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES,
+            (
+                ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY,
+                ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE,
+                ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+                ASSIST_REASON_DETERMINISTIC_CANDIDATE_LOW_CONFIDENCE,
+            ),
+        )
+        # All deterministic codes are members of the wider closed set, and
+        # the caller-driven codes remain the documented fallbacks.
+        for code in ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES:
+            self.assertIn(code, ASSIST_REASON_CODES)
+        self.assertIn(ASSIST_REASON_CALLER_EXPLICIT_OPT_IN, ASSIST_REASON_CODES)
+        self.assertIn(ASSIST_REASON_CALLER_DID_NOT_OPT_IN, ASSIST_REASON_CODES)
+
+    def test_assist_decision_accepts_each_uncertainty_code(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_AGENT_ROLE_TRANSFORMATION,
+            ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES,
+            ASSIST_OUTCOME_REQUIRED,
+            AssistDecision,
+        )
+
+        for code in ASSIST_DETERMINISTIC_UNCERTAINTY_REASON_CODES:
+            decision = AssistDecision(
+                outcome=ASSIST_OUTCOME_REQUIRED,
+                reason_code=code,
+                decided_at="2026-05-17T00:00:00Z",
+                selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
+                rationale=f"uncertainty marker: {code}",
+            )
+            self.assertEqual(decision.to_dict()["reasonCode"], code)
+
+    def test_unknown_uncertainty_marker_string_rejected(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_AGENT_ROLE_TRANSFORMATION,
+            ASSIST_OUTCOME_REQUIRED,
+            AssistDecision,
+        )
+
+        with self.assertRaises(ValueError):
+            AssistDecision(
+                outcome=ASSIST_OUTCOME_REQUIRED,
+                reason_code="generator_felt_unsure",
+                decided_at="2026-05-17T00:00:00Z",
+                selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
+            )
+

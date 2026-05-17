@@ -1040,7 +1040,16 @@ components:
           enum: [assist_required, assist_not_required]
         reasonCode:
           type: string
-          enum: [caller_explicit_opt_in, caller_did_not_opt_in]
+          # Deterministic uncertainty reason codes (Issue #215) followed by
+          # caller-driven baseline codes (Issue #214). Consumers MUST drop
+          # any value outside this set rather than rendering it.
+          enum:
+            - semantic_ir_bounded_ambiguity
+            - translation_unsupported_repairable
+            - baseline_open_assumptions
+            - deterministic_candidate_low_confidence
+            - caller_explicit_opt_in
+            - caller_did_not_opt_in
         decidedAt:
           type: string
           description: ISO-8601 UTC timestamp.
