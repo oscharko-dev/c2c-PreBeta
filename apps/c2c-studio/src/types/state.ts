@@ -133,17 +133,6 @@ export function deriveProductState(runState: TransformationRunState): StateConte
   if (runState.phase === 'unavailable') {
     return { state: 'backend-unavailable', message: runState.error ?? 'Backend unavailable. Try again shortly.' };
   }
-  if (hasUnavailableProductMode(runState)) {
-    return {
-      state: 'upstream-unavailable',
-      message: runState.summary?.message ?? runState.generated?.note ?? runState.evidence?.note,
-    };
-  }
-
-  // Issue #173: terminal verdicts driven by the W0.2 finalClassification.
-  // The orchestrator-side classification is authoritative — if BFF says
-  // "blocked" / "cancelled" we render that verdict even when artifact
-  // views look complete.
   const workflow = runState.workflow;
   const finalClassification =
     workflow?.finalClassification ?? runState.summary?.finalClassification ?? null;
@@ -155,16 +144,44 @@ export function deriveProductState(runState: TransformationRunState): StateConte
     return { state: 'cancelled', message: failureMessage ?? 'Run was cancelled.' };
   }
 
-  // Issue #173: BFF-classified blocked verdict (e.g. model_policy_denied,
-  // model_gateway_unavailable) is authoritative even when generated/
-  // build-test/evidence views look incomplete — they are downstream of
-  // the block, not the cause. We surface the closed-set failure code so
-  // the StatusBar chip and ErrorNotice can render the actionable label.
-  if (finalClassification === 'blocked' && failureCode) {
+  if (
+    (finalClassification === 'blocked' ||
+      finalClassification === 'failed' ||
+      finalClassification === 'incomplete') &&
+    failureCode
+  ) {
     return {
       state: failureCodeToState(failureCode),
       message: failureMessage ?? runState.summary?.message ?? undefined,
       failureCode,
+    };
+  }
+
+  if (finalClassification === 'incomplete') {
+    return {
+      state: 'evidence-incomplete',
+      message: failureMessage ?? runState.summary?.message ?? 'Evidence pack is incomplete.',
+      failureCode: failureCode ?? undefined,
+    };
+  }
+
+  if (finalClassification === 'blocked' || finalClassification === 'failed') {
+    return {
+      state: finalClassification,
+      message: failureMessage ?? runState.error ?? runState.summary?.message ?? undefined,
+      failureCode: failureCode ?? undefined,
+    };
+  }
+
+  if (
+    hasUnavailableProductMode(runState) &&
+    runState.phase !== 'completed' &&
+    runState.phase !== 'failed' &&
+    runState.phase !== 'incomplete'
+  ) {
+    return {
+      state: 'upstream-unavailable',
+      message: runState.summary?.message ?? runState.generated?.note ?? runState.evidence?.note,
     };
   }
 
@@ -246,18 +263,6 @@ export function deriveProductState(runState: TransformationRunState): StateConte
   const mismatches = collectHashMismatches(runState);
   if (mismatches.length > 0) {
     return { state: 'hash-mismatch', mismatchedHashes: mismatches };
-  }
-
-  // Issue #173: BFF-classified failures take precedence over the generic
-  // "failed" phase, and the code becomes the user-facing failure code.
-  if (finalClassification === 'failed' || finalClassification === 'blocked') {
-    const code = failureCode ?? undefined;
-    const derived = code ? failureCodeToState(code) : finalClassification === 'blocked' ? 'blocked' : 'failed';
-    return {
-      state: derived,
-      message: failureMessage ?? runState.error ?? runState.summary?.message ?? undefined,
-      failureCode: code,
-    };
   }
 
   if (runState.phase === 'failed' || runState.summary?.status === 'failed') {

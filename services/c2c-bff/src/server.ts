@@ -611,6 +611,80 @@ function normalizeModelGatewayHealthView(
   };
 }
 
+function modelGatewayViewHasCallableTransformationModel(
+  payload: Record<string, unknown>,
+): boolean {
+  const activeModelCount = asNumber(payload.activeModelCount);
+  if (activeModelCount !== undefined && activeModelCount > 0) {
+    return true;
+  }
+
+  const roles = Array.isArray(payload.roleAvailability)
+    ? payload.roleAvailability
+    : [];
+  return roles.some((entry) => {
+    const role = asRecord(entry) ?? {};
+    return (
+      asString(role.role) === "transformation" &&
+      asString(role.status) === "ok" &&
+      asStringArray(role.availableModels).length > 0
+    );
+  });
+}
+
+async function verifyTransformationModelGatewayAvailable(
+  modelGateway: ModelGatewayClient,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (!modelGateway.enabled) {
+    return {
+      ok: false,
+      message: "Model Gateway is required while AI Assist is enabled.",
+    };
+  }
+
+  try {
+    const health = await modelGateway.getHealth();
+    if (!health || health.status < 200 || health.status >= 300) {
+      return {
+        ok: false,
+        message: "Model Gateway is unavailable while AI Assist is enabled.",
+      };
+    }
+
+    let capabilitiesBody: unknown;
+    try {
+      const capabilities = await modelGateway.getCapabilities();
+      if (
+        capabilities &&
+        capabilities.status >= 200 &&
+        capabilities.status < 300
+      ) {
+        capabilitiesBody = capabilities.body;
+      }
+    } catch {
+      capabilitiesBody = undefined;
+    }
+
+    const view = normalizeModelGatewayHealthView(
+      health.body,
+      capabilitiesBody,
+    );
+    if (!modelGatewayViewHasCallableTransformationModel(view)) {
+      return {
+        ok: false,
+        message: "No transformation model is currently available.",
+      };
+    }
+
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      message: "Model Gateway is unavailable while AI Assist is enabled.",
+    };
+  }
+}
+
 function normalizeModelGatewayModelsView(
   payload: unknown,
 ): Record<string, unknown> {
@@ -2341,6 +2415,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const expectedOutputRaw = (body as Record<string, unknown>)
           .expectedOutput;
         const oracleInputRaw = (body as Record<string, unknown>).oracleInput;
+        const useTransformationAgentRaw = (body as Record<string, unknown>)
+          .useTransformationAgent;
         if (
           typeof sourceTextRaw !== "string" ||
           sourceTextRaw.trim().length === 0
@@ -2412,6 +2488,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "oracleInput must be a string when provided");
           return;
         }
+        if (
+          useTransformationAgentRaw !== undefined &&
+          typeof useTransformationAgentRaw !== "boolean"
+        ) {
+          badRequest(
+            res,
+            "useTransformationAgent must be a boolean when provided",
+          );
+          return;
+        }
         if (!orchestrator.enabled) {
           jsonResponse(res, 503, {
             error: "orchestrator URL is required for /api/v0/transform",
@@ -2432,6 +2518,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           typeof expectedOutputRaw === "string" ? expectedOutputRaw : undefined;
         const oracleInput =
           typeof oracleInputRaw === "string" ? oracleInputRaw : undefined;
+        const useTransformationAgent =
+          typeof useTransformationAgentRaw === "boolean"
+            ? useTransformationAgentRaw
+            : true;
 
         const referenceMatch = samples.get(programId);
         if (referenceMatch && !referenceMatch.supportedInProductMode) {
@@ -2440,15 +2530,19 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
+        if (useTransformationAgent) {
+          const gatewayAvailability =
+            await verifyTransformationModelGatewayAvailable(modelGateway);
+          if (!gatewayAvailability.ok) {
+            jsonResponse(res, 503, {
+              error: gatewayAvailability.message,
+              failureCode: "model_gateway_unavailable",
+            });
+            return;
+          }
+        }
 
         try {
-          // W0.3 deterministic-first hardening (#213): the productive
-          // Transformation Agent must not be activated implicitly by
-          // Model Gateway availability. The explicit assist-decision
-          // gate that authorizes agent participation is owned by a
-          // separate W0.3 issue (#214); until that gate lands, every
-          // product run starts deterministically regardless of gateway
-          // state.
           const transformInput: Parameters<
             typeof orchestrator.startTransformRun
           >[0] = {
@@ -2460,6 +2554,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             targetLanguage,
             expectedOutput,
             oracleInput,
+            useTransformationAgent,
           };
           const upstream = await orchestrator.startTransformRun(transformInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {

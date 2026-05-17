@@ -158,8 +158,8 @@ jobs:
         working-directory: apps/c2c-studio
         run: npm run test:e2e:ci
 
-      - name: Run W0.2 release gate (deterministic, no Foundry)
-        if: hashFiles('scripts/w0-2-release-gate.sh') != ''
+      - name: Run W0.3 release gate (deterministic-first, no Foundry)
+        if: hashFiles('scripts/w0-3-release-gate.sh') != ''
         env:
           # No C2C_LOCAL_ENV_FILE: in CI we want the launcher to fall back
           # to its absolute-path defaults rather than source .env.example,
@@ -168,4 +168,4 @@ jobs:
           # while keeping the -o path relative, which puts the binary in
           # the wrong place).
           C2C_LOCAL_MODEL_GATEWAY_ENABLED: 'false'
-        run: ./scripts/w0-2-release-gate.sh
+        run: ./scripts/w0-3-release-gate.sh

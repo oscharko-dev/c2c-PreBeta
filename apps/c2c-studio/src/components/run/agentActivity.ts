@@ -118,8 +118,8 @@ export const ASSIST_DECISION_REASON_LABELS: Record<AssistDecisionReasonCode, str
   translation_unsupported_repairable: 'Translation unsupported but repairable',
   baseline_open_assumptions: 'Baseline left open assumptions',
   deterministic_candidate_low_confidence: 'Deterministic candidate low confidence',
-  caller_explicit_opt_in: 'Caller explicitly opted in',
-  caller_did_not_opt_in: 'Caller did not opt in',
+  caller_explicit_opt_in: 'AI assist enabled',
+  caller_did_not_opt_in: 'AI assist disabled',
   assist_budget_exhausted: 'Assist budget exhausted',
 };
 
@@ -133,9 +133,9 @@ export const ASSIST_DECISION_REASON_DESCRIPTIONS: Record<AssistDecisionReasonCod
   deterministic_candidate_low_confidence:
     'A deterministic candidate exists, but uncertainty markers were strong enough to justify an assist attempt.',
   caller_explicit_opt_in:
-    'The caller explicitly opted in to productive AI assist for this run.',
+    'Productive AI assist was enabled for this run.',
   caller_did_not_opt_in:
-    'The caller did not opt in to productive AI assist, so the run remained on the deterministic baseline.',
+    'The caller explicitly disabled productive AI assist, so the run remained on the deterministic baseline.',
   assist_budget_exhausted:
     'The caller opted in but the per-run assist budget had no units left, so the deterministic baseline is the final candidate.',
 };

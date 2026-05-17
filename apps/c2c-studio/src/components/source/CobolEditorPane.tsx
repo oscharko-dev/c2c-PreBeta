@@ -20,6 +20,8 @@ export function CobolEditorPane() {
     setExpectedOutput,
     oracleInput,
     setOracleInput,
+    allowAiAssist,
+    setAllowAiAssist,
     isDirty,
     sourceName,
     transformError,
@@ -30,8 +32,12 @@ export function CobolEditorPane() {
   const [sourceHash, setSourceHash] = useState('00000000');
 
   const apiState = useC2cApi();
-  const { productState } = useTransformationRun();
+  const { productState, state: runState } = useTransformationRun();
   const readiness = getWorkbenchReadiness(apiState);
+  const modelGatewayReady = runState.modelGatewayHealth?.status === 'ok';
+  const modelGatewayMessage =
+    runState.modelGatewayHealth?.error ||
+    'Model Gateway unavailable. AI-assisted transformation cannot start.';
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -152,7 +158,7 @@ export function CobolEditorPane() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 border-b border-line bg-bg-1 px-4 py-3 md:grid-cols-2">
+      <div className="grid gap-3 border-b border-line bg-bg-1 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_18rem]">
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">
             Optional Expected Output
@@ -178,6 +184,35 @@ export function CobolEditorPane() {
             placeholder="Stdin passed to the COBOL oracle; leave empty for no input."
             className="h-20 resize-none overflow-auto rounded border border-line-2 bg-bg-0 p-2 font-mono text-xs text-text outline-none placeholder:text-text-faint focus:border-accent"
           />
+        </label>
+        <label className="flex min-w-0 flex-col justify-between gap-3 rounded border border-line-2 bg-bg-0 p-3 text-xs text-text">
+          <span>
+            <span className="block text-[10px] font-semibold uppercase tracking-wider text-text-faint">
+              AI Assist
+            </span>
+            <span className="mt-1 block text-text-dim">
+              Default on. The orchestrator still runs the deterministic
+              baseline first and may activate the Transformation Agent only
+              after the assist-decision gate.
+            </span>
+          </span>
+          <span className="flex items-center justify-between gap-3">
+            <span className="font-medium">
+              Allow controlled assist
+            </span>
+            <input
+              type="checkbox"
+              checked={allowAiAssist}
+              onChange={(event) => setAllowAiAssist(event.currentTarget.checked)}
+              aria-label="Allow AI assist after deterministic baseline"
+              className="h-4 w-4 rounded border-line-2 bg-bg-1 text-accent focus:ring-accent"
+            />
+          </span>
+          {allowAiAssist && runState.modelGatewayHealth && !modelGatewayReady ? (
+            <span className="rounded border border-error/30 bg-error/10 p-2 text-error">
+              {modelGatewayMessage} Disable AI Assist to run deterministic-only.
+            </span>
+          ) : null}
         </label>
       </div>
 

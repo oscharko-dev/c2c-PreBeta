@@ -798,6 +798,9 @@ components:
           default: java
         expectedOutput: { type: string }
         oracleInput: { type: string }
+        useTransformationAgent:
+          type: boolean
+          default: true
         options:
           type: object
           additionalProperties: true

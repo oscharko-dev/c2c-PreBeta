@@ -11,6 +11,7 @@ export interface SourceWorkspaceState {
   sourceName: string | null;
   expectedOutput: string;
   oracleInput: string;
+  allowAiAssist: boolean;
   transformError: string | null;
   isTransforming: boolean;
   canSubmitTransform: boolean;
@@ -18,6 +19,7 @@ export interface SourceWorkspaceState {
   setSourceFile: (text: string, sourceName: string) => void;
   setExpectedOutput: (text: string) => void;
   setOracleInput: (text: string) => void;
+  setAllowAiAssist: (enabled: boolean) => void;
   clearWorkspace: () => void;
   submitTransform: () => Promise<ApiResult<TransformResponse>>;
 }
@@ -30,10 +32,13 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [expectedOutput, setExpectedOutputInternal] = useState('');
   const [oracleInput, setOracleInputInternal] = useState('');
+  const [allowAiAssist, setAllowAiAssistInternal] = useState(true);
   const [transformError, setTransformError] = useState<string | null>(null);
   
   const { state: runState, startTransform } = useTransformationRun();
   const isTransforming = runState.phase === 'starting' || runState.phase === 'running';
+  const modelGatewayUnavailable =
+    allowAiAssist && runState.modelGatewayHealth?.status === 'unavailable';
 
   const setSourceText = (text: string) => {
     setSourceTextInternal(text);
@@ -63,16 +68,23 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setTransformError(null);
   };
 
+  const setAllowAiAssist = (enabled: boolean) => {
+    setAllowAiAssistInternal(enabled);
+    setTransformError(null);
+  };
+
   const clearWorkspace = () => {
     setSourceTextInternal('');
     setSourceName(null);
     setExpectedOutputInternal('');
     setOracleInputInternal('');
+    setAllowAiAssistInternal(true);
     setIsDirty(false);
     setTransformError(null);
   };
 
-  const canSubmitTransform = sourceText.trim().length > 0 && !isTransforming;
+  const canSubmitTransform =
+    sourceText.trim().length > 0 && !isTransforming && !modelGatewayUnavailable;
 
   const submitTransform = async (): Promise<ApiResult<TransformResponse>> => {
     const trimmed = sourceText.trim();
@@ -88,16 +100,26 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       return result;
     }
 
+    if (modelGatewayUnavailable) {
+      const result = { ok: false, message: 'AI Assist is enabled, but the Model Gateway is unavailable. Disable AI Assist to run deterministic-only.' } as const;
+      setTransformError(result.message);
+      return result;
+    }
+
     setTransformError(null);
 
-    const result = await startTransform({
+    const request = {
       sourceText,
       programId: undefined,
       sourceName: sourceName || DEFAULT_SOURCE_NAME,
       targetLanguage: 'java',
       expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
       oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
-    });
+    } as const;
+
+    const result = await startTransform(
+      { ...request, useTransformationAgent: allowAiAssist }
+    );
 
     if (!result.ok) {
       setTransformError(result.status === 503 ? 'Backend unavailable. Try again shortly.' : result.message);
@@ -114,6 +136,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         sourceName,
         expectedOutput,
         oracleInput,
+        allowAiAssist,
         transformError,
         isTransforming,
         canSubmitTransform,
@@ -121,6 +144,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         setSourceFile,
         setExpectedOutput,
         setOracleInput,
+        setAllowAiAssist,
         clearWorkspace,
         submitTransform,
       }}

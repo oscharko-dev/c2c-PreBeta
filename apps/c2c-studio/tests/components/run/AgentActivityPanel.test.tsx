@@ -337,7 +337,7 @@ describe("AgentActivityPanel", () => {
     ).toContain("Deterministic-only run");
     expect(
       screen.getByTestId("agent-activity-assist-reason").textContent,
-    ).toBe("Caller did not opt in");
+    ).toBe("AI assist disabled");
     expect(
       screen.getByTestId("agent-activity-assist-decided-at").textContent,
     ).toBe("2026-05-17T12:00:00Z");

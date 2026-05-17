@@ -102,7 +102,9 @@ for f in \
   schemas/semantic-ir-v0.json \
   schemas/build-test-result-v0.json \
   schemas/model-policy-skipped-v0.json \
-  schemas/evidence-pack-manifest-v0.json
+  schemas/evidence-pack-manifest-v0.json \
+  scripts/w0-2-release-gate.sh \
+  scripts/w0-3-release-gate.sh
  do
   if [ ! -f "$f" ]; then
     echo "Missing required file: $f" >&2

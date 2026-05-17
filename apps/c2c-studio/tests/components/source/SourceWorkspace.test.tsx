@@ -139,6 +139,7 @@ describe('COBOL source input', () => {
         targetLanguage: 'java',
         expectedOutput: undefined,
         oracleInput: undefined,
+        useTransformationAgent: true,
       });
     });
   });
@@ -168,6 +169,34 @@ describe('COBOL source input', () => {
         targetLanguage: 'java',
         expectedOutput: 'DONE\n',
         oracleInput: 'stdin line\n',
+        useTransformationAgent: true,
+      });
+    });
+  });
+
+  it('keeps AI assist enabled by default and lets the user explicitly disable it', async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r-assist', programId: 'SRC-1', status: 'starting' } as unknown as TransformResponse });
+
+    renderSourceWorkbench(<CobolEditorPane />);
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    const assistToggle = screen.getByRole('checkbox', { name: /allow ai assist after deterministic baseline/i });
+    expect(assistToggle).toBeChecked();
+    fireEvent.change(screen.getByRole('textbox', { name: /COBOL source editor/i }), {
+      target: { value: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN05.\n' },
+    });
+    fireEvent.click(assistToggle);
+    fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
+
+    await waitFor(() => {
+      expect(apiClient.transform).toHaveBeenCalledWith({
+        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN05.\n',
+        programId: undefined,
+        sourceName: 'pasted-source.cbl',
+        targetLanguage: 'java',
+        expectedOutput: undefined,
+        oracleInput: undefined,
+        useTransformationAgent: false,
       });
     });
   });
@@ -209,6 +238,7 @@ describe('COBOL source input', () => {
         targetLanguage: 'java',
         expectedOutput: undefined,
         oracleInput: undefined,
+        useTransformationAgent: true,
       });
     });
   });
@@ -219,6 +249,26 @@ describe('COBOL source input', () => {
     expect(screen.queryByText('Start Transformation')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Start Typing'));
     expect(screen.getByRole('button', { name: /Start Transformation/i })).toBeDisabled();
+  });
+
+  it('blocks default AI-assisted submission when the Model Gateway is unavailable until AI assist is disabled', async () => {
+    vi.mocked(apiClient.getModelGatewayHealth).mockResolvedValue(okResult<ModelGatewayHealth>({
+      status: 'unavailable',
+      error: 'No model is currently available',
+    }));
+
+    renderSourceWorkbench(<CobolEditorPane />);
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    fireEvent.change(screen.getByRole('textbox', { name: /COBOL source editor/i }), {
+      target: { value: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN06.\n' },
+    });
+
+    expect(await screen.findByText(/No model is currently available/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start transformation/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /allow ai assist after deterministic baseline/i }));
+    expect(screen.getByRole('button', { name: /start transformation/i })).not.toBeDisabled();
   });
 
   it('keeps large source buffers accessible without rendering every gutter row at once', async () => {

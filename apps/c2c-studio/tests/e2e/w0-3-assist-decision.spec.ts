@@ -67,6 +67,16 @@ async function fillCobol(page: Page, source: string) {
   await editor.fill(source);
 }
 
+async function setAiAssist(page: Page, enabled: boolean) {
+  const toggle = page.getByRole("checkbox", {
+    name: /allow ai assist after deterministic baseline/i,
+  });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.isChecked()) !== enabled) {
+    await toggle.click();
+  }
+}
+
 function runLinks(runId: string) {
   return {
     self: `/api/v0/runs/${runId}`,
@@ -97,6 +107,63 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
     "}",
   ].join("\n");
   const entryFilePath = "src/main/java/W03Demo.java";
+  const modelGatewayAvailable =
+    fixture.assistDecision.outcome === "assist_required";
+
+  await page.route("**/api/v0/model-gateway/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: MOCK_CORS_HEADERS,
+      body: JSON.stringify(
+        modelGatewayAvailable
+          ? {
+              status: "ok",
+              providerMode: "w0.3-test",
+              activeModelCount: 1,
+              dataPolicy: "model-gateway",
+              ledgerEnabled: true,
+              eventEmission: true,
+              policyId: "w0.3-test-policy",
+              roleAvailability: [
+                {
+                  role: "transformation",
+                  status: "ok",
+                  policyId: "w0.3-test-policy",
+                  availableModels: ["w0.3-test-model"],
+                  configuredModels: ["w0.3-test-model"],
+                  reason: "",
+                },
+              ],
+            }
+          : {
+              status: "unavailable",
+              error: "Model Gateway unavailable in deterministic W0 mode",
+            },
+      ),
+    });
+  });
+
+  await page.route("**/api/v0/model-gateway/models", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: MOCK_CORS_HEADERS,
+      body: JSON.stringify(
+        modelGatewayAvailable
+          ? {
+              models: [
+                {
+                  id: "w0.3-test-model",
+                  name: "W0.3 Test Model",
+                  provider: "test",
+                },
+              ],
+            }
+          : { models: [] },
+      ),
+    });
+  });
 
   await page.route("**/api/v0/transform", async (route) => {
     if (route.request().method() === "OPTIONS") {
@@ -454,6 +521,8 @@ test.describe("W0.3-7 causal assist-decision browser acceptance", () => {
 
     await expectReadyWorkbench(page);
     await fillCobol(page, fixture.run.cobolSource);
+    await setAiAssist(page, false);
+    await expect(topBarStartButton(page)).toBeEnabled();
     await topBarStartButton(page).click();
 
     await page.getByRole("tab", { name: "Agent" }).click();
@@ -472,7 +541,7 @@ test.describe("W0.3-7 causal assist-decision browser acceptance", () => {
     ).toContainText("Deterministic-only run");
     await expect(
       agentPanel.getByTestId("agent-activity-assist-reason"),
-    ).toContainText("Caller did not opt in");
+    ).toContainText("AI assist disabled");
     // No agent-role chip when assist was not required.
     await expect(
       agentPanel.getByTestId("agent-activity-assist-agent-role"),
@@ -512,6 +581,7 @@ test.describe("W0.3-7 causal assist-decision browser acceptance", () => {
 
     await expectReadyWorkbench(page);
     await fillCobol(page, fixture.run.cobolSource);
+    await expect(topBarStartButton(page)).toBeEnabled();
     await topBarStartButton(page).click();
 
     await page.getByRole("tab", { name: "Agent" }).click();
@@ -585,6 +655,7 @@ test.describe("W0.3-7 causal assist-decision browser acceptance", () => {
 
     await expectReadyWorkbench(page);
     await fillCobol(page, fixture.run.cobolSource);
+    await expect(topBarStartButton(page)).toBeEnabled();
     await topBarStartButton(page).click();
 
     await page.getByRole("tab", { name: "Agent" }).click();

@@ -316,17 +316,24 @@ fi
 # ---------------------------------------------------------------------------
 
 log "submitting $POSITIVE_FIXTURE_LABEL to BFF /transform"
+if [[ "$MODE" == "foundry" ]]; then
+  positive_use_agent="true"
+else
+  positive_use_agent="false"
+fi
 if [[ -n "$POSITIVE_EXPECTED" ]]; then
   transform_payload="$(jq -n \
     --rawfile source "$POSITIVE_SOURCE" \
     --rawfile expected "$POSITIVE_EXPECTED" \
     --arg name "$POSITIVE_SOURCE_NAME" \
-    '{sourceText: $source, sourceName: $name, expectedOutput: $expected}')"
+    --argjson useAgent "$positive_use_agent" \
+    '{sourceText: $source, sourceName: $name, expectedOutput: $expected, useTransformationAgent: $useAgent}')"
 else
   transform_payload="$(jq -n \
     --rawfile source "$POSITIVE_SOURCE" \
     --arg name "$POSITIVE_SOURCE_NAME" \
-    '{sourceText: $source, sourceName: $name}')"
+    --argjson useAgent "$positive_use_agent" \
+    '{sourceText: $source, sourceName: $name, useTransformationAgent: $useAgent}')"
 fi
 transform_json="$(post_json "$BFF_URL/api/v0/transform" "$transform_payload")"
 positive_run_id="$(jq -r '.runId // empty' <<<"$transform_json")"
@@ -461,7 +468,7 @@ fi
 log "submitting FILEIO-UNSUPPORTED negative fixture to BFF /transform"
 negative_payload="$(jq -n \
   --rawfile source "$NEGATIVE_SOURCE" \
-  '{sourceText: $source, sourceName: "file-io-unsupported.cbl"}')"
+  '{sourceText: $source, sourceName: "file-io-unsupported.cbl", useTransformationAgent: false}')"
 negative_json="$(post_json "$BFF_URL/api/v0/transform" "$negative_payload")"
 negative_run_id="$(jq -r '.runId // empty' <<<"$negative_json")"
 [[ -n "$negative_run_id" ]] || fail "transform response missing runId for FILEIO-UNSUPPORTED: $negative_json" 4
