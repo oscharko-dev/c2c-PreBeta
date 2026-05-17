@@ -561,6 +561,7 @@ describe("apiClient", () => {
           rationale: "first repair attempt",
         },
       ],
+      assistDecision: null,
       finalClassification: null,
       failureCode: null,
       failureMessage: null,
@@ -588,6 +589,7 @@ describe("apiClient", () => {
       expect(result.data.activeAgent).toBe("transformation_agent");
       expect(result.data.repairAttempts).toHaveLength(1);
       expect(result.data.repairBudget?.remaining).toBe(2);
+      expect(result.data.assistDecision).toBeNull();
     }
   });
 
@@ -606,6 +608,7 @@ describe("apiClient", () => {
       assistBudget: null,
       modelInvocationBudget: null,
       repairAttempts: [],
+      assistDecision: null,
       finalClassification: "failed",
       failureCode: "totally_unknown_code",
       failureMessage: "nope",
@@ -619,6 +622,153 @@ describe("apiClient", () => {
     } as Response);
 
     const result = await apiClient.getRunWorkflow("run-2");
+    expect(result).toMatchObject({ ok: false, details: { kind: "contract" } });
+  });
+
+  // Issue #218 (W0.3-7): the Studio rejects assist-decision payloads
+  // with unknown closed-set values or invariant violations so an upstream
+  // regression cannot be silently mis-rendered.
+  it("accepts an assist-required assist-decision payload on /workflow", async () => {
+    const payload = {
+      runId: "run-assist-1",
+      programId: "P",
+      mode: "live",
+      productMode: "live",
+      source: "live",
+      state: "assist_decision_recorded",
+      activeStep: "assist-decision-gate",
+      activeAgent: "transformation_agent",
+      agentAttemptCount: 0,
+      repairBudget: { limit: 3, used: 0, remaining: 3 },
+      assistBudget: { limit: 1, used: 1, remaining: 0 },
+      modelInvocationBudget: { limit: 6, used: 1, remaining: 5 },
+      repairAttempts: [],
+      assistDecision: {
+        outcome: "assist_required",
+        reasonCode: "semantic_ir_bounded_ambiguity",
+        decidedAt: "2026-05-17T12:00:00Z",
+        selectedAgentRole: "transformation_agent",
+        affectedArtifactRefs: [
+          {
+            sha256: "a".repeat(64),
+            byteSize: 64,
+            kind: "semantic-ir",
+          },
+        ],
+        repairBudgetSnapshot: { limit: 3, used: 0, remaining: 3 },
+        assistBudgetSnapshot: { limit: 1, used: 1, remaining: 0 },
+        modelInvocationBudgetSnapshot: { limit: 6, used: 1, remaining: 5 },
+        rationale: "Bounded ambiguity in OCCURS-resolution.",
+      },
+      finalClassification: null,
+      failureCode: null,
+      failureMessage: null,
+      generatedJavaRef: null,
+      buildTestResultRef: null,
+      evidencePackRef: null,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+
+    const result = await apiClient.getRunWorkflow("run-assist-1");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.assistDecision?.outcome).toBe("assist_required");
+      expect(result.data.assistDecision?.reasonCode).toBe(
+        "semantic_ir_bounded_ambiguity",
+      );
+      expect(result.data.assistDecision?.selectedAgentRole).toBe(
+        "transformation_agent",
+      );
+    }
+  });
+
+  it("rejects an assist-decision payload with an unknown outcome", async () => {
+    const payload = {
+      runId: "run-assist-bad",
+      programId: "P",
+      mode: "live",
+      productMode: "live",
+      source: "live",
+      state: null,
+      activeStep: null,
+      activeAgent: null,
+      agentAttemptCount: 0,
+      repairBudget: null,
+      assistBudget: null,
+      modelInvocationBudget: null,
+      repairAttempts: [],
+      assistDecision: {
+        outcome: "not_a_real_outcome",
+        reasonCode: "caller_did_not_opt_in",
+        decidedAt: "2026-05-17T12:00:00Z",
+        selectedAgentRole: null,
+        affectedArtifactRefs: [],
+        repairBudgetSnapshot: null,
+        assistBudgetSnapshot: null,
+        modelInvocationBudgetSnapshot: null,
+        rationale: null,
+      },
+      finalClassification: null,
+      failureCode: null,
+      failureMessage: null,
+      generatedJavaRef: null,
+      buildTestResultRef: null,
+      evidencePackRef: null,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+
+    const result = await apiClient.getRunWorkflow("run-assist-bad");
+    expect(result).toMatchObject({ ok: false, details: { kind: "contract" } });
+  });
+
+  it("rejects an assist-decision payload that violates the agent-role invariant", async () => {
+    const payload = {
+      runId: "run-assist-inv",
+      programId: "P",
+      mode: "live",
+      productMode: "live",
+      source: "live",
+      state: null,
+      activeStep: null,
+      activeAgent: null,
+      agentAttemptCount: 0,
+      repairBudget: null,
+      assistBudget: null,
+      modelInvocationBudget: null,
+      repairAttempts: [],
+      // assist_required must carry a non-null selectedAgentRole; the
+      // orchestrator-side invariant is mirrored on the Studio so an
+      // upstream drift is rejected loudly.
+      assistDecision: {
+        outcome: "assist_required",
+        reasonCode: "semantic_ir_bounded_ambiguity",
+        decidedAt: "2026-05-17T12:00:00Z",
+        selectedAgentRole: null,
+        affectedArtifactRefs: [],
+        repairBudgetSnapshot: null,
+        assistBudgetSnapshot: null,
+        modelInvocationBudgetSnapshot: null,
+        rationale: null,
+      },
+      finalClassification: null,
+      failureCode: null,
+      failureMessage: null,
+      generatedJavaRef: null,
+      buildTestResultRef: null,
+      evidencePackRef: null,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+
+    const result = await apiClient.getRunWorkflow("run-assist-inv");
     expect(result).toMatchObject({ ok: false, details: { kind: "contract" } });
   });
 });
