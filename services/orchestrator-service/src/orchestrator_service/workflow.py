@@ -586,6 +586,8 @@ _UNSUPPORTED_COBOL_DIAGNOSTIC_MARKERS: tuple[str, ...] = (
     "unsupported-statement",
 )
 
+_MAX_EXCEPTION_BODY_SCAN_CHARS = 65_536
+
 
 def _exception_chain_text(exc: BaseException) -> str:
     parts: list[str] = []
@@ -596,7 +598,7 @@ def _exception_chain_text(exc: BaseException) -> str:
         parts.append(str(current))
         body = getattr(current, "body", None)
         if isinstance(body, str) and body:
-            parts.append(body)
+            parts.append(body[:_MAX_EXCEPTION_BODY_SCAN_CHARS])
         current = current.__cause__ or current.__context__
     return " ".join(parts).lower()
 
