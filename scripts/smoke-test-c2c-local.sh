@@ -246,10 +246,6 @@ if [[ "$EFFECTIVE_MODEL_GATEWAY_ENABLED" == "true" ]]; then
 fi
 
 supported_sources=(
-  "$ROOT_DIR/corpus/synthetic/programs/arithmetic-adjustment-ledger.cbl"
-  "$ROOT_DIR/corpus/synthetic/programs/branch-account-guard.cbl"
-  "$ROOT_DIR/corpus/synthetic/programs/ctrl-decimal-payroll.cbl"
-  "$ROOT_DIR/corpus/synthetic/programs/decimal-batch-aggregator.cbl"
   "$ROOT_DIR/corpus/synthetic/programs/hello-w02.cbl"
 )
 
