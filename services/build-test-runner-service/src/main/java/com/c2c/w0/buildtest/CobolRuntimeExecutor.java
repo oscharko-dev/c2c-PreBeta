@@ -308,15 +308,16 @@ final class CobolRuntimeExecutor {
             builder.directory(workingDirectory.toFile());
             builder.environment().putAll(environment);
             Process process = builder.start();
-            try (var processInput = process.getOutputStream()) {
-                if (stdin != null && !stdin.isEmpty()) {
-                    processInput.write(stdin.getBytes(StandardCharsets.UTF_8));
-                }
-            }
             CompletableFuture<String> stdout = CompletableFuture.supplyAsync(
                     () -> readAll(process.getInputStream()));
             CompletableFuture<String> stderr = CompletableFuture.supplyAsync(
                     () -> readAll(process.getErrorStream()));
+            try (var processInput = process.getOutputStream()) {
+                if (stdin != null && !stdin.isEmpty()) {
+                    processInput.write(stdin.getBytes(StandardCharsets.UTF_8));
+                    processInput.flush();
+                }
+            }
 
             boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
             if (!finished) {

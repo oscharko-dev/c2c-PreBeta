@@ -338,11 +338,17 @@ public final class BuildTestRunnerService {
         String expectedOutput = exactStringOrNull(oracleSpec.get("expectedOutput"));
         String oracleInput = exactStringOrNull(oracleSpec.get("oracleInput"));
         Map<String, Object> oracleSourceRef = mapOrEmpty(oracleSpec.get("sourceRef"));
+        boolean usingUserExpectedOutput = expectedOutput != null;
 
-        CobolRuntimeExecutor.OracleRun oracle =
-                CobolRuntimeExecutor.executeSource(programId, sourceText, oracleInput, oracleTimeoutMs);
+        CobolRuntimeExecutor.OracleRun oracle = null;
+        Map<String, Object> oracleMap;
+        if (usingUserExpectedOutput) {
+            oracleMap = userProvidedOracleMap();
+        } else {
+            oracle = CobolRuntimeExecutor.executeSource(programId, sourceText, oracleInput, oracleTimeoutMs);
+            oracleMap = oracle.toMap();
+        }
 
-        Map<String, Object> oracleMap = oracle.toMap();
         if (!oracleSourceRef.isEmpty()) {
             oracleMap.put("sourceRef", oracleSourceRef);
         }
@@ -356,7 +362,7 @@ public final class BuildTestRunnerService {
         }
         response.put("oracle", oracleMap);
 
-        if (!oracle.attempted()) {
+        if (!usingUserExpectedOutput && !oracle.attempted()) {
             diagnostics.add(diagnostic("error", "oracle-invalid-request",
                     oracle.reason() == null ? "oracle request is invalid" : oracle.reason()));
             applyClassification(response, ResultClassifier.oracleInvalid(oracle.reason()));
@@ -369,7 +375,7 @@ public final class BuildTestRunnerService {
             return response;
         }
 
-        if (!oracle.available()) {
+        if (!usingUserExpectedOutput && !oracle.available()) {
             diagnostics.add(diagnostic("error", "oracle-unavailable",
                     "GnuCOBOL (cobc/cobcrun) is not available; cannot prove equivalence"
                             + " for UI-provided COBOL source."));
@@ -383,7 +389,7 @@ public final class BuildTestRunnerService {
             return response;
         }
 
-        if (!oracle.compileOk()) {
+        if (!usingUserExpectedOutput && !oracle.compileOk()) {
             diagnostics.add(diagnostic("error", "oracle-cobol-compile-failed",
                     "cobc failed to compile the UI-provided COBOL source: " + oracle.reason()));
             applyClassification(response, ResultClassifier.oracleCompileError(
@@ -397,7 +403,7 @@ public final class BuildTestRunnerService {
             return response;
         }
 
-        if (!oracle.runOk()) {
+        if (!usingUserExpectedOutput && !oracle.runOk()) {
             diagnostics.add(diagnostic("error", "oracle-cobol-run-failed",
                     "cobcrun did not complete cleanly: " + oracle.reason()));
             applyClassification(response, ResultClassifier.oracleRunError(
@@ -412,10 +418,9 @@ public final class BuildTestRunnerService {
             return response;
         }
 
-        // Both COBOL and Java executed successfully. Explicit user-supplied
-        // expected output is the paste-mode oracle; otherwise use COBOL stdout.
+        // Explicit user-supplied expected output is the paste-mode oracle.
+        // Otherwise, the COBOL runtime must have produced the oracle stdout.
         String javaStdout = run == null ? "" : run.stdout();
-        boolean usingUserExpectedOutput = expectedOutput != null;
         String expectedStdout = usingUserExpectedOutput ? expectedOutput : oracle.stdout();
         Map<String, Object> comparison = compareOutputs(
                 javaStdout,
@@ -449,6 +454,18 @@ public final class BuildTestRunnerService {
         if (!oracleSourceRef.isEmpty()) {
             map.put("sourceRef", oracleSourceRef);
         }
+        return map;
+    }
+
+    private static Map<String, Object> userProvidedOracleMap() {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("mode", "user-provided");
+        map.put("attempted", false);
+        map.put("available", true);
+        map.put("compileOk", false);
+        map.put("ran", false);
+        map.put("runOk", false);
+        map.put("reason", "explicit expectedOutput supplied; COBOL runtime not required");
         return map;
     }
 

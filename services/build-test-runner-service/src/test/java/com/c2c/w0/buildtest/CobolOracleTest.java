@@ -197,8 +197,6 @@ class CobolOracleTest {
 
     @Test
     void userProvidedExpectedOutputOverridesCobolStdoutForPasteModeOracle() {
-        assumeTrue(CobolRuntimeExecutor.isAvailable(),
-                "GnuCOBOL cobc/cobcrun must be installed for oracle equivalence");
         Map<String, Object> generatedProject = trivialProject(
                 "sample.UserExpectedMismatch",
                 "package sample; public class UserExpectedMismatch { "
@@ -223,8 +221,9 @@ class CobolOracleTest {
         assertEquals("user-provided-expected-output", ((Map<?, ?>) comparison.get("expectedRef")).get("kind"));
         assertEquals("java-stdout", ((Map<?, ?>) comparison.get("actualRef")).get("kind"));
         Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
-        assertEquals("PASS\n", oracle.get("stdout"),
-                "COBOL stdout may still be captured, but it must not override explicit expectedOutput");
+        assertEquals("user-provided", oracle.get("mode"));
+        assertEquals(false, oracle.get("attempted"),
+                "explicit expectedOutput must not require executing the COBOL runtime");
     }
 
     @Test
@@ -288,6 +287,43 @@ class CobolOracleTest {
             assertTrue(diagnostics.stream()
                     .map(d -> ((Map<?, ?>) d).get("code"))
                     .anyMatch("oracle-unavailable"::equals));
+        } finally {
+            restoreProperty("c2c.cobc.path", previousCobc);
+            restoreProperty("c2c.cobcrun.path", previousCobcrun);
+        }
+    }
+
+    @Test
+    void userProvidedExpectedOutputDoesNotRequireCobolRuntime() {
+        String previousCobc = System.getProperty("c2c.cobc.path");
+        String previousCobcrun = System.getProperty("c2c.cobcrun.path");
+        System.setProperty("c2c.cobc.path", "__missing_cobc_for_test__");
+        System.setProperty("c2c.cobcrun.path", "__missing_cobcrun_for_test__");
+        try {
+            Map<String, Object> generatedProject = trivialProject(
+                    "sample.UserExpectedNoRuntime",
+                    "package sample; public class UserExpectedNoRuntime { "
+                            + "public static void main(String[] a) { System.out.println(\"PASS\"); } }");
+            Map<String, Object> request = Map.of(
+                    "runId", "run-user-expected-no-runtime",
+                    "programId", "PASSPRG",
+                    "generatedProject", generatedProject,
+                    "oracle", Map.of(
+                            "mode", "cobol-runtime",
+                            "sourceText", COBOL_PRINT_PASS,
+                            "expectedOutput", "PASS\n"));
+
+            Map<String, Object> response = service.runVerification(request);
+
+            assertEquals("ok", response.get("status"),
+                    () -> "explicit expectedOutput should not require GnuCOBOL; response=" + response);
+            assertEquals("match", response.get("classification"));
+            Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
+            assertEquals("user-provided", oracle.get("mode"));
+            assertEquals(false, oracle.get("attempted"));
+            Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
+            assertEquals(true, comparison.get("matched"));
+            assertEquals("oracle.user-provided", comparison.get("source"));
         } finally {
             restoreProperty("c2c.cobc.path", previousCobc);
             restoreProperty("c2c.cobcrun.path", previousCobcrun);

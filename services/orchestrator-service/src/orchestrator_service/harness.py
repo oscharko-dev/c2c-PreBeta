@@ -120,7 +120,7 @@ class HarnessGateway:
         endpoint = str(capability.get("endpoint", "")).strip()
         if not endpoint:
             raise ValueError("capability endpoint is required")
-        resp = self.http.post_json(endpoint, payload, headers=self.harness_headers)
+        resp = self.http.post_json(endpoint, payload)
         if resp.status not in (200, 201):
             raise HarnessFailure(resp.status, str(resp.payload))
         if not isinstance(resp.payload, dict):

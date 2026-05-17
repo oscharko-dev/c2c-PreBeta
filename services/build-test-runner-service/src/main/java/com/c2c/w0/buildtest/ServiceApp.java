@@ -48,7 +48,7 @@ public final class ServiceApp {
         String harnessEndpoint = normaliseEndpoint(System.getenv("HARNESS_EVENT_ENDPOINT"));
         String harnessEventToken = normaliseToken(System.getenv("HARNESS_EVENT_TOKEN"));
         String configuredControlToken = normaliseToken(System.getenv("BUILD_TEST_RUNNER_CONTROL_TOKEN"));
-        String controlToken = configuredControlToken == null ? harnessEventToken : configuredControlToken;
+        String controlToken = configuredControlToken;
         String experienceEndpoint = normaliseEndpoint(System.getenv("EXPERIENCE_EVENT_ENDPOINT"));
         BuildTestRunnerService service = new BuildTestRunnerService();
 
