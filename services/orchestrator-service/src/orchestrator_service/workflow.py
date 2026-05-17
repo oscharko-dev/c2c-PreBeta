@@ -3103,6 +3103,25 @@ class W0WorkflowRunner:
                 ),
             }
 
+            # Issue #217 (W0.3-6): the W0.2 evidence pack records the
+            # Orchestrator-owned assist-decision and the final consumption of
+            # the three bounded run budgets so reviewers can audit, from the
+            # pack alone, "was AI required? why? against which budgets?".
+            #
+            # - assistDecision is emitted whenever the contract reached the
+            #   gate. A run that was blocked before the gate fires (parse or
+            #   IR failure) legitimately has no decision; the evidence-service
+            #   relaxes the requirement for blocked packs in that case.
+            # - budgetSummary is emitted for every W0.2 run, blocked or not,
+            #   so the bounded-budget posture is always visible.
+            if w02_contract is not None:
+                assist_decision_payload = self._build_assist_decision_lineage(
+                    w02_contract
+                )
+                if assist_decision_payload is not None:
+                    artifacts["assistDecision"] = assist_decision_payload
+                artifacts["budgetSummary"] = self._build_budget_summary(w02_contract)
+
         payload: JsonObject = {
             "runId": context.run_id,
             "workflowId": context.workflow_id,
@@ -3416,6 +3435,38 @@ class W0WorkflowRunner:
         if summary:
             envelope["summary"] = summary
         return envelope
+
+    @staticmethod
+    def _build_budget_summary(contract: W02RunContract) -> JsonObject:
+        """Project the three bounded W0.3 run budgets into a single audit-
+        ready summary for the evidence pack (Issue #217).
+
+        Each entry reports the configured ``limit``, the ``used`` count at
+        evidence-write time, and the derived ``remaining``. Budgets only
+        grow during a run, so the summary is monotonic with the
+        gate-time snapshots recorded on the assist-decision.
+        """
+        return {
+            "repair": contract.repair_budget.to_dict(),
+            "assist": contract.assist_budget.to_dict(),
+            "modelInvocation": contract.model_invocation_budget.to_dict(),
+        }
+
+    @staticmethod
+    def _build_assist_decision_lineage(
+        contract: W02RunContract,
+    ) -> JsonObject | None:
+        """Project the run contract's assist-decision (Issue #214/#215/#216)
+        into the evidence-pack lineage envelope defined by Issue #217.
+
+        Returns ``None`` when the run never reached the gate (e.g., it was
+        blocked before semantic-IR-ready). Evidence-service relaxes the
+        ``assistDecision`` requirement for blocked packs in that case.
+        """
+        decision = contract.assist_decision
+        if decision is None:
+            return None
+        return decision.to_dict()
 
     @staticmethod
     def _normalise_model_invocation_ref(

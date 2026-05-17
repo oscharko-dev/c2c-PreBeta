@@ -205,6 +205,11 @@ components:
         harnessEvents: { $ref: "#/components/schemas/DataReference" }
         trajectoryLedger: { $ref: "#/components/schemas/DataReference" }
         experienceEvents: { type: array, items: { $ref: "#/components/schemas/DataReference" } }
+        # Issue #217 (W0.3-6): assist-decision and budget-consumption lineage.
+        # assistDecision is required for non-blocked W0.2 runs; budgetSummary
+        # is required for every W0.2 run (including blocked ones).
+        assistDecision: { $ref: "#/components/schemas/AssistDecisionLineage" }
+        budgetSummary: { $ref: "#/components/schemas/BudgetSummary" }
 
     TransformationPass:
       type: object
@@ -329,6 +334,55 @@ components:
         feature: { type: string }
         context: { type: string }
         sourceRef: { $ref: "#/components/schemas/DataReference" }
+
+    # Issue #217 (W0.3-6): assist-decision and budget lineage. Mirrors the
+    # orchestrator's W02RunContract.AssistDecision contract and the three
+    # bounded run budgets defined in W0.3-5 (Issue #216). Closed enums are
+    # identical to the BFF AssistDecisionSummary — drift is a contract bug.
+    BudgetSnapshot:
+      type: object
+      required: [limit, used, remaining]
+      properties:
+        limit: { type: integer, minimum: 0 }
+        used: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+
+    BudgetSummary:
+      type: object
+      required: [repair, assist, modelInvocation]
+      properties:
+        repair: { $ref: "#/components/schemas/BudgetSnapshot" }
+        assist: { $ref: "#/components/schemas/BudgetSnapshot" }
+        modelInvocation: { $ref: "#/components/schemas/BudgetSnapshot" }
+
+    AssistDecisionLineage:
+      type: object
+      required: [outcome, reasonCode, decidedAt]
+      properties:
+        outcome:
+          type: string
+          enum: [assist_required, assist_not_required]
+        reasonCode:
+          type: string
+          enum:
+            - semantic_ir_bounded_ambiguity
+            - translation_unsupported_repairable
+            - baseline_open_assumptions
+            - deterministic_candidate_low_confidence
+            - caller_explicit_opt_in
+            - caller_did_not_opt_in
+            - assist_budget_exhausted
+        decidedAt: { type: string, format: date-time }
+        selectedAgentRole:
+          type: string
+          enum: [transformation_agent]
+        rationale: { type: string }
+        repairBudgetSnapshot: { $ref: "#/components/schemas/BudgetSnapshot" }
+        assistBudgetSnapshot: { $ref: "#/components/schemas/BudgetSnapshot" }
+        modelInvocationBudgetSnapshot: { $ref: "#/components/schemas/BudgetSnapshot" }
+        affectedArtifactRefs:
+          type: array
+          items: { $ref: "#/components/schemas/DataReference" }
 
     ValidationResult:
       type: object

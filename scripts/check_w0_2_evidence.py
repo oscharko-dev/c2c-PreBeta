@@ -421,6 +421,102 @@ def _check_oracle(oracle: Mapping[str, Any], failures: list[str]) -> None:
         )
 
 
+# Issue #217 (W0.3-6): closed enum sets for the assist-decision lineage. Kept
+# in sync with run_contract.ASSIST_* and the BFF AssistDecisionSummary schema.
+_ASSIST_DECISION_OUTCOMES = {"assist_required", "assist_not_required"}
+_ASSIST_DECISION_REASON_CODES = {
+    "semantic_ir_bounded_ambiguity",
+    "translation_unsupported_repairable",
+    "baseline_open_assumptions",
+    "deterministic_candidate_low_confidence",
+    "caller_explicit_opt_in",
+    "caller_did_not_opt_in",
+    "assist_budget_exhausted",
+}
+_ASSIST_DECISION_AGENT_ROLES = {"transformation_agent"}
+
+
+def _check_budget_snapshot(
+    snapshot: Any,
+    *,
+    path: str,
+    failures: list[str],
+) -> None:
+    if not _is_mapping(snapshot):
+        _emit_failure(failures, f"{path} must be an object with limit/used/remaining")
+        return
+    limit = snapshot.get("limit")
+    used = snapshot.get("used")
+    remaining = snapshot.get("remaining")
+    for label, value in (("limit", limit), ("used", used), ("remaining", remaining)):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            _emit_failure(failures, f"{path}.{label} must be a non-negative integer, got {value!r}")
+            return
+    expected_remaining = max(0, int(limit) - int(used))
+    _require(
+        int(remaining) == expected_remaining,
+        f"{path}.remaining must equal max(0, limit - used)",
+        failures,
+    )
+
+
+def _check_assist_decision_lineage(decision: Any, failures: list[str]) -> None:
+    if not _is_mapping(decision):
+        _emit_failure(
+            failures,
+            "artifacts.assistDecision must be set for a W0.2 success run (Issue #217)",
+        )
+        return
+    outcome = decision.get("outcome")
+    _require(
+        outcome in _ASSIST_DECISION_OUTCOMES,
+        f"artifacts.assistDecision.outcome must be one of {sorted(_ASSIST_DECISION_OUTCOMES)!r}; got {outcome!r}",
+        failures,
+    )
+    reason_code = decision.get("reasonCode")
+    _require(
+        reason_code in _ASSIST_DECISION_REASON_CODES,
+        f"artifacts.assistDecision.reasonCode must be one of the closed W0.3 reason codes; got {reason_code!r}",
+        failures,
+    )
+    decided_at = decision.get("decidedAt")
+    _require(
+        isinstance(decided_at, str) and decided_at != "",
+        f"artifacts.assistDecision.decidedAt must be a non-empty ISO-8601 string; got {decided_at!r}",
+        failures,
+    )
+    selected_role = decision.get("selectedAgentRole")
+    if outcome == "assist_required":
+        _require(
+            selected_role in _ASSIST_DECISION_AGENT_ROLES,
+            f"artifacts.assistDecision.selectedAgentRole must be transformation_agent when assist_required; got {selected_role!r}",
+            failures,
+        )
+    else:
+        _require(
+            selected_role in (None, ""),
+            f"artifacts.assistDecision.selectedAgentRole must be absent when assist_not_required; got {selected_role!r}",
+            failures,
+        )
+    if reason_code == "assist_budget_exhausted":
+        _require(
+            outcome == "assist_not_required",
+            "artifacts.assistDecision: assist_budget_exhausted reason requires outcome=assist_not_required",
+            failures,
+        )
+
+
+def _check_budget_summary(summary: Any, failures: list[str]) -> None:
+    if not _is_mapping(summary):
+        _emit_failure(
+            failures,
+            "artifacts.budgetSummary must be set for a W0.2 success run (Issue #217)",
+        )
+        return
+    for key in ("repair", "assist", "modelInvocation"):
+        _check_budget_snapshot(summary.get(key), path=f"artifacts.budgetSummary.{key}", failures=failures)
+
+
 def _check_success_artifacts(
     manifest: Mapping[str, Any],
     *,
@@ -542,6 +638,12 @@ def _check_success_artifacts(
     else:
         _emit_failure(failures, "artifacts.oracleComparison must be set for a W0.2 success run")
 
+    # Issue #217 (W0.3-6): the release gate enforces the assist-decision and
+    # budget-summary lineage so a green W0.2 run always answers "was AI
+    # required?" and "what budget was used?" from the evidence pack alone.
+    _check_assist_decision_lineage(artifacts.get("assistDecision"), failures)
+    _check_budget_summary(artifacts.get("budgetSummary"), failures)
+
 
 def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -> None:
     completeness = manifest.get("completenessStatus")
@@ -593,6 +695,50 @@ def _check_blocked_artifacts(manifest: Mapping[str, Any], failures: list[str]) -
                 "a blocked-path run must not mark any generatedJavaArtifacts entry as selected",
                 failures,
             )
+
+        # Issue #217 (W0.3-6): budgetSummary stays mandatory on every W0.2
+        # pack — including blocked runs — because the bounded budgets always
+        # exist on the contract. assistDecision is conditional: blocked
+        # packs that legitimately terminated before the gate fired
+        # (no transformation/verification-repair trajectory and no repair
+        # attempts) may omit it; once any post-gate signal is present, the
+        # decision must be recorded.
+        _check_budget_summary(artifacts.get("budgetSummary"), failures)
+        decision = artifacts.get("assistDecision")
+        gate_fired = _blocked_run_reached_assist_gate(artifacts)
+        if decision is None:
+            _require(
+                not gate_fired,
+                "blocked W0.2 pack shows post-gate signals (agentTrajectories or "
+                "repairAttempts) but does not record artifacts.assistDecision (Issue #217)",
+                failures,
+            )
+        else:
+            _check_assist_decision_lineage(decision, failures)
+
+
+def _blocked_run_reached_assist_gate(artifacts: Mapping[str, Any]) -> bool:
+    """Infer from the pack whether the assist-decision gate fired before the run was blocked."""
+    trajectories = artifacts.get("agentTrajectories") or []
+    if _is_seq(trajectories):
+        for entry in trajectories:
+            if not _is_mapping(entry):
+                continue
+            role = entry.get("agentRole")
+            if role in ("transformation", "verification-repair"):
+                return True
+    repair_attempts = artifacts.get("repairAttempts") or []
+    if _is_seq(repair_attempts) and len(list(repair_attempts)) > 0:
+        return True
+    invocations = artifacts.get("modelInvocations") or []
+    if _is_seq(invocations):
+        for entry in invocations:
+            if not _is_mapping(entry):
+                continue
+            role = entry.get("agentRole")
+            if role in ("transformation", "verification-repair"):
+                return True
+    return False
 
 
 def _scan_referenced_artifacts(

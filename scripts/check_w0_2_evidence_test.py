@@ -97,6 +97,22 @@ GOOD_SUCCESS_MANIFEST: dict[str, Any] = {
             "id": "c2c-target-java-runtime:21",
             "ref": {"uri": "file:///tmp/runtime.json", "sha256": _hex("6"), "byteSize": 50},
         },
+        # Issue #217 (W0.3-6): the W0.2 success contract now requires
+        # assist-decision and budget-summary lineage in the evidence pack.
+        "assistDecision": {
+            "outcome": "assist_not_required",
+            "reasonCode": "caller_did_not_opt_in",
+            "decidedAt": "2026-05-17T00:00:00Z",
+            "repairBudgetSnapshot": {"limit": 2, "used": 0, "remaining": 2},
+            "assistBudgetSnapshot": {"limit": 1, "used": 0, "remaining": 1},
+            "modelInvocationBudgetSnapshot": {"limit": 6, "used": 0, "remaining": 6},
+            "rationale": "caller did not opt into productive assist",
+        },
+        "budgetSummary": {
+            "repair": {"limit": 2, "used": 0, "remaining": 2},
+            "assist": {"limit": 1, "used": 0, "remaining": 1},
+            "modelInvocation": {"limit": 6, "used": 1, "remaining": 5},
+        },
     },
     "validation": {
         "ok": True,
@@ -227,6 +243,134 @@ class CheckW02EvidenceTest(unittest.TestCase):
         result = self._run(manifest, "--success", "--expect-policy-skipped")
         self.assertEqual(result.returncode, 3)
         self.assertIn("generatedJava", result.stderr)
+
+    # ----- W0.3-6 (Issue #217) assist-decision + budget lineage ---------
+
+    def test_missing_assist_decision_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("assistDecision")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("assistDecision", result.stderr)
+
+    def test_assist_decision_with_unknown_reason_code_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["assistDecision"]["reasonCode"] = "made_up"
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("reasonCode", result.stderr)
+
+    def test_assist_required_without_selected_agent_role_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["assistDecision"]["outcome"] = "assist_required"
+        manifest["artifacts"]["assistDecision"]["reasonCode"] = "baseline_open_assumptions"
+        manifest["artifacts"]["assistDecision"].pop("selectedAgentRole", None)
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("selectedAgentRole", result.stderr)
+
+    def test_assist_budget_exhausted_must_force_not_required(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["assistDecision"]["outcome"] = "assist_required"
+        manifest["artifacts"]["assistDecision"]["reasonCode"] = "assist_budget_exhausted"
+        manifest["artifacts"]["assistDecision"]["selectedAgentRole"] = "transformation_agent"
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("assist_budget_exhausted", result.stderr)
+
+    def test_missing_budget_summary_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"].pop("budgetSummary")
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("budgetSummary", result.stderr)
+
+    def test_budget_summary_with_inconsistent_remaining_fails(self) -> None:
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["artifacts"]["budgetSummary"]["repair"]["remaining"] = 99
+        result = self._run(manifest, "--success", "--expect-policy-skipped")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("remaining", result.stderr)
+
+    def test_blocked_pack_requires_budget_summary(self) -> None:
+        # Issue #217: budgetSummary stays mandatory even on blocked packs.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
+        manifest["artifacts"].pop("finalJavaArtifact")
+        manifest["artifacts"].pop("budgetSummary")
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
+        manifest["validation"] = {
+            "ok": False,
+            "requiredArtifacts": ["evidence-pack-manifest"],
+            "missingArtifacts": [],
+        }
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("budgetSummary", result.stderr)
+
+    def test_blocked_pack_post_gate_requires_assist_decision(self) -> None:
+        # Issue #217: when post-gate signals (agentTrajectories with
+        # transformation/verification-repair role, or repairAttempts) are
+        # present, assistDecision must be recorded even on a blocked pack.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
+        manifest["artifacts"].pop("finalJavaArtifact")
+        manifest["artifacts"].pop("assistDecision")
+        # Post-gate signal: transformation agent trajectory present.
+        manifest["artifacts"]["agentTrajectories"] = [
+            {"agentRole": "orchestrator", "ledgerRef": {"uri": "file:///tmp/o.json", "sha256": _hex("1"), "byteSize": 50}},
+            {"agentRole": "transformation", "ledgerRef": {"uri": "file:///tmp/t.json", "sha256": _hex("2"), "byteSize": 50}},
+        ]
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
+        manifest["validation"] = {
+            "ok": False,
+            "requiredArtifacts": ["evidence-pack-manifest"],
+            "missingArtifacts": [],
+        }
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("assistDecision", result.stderr)
+
+    def test_blocked_pack_pre_gate_may_omit_assist_decision(self) -> None:
+        # Issue #217: a blocked pack with no post-gate signals legitimately
+        # has no assistDecision.
+        manifest = copy.deepcopy(GOOD_SUCCESS_MANIFEST)
+        manifest["classification"] = "blocked"
+        manifest["completenessStatus"] = "blocked"
+        manifest["status"] = "incomplete"
+        manifest["artifacts"].pop("generatedJava")
+        manifest["artifacts"].pop("finalJavaArtifact")
+        manifest["artifacts"].pop("assistDecision")
+        for candidate in manifest["artifacts"]["generatedJavaArtifacts"]:
+            candidate.pop("selected", None)
+        # Strip all post-gate signals.
+        manifest["artifacts"]["agentTrajectories"] = [
+            {"agentRole": "orchestrator", "ledgerRef": {"uri": "file:///tmp/o.json", "sha256": _hex("1"), "byteSize": 50}},
+        ]
+        manifest["artifacts"].pop("repairAttempts", None)
+        manifest["artifacts"]["modelInvocations"] = [
+            {
+                "invocationId": "inv-pre-gate",
+                "modelId": "none",
+                "status": "skipped",
+                "ledgerRef": {"uri": "file:///tmp/ledger.json", "sha256": _hex("0"), "byteSize": 50},
+            }
+        ]
+        manifest["validation"] = {
+            "ok": False,
+            "requiredArtifacts": ["evidence-pack-manifest"],
+            "missingArtifacts": [],
+        }
+        result = self._run(manifest, "--blocked")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
 
     # ----- blocked-path acceptance --------------------------------------
 

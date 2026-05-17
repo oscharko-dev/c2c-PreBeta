@@ -74,6 +74,9 @@ func (s *PackStore) Create(input CreateInput) (*EvidencePackManifest, error) {
 		UnsupportedFeatures: input.UnsupportedFeatures,
 	}
 	manifest.Validation = EvaluateValidationForWave(&manifest.Artifacts, wave)
+	if input.Blocked && wave == WaveW02 {
+		manifest.Validation = relaxBlockedW02Validation(manifest.Validation, manifest.Artifacts)
+	}
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, input.Blocked)
 	manifest.Classification = deriveClassification(manifest.Validation, input.Blocked)
@@ -131,6 +134,9 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 		normalizeBlockedW02Artifacts(&manifest.Artifacts)
 	}
 	manifest.Validation = EvaluateValidationForWave(&manifest.Artifacts, manifest.Wave)
+	if blocked && manifest.Wave == WaveW02 {
+		manifest.Validation = relaxBlockedW02Validation(manifest.Validation, manifest.Artifacts)
+	}
 	manifest.Status = deriveStatus(manifest.Validation)
 	manifest.CompletenessStatus = deriveCompletenessStatus(manifest.Validation, blocked)
 	manifest.Classification = deriveClassification(manifest.Validation, blocked)
@@ -292,6 +298,13 @@ func mergeArtifacts(dst, src *Artifacts) {
 	if len(src.ExperienceEvents) > 0 {
 		dst.ExperienceEvents = append(dst.ExperienceEvents, src.ExperienceEvents...)
 	}
+	if src.AssistDecision != nil {
+		dst.AssistDecision = cloneAssistDecision(src.AssistDecision)
+	}
+	if src.BudgetSummary != nil {
+		summary := *src.BudgetSummary
+		dst.BudgetSummary = &summary
+	}
 }
 
 func validateBlockedW02Artifacts(a Artifacts) error {
@@ -307,6 +320,72 @@ func validateBlockedW02Artifacts(a Artifacts) error {
 		}
 	}
 	return nil
+}
+
+// blockedW02PreGateRelaxedRequirements (Issue #217) lists the W0.2 required
+// artifact names that a run blocked BEFORE the assist-decision gate fires
+// (e.g., parse_failed, semantic_ir_failed) legitimately has no way to
+// emit. Post-gate artifacts (assistDecision) and end-of-run lineage
+// (budgetSummary) stay mandatory whenever the pack shows evidence that the
+// gate already fired — see runReachedAssistGate.
+var blockedW02PreGateRelaxedRequirements = map[string]struct{}{
+	"generatedJava":          {},
+	"generatedJavaArtifacts": {},
+	"finalJavaArtifact":      {},
+	"buildTestResults":       {},
+	"oracleComparison":       {},
+}
+
+// runReachedAssistGate (Issue #217) infers from the pack itself whether the
+// assist-decision gate already fired. The orchestrator only emits a
+// transformation or verification-repair agent trajectory after the gate
+// authorised productive assist (transformation) or after the repair loop
+// started (verification-repair, which is downstream of the gate). Either
+// signal proves the run made it past the gate, so the decision must be
+// present even on a blocked pack.
+func runReachedAssistGate(a Artifacts) bool {
+	for _, trajectory := range a.AgentTrajectories {
+		if trajectory.AgentRole == AgentRoleTransformation || trajectory.AgentRole == AgentRoleVerificationRepair {
+			return true
+		}
+	}
+	if len(a.RepairAttempts) > 0 {
+		return true
+	}
+	for _, invocation := range a.ModelInvocations {
+		if invocation.AgentRole == AgentRoleTransformation || invocation.AgentRole == AgentRoleVerificationRepair {
+			return true
+		}
+	}
+	return false
+}
+
+// relaxBlockedW02Validation drops "missingArtifacts" entries that are
+// legitimately absent on a blocked W0.2 pack (Issue #217). The validation
+// stays "OK=false" if any other artifact is missing, but absence of
+// pre-gate artifacts on a blocked run no longer forces a second-degree
+// "evidence_incomplete" label on top of "blocked". budgetSummary stays
+// mandatory unconditionally; assistDecision is relaxed only when the
+// pack shows no evidence that the gate fired.
+func relaxBlockedW02Validation(v ValidationResult, artifacts Artifacts) ValidationResult {
+	gateFired := runReachedAssistGate(artifacts)
+	filtered := make([]string, 0, len(v.MissingArtifacts))
+	for _, name := range v.MissingArtifacts {
+		if _, relaxed := blockedW02PreGateRelaxedRequirements[name]; relaxed {
+			continue
+		}
+		if name == "assistDecision" && !gateFired {
+			continue
+		}
+		filtered = append(filtered, name)
+	}
+	v.MissingArtifacts = filtered
+	v.OK = len(filtered) == 0
+	if v.OK {
+		v.Messages = nil
+		v.CompletenessStatus = CompletenessStatusComplete
+	}
+	return v
 }
 
 func normalizeBlockedW02Artifacts(a *Artifacts) {
@@ -461,5 +540,35 @@ func cloneArtifacts(a Artifacts) Artifacts {
 	if a.ExperienceEvents != nil {
 		out.ExperienceEvents = append([]DataReference{}, a.ExperienceEvents...)
 	}
+	if a.AssistDecision != nil {
+		out.AssistDecision = cloneAssistDecision(a.AssistDecision)
+	}
+	if a.BudgetSummary != nil {
+		summary := *a.BudgetSummary
+		out.BudgetSummary = &summary
+	}
 	return out
+}
+
+func cloneAssistDecision(src *AssistDecisionLineage) *AssistDecisionLineage {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	if src.RepairBudgetSnapshot != nil {
+		snap := *src.RepairBudgetSnapshot
+		dst.RepairBudgetSnapshot = &snap
+	}
+	if src.AssistBudgetSnapshot != nil {
+		snap := *src.AssistBudgetSnapshot
+		dst.AssistBudgetSnapshot = &snap
+	}
+	if src.ModelInvocationBudgetSnapshot != nil {
+		snap := *src.ModelInvocationBudgetSnapshot
+		dst.ModelInvocationBudgetSnapshot = &snap
+	}
+	if src.AffectedArtifactRefs != nil {
+		dst.AffectedArtifactRefs = append([]DataReference{}, src.AffectedArtifactRefs...)
+	}
+	return &dst
 }
