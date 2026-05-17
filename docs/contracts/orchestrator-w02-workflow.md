@@ -1,6 +1,13 @@
 # Orchestrator W0.2 Workflow Contract
 
 **Status:** v0 (Issue [#166](https://github.com/oscharko-dev/c2c-PreBeta/issues/166))
+**Successor:** [Orchestrator W0.3 Workflow Contract](orchestrator-w03-workflow.md)
+([#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222)) — the canonical
+reference for deterministic-first multi-agent hardening (explicit
+assist-decision gate, assist/model-invocation budgets, evidence-pack lineage).
+This document is retained for historical wording and remains valid for
+consumers that have not yet migrated to the W0.3 surface; new W0.3 fields
+documented below are additive under the same `v0` schema.
 **Owner:** orchestrator-service
 **Consumers:** c2c-bff, c2c-studio UI, future transformation/verification agents,
 evidence-service

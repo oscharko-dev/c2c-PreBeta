@@ -436,7 +436,7 @@ current gaps:
 | W0   | Done    | Deterministic enterprise kernel and evidence backbone.                                                                     | Service mesh produces compiled Java, build/test result, Harness/Experience Learning telemetry, and complete Evidence Pack for the W0 corpus without required model calls.                                                                                         |
 | W0.1 | Done    | Product Studio UI over the W0 kernel.                                                                                      | Browser workflow loads/pastes supported COBOL, starts a BFF/orchestrator run, displays artifact-backed Java, build/test, evidence, progress, artifacts, and honest blocked states.                                                                                |
 | W0.2 | Done    | First productive AI-agent transformation loop.                                                                             | At least one small COBOL program is transformed through an orchestrator-steered, model-backed agent workflow on the Experience Learning Harness, with bounded repair, first learning signals, and deterministic verification/evidence.                            |
-| W0.3 | Planned | Deterministic-first multi-agent hardening (see [ADR 0003](../adr/0003-w0-3-deterministic-first-multi-agent-hardening.md)). | Product runs execute deterministic baseline steps first, invoke productive AI only through an explicit Orchestrator assist-decision gate, surface stricter assist/repair budgets, and preserve deterministic verification/evidence as the only path to `success`. |
+| W0.3 | In progress | Deterministic-first multi-agent hardening (see [ADR 0003](../adr/0003-w0-3-deterministic-first-multi-agent-hardening.md), [W0.3 workflow contract](../contracts/orchestrator-w03-workflow.md), [W0.3 reference runbook](../showcase/w0-3-reference-runbook.md)). | Product runs execute deterministic baseline steps first, invoke productive AI only through an explicit Orchestrator assist-decision gate, surface stricter assist/repair budgets, and preserve deterministic verification/evidence as the only path to `success`. |
 | W1   | Planned | Coverage and enterprise agentic expansion.                                                                                 | Broader customer-like COBOL coverage, stronger mainframe semantics, larger bounded agent-team patterns, richer Experience Learning, model-governance hardening, and broader corpus evidence.                                                                      |
 
 ### W0.3 Scope, Non-Goals, and Success Semantics
@@ -488,20 +488,23 @@ end-to-end:
 - Unsupported, blocked, failed, and incomplete states remain honest and
   distinguishable.
 
-**Documentation obligations still to land in W0.3.** The following canonical
-documents are expected to be added or refreshed by subsequent child issues
-under epic [#211](https://github.com/oscharko-dev/c2c-PreBeta/issues/211); they
-are intentionally out of scope for [#212](https://github.com/oscharko-dev/c2c-PreBeta/issues/212):
+**Documentation obligations status.** The canonical W0.3 documentation set
+under epic [#211](https://github.com/oscharko-dev/c2c-PreBeta/issues/211):
 
-- `docs/contracts/orchestrator-w03-workflow.md` — successor to the W0.2
-  workflow contract, owned by [#214](https://github.com/oscharko-dev/c2c-PreBeta/issues/214)
-  and [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222);
+- [`docs/contracts/orchestrator-w03-workflow.md`](../contracts/orchestrator-w03-workflow.md)
+  — successor to the W0.2 workflow contract, landed by
+  [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222) on top of
+  the incremental field-level updates contributed by
+  [#214](https://github.com/oscharko-dev/c2c-PreBeta/issues/214)–[#217](https://github.com/oscharko-dev/c2c-PreBeta/issues/217).
+- [`docs/showcase/w0-3-reference-runbook.md`](../showcase/w0-3-reference-runbook.md)
+  — runbook refresh for the hardened control model, landed by
+  [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222).
 - `docs/release/w0-3-release-gate.md` — W0.3 closure evidence package, owned by
-  [#224](https://github.com/oscharko-dev/c2c-PreBeta/issues/224);
-- `docs/showcase/w0-3-reference-runbook.md` — runbook refresh for the hardened
-  control model, owned by [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222);
+  [#224](https://github.com/oscharko-dev/c2c-PreBeta/issues/224) and not yet
+  landed.
 - W0.3 fixtures, integration tests, and browser acceptance documentation,
-  owned by [#223](https://github.com/oscharko-dev/c2c-PreBeta/issues/223).
+  owned by [#223](https://github.com/oscharko-dev/c2c-PreBeta/issues/223)
+  and not yet landed.
 
 This section is the canonical product-concept record of W0.3 and is consistent
 with [ADR 0003](../adr/0003-w0-3-deterministic-first-multi-agent-hardening.md).

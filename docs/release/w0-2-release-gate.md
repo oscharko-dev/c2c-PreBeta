@@ -13,7 +13,16 @@ acceptable.
 > W0.2 BFF contract: [w0.2-api-contract.md](../c2c-bff/w0.2-api-contract.md) ·
 > W0.2 acceptance fixtures: [w02-acceptance.md](../corpus/w02-acceptance.md) ·
 > Runbook companion: [w0-2-reference-runbook.md](../showcase/w0-2-reference-runbook.md) ·
-> W0.2 epic #164 closure evidence: [w0-2-epic-164.md](w0-2-epic-164.md).
+> W0.2 epic #164 closure evidence: [w0-2-epic-164.md](w0-2-epic-164.md) ·
+> W0.3 successor contract: [orchestrator-w03-workflow.md](../contracts/orchestrator-w03-workflow.md) ·
+> W0.3 runbook companion: [w0-3-reference-runbook.md](../showcase/w0-3-reference-runbook.md).
+>
+> As of W0.3 ([#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222)),
+> this script enforces the W0.3 hardening invariants too: budget shape
+> (`used + remaining == limit` for `repairBudget`, `assistBudget`, and
+> `modelInvocationBudget`) and the presence of `artifacts.assistDecision` and
+> `artifacts.budgetSummary` on non-blocked packs. The dedicated W0.3 closure
+> gate is owned by [#224](https://github.com/oscharko-dev/c2c-PreBeta/issues/224).
 
 ## Decision contract
 
