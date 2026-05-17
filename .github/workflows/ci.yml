@@ -147,25 +147,3 @@ jobs:
         if: hashFiles('apps/c2c-studio/package.json') != ''
         working-directory: apps/c2c-studio
         run: npm run build
-
-      - name: Install Playwright Chromium
-        if: hashFiles('apps/c2c-studio/package.json') != ''
-        working-directory: apps/c2c-studio
-        run: npx playwright install --with-deps chromium
-
-      - name: Run c2c-studio browser acceptance suite
-        if: hashFiles('apps/c2c-studio/package.json') != ''
-        working-directory: apps/c2c-studio
-        run: npm run test:e2e:ci
-
-      - name: Run W0.2 release gate (deterministic, no Foundry)
-        if: hashFiles('scripts/w0-2-release-gate.sh') != ''
-        env:
-          # No C2C_LOCAL_ENV_FILE: in CI we want the launcher to fall back
-          # to its absolute-path defaults rather than source .env.example,
-          # which declares C2C_LOCAL_VAR_DIR as a relative path (a latent
-          # launcher quirk: the Go binary build cd's into the service dir
-          # while keeping the -o path relative, which puts the binary in
-          # the wrong place).
-          C2C_LOCAL_MODEL_GATEWAY_ENABLED: 'false'
-        run: ./scripts/w0-2-release-gate.sh

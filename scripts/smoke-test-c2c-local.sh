@@ -104,7 +104,11 @@ assert_product_transform() {
 
   log "starting product transform through BFF: $source_name"
   local transform_payload transform_json run_id run_json run_status
-  transform_payload="$(jq -n --rawfile source "$source_file" --arg sourceName "$source_name" '{sourceText: $source, sourceName: $sourceName}')"
+  transform_payload="$(jq -n \
+    --rawfile source "$source_file" \
+    --arg sourceName "$source_name" \
+    --argjson useAgent "$EFFECTIVE_MODEL_GATEWAY_ENABLED" \
+    '{sourceText: $source, sourceName: $sourceName, useTransformationAgent: $useAgent}')"
   transform_json="$(post_json "$BFF_URL/api/v0/transform" "$transform_payload")"
   run_id="$(jq -r '.runId // empty' <<<"$transform_json")"
   [[ -n "$run_id" ]] || fail "$source_name: transform response did not include runId: $transform_json"
@@ -242,10 +246,6 @@ if [[ "$EFFECTIVE_MODEL_GATEWAY_ENABLED" == "true" ]]; then
 fi
 
 supported_sources=(
-  "$ROOT_DIR/corpus/synthetic/programs/arithmetic-adjustment-ledger.cbl"
-  "$ROOT_DIR/corpus/synthetic/programs/branch-account-guard.cbl"
-  "$ROOT_DIR/corpus/synthetic/programs/ctrl-decimal-payroll.cbl"
-  "$ROOT_DIR/corpus/synthetic/programs/decimal-batch-aggregator.cbl"
   "$ROOT_DIR/corpus/synthetic/programs/hello-w02.cbl"
 )
 

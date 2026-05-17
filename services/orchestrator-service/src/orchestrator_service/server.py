@@ -629,9 +629,15 @@ class OrchestratorService:
     def _run_state(self, run_id: str) -> JsonObject | None:
         try:
             return self.runner.gateway.get_run(run_id)
-        except Exception as exc:
-            if "404" in str(exc):
+        except HarnessFailure as exc:
+            if exc.status == 404:
                 return None
+            raise UpstreamServiceError("harness run status unavailable") from exc
+        except HttpClientError as exc:
+            if "failed with 404" in str(exc):
+                return None
+            raise UpstreamServiceError("harness run status unavailable") from exc
+        except Exception as exc:
             raise UpstreamServiceError("harness run status unavailable") from exc
 
     def _runs_list(self) -> list[JsonObject]:

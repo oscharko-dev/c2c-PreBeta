@@ -5,5 +5,6 @@ export interface TransformRequest {
   targetLanguage?: 'java';
   expectedOutput?: string;
   oracleInput?: string;
+  useTransformationAgent?: boolean;
   options?: Record<string, unknown>;
 }

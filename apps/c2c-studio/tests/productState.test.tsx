@@ -507,6 +507,48 @@ describe("Product State Derivation", () => {
       expect(result.message).toBe("gateway 502");
     });
 
+    it("does not mask a terminal blocked verdict behind unavailable artifact views", () => {
+      const state = makeState({
+        phase: "failed",
+        summary: makeSummary({
+          status: "failed",
+          finalClassification: "blocked",
+          failureCode: "model_policy_denied",
+          failureMessage: "policy denied",
+        }),
+        generated: makeGenerated({
+          productMode: "unavailable",
+          status: "incomplete",
+          missingArtifacts: ["generated-java"],
+        }),
+      });
+      const result = deriveProductState(state);
+      expect(result.state).toBe("blocked");
+      expect(result.failureCode).toBe("model_policy_denied");
+      expect(result.message).toBe("policy denied");
+    });
+
+    it("surfaces terminal incomplete evidence instead of upstream-unavailable", () => {
+      const state = makeState({
+        phase: "incomplete",
+        summary: makeSummary({
+          status: "failed",
+          finalClassification: "incomplete",
+          failureCode: "evidence_incomplete",
+          failureMessage: "evidence pack incomplete",
+        }),
+        evidence: makeEvidence({
+          productMode: "unavailable",
+          status: "incomplete",
+          missingArtifacts: ["agentTrajectories"],
+        }),
+      });
+      const result = deriveProductState(state);
+      expect(result.state).toBe("evidence-incomplete");
+      expect(result.failureCode).toBe("evidence_incomplete");
+      expect(result.message).toBe("evidence pack incomplete");
+    });
+
     it("maps agent_timeout failure code to failed state", () => {
       const state = makeState({
         phase: "failed",

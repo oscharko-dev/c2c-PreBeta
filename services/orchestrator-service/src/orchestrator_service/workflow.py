@@ -3748,13 +3748,13 @@ class W0WorkflowRunner:
             selected_role = None
             if detected_markers:
                 rationale = (
-                    f"no caller opt-in for productive Transformation Agent; "
+                    f"productive Transformation Agent is disabled for this run; "
                     f"deterministic baseline is the final candidate "
                     f"(detected markers ignored: {', '.join(detected_markers)})"
                 )
             else:
                 rationale = (
-                    "no caller opt-in for productive Transformation Agent; "
+                    "productive Transformation Agent is disabled for this run; "
                     "deterministic baseline is the final candidate"
                 )
 

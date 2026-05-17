@@ -20,6 +20,7 @@ import {
   type EvidenceClient,
   type HttpClient,
   type HttpRequestOptions,
+  type ModelGatewayClient,
   type OrchestratorClient,
   type UpstreamResponse,
 } from "./upstream";
@@ -309,6 +310,56 @@ function liveEvidence(): EvidenceClient {
     enabled: true,
     async getPack() {
       return { status: 200, body: { packId: "epk-live-1" } };
+    },
+  };
+}
+
+function availableModelGateway(): ModelGatewayClient {
+  return {
+    enabled: true,
+    async getHealth() {
+      return {
+        status: 200,
+        body: {
+          service: "model-gateway",
+          schema: "v0",
+          providers: ["test"],
+          activeModels: 1,
+          configured: {
+            mode: "test",
+            dataPolicy: "model-gateway",
+            invocationLedgerEnabled: "true",
+            harnessEventEmissionEnabled: "true",
+          },
+        },
+      };
+    },
+    async getModels() {
+      return {
+        status: 200,
+        body: [{ id: "test-model", displayName: "Test Model", provider: "test" }],
+      };
+    },
+    async getCapabilities() {
+      return {
+        status: 200,
+        body: {
+          schema: "v0",
+          service: "model-gateway-service",
+          status: "ok",
+          provider: "test",
+          policyId: "test-policy",
+          roles: [
+            {
+              role: "transformation",
+              status: "ok",
+              policyId: "test-policy",
+              availableModels: ["test-model"],
+              configuredModels: ["test-model"],
+            },
+          ],
+        },
+      };
     },
   };
 }
@@ -762,7 +813,11 @@ test("every shipped reference program is loadable and routes its source through 
         `${server.baseUrl}/api/v0/transform`,
         {
           method: "POST",
-          body: { sourceText: detail.cobolSource, programId: detail.programId },
+          body: {
+            sourceText: detail.cobolSource,
+            programId: detail.programId,
+            useTransformationAgent: false,
+          },
         },
       );
       assert.equal(
@@ -1491,6 +1546,7 @@ test("live generated endpoint never inlines upstream Java content", async () => 
     samples,
     orchestrator: orch,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -1967,6 +2023,7 @@ test("transform derives program id, calls orchestrator, and returns the full tra
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -1988,6 +2045,7 @@ test("transform derives program id, calls orchestrator, and returns the full tra
       targetLanguage: "java",
       expectedOutput: undefined,
       oracleInput: undefined,
+      useTransformationAgent: true,
     });
     assert.equal(runStore.list().length, 1);
 
@@ -2032,6 +2090,7 @@ test("transform uses a deterministic fallback program id when none is provided",
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -2104,6 +2163,7 @@ test("transform does not create a run when the orchestrator returns a non-2xx st
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: client,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -2168,6 +2228,7 @@ test("transform does not create a run when the orchestrator throws", async () =>
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: client,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -2195,6 +2256,7 @@ test("transform rejects oversize source text before calling the orchestrator", a
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -2257,7 +2319,10 @@ test("product transform calls only orchestrator URL, never capability endpoints"
   try {
     const transformed = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
-      body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. ISO01.\n" },
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. ISO01.\n",
+        useTransformationAgent: false,
+      },
     });
     assert.equal(transformed.status, 201);
 
@@ -4292,6 +4357,7 @@ test("POST /api/v0/transform rejects unsupported targetLanguage", async () => {
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -4319,6 +4385,7 @@ test("POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
@@ -4337,21 +4404,76 @@ test("POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
     assert.equal(calls.startTransformRun[0]?.targetLanguage, "java");
     assert.equal(calls.startTransformRun[0]?.expectedOutput, "HELLO WORLD\n");
     assert.equal(calls.startTransformRun[0]?.oracleInput, "");
-    // W0.3 (#213): with the Model Gateway unconfigured, the productive
-    // Transformation Agent must not be activated.
-    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, undefined);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, true);
   } finally {
     await server.close();
   }
 });
 
-test("POST /api/v0/transform does not implicitly activate the transformation agent when Model Gateway is enabled", async () => {
-  // W0.3 deterministic-first hardening (#213): Model Gateway availability is
-  // infrastructure, not a decision. The BFF must not opt the productive
-  // Transformation Agent in just because a gateway URL is configured. The
-  // explicit assist-decision gate that authorizes opt-in is owned by a
-  // separate W0.3 issue (#214); until then every product run starts
-  // deterministically regardless of gateway state.
+test("POST /api/v0/transform enables transformation-agent assist by default", async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      modelGatewayUrl: "http://gateway",
+    },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: "POST",
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        targetLanguage: "java",
+      },
+    });
+    assert.equal(response.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/transform rejects default AI assist when no model is available", async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: "POST",
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        targetLanguage: "java",
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(
+      (response.body as { failureCode: string }).failureCode,
+      "model_gateway_unavailable",
+    );
+    assert.equal(calls.startTransformRun.length, 0);
+    assert.equal(runStore.list().length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/transform forwards explicit transformation-agent opt-out", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
@@ -4372,11 +4494,38 @@ test("POST /api/v0/transform does not implicitly activate the transformation age
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         targetLanguage: "java",
+        useTransformationAgent: false,
       },
     });
     assert.equal(response.status, 201);
     assert.equal(calls.startTransformRun.length, 1);
-    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, undefined);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/transform rejects non-boolean transformation-agent opt-in", async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: "POST",
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        useTransformationAgent: "true",
+      },
+    });
+    assert.equal(response.status, 400);
+    assert.equal(calls.startTransformRun.length, 0);
   } finally {
     await server.close();
   }
@@ -4572,6 +4721,7 @@ test("transform 502 response carries a UI-safe failureCode and never leaks orche
     samples,
     orchestrator: failingOrchestrator,
     evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
     runStore,
   });
   const server = await startTestServer(handler);
