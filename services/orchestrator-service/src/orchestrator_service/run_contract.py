@@ -153,6 +153,7 @@ STEP_NORMALIZE_SOURCE = "normalize-source"
 STEP_PARSE_COBOL = "parse-cobol"
 STEP_GENERATE_IR = "generate-ir"
 STEP_GENERATE_JAVA = "generate-java"
+STEP_ASSIST_DECISION = "assist-decision"
 STEP_TRANSFORMATION_AGENT = "transformation-agent"
 STEP_COMPILE_TEST_JAVA = "compile-test-java"
 STEP_VERIFICATION_REPAIR_AGENT = "verification-repair-agent"
@@ -400,6 +401,120 @@ class WorkflowStateMachine:
 
 
 # ---------------------------------------------------------------------------
+# Assist decision (Issue #214 / W0.3-3)
+# ---------------------------------------------------------------------------
+
+# The assist-decision gate makes productive AI participation an explicit,
+# recorded Orchestrator decision rather than an inference from
+# ``agent_attempt_count > 0`` or from Model Gateway availability. The
+# Orchestrator records the decision on every productive run that reaches
+# the gate; the BFF surfaces it on the run-workflow endpoint so consumers
+# never have to infer AI activation indirectly.
+#
+# W0.3-3 deliberately ships a small, closed set of outcomes and reason
+# codes. Deterministic uncertainty-based activation criteria are owned by
+# Issue #215 (W0.3-4) and will extend ``ASSIST_REASON_CODES`` without
+# changing the contract shape.
+
+ASSIST_OUTCOME_REQUIRED = "assist_required"
+ASSIST_OUTCOME_NOT_REQUIRED = "assist_not_required"
+
+ASSIST_OUTCOMES: tuple[str, ...] = (
+    ASSIST_OUTCOME_REQUIRED,
+    ASSIST_OUTCOME_NOT_REQUIRED,
+)
+
+# Closed set of reason codes for the W0.3-3 baseline. Future waves extend
+# this tuple; consumers must treat any code not listed here as opaque
+# rather than rendering an unknown reason silently.
+ASSIST_REASON_CALLER_EXPLICIT_OPT_IN = "caller_explicit_opt_in"
+ASSIST_REASON_CALLER_DID_NOT_OPT_IN = "caller_did_not_opt_in"
+
+ASSIST_REASON_CODES: tuple[str, ...] = (
+    ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+    ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+)
+
+# Closed set of agent roles the gate may select. W0.3-3 only authorises
+# the productive Transformation Agent; the Verification/Repair Agent
+# continues to be activated by the bounded repair-budget loop and is not
+# part of this gate.
+ASSIST_AGENT_ROLE_TRANSFORMATION = "transformation_agent"
+
+ASSIST_AGENT_ROLES: tuple[str, ...] = (
+    ASSIST_AGENT_ROLE_TRANSFORMATION,
+)
+
+
+# noinspection PyClassHasNoInitInspection
+@dataclass(frozen=True)
+class AssistDecision:
+    """Explicit Orchestrator-owned decision about productive AI assistance.
+
+    Recorded on :class:`W02RunContract` so consumers can read whether
+    assist was activated, why, and against which budget without inferring
+    from agent attempts alone.
+    """
+
+    outcome: str
+    reason_code: str
+    decided_at: str
+    selected_agent_role: str | None = None
+    affected_artifact_refs: tuple[JsonObject, ...] = ()
+    repair_budget_snapshot: JsonObject | None = None
+    rationale: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome not in ASSIST_OUTCOMES:
+            raise ValueError(
+                f"unknown assist-decision outcome: {self.outcome!r}; "
+                f"allowed: {sorted(ASSIST_OUTCOMES)}"
+            )
+        if self.reason_code not in ASSIST_REASON_CODES:
+            raise ValueError(
+                f"unknown assist-decision reason code: {self.reason_code!r}; "
+                f"allowed: {sorted(ASSIST_REASON_CODES)}"
+            )
+        if (
+            self.selected_agent_role is not None
+            and self.selected_agent_role not in ASSIST_AGENT_ROLES
+        ):
+            raise ValueError(
+                f"unknown assist-decision agent role: {self.selected_agent_role!r}; "
+                f"allowed: {sorted(ASSIST_AGENT_ROLES)}"
+            )
+        if self.outcome == ASSIST_OUTCOME_REQUIRED and self.selected_agent_role is None:
+            raise ValueError(
+                "assist_required outcome requires a selected_agent_role"
+            )
+        if (
+            self.outcome == ASSIST_OUTCOME_NOT_REQUIRED
+            and self.selected_agent_role is not None
+        ):
+            raise ValueError(
+                "assist_not_required outcome must not carry a selected_agent_role"
+            )
+
+    def to_dict(self) -> JsonObject:
+        payload: JsonObject = {
+            "outcome": self.outcome,
+            "reasonCode": self.reason_code,
+            "decidedAt": self.decided_at,
+        }
+        if self.selected_agent_role is not None:
+            payload["selectedAgentRole"] = self.selected_agent_role
+        if self.affected_artifact_refs:
+            payload["affectedArtifactRefs"] = [
+                dict(ref) for ref in self.affected_artifact_refs
+            ]
+        if self.repair_budget_snapshot is not None:
+            payload["repairBudgetSnapshot"] = dict(self.repair_budget_snapshot)
+        if self.rationale is not None:
+            payload["rationale"] = self.rationale
+        return payload
+
+
+# ---------------------------------------------------------------------------
 # Run contract
 # ---------------------------------------------------------------------------
 
@@ -428,6 +543,7 @@ class W02RunContract:
     failure_code: str | None = None
     failure_message: str | None = None
     repair_attempts: list[JsonObject] = field(default_factory=list)
+    assist_decision: AssistDecision | None = None
     created_at: str = field(default_factory=_iso_now)
     updated_at: str = field(default_factory=_iso_now)
 
@@ -511,6 +627,23 @@ class W02RunContract:
             if entry.get("repairDecision") == "no_change"
         )
 
+    def record_assist_decision(self, decision: AssistDecision) -> AssistDecision:
+        """Record the W0.3 assist-decision gate result on the run contract.
+
+        Issue #214: every productive run that reaches the gate records an
+        explicit decision so consumers do not need to infer AI activation
+        from ``agent_attempt_count > 0`` or from Model Gateway state.
+        Subsequent recordings overwrite the previous decision (the gate
+        runs once per run today; future waves may re-evaluate).
+        """
+        if not isinstance(decision, AssistDecision):
+            raise TypeError(
+                "record_assist_decision requires an AssistDecision instance"
+            )
+        self.assist_decision = decision
+        self.touch()
+        return decision
+
     def set_generated_java_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.generated_java_ref = dict(ref) if ref else None
         self.touch()
@@ -572,6 +705,7 @@ class W02RunContract:
             "failureCode": self.failure_code,
             "failureMessage": self.failure_message,
             "repairAttempts": [dict(entry) for entry in self.repair_attempts],
+            "assistDecision": self.assist_decision.to_dict() if self.assist_decision else None,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         }

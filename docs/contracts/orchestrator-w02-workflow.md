@@ -109,6 +109,75 @@ A non-success run MUST carry exactly one failure code from this closed set:
 Any non-`success` classification **must** carry a `failureCode`; the
 contract refuses to finalise otherwise.
 
+## Assist-decision gate (W0.3 / Issue #214)
+
+The Orchestrator owns an explicit assist-decision gate that runs once per
+productive run, immediately after the deterministic baseline and before any
+productive agent step. The gate records an outcome and reason code on the run
+contract, persists the updated contract to the artifact store, and emits a
+Harness event so consumers do not have to infer AI activation from
+`agentAttemptCount > 0` or Model Gateway state.
+
+The gate is intentionally minimal in W0.3-3: it captures the *current*
+caller-opt-in semantics in a stable, recordable shape. Issue #215 (W0.3-4)
+extends the closed reason-code set with deterministic uncertainty criteria
+without changing the contract shape.
+
+### Contract shape
+
+The contract carries one additional field:
+
+```json
+"assistDecision": {
+  "outcome": "assist_required",
+  "reasonCode": "caller_explicit_opt_in",
+  "decidedAt": "2026-05-17T12:00:00Z",
+  "selectedAgentRole": "transformation_agent",
+  "affectedArtifactRefs": [
+    { "uri": "...", "sha256": "...", "kind": "generated-project-manifest" }
+  ],
+  "repairBudgetSnapshot": { "limit": 2, "used": 0, "remaining": 2 },
+  "rationale": "caller opted into productive Transformation Agent via useTransformationAgent=true"
+}
+```
+
+`assistDecision` is `null` for runs that never reach the gate (e.g., parse
+failed before the deterministic baseline).
+
+### Closed sets
+
+| Field | Values |
+|-------|--------|
+| `outcome` | `assist_required`, `assist_not_required` |
+| `reasonCode` | `caller_explicit_opt_in`, `caller_did_not_opt_in` |
+| `selectedAgentRole` | `transformation_agent`, or omitted when `outcome = assist_not_required` |
+
+Consumers MUST drop any value outside these closed sets rather than rendering
+it. The BFF enforces this on `GET /api/v0/runs/{runId}/workflow`.
+
+### Active step
+
+While the gate evaluates, the contract reports
+`activeStep = "assist-decision"`. The step is short-lived: the workflow
+records the decision, advances to either `transformation_agent_invoked`
+(when `outcome = assist_required`) or directly to
+`java_candidate_persisted` (when `outcome = assist_not_required`) and resets
+`activeStep` accordingly.
+
+### Harness event
+
+For every run that records a decision, the Orchestrator emits exactly one
+Harness event:
+
+```
+eventType = "orchestrator.workflow.assist_decision.<outcome>"
+```
+
+The event `payload.output` carries the full decision dictionary (the same
+shape as the `assistDecision` contract field). The Verification/Repair Agent
+loop remains governed by the bounded repair budget and is **not** part of this
+gate; that loop is the subject of subsequent W0.3 issues.
+
 ## Repair budget
 
 The W0.2 verification/repair loop is bounded by a configurable iteration

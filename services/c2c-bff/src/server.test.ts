@@ -3156,6 +3156,133 @@ test('GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
   }
 });
 
+test('GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate when present', async () => {
+  // W0.3 (#214): consumers must be able to read the assist decision (outcome,
+  // reason code, selected agent role, budget snapshot, affected artifacts)
+  // directly from the workflow envelope without inferring from
+  // ``agentAttemptCount`` or ``activeAgent``.
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        runId: 'live-run-2',
+        workflowId: 'w0-migration-v0',
+        programId: 'BRNCH01',
+        runStatus: 'in-progress',
+        status: 'complete',
+        source: 'live',
+        contract: {
+          currentState: 'transformation_agent_invoked',
+          activeStep: 'transformation-agent',
+          agentAttemptCount: 1,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          repairAttempts: [],
+          assistDecision: {
+            outcome: 'assist_required',
+            reasonCode: 'caller_explicit_opt_in',
+            decidedAt: '2026-05-17T12:00:00Z',
+            selectedAgentRole: 'transformation_agent',
+            affectedArtifactRefs: [
+              { sha256: 'a'.repeat(64), byteSize: 4096, kind: 'generated-project-manifest', path: 'baseline.json' },
+            ],
+            repairBudgetSnapshot: { limit: 2, used: 0, remaining: 2 },
+            rationale: 'caller opted in',
+          },
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+        contractRef: null,
+        missingArtifacts: [],
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    assert.equal(workflow.status, 200);
+    const body = workflow.body as { assistDecision: Record<string, unknown> | null };
+    assert.ok(body.assistDecision, 'assistDecision must be exposed on the workflow envelope');
+    assert.equal(body.assistDecision.outcome, 'assist_required');
+    assert.equal(body.assistDecision.reasonCode, 'caller_explicit_opt_in');
+    assert.equal(body.assistDecision.selectedAgentRole, 'transformation_agent');
+    assert.equal(body.assistDecision.decidedAt, '2026-05-17T12:00:00Z');
+    assert.equal(body.assistDecision.rationale, 'caller opted in');
+    assert.deepEqual(body.assistDecision.repairBudgetSnapshot, { limit: 2, used: 0, remaining: 2 });
+    const refs = body.assistDecision.affectedArtifactRefs as Array<{ sha256?: string; kind?: string }>;
+    assert.equal(refs.length, 1);
+    assert.equal(refs[0]?.kind, 'generated-project-manifest');
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcome', async () => {
+  // W0.3 (#214): the BFF must never surface an unrecognised assist-decision
+  // outcome to the UI. Any contract that carries an unknown outcome is
+  // sanitised to ``assistDecision: null`` so the UI cannot render an
+  // unknown reason silently.
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: 'complete',
+        contract: {
+          currentState: 'baseline_generation_attempted',
+          activeStep: 'assist-decision',
+          agentAttemptCount: 0,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          repairAttempts: [],
+          assistDecision: {
+            outcome: 'maybe_later',
+            reasonCode: 'caller_explicit_opt_in',
+            decidedAt: '2026-05-17T12:00:00Z',
+          },
+          finalClassification: null,
+          failureCode: null,
+          failureMessage: null,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: 'http://upstream' },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: 'POST',
+      body: { programId: 'BRNCH01' },
+    });
+    const startedBody = started.body as { runId: string };
+    const workflow = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`);
+    const body = workflow.body as { assistDecision: unknown };
+    assert.equal(body.assistDecision, null);
+  } finally {
+    await server.close();
+  }
+});
+
 test('GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary', async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);

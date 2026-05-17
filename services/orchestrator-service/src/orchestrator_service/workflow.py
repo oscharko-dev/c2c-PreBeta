@@ -89,9 +89,16 @@ from .run_contract import (
     STEP_GENERATE_JAVA as W02_STEP_GENERATE_JAVA,
     STEP_NORMALIZE_SOURCE as W02_STEP_NORMALIZE_SOURCE,
     STEP_PARSE_COBOL as W02_STEP_PARSE_COBOL,
+    STEP_ASSIST_DECISION as W02_STEP_ASSIST_DECISION,
     STEP_TRANSFORMATION_AGENT as W02_STEP_TRANSFORMATION_AGENT,
     STEP_VERIFICATION_REPAIR_AGENT as W02_STEP_VERIFICATION_REPAIR_AGENT,
     STEP_WRITE_EVIDENCE as W02_STEP_WRITE_EVIDENCE,
+    ASSIST_AGENT_ROLE_TRANSFORMATION,
+    ASSIST_OUTCOME_NOT_REQUIRED,
+    ASSIST_OUTCOME_REQUIRED,
+    ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+    ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+    AssistDecision,
     STATE_BASELINE_GENERATION_ATTEMPTED,
     STATE_BUILD_TEST_RUNNING,
     STATE_COBOL_PARSE_ATTEMPTED,
@@ -1703,6 +1710,24 @@ class W0WorkflowRunner:
             baseline_artifact_ref: JsonObject | None = generated_artifact_ref
             baseline_generated_project: Mapping[str, JsonValue] | None = generated_project
             agent_result: TransformationAgentResult | None = None
+
+            # Issue #214 (W0.3-3): the assist-decision gate. Every productive
+            # run that reaches the post-baseline boundary records an explicit
+            # Orchestrator-owned decision about whether productive AI assist
+            # is required, the reason code, the selected agent role, the
+            # affected artifacts, and the relevant repair-budget snapshot.
+            # Consumers must read the decision from the contract instead of
+            # inferring AI activation from ``agentAttemptCount > 0``.
+            #
+            # Issue #215 (W0.3-4) will extend the closed set of reason codes
+            # with deterministic uncertainty criteria; the contract shape is
+            # stable.
+            self._record_assist_decision(
+                context,
+                w02_contract,
+                baseline_artifact_ref=baseline_artifact_ref,
+                ir_output_ref=ir_output.output_ref,
+            )
 
             # Issue #169: when the requester opted into the productive
             # Transformation Agent, invoke it after the deterministic
@@ -3426,6 +3451,93 @@ class W0WorkflowRunner:
             output_ref=_build_reference(
                 f"urn:orchestrator/{context.run_id}/workflow-out",
                 {"message": message},
+            ),
+            policy_decision=POLICY_ALLOW,
+        )
+
+    def _record_assist_decision(
+        self,
+        context: W0RunContext,
+        contract: W02RunContract,
+        *,
+        baseline_artifact_ref: JsonObject | None,
+        ir_output_ref: DataReference,
+    ) -> AssistDecision:
+        """Evaluate, record, persist, and emit the W0.3 assist-decision gate.
+
+        Issue #214: the gate runs once per productive run, immediately after
+        the deterministic baseline and before any productive agent step.
+        Its result is recorded on the run contract, persisted to the
+        run artifact store, and emitted as a Harness event so consumers
+        never have to infer AI activation indirectly.
+
+        The W0.3-3 baseline only authorises explicit caller opt-in;
+        deterministic uncertainty criteria are owned by Issue #215.
+        """
+        contract.set_active_step(W02_STEP_ASSIST_DECISION)
+        affected_refs: tuple[JsonObject, ...] = ()
+        if baseline_artifact_ref is not None:
+            affected_refs = (dict(baseline_artifact_ref),)
+        if context.use_transformation_agent:
+            outcome = ASSIST_OUTCOME_REQUIRED
+            reason_code = ASSIST_REASON_CALLER_EXPLICIT_OPT_IN
+            selected_role: str | None = ASSIST_AGENT_ROLE_TRANSFORMATION
+            rationale = (
+                "caller opted into productive Transformation Agent via "
+                "useTransformationAgent=true"
+            )
+        else:
+            outcome = ASSIST_OUTCOME_NOT_REQUIRED
+            reason_code = ASSIST_REASON_CALLER_DID_NOT_OPT_IN
+            selected_role = None
+            rationale = (
+                "no caller opt-in for productive Transformation Agent; "
+                "deterministic baseline is the final candidate"
+            )
+        decision = AssistDecision(
+            outcome=outcome,
+            reason_code=reason_code,
+            decided_at=_iso_now(),
+            selected_agent_role=selected_role,
+            affected_artifact_refs=affected_refs,
+            repair_budget_snapshot=contract.repair_budget.to_dict(),
+            rationale=rationale,
+        )
+        contract.record_assist_decision(decision)
+        self._persist_w02_contract(context, contract)
+        self._emit_assist_decision_event(context, decision, ir_output_ref)
+        return decision
+
+    def _emit_assist_decision_event(
+        self,
+        context: W0RunContext,
+        decision: AssistDecision,
+        input_ref: DataReference,
+    ) -> None:
+        """Emit the Harness event recording the assist-decision gate.
+
+        Event type: ``orchestrator.workflow.assist_decision.<outcome>`` where
+        ``<outcome>`` is one of the closed-set
+        :data:`run_contract.ASSIST_OUTCOMES` values.
+        """
+        payload = decision.to_dict()
+        self._post_event(
+            context.run_id,
+            event_type=f"orchestrator.workflow.assist_decision.{decision.outcome}",
+            capability=self.config.service_name,
+            actor=self.config.service_name,
+            data_class=DATA_CLASS_CONTROL,
+            status="updating",
+            state_transition=STATE_TRANSITION_FLOW,
+            input_payload={
+                "runId": context.run_id,
+                "workflowId": context.workflow_id,
+            },
+            output_payload=payload,
+            input_ref=input_ref,
+            output_ref=_build_reference(
+                f"urn:orchestrator/{context.run_id}/assist-decision",
+                payload,
             ),
             policy_decision=POLICY_ALLOW,
         )

@@ -868,3 +868,146 @@ class W02WorkflowIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+class AssistDecisionTests(unittest.TestCase):
+    """W0.3-3 (#214): contract-level AssistDecision dataclass behaviour."""
+
+    def test_assist_required_serialises_full_payload(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_AGENT_ROLE_TRANSFORMATION,
+            ASSIST_OUTCOME_REQUIRED,
+            ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+            AssistDecision,
+        )
+
+        decision = AssistDecision(
+            outcome=ASSIST_OUTCOME_REQUIRED,
+            reason_code=ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+            decided_at="2026-05-17T00:00:00Z",
+            selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
+            affected_artifact_refs=({"uri": "urn:baseline", "sha256": "abc"},),
+            repair_budget_snapshot={"limit": 2, "used": 0, "remaining": 2},
+            rationale="caller opted in",
+        )
+
+        payload = decision.to_dict()
+
+        self.assertEqual(payload["outcome"], "assist_required")
+        self.assertEqual(payload["reasonCode"], "caller_explicit_opt_in")
+        self.assertEqual(payload["decidedAt"], "2026-05-17T00:00:00Z")
+        self.assertEqual(payload["selectedAgentRole"], "transformation_agent")
+        self.assertEqual(payload["rationale"], "caller opted in")
+        self.assertEqual(
+            payload["affectedArtifactRefs"],
+            [{"uri": "urn:baseline", "sha256": "abc"}],
+        )
+        self.assertEqual(
+            payload["repairBudgetSnapshot"],
+            {"limit": 2, "used": 0, "remaining": 2},
+        )
+
+    def test_assist_not_required_omits_agent_role(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_OUTCOME_NOT_REQUIRED,
+            ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+            AssistDecision,
+        )
+
+        decision = AssistDecision(
+            outcome=ASSIST_OUTCOME_NOT_REQUIRED,
+            reason_code=ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+            decided_at="2026-05-17T00:00:00Z",
+        )
+
+        payload = decision.to_dict()
+
+        self.assertEqual(payload["outcome"], "assist_not_required")
+        self.assertEqual(payload["reasonCode"], "caller_did_not_opt_in")
+        self.assertNotIn(
+            "selectedAgentRole",
+            payload,
+            "assist_not_required must not carry a selected agent role",
+        )
+        self.assertNotIn("affectedArtifactRefs", payload)
+        self.assertNotIn("repairBudgetSnapshot", payload)
+        self.assertNotIn("rationale", payload)
+
+    def test_rejects_unknown_outcome(self) -> None:
+        from orchestrator_service.run_contract import AssistDecision
+
+        with self.assertRaises(ValueError):
+            AssistDecision(
+                outcome="maybe",
+                reason_code="caller_did_not_opt_in",
+                decided_at="2026-05-17T00:00:00Z",
+            )
+
+    def test_rejects_unknown_reason_code(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_OUTCOME_NOT_REQUIRED,
+            AssistDecision,
+        )
+
+        with self.assertRaises(ValueError):
+            AssistDecision(
+                outcome=ASSIST_OUTCOME_NOT_REQUIRED,
+                reason_code="vibes_said_so",
+                decided_at="2026-05-17T00:00:00Z",
+            )
+
+    def test_assist_required_without_agent_role_rejected(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_OUTCOME_REQUIRED,
+            ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+            AssistDecision,
+        )
+
+        with self.assertRaises(ValueError):
+            AssistDecision(
+                outcome=ASSIST_OUTCOME_REQUIRED,
+                reason_code=ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+                decided_at="2026-05-17T00:00:00Z",
+            )
+
+    def test_assist_not_required_with_agent_role_rejected(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_AGENT_ROLE_TRANSFORMATION,
+            ASSIST_OUTCOME_NOT_REQUIRED,
+            ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+            AssistDecision,
+        )
+
+        with self.assertRaises(ValueError):
+            AssistDecision(
+                outcome=ASSIST_OUTCOME_NOT_REQUIRED,
+                reason_code=ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+                decided_at="2026-05-17T00:00:00Z",
+                selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
+            )
+
+    def test_contract_to_dict_includes_assist_decision_when_recorded(self) -> None:
+        from orchestrator_service.run_contract import (
+            ASSIST_AGENT_ROLE_TRANSFORMATION,
+            ASSIST_OUTCOME_REQUIRED,
+            ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+            AssistDecision,
+            new_run_contract,
+        )
+
+        contract = new_run_contract(
+            run_id="run-x",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            source_ref={"uri": "urn:src"},
+        )
+        self.assertIsNone(contract.to_dict()["assistDecision"])
+        decision = AssistDecision(
+            outcome=ASSIST_OUTCOME_REQUIRED,
+            reason_code=ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+            decided_at="2026-05-17T00:00:00Z",
+            selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
+        )
+        contract.record_assist_decision(decision)
+        payload = contract.to_dict()
+        self.assertIsNotNone(payload["assistDecision"])
+        self.assertEqual(payload["assistDecision"]["outcome"], "assist_required")
+
