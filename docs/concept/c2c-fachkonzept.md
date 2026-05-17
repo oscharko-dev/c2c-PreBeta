@@ -431,13 +431,80 @@ current gaps:
 
 ## Wave Roadmap
 
-| Wave | Status | Purpose | Success Gate |
-|------|--------|---------|--------------|
-| W0 | Done | Deterministic enterprise kernel and evidence backbone. | Service mesh produces compiled Java, build/test result, Harness/Experience Learning telemetry, and complete Evidence Pack for the W0 corpus without required model calls. |
-| W0.1 | Done | Product Studio UI over the W0 kernel. | Browser workflow loads/pastes supported COBOL, starts a BFF/orchestrator run, displays artifact-backed Java, build/test, evidence, progress, artifacts, and honest blocked states. |
-| W0.2 | Done | First productive AI-agent transformation loop. | At least one small COBOL program is transformed through an orchestrator-steered, model-backed agent workflow on the Experience Learning Harness, with bounded repair, first learning signals, and deterministic verification/evidence. |
-| W0.3 | Planned | Deterministic-first multi-agent hardening. | Product runs execute deterministic baseline steps first, invoke productive AI only through an explicit Orchestrator assist-decision gate, surface stricter assist/repair budgets, and preserve deterministic verification/evidence as the only path to `success`. |
-| W1 | Planned | Coverage and enterprise agentic expansion. | Broader customer-like COBOL coverage, stronger mainframe semantics, larger bounded agent-team patterns, richer Experience Learning, model-governance hardening, and broader corpus evidence. |
+| Wave | Status  | Purpose                                                                                                                    | Success Gate                                                                                                                                                                                                                                                      |
+| ---- | ------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0   | Done    | Deterministic enterprise kernel and evidence backbone.                                                                     | Service mesh produces compiled Java, build/test result, Harness/Experience Learning telemetry, and complete Evidence Pack for the W0 corpus without required model calls.                                                                                         |
+| W0.1 | Done    | Product Studio UI over the W0 kernel.                                                                                      | Browser workflow loads/pastes supported COBOL, starts a BFF/orchestrator run, displays artifact-backed Java, build/test, evidence, progress, artifacts, and honest blocked states.                                                                                |
+| W0.2 | Done    | First productive AI-agent transformation loop.                                                                             | At least one small COBOL program is transformed through an orchestrator-steered, model-backed agent workflow on the Experience Learning Harness, with bounded repair, first learning signals, and deterministic verification/evidence.                            |
+| W0.3 | Planned | Deterministic-first multi-agent hardening (see [ADR 0003](../adr/0003-w0-3-deterministic-first-multi-agent-hardening.md)). | Product runs execute deterministic baseline steps first, invoke productive AI only through an explicit Orchestrator assist-decision gate, surface stricter assist/repair budgets, and preserve deterministic verification/evidence as the only path to `success`. |
+| W1   | Planned | Coverage and enterprise agentic expansion.                                                                                 | Broader customer-like COBOL coverage, stronger mainframe semantics, larger bounded agent-team patterns, richer Experience Learning, model-governance hardening, and broader corpus evidence.                                                                      |
+
+### W0.3 Scope, Non-Goals, and Success Semantics
+
+W0.3 is the **deterministic-first multi-agent hardening wave** for c2c. It does
+not broaden the platform by adding more free-form AI behavior. It makes the
+existing W0.2 multi-agent behavior stricter, clearer, and more trustworthy:
+deterministic baseline always runs first, productive AI participation is
+activated only through an explicit Orchestrator-owned assist-decision gate,
+assist and repair budgets are bounded and visible, and Evidence Pack and Studio
+semantics distinguish "AI participated" from "deterministic verification
+succeeded".
+
+**Non-goals.** W0.3 explicitly does not:
+
+- introduce an LLM global orchestrator;
+- allow the Harness to decide workflow order;
+- replace deterministic services with agent logic;
+- broaden target languages beyond Java;
+- deliver broad enterprise COBOL coverage by itself;
+- introduce autonomous Experience Learning decisioning;
+- claim arbitrary customer production readiness.
+
+**Success semantics.** W0.3 is complete when the repository provides,
+end-to-end:
+
+1. a product path where deterministic baseline processing always runs first;
+2. an explicit assist-decision step owned by the Orchestrator;
+3. no implicit productive transformation-agent activation from model-gateway
+   availability alone;
+4. stricter assist and repair budget visibility in contracts, artifacts, and
+   UI;
+5. evidence and release gates that distinguish deterministic baseline
+   completion, AI assist activation, deterministic verification result, and
+   final product classification;
+6. a Studio experience that shows agent participation causally, not
+   decoratively;
+7. passing deterministic W0/W0.1/W0.2 safety gates with no weakened success
+   semantics.
+
+**Architecture invariants** mandatory for every W0.3 child issue:
+
+- The Orchestrator remains deterministic and remains the only authoritative
+  workflow controller.
+- The Harness remains infrastructure, governance, telemetry, and Experience
+  Learning substrate, not a hidden orchestrator.
+- Productive model calls remain routed only through the Model Gateway.
+- Success remains impossible without deterministic build/test/evidence gates.
+- Unsupported, blocked, failed, and incomplete states remain honest and
+  distinguishable.
+
+**Documentation obligations still to land in W0.3.** The following canonical
+documents are expected to be added or refreshed by subsequent child issues
+under epic [#211](https://github.com/oscharko-dev/c2c-PreBeta/issues/211); they
+are intentionally out of scope for [#212](https://github.com/oscharko-dev/c2c-PreBeta/issues/212):
+
+- `docs/contracts/orchestrator-w03-workflow.md` — successor to the W0.2
+  workflow contract, owned by [#214](https://github.com/oscharko-dev/c2c-PreBeta/issues/214)
+  and [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222);
+- `docs/release/w0-3-release-gate.md` — W0.3 closure evidence package, owned by
+  [#224](https://github.com/oscharko-dev/c2c-PreBeta/issues/224);
+- `docs/showcase/w0-3-reference-runbook.md` — runbook refresh for the hardened
+  control model, owned by [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222);
+- W0.3 fixtures, integration tests, and browser acceptance documentation,
+  owned by [#223](https://github.com/oscharko-dev/c2c-PreBeta/issues/223).
+
+This section is the canonical product-concept record of W0.3 and is consistent
+with [ADR 0003](../adr/0003-w0-3-deterministic-first-multi-agent-hardening.md).
 
 ## Development Rule
 

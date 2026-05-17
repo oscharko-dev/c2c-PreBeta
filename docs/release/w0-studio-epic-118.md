@@ -36,37 +36,37 @@ The Issue #118 Studio epic is satisfied when the current `dev` branch provides:
 
 The W0.1 implementation children are complete on `dev`:
 
-| Issue | Closure evidence |
-|-------|------------------|
-| [#119](https://github.com/oscharko-dev/c2c-PreBeta/issues/119) | Initial product frontend and BFF runtime contract. |
-| [#137](https://github.com/oscharko-dev/c2c-PreBeta/issues/137) | Corrective replacement of the earlier scaffold with Next.js/Tailwind. |
-| [#121](https://github.com/oscharko-dev/c2c-PreBeta/issues/121) | Tailwind design system and Studio visual tokens. |
-| [#122](https://github.com/oscharko-dev/c2c-PreBeta/issues/122) | IDE-grade shell layout and responsive workbench. |
-| [#123](https://github.com/oscharko-dev/c2c-PreBeta/issues/123) | Source workspace tree and editable COBOL editor. |
-| [#124](https://github.com/oscharko-dev/c2c-PreBeta/issues/124) | Typed BFF API client and transformation run store. |
-| [#125](https://github.com/oscharko-dev/c2c-PreBeta/issues/125) | Generated Java editor and target artifact inspector. |
-| [#126](https://github.com/oscharko-dev/c2c-PreBeta/issues/126) | Build/Test, Evidence Pack, and run artifact panels. |
-| [#127](https://github.com/oscharko-dev/c2c-PreBeta/issues/127) | Experience Learning, Harness, and Model Gateway observability. |
-| [#128](https://github.com/oscharko-dev/c2c-PreBeta/issues/128) | Product-grade unavailable, unsupported, failure, and incomplete states. |
+| Issue                                                          | Closure evidence                                                         |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| [#119](https://github.com/oscharko-dev/c2c-PreBeta/issues/119) | Initial product frontend and BFF runtime contract.                       |
+| [#137](https://github.com/oscharko-dev/c2c-PreBeta/issues/137) | Corrective replacement of the earlier scaffold with Next.js/Tailwind.    |
+| [#121](https://github.com/oscharko-dev/c2c-PreBeta/issues/121) | Tailwind design system and Studio visual tokens.                         |
+| [#122](https://github.com/oscharko-dev/c2c-PreBeta/issues/122) | IDE-grade shell layout and responsive workbench.                         |
+| [#123](https://github.com/oscharko-dev/c2c-PreBeta/issues/123) | Source workspace tree and editable COBOL editor.                         |
+| [#124](https://github.com/oscharko-dev/c2c-PreBeta/issues/124) | Typed BFF API client and transformation run store.                       |
+| [#125](https://github.com/oscharko-dev/c2c-PreBeta/issues/125) | Generated Java editor and target artifact inspector.                     |
+| [#126](https://github.com/oscharko-dev/c2c-PreBeta/issues/126) | Build/Test, Evidence Pack, and run artifact panels.                      |
+| [#127](https://github.com/oscharko-dev/c2c-PreBeta/issues/127) | Experience Learning, Harness, and Model Gateway observability.           |
+| [#128](https://github.com/oscharko-dev/c2c-PreBeta/issues/128) | Product-grade unavailable, unsupported, failure, and incomplete states.  |
 | [#129](https://github.com/oscharko-dev/c2c-PreBeta/issues/129) | Accessibility, keyboard navigation, resizing, and performance hardening. |
-| [#130](https://github.com/oscharko-dev/c2c-PreBeta/issues/130) | Browser acceptance and visual-regression coverage. |
+| [#130](https://github.com/oscharko-dev/c2c-PreBeta/issues/130) | Browser acceptance and visual-regression coverage.                       |
 
 ## Repository Evidence
 
-| Evidence | Location |
-|----------|----------|
-| Studio app shell | [`apps/c2c-studio/src/components/workbench/WorkbenchShell.tsx`](../../apps/c2c-studio/src/components/workbench/WorkbenchShell.tsx) |
-| Source workspace and COBOL editor | [`apps/c2c-studio/src/components/source/SourceWorkspaceTree.tsx`](../../apps/c2c-studio/src/components/source/SourceWorkspaceTree.tsx), [`apps/c2c-studio/src/components/source/CobolEditorPane.tsx`](../../apps/c2c-studio/src/components/source/CobolEditorPane.tsx) |
-| Typed BFF client and runtime config | [`apps/c2c-studio/src/lib/apiClient.ts`](../../apps/c2c-studio/src/lib/apiClient.ts), [`apps/c2c-studio/src/hooks/useC2cApi.ts`](../../apps/c2c-studio/src/hooks/useC2cApi.ts) |
-| Run state and artifact hydration | [`apps/c2c-studio/src/stores/transformationRun.tsx`](../../apps/c2c-studio/src/stores/transformationRun.tsx), [`apps/c2c-studio/src/hooks/useRunPolling.ts`](../../apps/c2c-studio/src/hooks/useRunPolling.ts) |
-| Generated Java artifact browser | [`apps/c2c-studio/src/hooks/useGeneratedArtifacts.ts`](../../apps/c2c-studio/src/hooks/useGeneratedArtifacts.ts), [`apps/c2c-studio/src/components/generated/GeneratedJavaEditorPane.tsx`](../../apps/c2c-studio/src/components/generated/GeneratedJavaEditorPane.tsx), [`apps/c2c-studio/src/components/generated/TargetJavaInspector.tsx`](../../apps/c2c-studio/src/components/generated/TargetJavaInspector.tsx) |
-| Build, evidence, artifact, progress, and learning panels | [`apps/c2c-studio/src/components/run/`](../../apps/c2c-studio/src/components/run/), [`apps/c2c-studio/src/components/observability/`](../../apps/c2c-studio/src/components/observability/) |
-| Product state model | [`apps/c2c-studio/src/types/state.ts`](../../apps/c2c-studio/src/types/state.ts) |
-| BFF product API and OpenAPI contract | [`services/c2c-bff/src/server.ts`](../../services/c2c-bff/src/server.ts), [`services/c2c-bff/openapi.yaml`](../../services/c2c-bff/openapi.yaml) |
-| Browser acceptance and visual baseline | [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts), [`apps/c2c-studio/playwright.config.ts`](../../apps/c2c-studio/playwright.config.ts) |
-| Accessibility, keyboard, resize, state, and contract tests | [`apps/c2c-studio/tests/`](../../apps/c2c-studio/tests/) |
-| Local product launcher and smoke gate | [`scripts/start-c2c-local.sh`](../../scripts/start-c2c-local.sh), [`scripts/smoke-test-c2c-local.sh`](../../scripts/smoke-test-c2c-local.sh) |
-| CI browser/unit gates | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml), [`.github/workflows/platform-baseline.yml`](../../.github/workflows/platform-baseline.yml) |
+| Evidence                                                   | Location                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Studio app shell                                           | [`apps/c2c-studio/src/components/workbench/WorkbenchShell.tsx`](../../apps/c2c-studio/src/components/workbench/WorkbenchShell.tsx)                                                                                                                                                                                                                                                                                   |
+| Source workspace and COBOL editor                          | [`apps/c2c-studio/src/components/source/CobolEditorPane.tsx`](../../apps/c2c-studio/src/components/source/CobolEditorPane.tsx)                                                                                                                                                                                                                                                                                       |
+| Typed BFF client and runtime config                        | [`apps/c2c-studio/src/lib/apiClient.ts`](../../apps/c2c-studio/src/lib/apiClient.ts), [`apps/c2c-studio/src/hooks/useC2cApi.ts`](../../apps/c2c-studio/src/hooks/useC2cApi.ts)                                                                                                                                                                                                                                       |
+| Run state and artifact hydration                           | [`apps/c2c-studio/src/stores/transformationRun.tsx`](../../apps/c2c-studio/src/stores/transformationRun.tsx), [`apps/c2c-studio/src/hooks/useRunPolling.ts`](../../apps/c2c-studio/src/hooks/useRunPolling.ts)                                                                                                                                                                                                       |
+| Generated Java artifact browser                            | [`apps/c2c-studio/src/hooks/useGeneratedArtifacts.ts`](../../apps/c2c-studio/src/hooks/useGeneratedArtifacts.ts), [`apps/c2c-studio/src/components/generated/GeneratedJavaEditorPane.tsx`](../../apps/c2c-studio/src/components/generated/GeneratedJavaEditorPane.tsx), [`apps/c2c-studio/src/components/generated/TargetJavaInspector.tsx`](../../apps/c2c-studio/src/components/generated/TargetJavaInspector.tsx) |
+| Build, evidence, artifact, progress, and learning panels   | [`apps/c2c-studio/src/components/run/`](../../apps/c2c-studio/src/components/run/), [`apps/c2c-studio/src/components/observability/`](../../apps/c2c-studio/src/components/observability/)                                                                                                                                                                                                                           |
+| Product state model                                        | [`apps/c2c-studio/src/types/state.ts`](../../apps/c2c-studio/src/types/state.ts)                                                                                                                                                                                                                                                                                                                                     |
+| BFF product API and OpenAPI contract                       | [`services/c2c-bff/src/server.ts`](../../services/c2c-bff/src/server.ts), [`services/c2c-bff/openapi.yaml`](../../services/c2c-bff/openapi.yaml)                                                                                                                                                                                                                                                                     |
+| Browser acceptance and visual baseline                     | [`apps/c2c-studio/tests/e2e/workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/workflow.spec.ts), [`apps/c2c-studio/playwright.config.ts`](../../apps/c2c-studio/playwright.config.ts)                                                                                                                                                                                                                               |
+| Accessibility, keyboard, resize, state, and contract tests | [`apps/c2c-studio/tests/`](../../apps/c2c-studio/tests/)                                                                                                                                                                                                                                                                                                                                                             |
+| Local product launcher and smoke gate                      | [`scripts/start-c2c-local.sh`](../../scripts/start-c2c-local.sh), [`scripts/smoke-test-c2c-local.sh`](../../scripts/smoke-test-c2c-local.sh)                                                                                                                                                                                                                                                                         |
+| CI browser/unit gates                                      | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml), [`.github/workflows/platform-baseline.yml`](../../.github/workflows/platform-baseline.yml)                                                                                                                                                                                                                                                             |
 
 ## Re-Evidencing Commands
 

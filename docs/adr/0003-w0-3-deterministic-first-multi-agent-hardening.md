@@ -1,7 +1,9 @@
 # ADR 0003: W0.3 Deterministic-First Multi-Agent Hardening
 
 **Date**: 2026-05-17
-**Status**: Proposed
+**Status**: Accepted
+**Issue**: [#211](https://github.com/oscharko-dev/c2c-PreBeta/issues/211)
+**Related issues**: [#212](https://github.com/oscharko-dev/c2c-PreBeta/issues/212)
 
 ## Context
 
