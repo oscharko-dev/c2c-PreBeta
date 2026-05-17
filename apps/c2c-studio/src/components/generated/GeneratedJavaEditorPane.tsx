@@ -217,7 +217,7 @@ export function GeneratedJavaEditorPane() {
           </div>
         ) : !selectedFilePath ? (
           <div className="flex h-full items-center justify-center p-6 text-center text-text-dim">
-            <p>Select a file from the Target Java Inspector to view its content.</p>
+            <p>Select a file from the Java Project Explorer to view its content.</p>
           </div>
         ) : unavailableFiles.has(selectedFilePath) ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-text-dim">

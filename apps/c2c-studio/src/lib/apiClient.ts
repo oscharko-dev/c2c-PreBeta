@@ -28,7 +28,7 @@ import {
   W02RepairDecision,
   RunFinalClassification,
 } from '../types/api';
-import { Sample, SampleDetail, TransformRequest } from '../types/reference-program';
+import { TransformRequest } from '../types/transform-request';
 
 const LOCAL_OVERRIDE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
@@ -611,39 +611,6 @@ function isRunArtifactsViewPayload(payload: unknown): payload is RunArtifactsVie
   );
 }
 
-function isSample(payload: unknown): payload is Sample {
-  if (!isRecord(payload)) {
-    return false;
-  }
-
-  return (
-    typeof payload.programId === 'string' &&
-    typeof payload.title === 'string' &&
-    typeof payload.description === 'string' &&
-    typeof payload.knownDivergenceAtW0 === 'boolean' &&
-    typeof payload.supportedInProductMode === 'boolean' &&
-    isStringArray(payload.w0Subset) &&
-    (payload.oracleMode === null ||
-      payload.oracleMode === 'cobol-runtime' ||
-      payload.oracleMode === 'synthetic-fixture') &&
-    isStringArray(payload.knownLimitations)
-  );
-}
-
-function isSampleDetail(payload: unknown): payload is SampleDetail {
-  if (!isSample(payload)) {
-    return false;
-  }
-
-  const detail = payload as SampleDetail;
-  return (
-    typeof detail.cobolSource === 'string' &&
-    typeof detail.cobolSourcePath === 'string' &&
-    typeof detail.expectedOutput === 'string' &&
-    typeof detail.expectedOutputPath === 'string'
-  );
-}
-
 function parseHealthResponse(payload: unknown): ApiResult<HealthResponse> {
   if (!isRecord(payload)) {
     return createFailure('Contract error: health payload must be a JSON object.', {
@@ -725,32 +692,6 @@ async function fetchJson<T>(
       { kind: 'network', cause },
     );
   }
-}
-
-function parseSamplesResponse(payload: unknown): ApiResult<Sample[]> {
-  if (!Array.isArray(payload)) {
-    return createFailure('Contract error: samples payload must be an array.', {
-      kind: 'contract',
-      body: payload,
-    });
-  }
-  if (!payload.every(isSample)) {
-    return createFailure('Contract error: samples payload contains invalid entries.', {
-      kind: 'contract',
-      body: payload,
-    });
-  }
-  return { ok: true, data: payload };
-}
-
-function parseSampleDetailResponse(payload: unknown): ApiResult<SampleDetail> {
-  if (!isSampleDetail(payload)) {
-    return createFailure('Contract error: sample detail payload has missing or invalid fields.', {
-      kind: 'contract',
-      body: payload,
-    });
-  }
-  return { ok: true, data: payload };
 }
 
 function parseTransformResponse(payload: unknown): ApiResult<TransformResponse> {
@@ -912,8 +853,6 @@ function parseHarnessReady(payload: unknown): ApiResult<HarnessReady> {
 export const apiClient = {
   getHealth: () => fetchJson('/api/v0/health', parseHealthResponse),
   getMode: () => fetchJson('/api/v0/mode', parseModeResponse),
-  getSamples: () => fetchJson('/api/v0/samples', parseSamplesResponse),
-  getSampleDetail: (programId: string) => fetchJson(`/api/v0/samples/${encodeURIComponent(programId)}`, parseSampleDetailResponse),
   transform: (request: TransformRequest) => 
     fetchJson('/api/v0/transform', parseTransformResponse, {
       method: 'POST',

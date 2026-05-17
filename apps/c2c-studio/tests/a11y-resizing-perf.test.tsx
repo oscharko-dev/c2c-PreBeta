@@ -7,17 +7,6 @@ vi.mock('../src/hooks/useC2cApi', () => ({
   useC2cApi: vi.fn(),
 }));
 
-vi.mock('../src/hooks/useReferencePrograms', () => ({
-  useReferencePrograms: vi.fn(() => ({
-    programs: [
-      { programId: 'P1', title: 'Test Prog 1', supportedInProductMode: true, knownLimitations: [] },
-      { programId: 'P2', title: 'Test Prog 2', supportedInProductMode: false, knownLimitations: [] }
-    ],
-    isLoading: false,
-    error: null,
-  })),
-}));
-
 describe('A11y, Keyboard, Resizing, and Performance Hardening', () => {
   it('supports keyboard resizing on the target inspector separator', async () => {
     sessionStorage.clear();
@@ -37,8 +26,8 @@ describe('A11y, Keyboard, Resizing, and Performance Hardening', () => {
 
     render(<WorkbenchShell />);
 
-    const targetInspector = screen.getByLabelText('Target Java Inspector');
-    const resizeHandle = screen.getByLabelText('Resize Target Inspector');
+    const targetInspector = screen.getByLabelText('Java Project Explorer');
+    const resizeHandle = screen.getByLabelText('Resize Java Project Explorer');
 
     expect(targetInspector).toHaveStyle({ '--target-inspector-width': '288px' });
     expect(resizeHandle).toHaveAttribute('aria-controls', 'target-java-inspector-panel');
@@ -101,14 +90,13 @@ describe('A11y, Keyboard, Resizing, and Performance Hardening', () => {
     const startButton = screen.getByRole('button', { name: 'Start Transformation' });
     expect(startButton).toBeDisabled(); // Because no program is selected initially
 
-    const tree = screen.getByRole('tree', { name: 'Reference Programs' });
+    const tree = screen.getByRole('tree', { name: 'COBOL source files' });
     expect(tree).toBeInTheDocument();
 
     const { getAllByRole } = within(tree);
     const items = getAllByRole('treeitem');
-    expect(items).toHaveLength(2);
-    expect(items[0]).not.toHaveAttribute('aria-disabled', 'true');
-    expect(items[1]).toHaveAttribute('aria-disabled', 'true');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('Verifies ARIA roles for tabs and panels', () => {

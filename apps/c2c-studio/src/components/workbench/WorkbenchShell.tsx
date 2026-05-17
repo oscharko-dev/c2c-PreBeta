@@ -8,7 +8,6 @@ import { GeneratedArtifactsProvider } from '../../hooks/useGeneratedArtifacts';
 import { AppTopBar } from './AppTopBar';
 import { ActivityBar } from './ActivityBar';
 import { SecondaryStripe } from './SecondaryStripe';
-import { SourceWorkspacePanel } from './SourceWorkspacePanel';
 import { SplitEditorArea } from './SplitEditorArea';
 import { TargetJavaInspector } from '../generated/TargetJavaInspector';
 import { BottomWorkbench } from './BottomWorkbench';
@@ -34,17 +33,16 @@ export function WorkbenchShell() {
                 Skip to transformation workbench
               </a>
               <AppTopBar apiState={apiState} />
-              <div className="relative flex flex-1 overflow-hidden">
+              <div className="relative flex min-h-0 flex-1 overflow-hidden">
                 <ActivityBar />
                 <SecondaryStripe />
-                <div className="flex flex-1 flex-col min-w-0">
-                  <div className="relative flex flex-1 overflow-hidden">
-                    <SourceWorkspacePanel />
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <div className="relative flex min-h-0 flex-1 overflow-hidden">
                     <SplitEditorArea />
-                    <TargetJavaInspector />
                   </div>
                   <BottomWorkbench />
                 </div>
+                <TargetJavaInspector />
                 <RightObservabilityStripe />
               </div>
               <StatusBar apiState={apiState} />

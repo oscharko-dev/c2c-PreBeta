@@ -32,15 +32,15 @@ export function TargetJavaInspector() {
   return (
     <aside
       id="target-java-inspector-panel"
-      className="absolute bottom-0 right-0 top-0 z-20 flex h-full w-64 shrink-0 flex-col overflow-hidden bg-bg-2 shadow-lg lg:relative lg:z-auto lg:w-[var(--target-inspector-width)] lg:shadow-none group"
-      aria-label="Target Java Inspector"
+      className="absolute bottom-0 right-0 top-0 z-20 flex w-64 shrink-0 flex-col overflow-hidden bg-bg-2 shadow-lg lg:relative lg:z-auto lg:w-[var(--target-inspector-width)] lg:self-stretch lg:shadow-none group"
+      aria-label="Java Project Explorer"
       style={{ '--target-inspector-width': `${size}px` } as React.CSSProperties}
     >
       {/* Resize Handle */}
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize Target Inspector"
+        aria-label="Resize Java Project Explorer"
         aria-controls="target-java-inspector-panel"
         aria-valuemin={minSize}
         aria-valuemax={maxSize}
@@ -56,7 +56,7 @@ export function TargetJavaInspector() {
       />
 
       <div className="flex items-center px-4 h-10 border-b border-line-2 font-medium text-xs text-text uppercase tracking-wider shrink-0 ml-1">
-        Target Java Inspector
+        Java Project Explorer
       </div>
       
       {artifactState === 'idle' && (
