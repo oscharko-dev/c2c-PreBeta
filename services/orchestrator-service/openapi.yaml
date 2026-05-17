@@ -252,12 +252,12 @@ paths:
       summary: Retrieve the W0.2 workflow contract for a run (Issue #166)
       description: >
         Returns the Orchestrator-owned W0.2 run contract: current state,
-        state history, active step, agent attempt count, repair budget,
-        generated-java/build-test/evidence-pack references, final
-        classification, and (when not successful) the canonical failure
-        code and human-readable message. The contract is the source of
-        truth that the BFF, UI, agent, and evidence-service consumers use
-        to render and audit the workflow.
+        state history, active step, agent attempt count, repair/assist/model
+        invocation budgets, assist decision, generated-java/build-test/
+        evidence-pack references, final classification, and (when not
+        successful) the canonical failure code and human-readable message.
+        The contract is the source of truth that the BFF, UI, agent, and
+        evidence-service consumers use to render and audit the workflow.
       operationId: getRunWorkflowContract
       parameters:
         - in: path
@@ -380,7 +380,7 @@ components:
       type: object
       required: [uri, sha256, byteSize, mimeType, kind, createdBy, createdAt, runId, workflowId, path, name]
       properties:
-        uri: { type: string, description: file:// URI of the persisted artifact }
+        uri: { type: string, description: "file:// URI of the persisted artifact" }
         sha256: { type: string, description: SHA-256 over the exact bytes persisted }
         byteSize: { type: integer, minimum: 0 }
         mimeType: { type: string }
@@ -536,7 +536,8 @@ components:
       description: >
         W0.2 workflow contract (Issue #166). The Orchestrator owns this
         document; the Harness records the state-change events but does not
-        decide transitions.
+        decide transitions. W0.3 extends the same shape with explicit assist
+        decisions and visible budgets.
       properties:
         schemaVersion: { type: string, enum: [v0] }
         runId: { type: string }
@@ -575,6 +576,10 @@ components:
           minimum: 0
         repairBudget:
           $ref: "#/components/schemas/W02RepairBudget"
+        assistBudget:
+          $ref: "#/components/schemas/W03AssistBudget"
+        modelInvocationBudget:
+          $ref: "#/components/schemas/W03ModelInvocationBudget"
         generatedJavaRef:
           oneOf:
             - type: object
@@ -616,6 +621,10 @@ components:
         repairAttempts:
           type: array
           items: { $ref: "#/components/schemas/W02RepairAttempt" }
+        assistDecision:
+          oneOf:
+            - $ref: "#/components/schemas/W03AssistDecision"
+            - type: 'null'
         failureMessage:
           oneOf:
             - type: string
@@ -672,3 +681,61 @@ components:
         limit: { type: integer, minimum: 1, maximum: 3 }
         used: { type: integer, minimum: 0 }
         remaining: { type: integer, minimum: 0 }
+    W03AssistBudget:
+      type: object
+      required: [limit, used, remaining]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 3 }
+        used: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+    W03ModelInvocationBudget:
+      type: object
+      required: [limit, used, remaining]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 20 }
+        used: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+    W03AssistDecision:
+      type: object
+      required: [outcome, reasonCode, decidedAt]
+      properties:
+        outcome:
+          type: string
+          enum: [assist_required, assist_not_required]
+        reasonCode:
+          type: string
+          enum:
+            - semantic_ir_bounded_ambiguity
+            - translation_unsupported_repairable
+            - baseline_open_assumptions
+            - deterministic_candidate_low_confidence
+            - caller_explicit_opt_in
+            - caller_did_not_opt_in
+            - assist_budget_exhausted
+        decidedAt: { type: string, format: date-time }
+        selectedAgentRole:
+          oneOf:
+            - type: string
+              enum: [transformation_agent]
+            - type: 'null'
+        affectedArtifactRefs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        repairBudgetSnapshot:
+          oneOf:
+            - $ref: "#/components/schemas/W02RepairBudget"
+            - type: 'null'
+        assistBudgetSnapshot:
+          oneOf:
+            - $ref: "#/components/schemas/W03AssistBudget"
+            - type: 'null'
+        modelInvocationBudgetSnapshot:
+          oneOf:
+            - $ref: "#/components/schemas/W03ModelInvocationBudget"
+            - type: 'null'
+        rationale:
+          oneOf:
+            - type: string
+            - type: 'null'

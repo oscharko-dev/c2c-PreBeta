@@ -51,4 +51,5 @@ reads, and ledger reads remain unauthenticated for W0 local inspection.
 - Run transitions are explicit and stateful for `starting`, `updating`, `completed`, and `failed`.
 - Event envelopes are persisted in JSONL (`data/harness-events-v0.jsonl` by default) and include stable `runId`/`stepId`.
 - Event envelopes are guaranteed for capability registration, MCP registration, run state changes, and authenticated external service ingestion via `POST /v0/events`.
-- Local sample ledger output is available as `docs/agentic-harness-core/harness-events-v0.jsonl`.
+- Local event output is written to `data/harness-events-v0.jsonl` unless the
+  runtime configuration overrides the path.

@@ -9,8 +9,6 @@
 # harness events into experience-learning, and emits a scorecard.
 #
 # Issue: #16 (W0-14)
-# Runbook: docs/showcase/w0-reference-runbook.md
-# Release gate: docs/release/w0-release-gate.md
 
 set -euo pipefail
 
@@ -648,7 +646,7 @@ run_program() {
   validationOk="$(jq -r '.validation.ok // .ok // false' "$evidenceValidated")"
   packStatus="$(jq -r '.status // "unknown"' "$evidenceValidated")"
 
-  # Export the manifest for diffability/inclusion in the showcase artifact set.
+  # Export the manifest for diffability and evidence inspection.
   local exportBody
   exportBody="$(jq -n --arg dest "$packId" '{format:"directory", destination:$dest}')"
   local evidenceExported="$outDir/15-evidence-exported.json"

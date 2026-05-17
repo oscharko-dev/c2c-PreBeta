@@ -83,5 +83,5 @@ unless an inline Golden Master is provided.
   `true-golden-master-mismatch`, or `skipped-no-execution`.
 - `outputRef`: a hash-stamped reference to the canonical result JSON.
 
-See [`docs/build-test-runner-service/README.md`](../../docs/build-test-runner-service/README.md)
-for a worked example and local verification commands.
+The executable examples are the service tests under `src/test/`; local
+verification is `./scripts/java-check.sh` from the repository root.

@@ -79,7 +79,7 @@
         "expectedFinalClassification": {
           "type": "string",
           "enum": ["success", "blocked"],
-          "description": "Run-contract finalClassification the orchestrator MUST report when this fixture is executed end-to-end. Aligns with orchestrator-w02-workflow.md."
+          "description": "Run-contract finalClassification the orchestrator MUST report when this fixture is executed end-to-end."
         },
         "expectedFailureCode": {
           "type": "string",

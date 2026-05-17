@@ -20,13 +20,6 @@ for d in "${REQUIRED_DIRS[@]}"; do
 
 echo "Validated service directories."
 
-if [ ! -f "docs/platform/w0-artifact-naming.md" ]; then
-  echo "Missing docs/platform/w0-artifact-naming.md" >&2
-  exit 1
-fi
-
-echo "Validated W0 artifact naming docs."
-
 python3 scripts/check_model_governance.py --worktree
 
 echo "Validated model governance scan."
@@ -104,7 +97,6 @@ for f in \
   services/evidence-service/Dockerfile \
   services/evidence-service/openapi.yaml \
   services/evidence-service/README.md \
-  docs/evidence-service/README.md \
   docs/evidence-service/sample-evidence-pack-manifest.json \
   fixtures/golden-master/index.json \
   schemas/semantic-ir-v0.json \

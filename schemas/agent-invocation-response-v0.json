@@ -47,7 +47,7 @@
     "failureCode": {
       "type": "string",
       "minLength": 1,
-      "description": "Required when status != success. MUST match one of the failure codes the Orchestrator accepts (see orchestrator-w02-workflow.md)."
+      "description": "Required when status != success. MUST match one of the failure codes accepted by the Orchestrator run contract."
     },
     "failureMessage": {
       "type": "string",

@@ -4,10 +4,11 @@ Experience Learning Harness · Open Source · Open Weight · EU Sovereignty
 
 Think Big, Start Small.
 
-This repository is the W0/W0.1/W0.2 product foundation for a polyglot service
-mesh that prepares and validates COBOL-to-code migrations. The implemented
-product path is intentionally constrained, deterministic-first, and
-reproducible; W0.2 adds the first productive AI-agent transformation loop.
+This repository is the W0/W0.1/W0.2 foundation and current W0.3 hardening line
+for a polyglot service mesh that prepares and validates COBOL-to-code
+migrations. The implemented product path is intentionally constrained,
+deterministic-first, and reproducible; W0.2 added the first productive AI-agent
+transformation loop and W0.3 hardens explicit assist decisions.
 Deterministic capabilities and model-backed agents are not separate product
 paths: both run through the global Orchestrator, which is a deterministic state
 machine rather than an LLM.
@@ -24,31 +25,39 @@ value. Later LLM-based Team Leads or Planner Agents may coordinate specialist
 agents inside an Orchestrator-approved step, but they never replace the global
 Orchestrator and never bypass deterministic build/test/evidence gates.
 
-Canonical concept and roadmap:
+Minimal concept and roadmap:
 
 - [c2c Fachkonzept](docs/concept/c2c-fachkonzept.md)
 - [Development workflow governance](docs/governance/development-workflow.md)
-- [W0 release gate](docs/release/w0-release-gate.md)
-- [W0.1 Studio closure evidence](docs/release/w0-studio-epic-118.md)
-- [W0.2 release gate](docs/release/w0-2-release-gate.md)
-- [W0.2 reference runbook](docs/showcase/w0-2-reference-runbook.md)
+- `scripts/w0-reference-run.sh`
+- `scripts/w0-2-release-gate.sh`
 - [W0.3 orchestrator workflow contract](docs/contracts/orchestrator-w03-workflow.md)
-- [W0.3 reference runbook](docs/showcase/w0-3-reference-runbook.md)
 
-## W0 Repository Architecture
+## Repository Architecture
 
-The W0 architecture is organized as a microservice repository with one service skeleton per supported runtime:
+The product path is a deterministic-first capability mesh behind the BFF and
+Studio:
 
-- `services/java/w0-service` (Java 21 + Maven)
-- `services/cobol-parser-service` (Java 21 + Maven, W0 COBOL S0/S1 parser)
-- `services/semantic-ir-service` (Java 21 + Maven, Semantic IR v0 normalizer)
-- `services/go/w0-service` (Go 1.22 + Modules)
-- `services/agentic-harness-core` (Go control-plane for registries and run-state)
-- `services/python/w0-service` (Python 3.12 + stdlib tests)
-- `services/typescript/w0-service` (TypeScript + Node 20)
+- `apps/c2c-studio` is the current Next.js Studio UI.
+- `apps/c2c-ui` is the older static reference workbench still served by the BFF.
+- `services/c2c-bff` is the browser boundary.
+- `services/orchestrator-service` owns run sequencing, assist decisions,
+  budgets, repair loops, and final classification.
+- `services/cobol-parser-service`, `services/semantic-ir-service`,
+  `services/target-java-generation-service`,
+  `services/build-test-runner-service`, and `services/evidence-service` are the
+  deterministic proof path.
+- `services/agentic-harness-core`, `services/experience-learning-service`, and
+  `services/go/model-gateway-service` provide registry, policy, ledgers,
+  learning signals, and governed model access.
+- `libs/c2c-target-java-runtime` is linked by generated Java projects.
+- `services/java/w0-service`, `services/go/w0-service`,
+  `services/python/w0-service`, and `services/typescript/w0-service` remain
+  language baseline services for the W0 platform checks.
 
-W0 remains **Java-first for platform orchestration**, while every additional target language must follow the
-`target-generator contract` defined in this repository (scripts, folder layout, artifact naming, and CI checks).
+W0 remains Java-first for the target runtime. Target-generation compatibility
+is enforced by service code, schemas, runtime metadata, and tests, not by a
+separate copied contract document.
 
 ## Bootstrap (Local)
 
@@ -202,7 +211,7 @@ Launcher overrides are documented in `.env.example`:
 | W0   | Done    | Deterministic COBOL-to-Java enterprise kernel: parser, Semantic IR, Java generation, build/test, evidence, Harness, Experience Learning telemetry, and no required model call.                                                                                                                                                                                                                                                                          |
 | W0.1 | Done    | Next.js/Tailwind c2c Studio: editable COBOL, BFF-backed transformation run, generated Java artifact view, build/test, evidence, artifacts, and honest blocked states.                                                                                                                                                                                                                                                                                   |
 | W0.2 | Done    | First productive AI transformation loop on the Experience Learning Harness: orchestrator-steered Transformation and Verification/Repair Agents, Model Gateway/Foundry calls, bounded repair, first read-only learning signals, deterministic verification/evidence gate, and an executable release gate at [`scripts/w0-2-release-gate.sh`](scripts/w0-2-release-gate.sh).                                                                              |
-| W0.3 | In progress | Deterministic-first multi-agent hardening: explicit assist-decision semantics in the Orchestrator, no implicit productive agent activation from infrastructure availability, stronger assist/repair budgets, clearer Evidence Pack lineage, and Studio-visible causal agent participation while deterministic verification/evidence remains the only path to success (see [ADR 0003](docs/adr/0003-w0-3-deterministic-first-multi-agent-hardening.md), [W0.3 workflow contract](docs/contracts/orchestrator-w03-workflow.md), [W0.3 reference runbook](docs/showcase/w0-3-reference-runbook.md)). |
+| W0.3 | In progress | Deterministic-first multi-agent hardening: explicit assist decisions, no implicit productive agent activation from model availability, stricter budgets, and Evidence/UI lineage while deterministic verification remains the only path to success. See [ADR 0003](docs/adr/0003-w0-3-deterministic-first-multi-agent-hardening.md) and [W0.3 workflow contract](docs/contracts/orchestrator-w03-workflow.md). |
 
 The W0/W0.1 product can transform supported W0 COBOL programs and selected
 small custom sources that stay inside the implemented subset. It must not be
@@ -235,7 +244,9 @@ Examples:
 - `w0-service-java-v0.1.0-7f3c2a1-20260514T101010Z`
 - `w0-service-python-v0.1.0-7f3c2a1-20260514T101010Z`
 
-The canonical version source is `artifacts/build-metadata.json`, produced by the CI scripts.
+The local convention is produced by `scripts/build-metadata.sh`. Build and run
+artifacts for product-mode runs are materialized under `var/c2c-local/` by the
+launcher and Orchestrator.
 
 ## Repo layout map
 
@@ -244,13 +255,31 @@ The canonical version source is `artifacts/build-metadata.json`, produced by the
   workflows/
     ci.yml                 # foundational pull checks
     platform-baseline.yml  # language, supply-chain and artifact gates
+    secret-scan.yml         # credential-pattern guard
+apps/
+  c2c-studio/
+  c2c-ui/
 services/
-  go/w0-service/
-  java/w0-service/
   cobol-parser-service/
   semantic-ir-service/
+  target-java-generation-service/
+  build-test-runner-service/
+  evidence-service/
+  orchestrator-service/
+  c2c-bff/
+  agentic-harness-core/
+  experience-learning-service/
+  go/model-gateway-service/
+  go/w0-service/
+  java/w0-service/
   python/w0-service/
   typescript/w0-service/
+libs/
+  c2c-target-java-runtime/
+config/
+corpus/
+fixtures/
+schemas/
 scripts/
   bootstrap.sh
   ci-checks.sh
@@ -262,10 +291,13 @@ scripts/
   secret-scan.sh
   build-metadata.sh
 docs/
+  adr/
+  configuration/
+  contracts/
   concept/
   corpus/
+  evidence-service/
   governance/
-  adr/
 ```
 
 ## Safety constraints

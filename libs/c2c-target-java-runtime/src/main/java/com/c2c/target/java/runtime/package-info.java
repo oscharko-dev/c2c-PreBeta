@@ -11,7 +11,6 @@
  * semantic assumptions tracked in the IR.
  * <p>
  * The runtime is consumed by code emitted through the
- * {@code target-generator-contract-v0} (see
- * {@code docs/contracts/target-generator-contract-v0.md}).
+ * {@code target-generator-contract-v0}.
  */
 package com.c2c.target.java.runtime;
