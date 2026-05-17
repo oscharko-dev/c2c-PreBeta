@@ -578,7 +578,7 @@ class W02RunContractShapeTests(unittest.TestCase):
             "model_policy_denied",
             "agent_timeout",
             # Issue #167 extends the closed set with one additional code for
-            # invalid agent I/O contract output. The orchestrator-w02-workflow
+            # invalid agent I/O contract output. The orchestrator run contract
             # contract doc lists the full set.
             "agent_contract_invalid",
             "java_generation_failed",
@@ -1480,4 +1480,3 @@ class DeterministicUncertaintyReasonCodesTests(unittest.TestCase):
                 decided_at="2026-05-17T00:00:00Z",
                 selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
             )
-

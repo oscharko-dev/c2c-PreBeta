@@ -5,8 +5,8 @@ COBOL via the c2c semantic IR) link against this library for COBOL-compatible
 primitives: fixed-point decimal, working-storage fields, class- and relational
 conditions, and an open-assumption registry.
 
-This runtime implements the requirements of
-[`docs/contracts/target-generator-contract-v0.md`](../../docs/contracts/target-generator-contract-v0.md).
+Generated projects identify this runtime through the
+`target-generator-contract-v0` coordinate.
 
 ## Coordinates
 
@@ -56,10 +56,9 @@ declared dependency is JUnit 5 in test scope.
 ## Java-first now, multi-target later
 
 W0 ships only the Java target. Rust, Go, and Python targets are explicitly
-out of scope for this wave but the contract is written so they can be added
-without changing the IR or refactoring the existing target. See
-[`docs/target-java-runtime/README.md`](../../docs/target-java-runtime/README.md)
-for the architecture rationale.
+out of scope for this wave. Any later target must prove compatibility through
+schemas, generator tests, runtime metadata, and deterministic build/test
+evidence.
 
 ## Documented W0 simplifications
 

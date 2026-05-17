@@ -117,7 +117,5 @@ refactoring hot paths.
 
 ## Sample manifest
 
-A worked W0 example lives at
-[`docs/evidence-service/sample-evidence-pack-manifest.json`](../../docs/evidence-service/sample-evidence-pack-manifest.json),
-along with documentation of the W0 limitations in
-[`docs/evidence-service/README.md`](../../docs/evidence-service/README.md).
+A worked W0 fixture lives at
+[`docs/evidence-service/sample-evidence-pack-manifest.json`](../../docs/evidence-service/sample-evidence-pack-manifest.json).

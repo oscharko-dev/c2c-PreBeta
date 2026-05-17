@@ -4,10 +4,9 @@ W0 capability service that turns a validated Semantic IR v0 document into a
 self-contained Java Maven project depending on
 [`c2c-target-java-runtime`](../../libs/c2c-target-java-runtime).
 
-The service implements the
-[target-generator-contract-v0](../../docs/contracts/target-generator-contract-v0.md):
-it validates IR schema version, refuses to emit on blocker assumptions, embeds
-runtime coordinates in the generated `pom.xml`, and writes an
+The service implements `target-generator-contract-v0`: it validates IR schema
+version, refuses to emit on blocker assumptions, embeds runtime coordinates in
+the generated `pom.xml`, and writes an
 `src/main/resources/c2c-trace.json` traceability index keyed by file path to
 IR node ids.
 

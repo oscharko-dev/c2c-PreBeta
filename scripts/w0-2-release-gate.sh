@@ -4,8 +4,7 @@
 # End-to-end verification that the W0.2 agentic COBOL → Java path is
 # production-ready on this branch. The gate starts the local product stack,
 # submits the W0.2 acceptance fixture(s), waits for the agentic workflow to
-# complete, and asserts every contract item from
-# docs/release/w0-2-release-gate.md:
+# complete, and asserts the W0.2 product gate:
 #
 #   1. Studio, BFF, Orchestrator, Model Gateway, Harness, Evidence are healthy.
 #   2. The BFF is the only browser-visible backend boundary.
