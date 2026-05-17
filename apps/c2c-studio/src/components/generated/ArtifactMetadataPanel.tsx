@@ -62,7 +62,7 @@ export function ArtifactMetadataPanel({ details }: ArtifactMetadataPanelProps) {
       )}
 
       {details.unsupportedFeatures && details.unsupportedFeatures.length > 0 && (
-        <div className="mt-2 text-warning">
+        <div className="mt-2 text-warn">
           <div className="text-xs font-medium uppercase tracking-wider mb-1">Unsupported Features</div>
           <ul className="list-disc list-inside text-xs pl-4">
             {details.unsupportedFeatures.map(uf => <li key={uf}>{uf}</li>)}

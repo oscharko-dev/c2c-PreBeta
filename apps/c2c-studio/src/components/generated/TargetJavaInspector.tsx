@@ -50,8 +50,8 @@ export function TargetJavaInspector() {
         onTouchStart={startResize}
         onKeyDown={startResize}
         className={cn(
-          "absolute left-0 top-0 bottom-0 hidden w-1 cursor-col-resize hover:bg-accent hover:w-1 focus-visible:w-1 focus-visible:bg-accent outline-none z-10 transition-colors delay-100 lg:block",
-          isResizing ? "bg-accent w-1" : "bg-line"
+          "absolute -left-3 top-0 bottom-0 hidden w-6 cursor-col-resize outline-none z-10 lg:block before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:transition-colors hover:before:bg-accent focus-visible:before:bg-accent",
+          isResizing ? "before:bg-accent" : "before:bg-line"
         )}
       />
 
@@ -73,7 +73,7 @@ export function TargetJavaInspector() {
       )}
 
       {artifactState === 'unsupported' && (
-        <div className="flex-1 p-4 text-sm text-warning ml-1">
+        <div className="flex-1 p-4 text-sm text-warn ml-1">
           <p>Unsupported features present.</p>
         </div>
       )}

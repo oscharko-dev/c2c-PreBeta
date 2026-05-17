@@ -75,9 +75,21 @@ describe('AgentActivityPanel', () => {
 
   it('renders active agent label, description, attempt count, and active step', () => {
     useTransformationRunMock.mockReturnValue({
-      state: { ...baseState, phase: 'running', workflow: makeWorkflow({ agentAttemptCount: 2 }) },
+      state: {
+        ...baseState,
+        phase: 'running',
+        workflow: makeWorkflow({
+          agentAttemptCount: 2,
+          generatedJavaRef: { sha256: 'a'.repeat(64), byteSize: 128, kind: 'generated-java' },
+        }),
+      },
     });
     render(<AgentActivityPanel emptyState={{ title: 'Empty', message: 'Empty' }} />);
+    const status = screen.getByTestId('agent-activity-workflow-status');
+    expect(within(status).getByText('agent_running')).toBeDefined();
+    expect(within(status).getByText(/no invocation record yet/)).toBeDefined();
+    const artifactRefs = screen.getByTestId('agent-activity-artifact-refs');
+    expect(within(artifactRefs).getByText(/generated-java/)).toBeDefined();
     const activeAgent = screen.getByTestId('agent-activity-active-agent');
     expect(within(activeAgent).getByText('Transformation Agent')).toBeDefined();
     expect(within(activeAgent).getByText(/generate-java/)).toBeDefined();
@@ -129,6 +141,7 @@ describe('AgentActivityPanel', () => {
     });
     render(<AgentActivityPanel emptyState={{ title: 'Empty', message: 'Empty' }} />);
     const list = screen.getByTestId('agent-activity-repair-attempts');
+    expect(screen.getByTestId('agent-activity-workflow-status').textContent).toContain('1 invocation record observed');
     expect(within(list).getByText('Repair attempts (2)')).toBeDefined();
     expect(within(list).getByText('Attempt #1')).toBeDefined();
     expect(within(list).getByText('Proposed candidate')).toBeDefined();

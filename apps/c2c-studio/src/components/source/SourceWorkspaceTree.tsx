@@ -101,46 +101,45 @@ export function SourceWorkspaceTree() {
   }
 
   return (
-    <div className="flex-1 overflow-auto" role="tree" aria-label="Reference Programs">
-      <div className="py-2">
-        {visiblePrograms.map((program, index) => (
-          <div
+    <div className="flex-1 overflow-auto py-2" role="tree" aria-label="Reference Programs">
+      {visiblePrograms.map((program, index) => {
+        const label = program.title || program.programId;
+        const unavailableReason = !program.supportedInProductMode
+          ? `Unavailable in product mode.${program.knownLimitations.length > 0 ? ` ${program.knownLimitations[0]}` : ''}`
+          : undefined;
+
+        return (
+          <TreeRow
             key={program.programId}
-            className={!program.supportedInProductMode ? 'opacity-60' : ''}
-          >
-            <TreeRow
-              ref={(node) => {
-                if (node) {
-                  rowRefs.current.set(program.programId, node);
-                } else {
-                  rowRefs.current.delete(program.programId);
-                }
-              }}
-              label={program.title || program.programId}
-              type="file"
-              active={loadedProgramId === program.programId}
-              disabled={!program.supportedInProductMode}
-              statusVariant={program.supportedInProductMode ? 'success' : 'blocked'}
-              tabIndex={focusedProgramId === program.programId || (!focusedProgramId && index === 0) ? 0 : -1}
-              onFocus={() => setFocusedProgramId(program.programId)}
-              onKeyDown={(event) => handleTreeKeyDown(event, index)}
-              onActivate={
-                program.supportedInProductMode
-                  ? () => {
-                      void handleProgramClick(program.programId, true);
-                    }
-                  : undefined
+            ref={(node) => {
+              if (node) {
+                rowRefs.current.set(program.programId, node);
+              } else {
+                rowRefs.current.delete(program.programId);
               }
-            />
-            {!program.supportedInProductMode ? (
-              <p className="px-4 pb-2 text-xs text-text-dim">
-                Unavailable in product mode.
-                {program.knownLimitations.length > 0 ? ` ${program.knownLimitations[0]}` : ''}
-              </p>
-            ) : null}
-          </div>
-        ))}
-      </div>
+            }}
+            label={label}
+            description={unavailableReason}
+            type="file"
+            active={loadedProgramId === program.programId}
+            disabled={!program.supportedInProductMode}
+            statusVariant={program.supportedInProductMode ? 'success' : 'blocked'}
+            tabIndex={focusedProgramId === program.programId || (!focusedProgramId && index === 0) ? 0 : -1}
+            className={!program.supportedInProductMode ? 'opacity-60' : undefined}
+            aria-label={unavailableReason ? `${label}. ${unavailableReason}` : label}
+            title={unavailableReason}
+            onFocus={() => setFocusedProgramId(program.programId)}
+            onKeyDown={(event) => handleTreeKeyDown(event, index)}
+            onActivate={
+              program.supportedInProductMode
+                ? () => {
+                    void handleProgramClick(program.programId, true);
+                  }
+                : undefined
+            }
+          />
+        );
+      })}
     </div>
   );
 }

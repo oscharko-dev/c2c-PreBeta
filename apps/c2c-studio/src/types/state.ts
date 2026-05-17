@@ -272,16 +272,19 @@ export function deriveProductState(runState: TransformationRunState): StateConte
   if (runState.phase === 'completed') {
     // Issue #173: the Studio claims "success" only when the BFF classifies
     // the run as success AND build/test and evidence agree. For runs that
-    // predate the workflow contract (e.g. diagnostic-fixture runs without
-    // finalClassification) we accept the artifact-level agreement as the
-    // same gate — both routes converge on the same verdict so we do not
-    // need a separate legacy state.
+    // predate the workflow contract, artifact agreement alone is not enough
+    // to claim a product success verdict.
     const buildTestOk = buildTest?.status === 'ok';
     const evidenceOk = evidence?.status === 'complete';
     const bffConfirmedSuccess = finalClassification === 'success';
-    const artifactConfirmedSuccess = finalClassification === null && buildTestOk && evidenceOk;
-    if ((bffConfirmedSuccess && buildTestOk && evidenceOk) || artifactConfirmedSuccess) {
+    if (bffConfirmedSuccess && buildTestOk && evidenceOk) {
       return { state: 'success' };
+    }
+    if (finalClassification === null && buildTestOk && evidenceOk) {
+      return {
+        state: 'failed',
+        message: 'BFF final classification is unavailable; verified success cannot be claimed.',
+      };
     }
     // Completed without success agreement: surface the most specific
     // artifact-level reason if any, else fall back to a generic failed

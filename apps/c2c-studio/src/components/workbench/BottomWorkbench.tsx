@@ -51,10 +51,9 @@ export function BottomWorkbench() {
         onTouchStart={startResize}
         onKeyDown={startResize}
         className={cn(
-          "absolute left-0 right-0 top-0 h-1 cursor-row-resize hover:bg-accent hover:h-1 focus-visible:h-1 focus-visible:bg-accent outline-none z-10 transition-colors delay-100",
-          isResizing ? "bg-accent h-1" : "bg-line"
+          "absolute -top-3 left-0 right-0 h-6 cursor-row-resize outline-none z-10 before:absolute before:left-0 before:right-0 before:top-1/2 before:h-px before:-translate-y-1/2 before:transition-colors hover:before:bg-accent focus-visible:before:bg-accent",
+          isResizing ? "before:bg-accent" : "before:bg-line"
         )}
-        style={{ marginTop: '-1px' }} // pull it slightly over the border-t
       />
 
       <div className="flex min-h-10 items-center justify-between gap-2 border-b border-line-2 px-2 py-1 shrink-0 bg-bg-2">

@@ -1054,12 +1054,28 @@ interface PipelineStep {
   latencyMs?: number;
 }
 
+interface UiRunEvent {
+  type?: string;
+  status?: string;
+  message?: string;
+  createdAt?: string;
+}
+
 const PIPELINE_STEP_STATUSES: ReadonlyArray<PipelineStepStatus> = [
   'pending',
   'running',
   'ok',
   'failed',
   'skipped',
+];
+
+const FAILED_STEP_DIAGNOSTIC_FALLBACK = 'Step failed. See workflow failure details for the classified reason.';
+const SKIPPED_STEP_DIAGNOSTIC_FALLBACK = 'Step skipped by workflow policy.';
+const UNSAFE_PROGRESS_DIAGNOSTIC_PATTERNS: ReadonlyArray<RegExp> = [
+  /["']?(sourceText|expectedOutput|oracleInput|baselineFiles|previousJavaFiles|buildTestPayload|inputRef|outputRef)["']?\s*:/i,
+  /\bIDENTIFICATION\s+DIVISION\b/i,
+  /\bPROCEDURE\s+DIVISION\b/i,
+  /\bpublic\s+class\b/i,
 ];
 
 function asPipelineStepStatus(value: unknown): PipelineStepStatus {
@@ -1069,6 +1085,18 @@ function asPipelineStepStatus(value: unknown): PipelineStepStatus {
     }
   }
   return 'pending';
+}
+
+function sanitizeProgressDiagnostic(diagnostic: string, status: PipelineStepStatus): string {
+  if (status === 'skipped') return SKIPPED_STEP_DIAGNOSTIC_FALLBACK;
+  const fallback = status === 'failed' ? FAILED_STEP_DIAGNOSTIC_FALLBACK : 'Step diagnostic unavailable.';
+  const sanitized = sanitizeUpstreamMessage(diagnostic, fallback);
+  if (status !== 'failed') return sanitized;
+  if (sanitized === fallback) return fallback;
+  if (UNSAFE_PROGRESS_DIAGNOSTIC_PATTERNS.some((pattern) => pattern.test(sanitized))) {
+    return fallback;
+  }
+  return sanitized;
 }
 
 function normalizePipelineStep(raw: unknown): PipelineStep | null {
@@ -1092,12 +1120,32 @@ function normalizePipelineStep(raw: unknown): PipelineStep | null {
   const finishedAt = asString(record.finishedAt);
   if (finishedAt) step.finishedAt = finishedAt;
   const diagnostic = asString(record.diagnostic);
-  if (diagnostic) step.diagnostic = diagnostic;
+  if (diagnostic) {
+    step.diagnostic = sanitizeProgressDiagnostic(diagnostic, step.status);
+  }
   if (inputRef) step.inputRef = inputRef;
   if (outputRef) step.outputRef = outputRef;
   const latency = asNumber(record.latencyMs);
   if (latency !== undefined) step.latencyMs = latency;
   return step;
+}
+
+function sanitizeUiRunEvent(raw: unknown): UiRunEvent | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const event: UiRunEvent = {};
+  const type = asString(record.type);
+  if (type) event.type = type;
+  const status = asString(record.status);
+  if (status) event.status = status;
+  const message = asString(record.message);
+  if (message) {
+    const safeMessage = sanitizeUpstreamMessage(message, '');
+    if (safeMessage) event.message = safeMessage;
+  }
+  const createdAt = asString(record.createdAt);
+  if (createdAt) event.createdAt = createdAt;
+  return Object.keys(event).length > 0 ? event : null;
 }
 
 async function liveProgressView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
@@ -1198,15 +1246,14 @@ async function liveLearningView(
       ...baseEnvelope,
       status: 'incomplete',
       summary: null,
-      endpoint: experienceLearning.enabled ? `${experienceLearning.baseUrl}/v0/runs` : '',
       source: 'unavailable',
       missingArtifacts: ['learning-summary'],
       note: 'Live run id is unavailable; orchestrator has not yet accepted this run.',
     };
   }
   // Prefer the EL service when configured directly, fall back to the
-  // orchestrator's cached copy. This mirrors Issue #96's "or equivalent
-  // existing endpoint" wording: the BFF should expose whichever it can.
+  // orchestrator's cached copy. The browser contract reports only the
+  // source mode and summary, never internal service endpoint URLs.
   if (experienceLearning.enabled) {
     try {
       const upstream = await experienceLearning.getRunSummary(liveRunId);
@@ -1217,7 +1264,6 @@ async function liveLearningView(
           productMode: 'live',
           status: 'complete',
           summary: asRecord(upstream.body) ?? null,
-          endpoint: `${experienceLearning.baseUrl}/v0/runs/${encodeURIComponent(liveRunId)}/summary`,
           source: 'live',
           missingArtifacts: [],
           orchestratorRunId: liveRunId,
@@ -1234,7 +1280,6 @@ async function liveLearningView(
         ...baseEnvelope,
         status: 'incomplete',
         summary: null,
-        endpoint: experienceLearning.enabled ? `${experienceLearning.baseUrl}/v0/runs/${encodeURIComponent(liveRunId)}/summary` : '',
         source: 'unavailable',
         missingArtifacts: ['learning-summary'],
         orchestratorRunId: liveRunId,
@@ -1251,7 +1296,6 @@ async function liveLearningView(
       productMode: 'live',
       status: missing.length === 0 ? 'complete' : 'incomplete',
       summary: asRecord(envelope.summary) ?? null,
-      endpoint: asString(envelope.endpoint),
       source: asString(envelope.source) || 'cached',
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
@@ -1261,7 +1305,6 @@ async function liveLearningView(
       ...baseEnvelope,
       status: 'incomplete',
       summary: null,
-      endpoint: '',
       source: 'unavailable',
       missingArtifacts: ['learning-summary'],
       note: sanitizeUpstreamMessage(err instanceof Error ? err.message : '', 'orchestrator request failed'),
@@ -1316,7 +1359,11 @@ async function liveEventsView(stored: StoredRun, orchestrator: OrchestratorClien
       };
     }
     const envelope = asRecord(upstream.body) ?? {};
-    const events = Array.isArray(envelope.events) ? envelope.events : [];
+    const events = Array.isArray(envelope.events)
+      ? envelope.events
+          .map((event) => sanitizeUiRunEvent(event))
+          .filter((event): event is UiRunEvent => event !== null)
+      : [];
     const missing = Array.isArray(envelope.missingArtifacts)
       ? (envelope.missingArtifacts as unknown[]).filter((entry): entry is string => typeof entry === 'string')
       : [];
@@ -2301,7 +2348,6 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             productMode: 'unavailable',
             status: 'incomplete',
             summary: null,
-            endpoint: '',
             source: 'unavailable',
             missingArtifacts: ['learning-summary'],
             note: 'Diagnostic-fixture runs are never observed by experience-learning.',

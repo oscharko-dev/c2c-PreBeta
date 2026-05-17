@@ -10,6 +10,8 @@ export function RunArtifactsPanel({
   errorMessage?: string | null;
   missingArtifacts?: string[];
 }) {
+  const hasMissingArtifacts = Boolean(missingArtifacts && missingArtifacts.length > 0);
+
   if (!artifacts || artifacts.length === 0) {
     return (
       <div className="p-4 space-y-3 text-sm">
@@ -19,6 +21,7 @@ export function RunArtifactsPanel({
             <p className="mt-1 text-xs text-text-dim">{errorMessage}</p>
           </div>
         )}
+        {hasMissingArtifacts && <MissingArtifactRecords artifacts={missingArtifacts!} />}
         <div className="text-text-dim">No run artifacts available.</div>
       </div>
     );
@@ -36,16 +39,7 @@ export function RunArtifactsPanel({
             <p className="mt-1 text-xs text-text-dim">{errorMessage}</p>
           </div>
         )}
-        {missingArtifacts && missingArtifacts.length > 0 && (
-          <div className="mb-4 rounded border border-line-2 bg-bg-1 p-3">
-            <p className="text-xs font-medium text-warn">Missing artifact records</p>
-            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs font-mono text-text">
-              {missingArtifacts.map((artifact) => (
-                <li key={artifact}>{artifact}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {hasMissingArtifacts && <MissingArtifactRecords artifacts={missingArtifacts!} className="mb-4" />}
         <table className="w-full text-left text-xs font-mono text-text">
           <thead>
             <tr className="text-text-dim border-b border-line-2">
@@ -71,6 +65,25 @@ export function RunArtifactsPanel({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function MissingArtifactRecords({
+  artifacts,
+  className,
+}: {
+  artifacts: string[];
+  className?: string;
+}) {
+  return (
+    <div className={`rounded border border-line-2 bg-bg-1 p-3 ${className ?? ''}`.trim()}>
+      <p className="text-xs font-medium text-warn">Missing artifact records</p>
+      <ul className="mt-2 list-disc space-y-1 pl-4 text-xs font-mono text-text">
+        {artifacts.map((artifact) => (
+          <li key={artifact}>{artifact}</li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -131,6 +131,67 @@ describe('Run Panels', () => {
       expect(screen.getByText('Compile & Test Java')).toBeDefined();
       expect(screen.getByText('build-test-runner is running')).toBeDefined();
     });
+
+    it('renders model policy skipped progress without raw diagnostic leakage', () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'running',
+          progress: {
+            runId: 'run-progress',
+            programId: 'BRNCH01',
+            mode: 'live',
+            productMode: 'live',
+            status: 'complete',
+            currentStep: null,
+            failedStep: null,
+            completedSteps: ['accepted', 'model-policy-skipped'],
+            stepCount: 2,
+            steps: [
+              {
+                stepId: 1,
+                name: 'accepted',
+                capabilityId: 'orchestrator-service',
+                service: 'orchestrator-service',
+                actor: 'orchestrator-service',
+                status: 'ok'
+              },
+              {
+                stepId: 2,
+                name: 'model-policy-skipped',
+                capabilityId: 'orchestrator-service',
+                service: 'orchestrator-service',
+                actor: 'orchestrator-service',
+                status: 'skipped',
+                diagnostic: 'Step skipped by workflow policy.'
+              }
+            ]
+          }
+        }
+      });
+
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(screen.getByText('Model Policy Skipped')).toBeDefined();
+      expect(screen.getByText('Skipped: Step skipped by workflow policy.')).toBeDefined();
+    });
+
+    it('renders compile failure stages and failure note', () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          buildTest: {
+            status: 'compile-failed',
+            classification: 'compile-error',
+            note: 'javac failed with type mismatch'
+          }
+        }
+      });
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(screen.getByText('Compilation failed')).toBeDefined();
+      expect(screen.getAllByText('Blocked by compilation failure').length).toBeGreaterThan(0);
+      expect(screen.getByText('javac failed with type mismatch')).toBeDefined();
+    });
   });
 
   describe('EquivalencePanel', () => {
@@ -239,21 +300,21 @@ describe('Run Panels', () => {
           phase: 'completed',
           generated: {
             artifactRef: {
-              uri: 'air://generated',
-              sha256: 'abc123'
+              sha256: 'abc123',
+              path: 'artifacts/generated.json'
             }
           },
           buildTest: {
             generatedArtifactRef: {
-              uri: 'air://build-test',
-              sha256: 'def456'
+              sha256: 'def456',
+              path: 'artifacts/build-test.json'
             }
           },
           evidence: {
             status: 'complete',
             generatedArtifactRef: {
-              uri: 'air://evidence',
-              sha256: 'abc123'
+              sha256: 'abc123',
+              path: 'artifacts/evidence.json'
             }
           }
         }
@@ -269,20 +330,17 @@ describe('Run Panels', () => {
     it('renders artifact list hash/path correctly', () => {
       const artifacts = [
         {
-          path: '/path/to/art1',
+          path: 'artifacts/source.cbl',
           name: 'art1',
           kind: 'source',
           byteSize: 1234,
           sha256: 'hash123',
           createdBy: 'system',
           createdAt: '2026-05-15T12:00:00Z',
-          uri: 'uri1',
-          runId: 'run1',
-          workflowId: 'wf1'
         }
       ];
       render(<RunArtifactsPanel artifacts={artifacts} />);
-      expect(screen.getByText('/path/to/art1')).toBeDefined();
+      expect(screen.getByText('artifacts/source.cbl')).toBeDefined();
       expect(screen.getByText('source')).toBeDefined();
       expect(screen.getByText('1234')).toBeDefined();
       expect(screen.getByText('hash123')).toBeDefined();
@@ -292,6 +350,13 @@ describe('Run Panels', () => {
       render(<RunArtifactsPanel artifacts={[]} errorMessage="artifacts endpoint returned 503" />);
       expect(screen.getByText('Artifacts fetch failed')).toBeDefined();
       expect(screen.getByText('artifacts endpoint returned 503')).toBeDefined();
+    });
+
+    it('renders missing artifact records even when no artifact rows exist', () => {
+      render(<RunArtifactsPanel artifacts={[]} missingArtifacts={['generatedJava']} />);
+      expect(screen.getByText('Missing artifact records')).toBeDefined();
+      expect(screen.getByText('generatedJava')).toBeDefined();
+      expect(screen.getByText('No run artifacts available.')).toBeDefined();
     });
   });
 
@@ -305,8 +370,8 @@ describe('Run Panels', () => {
             unsupportedFeatures: ['GOTO', 'ALTER'],
             missingArtifacts: ['GenMiss'],
             artifactRef: {
-              uri: 'air://generated',
-              sha256: 'aaa'
+              sha256: 'aaa',
+              path: 'artifacts/generated.json'
             }
           },
           generatedFiles: {
@@ -316,15 +381,15 @@ describe('Run Panels', () => {
             status: 'compile-failed',
             classification: 'compile-error',
             generatedArtifactRef: {
-              uri: 'air://build-test',
-              sha256: 'bbb'
+              sha256: 'bbb',
+              path: 'artifacts/build-test.json'
             }
           },
           evidence: {
             status: 'incomplete',
             generatedArtifactRef: {
-              uri: 'air://evidence',
-              sha256: 'ccc'
+              sha256: 'ccc',
+              path: 'artifacts/evidence.json'
             }
           },
           artifactsError: 'artifact endpoint failed'

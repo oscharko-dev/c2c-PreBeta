@@ -53,8 +53,8 @@ export function SplitEditorArea() {
           onTouchStart={startResize}
           onKeyDown={startResize}
           className={cn(
-            "hidden lg:block w-1 cursor-col-resize hover:bg-accent hover:w-1 focus-visible:w-1 focus-visible:bg-accent outline-none z-10 transition-colors delay-100 shrink-0",
-            isResizing ? "bg-accent" : "bg-line-2"
+            "relative hidden w-6 cursor-col-resize outline-none z-10 shrink-0 before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:transition-colors hover:before:bg-accent focus-visible:before:bg-accent lg:block",
+            isResizing ? "before:bg-accent" : "before:bg-line-2"
           )}
         />
 

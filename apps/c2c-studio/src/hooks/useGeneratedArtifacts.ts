@@ -80,6 +80,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
   const [unavailableFiles, setUnavailableFiles] = useState<Set<string>>(new Set());
 
   const { generated, generatedFiles, buildTest, evidence } = state;
+  const finalClassification = state.workflow?.finalClassification ?? state.summary?.finalClassification ?? null;
 
   useEffect(() => {
     setSelectedFilePath(null);
@@ -106,13 +107,13 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
       if (buildTest.status === 'ok' && evidence.status === 'complete' && 
           generated.artifactRef?.sha256 === buildTest.generatedArtifactRef?.sha256 &&
           generated.artifactRef?.sha256 === evidence.generatedArtifactRef?.sha256) {
-        return 'verified';
+        return finalClassification === 'success' ? 'verified' : 'generated';
       }
       return 'failed-verification';
     }
     
     return 'generated';
-  }, [state.phase, state.runId, generated, generatedFiles, buildTest, evidence]);
+  }, [state.phase, state.runId, generated, generatedFiles, buildTest, evidence, finalClassification]);
 
   const fileTree = useMemo(() => {
     return buildFileTree(generatedFiles?.files);

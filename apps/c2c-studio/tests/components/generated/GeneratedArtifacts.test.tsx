@@ -354,7 +354,44 @@ describe('Generated Artifacts UI', () => {
       expect(screen.getByText('Unavailable')).toBeInTheDocument();
       expect(screen.queryByText(/failed to load file/i)).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/file content is empty or unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/Generated file unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/Verified state cannot be claimed from missing content/i)).toBeInTheDocument();
+    expect(screen.getAllByText('src/Missing.java').length).toBeGreaterThan(0);
+  });
+
+  it('renders the verified badge only when BFF final classification confirms success', async () => {
+    mockTransformationState.mockReturnValue({
+      phase: 'completed',
+      runId: '123',
+      summary: {
+        finalClassification: 'success',
+      },
+      generated: {
+        status: 'generated',
+        artifactRef: { sha256: 'aaa' },
+      },
+      generatedFiles: {
+        status: 'complete',
+        entryFilePath: 'src/App.java',
+        files: [{ path: 'src/App.java', sha256: 'file-sha' }],
+      },
+      buildTest: {
+        status: 'ok',
+        classification: 'match',
+        generatedArtifactRef: { sha256: 'aaa' },
+      },
+      evidence: {
+        status: 'complete',
+        generatedArtifactRef: { sha256: 'aaa' },
+      },
+    });
+    mockGeneratedFileContents({ 'src/App.java': 'public class App {}' });
+
+    renderArtifactsUi();
+
+    expect(await screen.findByText('public class App {}')).toBeInTheDocument();
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(screen.getByText('Target Java Inspector')).toBeInTheDocument();
   });
 
   it('resets selection when a new run starts and loads the new entry file', async () => {

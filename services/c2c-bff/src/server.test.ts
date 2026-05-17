@@ -923,8 +923,21 @@ test('live generated/build-test/evidence endpoints return real artifact contents
     artifacts: { sourceCobol: [], generatedJava: { uri: 'file:///run/generated.java' } },
   };
   const trajectoryEvents = [
-    { type: 'parse-cobol.executed', status: 'ok', message: 'parse complete', createdAt: '2026-05-14T10:00:00Z' },
-    { type: 'generate-java.executed', status: 'ok', message: 'java generated', createdAt: '2026-05-14T10:00:05Z' },
+    {
+      type: 'parse-cobol.executed',
+      status: 'ok',
+      message: 'parse complete',
+      createdAt: '2026-05-14T10:00:00Z',
+      payload: { input: { sourceText: 'IDENTIFICATION DIVISION.' } },
+      inputRef: { uri: 'file:///run/source.cbl', sha256: 'e'.repeat(64) },
+    },
+    {
+      type: 'generate-java.executed',
+      status: 'ok',
+      message: 'java generated at http://internal.service/run',
+      createdAt: '2026-05-14T10:00:05Z',
+      outputRef: { uri: 'file:///run/generated.java', sha256: 'f'.repeat(64) },
+    },
   ];
   const { client: orch, calls } = stubOrchestrator({
     generated: {
@@ -1048,6 +1061,12 @@ test('live generated/build-test/evidence endpoints return real artifact contents
     assert.equal(evtBody.mode, 'live');
     assert.equal(evtBody.events.length, 2);
     assert.equal(evtBody.events[0]?.type, 'parse-cobol.executed');
+    const serializedEvents = JSON.stringify(evtBody.events);
+    assert.ok(!serializedEvents.includes('sourceText'));
+    assert.ok(!serializedEvents.includes('inputRef'));
+    assert.ok(!serializedEvents.includes('outputRef'));
+    assert.ok(!serializedEvents.includes('file:///'));
+    assert.ok(serializedEvents.includes('[redacted]'));
     assert.deepEqual(evtBody.missingArtifacts, []);
 
     const artifacts = await fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts`);
@@ -2225,7 +2244,7 @@ test('progress route proxies orchestrator step timeline for live runs', async ()
       currentStep: string | null;
       failedStep: string | null;
       stepCount: number;
-      steps: Array<{ name: string; status: string; capabilityId: string; stepId: number }>;
+      steps: Array<{ name: string; status: string; capabilityId: string; stepId: number; inputRef?: { uri?: string }; outputRef?: { uri?: string } }>;
     };
     assert.equal(body.status, 'complete');
     assert.equal(body.runStatus, 'updating');
@@ -2234,13 +2253,15 @@ test('progress route proxies orchestrator step timeline for live runs', async ()
     assert.equal(body.stepCount, 4);
     assert.equal(body.steps[3]?.status, 'running');
     assert.equal(body.steps[1]?.capabilityId, 'cobol.parse');
+    assert.equal(body.steps[1]?.inputRef?.uri, undefined);
+    assert.equal(body.steps[1]?.outputRef?.uri, undefined);
     assert.equal(calls.getProgress, 1);
   } finally {
     await server.close();
   }
 });
 
-test('progress route surfaces failed step diagnostic and never reports success', async () => {
+test('progress route sanitizes failed step diagnostics and never reports success', async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator({
@@ -2264,10 +2285,20 @@ test('progress route surfaces failed step diagnostic and never reports success',
             service: 'orch',
             actor: 'generator',
             status: 'failed',
-            diagnostic: 'generator backend unavailable',
+            diagnostic: 'generator backend unavailable at http://generator.internal/v0',
           },
           {
             stepId: 5,
+            name: 'repair-java',
+            capabilityId: 'java.repair',
+            service: 'orch',
+            actor: 'repair',
+            status: 'failed',
+            diagnostic:
+              'repair rejected payload {"sourceText":"IDENTIFICATION DIVISION.","expectedOutput":"ok","inputRef":{"uri":"s3://internal/artifact"}}',
+          },
+          {
+            stepId: 6,
             name: 'failed',
             capabilityId: 'orch',
             service: 'orch',
@@ -2303,7 +2334,21 @@ test('progress route surfaces failed step diagnostic and never reports success',
     const failedStep = body.steps.find((entry) => entry.name === 'generate-java');
     assert.ok(failedStep, 'failed step must be present in payload');
     assert.equal(failedStep?.status, 'failed');
-    assert.match(failedStep?.diagnostic ?? '', /generator/i);
+    assert.equal(
+      failedStep?.diagnostic,
+      'generator backend unavailable at [redacted]',
+    );
+    const payloadStep = body.steps.find((entry) => entry.name === 'repair-java');
+    assert.equal(
+      payloadStep?.diagnostic,
+      'Step failed. See workflow failure details for the classified reason.',
+    );
+    const workflowFailureStep = body.steps.find((entry) => entry.name === 'failed');
+    assert.equal(workflowFailureStep?.diagnostic, 'W0 migration workflow failed: step generate-java failed');
+    const serialized = JSON.stringify(body.steps);
+    assert.ok(!serialized.includes('http://generator.internal'));
+    assert.ok(!serialized.includes('sourceText'));
+    assert.ok(!serialized.includes('s3://internal'));
   } finally {
     await server.close();
   }
@@ -2348,12 +2393,12 @@ test('learning route prefers live experience-learning client when configured', a
     const runId = (created.body as { runId: string }).runId;
     const learning = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/learning`);
     assert.equal(learning.status, 200);
-    const body = learning.body as { source: string; status: string; summary: { candidateCount: number; observedPatterns: string[] } | null; endpoint: string };
+    const body = learning.body as { source: string; status: string; summary: { candidateCount: number; observedPatterns: string[] } | null; endpoint?: string };
     assert.equal(body.source, 'live');
     assert.equal(body.status, 'complete');
     assert.equal(body.summary?.candidateCount, 2);
     assert.deepEqual(body.summary?.observedPatterns, ['accepted_pattern']);
-    assert.match(body.endpoint, /\/v0\/runs\//);
+    assert.equal(body.endpoint, undefined);
     assert.equal(learningCalls, 1);
     assert.equal(calls.getLearning, 0, 'orchestrator fallback must not be called when EL is live');
   } finally {
@@ -2443,9 +2488,10 @@ test('learning route falls back to orchestrator-cached summary when EL is unavai
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, { method: 'POST', body: { programId: 'BRNCH01' } });
     const runId = (created.body as { runId: string }).runId;
     const learning = await fetchJson(`${server.baseUrl}/api/v0/runs/${runId}/learning`);
-    const body = learning.body as { source: string; summary: { candidateCount: number } | null; endpoint: string };
+    const body = learning.body as { source: string; summary: { candidateCount: number } | null; endpoint?: string };
     assert.equal(body.source, 'cached');
     assert.equal(body.summary?.candidateCount, 1);
+    assert.equal(body.endpoint, undefined);
     assert.equal(calls.getLearning, 1);
   } finally {
     await server.close();

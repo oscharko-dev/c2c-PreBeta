@@ -26,6 +26,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   return (
     <header className="flex min-h-12 w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-bg-1 px-4 py-2 shrink-0" aria-label="Workbench Top Bar">
       <div className="flex min-w-0 items-center gap-4">
+        <h1 className="sr-only">c2c Studio Workbench</h1>
         <span className="text-sm font-bold text-accent uppercase tracking-wider" aria-label="c2c brand">c2c</span>
         <div className="h-4 w-px bg-line-2"></div>
         <div className="flex min-w-0 items-center gap-2 text-sm text-text-dim">

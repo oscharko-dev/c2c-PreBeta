@@ -10,7 +10,7 @@ import {
   W02_ERROR_LABELS,
   repairBudgetText,
 } from './agentActivity';
-import { RepairAttemptSummary, RepairBudget, W02ActiveAgent } from '../../types/api';
+import type { RepairAttemptSummary, RepairBudget, W02ActiveAgent, WorkflowArtifactRef } from '../../types/api';
 
 interface AgentActivityPanelProps {
   emptyState: { title: string; message: string };
@@ -47,7 +47,11 @@ export function AgentActivityPanel({ emptyState }: AgentActivityPanelProps) {
     finalClassification,
     failureCode,
     failureMessage,
+    generatedJavaRef,
+    buildTestResultRef,
+    evidencePackRef,
   } = workflow;
+  const modelInvocationCount = repairAttempts.filter((attempt) => attempt.hasModelInvocation).length;
 
   return (
     <section
@@ -55,7 +59,18 @@ export function AgentActivityPanel({ emptyState }: AgentActivityPanelProps) {
       aria-label="Agent activity"
       data-testid="agent-activity-panel"
     >
+      <WorkflowStatusRow
+        state={workflow.state}
+        mode={workflow.mode}
+        source={workflow.source}
+        modelInvocationCount={modelInvocationCount}
+      />
       <ActiveAgentRow activeAgent={activeAgent} activeStep={activeStep} attemptCount={agentAttemptCount} />
+      <WorkflowArtifactRefs
+        generatedJavaRef={generatedJavaRef}
+        buildTestResultRef={buildTestResultRef}
+        evidencePackRef={evidencePackRef}
+      />
       <RepairBudgetRow budget={repairBudget} />
       <RepairAttemptsList attempts={repairAttempts} />
       <FailureRow
@@ -64,6 +79,43 @@ export function AgentActivityPanel({ emptyState }: AgentActivityPanelProps) {
         failureMessage={failureMessage}
       />
     </section>
+  );
+}
+
+function WorkflowStatusRow({
+  state,
+  mode,
+  source,
+  modelInvocationCount,
+}: {
+  state: string | null;
+  mode: string;
+  source: string;
+  modelInvocationCount: number;
+}) {
+  const status = state ?? 'awaiting workflow status';
+  return (
+    <div
+      className="rounded border border-line-2 bg-bg-2 p-3"
+      data-testid="agent-activity-workflow-status"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-text-dim">Current status</span>
+        <span className="font-mono text-xs text-text">{status}</span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-dim">
+        <span>Mode: <span className="font-mono text-text">{mode}</span></span>
+        <span>Source: <span className="font-mono text-text">{source}</span></span>
+        <span>
+          Model metadata:{' '}
+          <span className="font-mono text-text">
+            {modelInvocationCount > 0
+              ? `${modelInvocationCount} invocation record${modelInvocationCount === 1 ? '' : 's'} observed`
+              : 'no invocation record yet'}
+          </span>
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -138,6 +190,45 @@ function RepairBudgetRow({ budget }: { budget: RepairBudget | null }) {
           className={exhausted ? 'h-full bg-error' : 'h-full bg-accent'}
           style={{ width: `${Math.round(ratio * 100)}%` }}
         />
+      </div>
+    </div>
+  );
+}
+
+function WorkflowArtifactRefs({
+  generatedJavaRef,
+  buildTestResultRef,
+  evidencePackRef,
+}: {
+  generatedJavaRef: WorkflowArtifactRef | null;
+  buildTestResultRef: WorkflowArtifactRef | null;
+  evidencePackRef: WorkflowArtifactRef | null;
+}) {
+  const refs = [
+    { label: 'Final Java', ref: generatedJavaRef },
+    { label: 'Build/Test', ref: buildTestResultRef },
+    { label: 'Evidence', ref: evidencePackRef },
+  ];
+
+  return (
+    <div
+      className="rounded border border-line-2 bg-bg-2 p-3"
+      data-testid="agent-activity-artifact-refs"
+    >
+      <div className="mb-2 text-xs font-medium text-text">Workflow artifact support</div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {refs.map(({ label, ref }) => (
+          <div key={label} className="rounded bg-bg-3 px-2 py-1.5 text-xs">
+            <div className="text-text-dim">{label}</div>
+            {ref ? (
+              <div className="mt-1 font-mono text-text" title={ref.sha256}>
+                {ref.kind || 'artifact'} · {ref.sha256.slice(0, 12)}
+              </div>
+            ) : (
+              <div className="mt-1 font-mono text-text-dim">not published</div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
