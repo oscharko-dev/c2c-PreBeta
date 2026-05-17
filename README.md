@@ -200,13 +200,15 @@ Launcher overrides are documented in `.env.example`:
 | W0 | Done | Deterministic COBOL-to-Java enterprise kernel: parser, Semantic IR, Java generation, build/test, evidence, Harness, Experience Learning telemetry, and no required model call. |
 | W0.1 | Done | Next.js/Tailwind c2c Studio: editable COBOL, BFF-backed transformation run, generated Java artifact view, build/test, evidence, artifacts, and honest blocked states. |
 | W0.2 | Done | First productive AI transformation loop on the Experience Learning Harness: orchestrator-steered Transformation and Verification/Repair Agents, Model Gateway/Foundry calls, bounded repair, first read-only learning signals, deterministic verification/evidence gate, and an executable release gate at [`scripts/w0-2-release-gate.sh`](scripts/w0-2-release-gate.sh). |
+| W0.3 | Planned | Deterministic-first multi-agent hardening: explicit assist-decision semantics in the Orchestrator, no implicit productive agent activation from infrastructure availability, stronger assist/repair budgets, clearer Evidence Pack lineage, and Studio-visible causal agent participation while deterministic verification/evidence remains the only path to success. |
 
 The W0/W0.1 product can transform supported W0 COBOL programs and selected
 small custom sources that stay inside the implemented subset. It must not be
 described as a feature-complete COBOL translator. W0.2 is responsible for the
 first real model-backed agent workflow and the first read-only learning signals;
-W0.3 and later waves broaden custom COBOL coverage and Experience Learning
-maturity.
+W0.3 hardens deterministic-first multi-agent control; W1 and later waves then
+broaden custom COBOL coverage and Experience Learning maturity on top of that
+cleaner control model.
 
 ## CI and quality gates
 
