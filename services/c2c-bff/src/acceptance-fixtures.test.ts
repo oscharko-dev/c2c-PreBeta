@@ -246,6 +246,23 @@ test('rejects index with mismatched on-disk byteSize', () => {
   }
 });
 
+test('rejects artifact paths that escape repo root through symlinks', () => {
+  const root = writeRepo([POSITIVE_FIXTURE]);
+  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2c-acceptance-external-'));
+  try {
+    const external = path.join(externalDir, 'external-ok.cbl');
+    fs.writeFileSync(external, POSITIVE_FIXTURE.sourceFile.content);
+    const sourcePath = path.join(root, POSITIVE_FIXTURE.sourceFile.path);
+    fs.unlinkSync(sourcePath);
+    fs.symlinkSync(external, sourcePath);
+
+    assert.throws(() => loadAcceptanceFixtureRegistry(root), /symlink|outside the repository root/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(externalDir, { recursive: true, force: true });
+  }
+});
+
 test('rejects duplicate fixtureId', () => {
   const root = writeRepo([POSITIVE_FIXTURE, { ...POSITIVE_FIXTURE, title: 'dup' }]);
   try {

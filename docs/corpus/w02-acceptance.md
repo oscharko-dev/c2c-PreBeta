@@ -55,17 +55,23 @@ Each entry carries the fields Issue #174 requires:
 
 | Field                            | Purpose                                                                                                              |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                  | Top-level registry schema version. Currently `v0`.                                                                  |
 | `fixtureId`                      | Stable, uppercase identifier, independent of the COBOL `PROGRAM-ID`.                                                 |
+| `title` / `description`          | Human-readable review labels. `title` is required; `description` is optional.                                        |
 | `sourceCobolArtifactRef`         | Content-addressed reference (`uri`, `path`, `sha256`, `byteSize`) to the COBOL source.                               |
-| `expectedOutputArtifactRef`      | Content-addressed reference to the oracle output. Required when `oracleGenerationMode == 'static-fixture'`.          |
+| `expectedOutputArtifactRef`      | Content-addressed reference to oracle output. Required when `oracleGenerationMode == 'static-fixture'`; omitted for blocked fixtures and allowed for `cobol-runtime` audit parity. |
 | `oracleGenerationMode`           | `cobol-runtime` \| `static-fixture` \| `user-provided`. Empty for blocked fixtures.                                 |
 | `supportedSubset[]`              | W0.2 constructs the fixture is expected to exercise (closed enum, see above).                                        |
-| `unsupportedConstructs[]`        | Constructs the parser MUST detect, each pinned to the diagnostic code it should emit.                                |
+| `unsupportedConstructs[]`        | Constructs the parser MUST detect, each pinned to a diagnostic code and optional `line` / `message`.                |
 | `targetLanguage`                 | Fixed at `"java"` for W0.2.                                                                                          |
 | `expectedFinalClassification`    | `success` \| `blocked` — must equal the run-contract value the orchestrator reaches.                                |
 | `expectedFailureCode`            | One of the W0.2 run-contract failure codes. Required when classification is `blocked`.                              |
 | `modes`                          | `file-backed` and/or `paste-mode`. Shipping fixtures declare both.                                                   |
 | `rationale`                      | Why this fixture is in the acceptance set.                                                                           |
+
+Success fixtures must declare `oracleGenerationMode` and must not declare
+`expectedFailureCode`. Blocked fixtures must declare a non-empty
+`unsupportedConstructs[]` list and the expected blocked failure code.
 
 The loader at [services/c2c-bff/src/acceptance-fixtures.ts](../../services/c2c-bff/src/acceptance-fixtures.ts)
 re-validates every artifact reference at boot, recomputing the SHA-256 of the
@@ -91,10 +97,11 @@ them as `expectedOutput`.
 ### Paste mode
 
 The user pastes COBOL source into Studio. The Studio submits via
-`POST /api/v0/transform` with an optional `expectedOutput` field (Issue
-#172 already wires this through the BFF and orchestrator). When no
-`expectedOutput` is provided and the orchestrator has a working GnuCOBOL
-toolchain, the oracle is derived from the source via the existing
+`POST /api/v0/transform` with optional `expectedOutput` and `oracleInput`
+fields. Empty strings are omitted before the BFF forwards the request, so
+blank oracle controls preserve the deterministic `cobol-runtime` path.
+When no `expectedOutput` is provided and the orchestrator has a working
+GnuCOBOL toolchain, the oracle is derived from the source via the existing
 `cobol-runtime` path (Issue #94). When no oracle is available, the
 build/test runner reports the limitation in the evidence pack instead of
 silently passing.

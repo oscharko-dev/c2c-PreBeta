@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -43,13 +44,15 @@ public final class ServiceApp {
     }
 
     public static void main(String[] args) throws Exception {
-        int port = readPort(System.getenv("BUILD_TEST_RUNNER_LISTEN_ADDR"));
+        InetSocketAddress listenAddress = readListenAddress(System.getenv("BUILD_TEST_RUNNER_LISTEN_ADDR"));
         String harnessEndpoint = normaliseEndpoint(System.getenv("HARNESS_EVENT_ENDPOINT"));
         String harnessEventToken = normaliseToken(System.getenv("HARNESS_EVENT_TOKEN"));
+        String configuredControlToken = normaliseToken(System.getenv("BUILD_TEST_RUNNER_CONTROL_TOKEN"));
+        String controlToken = configuredControlToken;
         String experienceEndpoint = normaliseEndpoint(System.getenv("EXPERIENCE_EVENT_ENDPOINT"));
         BuildTestRunnerService service = new BuildTestRunnerService();
 
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        HttpServer server = HttpServer.create(listenAddress, 0);
 
         server.createContext("/health", exchange -> {
             if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -60,10 +63,11 @@ public final class ServiceApp {
         });
 
         server.createContext("/v0/run-verification",
-                exchange -> handleRunVerification(exchange, service, harnessEndpoint, harnessEventToken, experienceEndpoint));
+                exchange -> handleRunVerification(exchange, service, harnessEndpoint, harnessEventToken, experienceEndpoint, controlToken));
 
         server.start();
-        System.out.printf("%s listening on %d%n", SERVICE_NAME, port);
+        System.out.printf("%s listening on %s:%d%n",
+                SERVICE_NAME, listenAddress.getHostString(), listenAddress.getPort());
         Thread.currentThread().join();
     }
 
@@ -71,9 +75,14 @@ public final class ServiceApp {
                                               BuildTestRunnerService service,
                                               String harnessEndpoint,
                                               String harnessEventToken,
-                                              String experienceEndpoint) throws IOException {
+                                              String experienceEndpoint,
+                                              String controlToken) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendText(exchange, 405, "method not allowed");
+            return;
+        }
+        if (!isAuthorized(exchange, controlToken)) {
+            sendJson(exchange, 401, Map.of("status", "failed", "error", "unauthorized"));
             return;
         }
         try {
@@ -89,6 +98,15 @@ public final class ServiceApp {
             sendJson(exchange, 500, Map.of("status", "failed",
                     "error", e.getMessage() == null ? "unknown" : e.getMessage()));
         }
+    }
+
+    static boolean isAuthorized(HttpExchange exchange, String controlToken) {
+        if (controlToken == null) {
+            InetAddress remote = exchange.getRemoteAddress().getAddress();
+            return remote != null && remote.isLoopbackAddress();
+        }
+        String header = exchange.getRequestHeaders().getFirst("Authorization");
+        return ("Bearer " + controlToken).equals(header);
     }
 
     static int httpStatus(Map<String, Object> response) {
@@ -232,22 +250,28 @@ public final class ServiceApp {
         }
     }
 
-    private static int readPort(String raw) {
+    static InetSocketAddress readListenAddress(String raw) {
         if (raw == null || raw.isBlank()) {
-            return DEFAULT_PORT;
+            return new InetSocketAddress("127.0.0.1", DEFAULT_PORT);
         }
         String candidate = raw.trim();
+        String host = "127.0.0.1";
         if (candidate.startsWith(":")) {
             candidate = candidate.substring(1);
-        }
-        if (candidate.contains(":")) {
+        } else if (candidate.contains(":")) {
+            host = candidate.substring(0, candidate.lastIndexOf(":")).trim();
             candidate = candidate.substring(candidate.lastIndexOf(":") + 1);
+            if (host.isBlank()) {
+                host = "127.0.0.1";
+            }
         }
+        int port;
         try {
-            return Integer.parseInt(candidate);
+            port = Integer.parseInt(candidate);
         } catch (NumberFormatException e) {
-            return DEFAULT_PORT;
+            port = DEFAULT_PORT;
         }
+        return new InetSocketAddress(host, port);
     }
 
     private static String normaliseEndpoint(String endpoint) {

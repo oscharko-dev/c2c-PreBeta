@@ -149,12 +149,18 @@ CI=1 \
 The W0.2 spec ([`tests/e2e/w0-2-workflow.spec.ts`](../../apps/c2c-studio/tests/e2e/w0-2-workflow.spec.ts))
 asserts:
 
-- HELLOW02 reaches `finalClassification == "success"` from the browser.
-- The generated Java pane displays the same `sha256` the BFF advertises.
-- The Agent and Evidence Pack tabs render without a failure verdict.
-- FILEIO-UNSUPPORTED is blocked honestly: no Java pane, no "Verified",
-  and `GeneratedView.status == "unsupported"` with non-empty
-  `unsupportedFeatures`.
+- FILEIO-UNSUPPORTED is blocked honestly with
+  `finalClassification == "blocked"` and
+  `failureCode == "unsupported_cobol"`.
+- The Studio never displays generated Java or a "Verified" affordance for
+  unsupported source.
+- The Agent, Build & Test, and Evidence Pack tabs render the blocked
+  state without presenting an empty success.
+
+The HELLOW02 browser success proof requires the agentic Model Gateway path
+and remains part of the manual `./scripts/w0-2-release-gate.sh --foundry`
+run. Parser, Semantic IR, BFF, build/test, and evidence contract tests keep
+the checked-in HELLOW02 fixture covered in deterministic CI.
 
 ## Updating the gate
 

@@ -107,7 +107,13 @@ class W0DeterministicEvidenceTests(_BaseEvidenceFixture):
             payload={
                 "status": "ok",
                 "classification": "match",
-                "comparison": {"matched": True, "actualSha256": "b" * 64, "expectedSha256": "b" * 64},
+                "comparison": {
+                    "matched": True,
+                    "actualSha256": "b" * 64,
+                    "expectedSha256": "b" * 64,
+                    "actualRef": {"uri": "urn:run/java-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "java-stdout"},
+                    "expectedRef": {"uri": "urn:run/oracle-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "cobol-oracle-stdout"},
+                },
                 "goldenMaster": {"classification": "true"},
             },
             output_uri="urn:run/build-1",
@@ -218,7 +224,13 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
                 "status": "ok",
                 "classification": "match",
                 "summary": "build/test passed after one repair",
-                "comparison": {"matched": True, "actualSha256": "b" * 64, "expectedSha256": "b" * 64},
+                "comparison": {
+                    "matched": True,
+                    "actualSha256": "b" * 64,
+                    "expectedSha256": "b" * 64,
+                    "actualRef": {"uri": "urn:run/java-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "java-stdout"},
+                    "expectedRef": {"uri": "urn:run/oracle-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "cobol-oracle-stdout"},
+                },
                 "goldenMaster": {"classification": "true"},
             },
             output_uri="urn:run/build-2",
@@ -296,6 +308,8 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(oc["oracleKind"], "true-golden-master")
         self.assertEqual(oc["classification"], "match")
         self.assertEqual(oc["actualSha256"], "b" * 64)
+        self.assertEqual(oc["actualRef"]["kind"], "java-stdout")
+        self.assertEqual(oc["expectedRef"]["kind"], "cobol-oracle-stdout")
 
     def test_blocked_w02_run_signals_blocked_flag(self) -> None:
         context = self._w0_context(use_transformation_agent=True)

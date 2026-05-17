@@ -340,6 +340,8 @@ function isBuildTestViewPayload(payload: unknown): payload is BuildTestView {
     (payload.expectedOutput === undefined || isString(payload.expectedOutput)) &&
     (payload.actualOutput === undefined || isString(payload.actualOutput)) &&
     (payload.outputRef === undefined || payload.outputRef === null || isOutputRef(payload.outputRef)) &&
+    (payload.expectedOutputRef === undefined || payload.expectedOutputRef === null || isOutputRef(payload.expectedOutputRef)) &&
+    (payload.actualOutputRef === undefined || payload.actualOutputRef === null || isOutputRef(payload.actualOutputRef)) &&
     (payload.generatedArtifactRef === null || isOutputRef(payload.generatedArtifactRef)) &&
     (payload.note === undefined || isString(payload.note))
   );

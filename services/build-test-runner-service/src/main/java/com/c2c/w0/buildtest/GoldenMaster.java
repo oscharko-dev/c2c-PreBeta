@@ -122,7 +122,17 @@ final class GoldenMaster {
         if (!resolved.startsWith(repoRoot)) {
             throw new IllegalArgumentException("Golden Master path escapes repo root: " + relativePath);
         }
-        return resolved;
+        try {
+            Path realRoot = repoRoot.toRealPath();
+            Path realTarget = resolved.toRealPath();
+            if (!realTarget.startsWith(realRoot)) {
+                throw new IllegalArgumentException(
+                        "Golden Master path escapes repo root through a symlink: " + relativePath);
+            }
+            return realTarget;
+        } catch (IOException e) {
+            return resolved;
+        }
     }
 
     private static String readSafe(Path path) {

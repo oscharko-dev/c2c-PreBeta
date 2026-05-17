@@ -39,6 +39,16 @@ class ServiceAppTest {
     }
 
     @Test
+    void listenAddressDefaultsToLoopbackAndHonorsConfiguredHost() {
+        assertEquals("127.0.0.1", ServiceApp.readListenAddress(null).getHostString());
+        assertEquals(8084, ServiceApp.readListenAddress(null).getPort());
+        assertEquals("127.0.0.1", ServiceApp.readListenAddress(":18086").getHostString());
+        assertEquals(18086, ServiceApp.readListenAddress(":18086").getPort());
+        assertEquals("0.0.0.0", ServiceApp.readListenAddress("0.0.0.0:18086").getHostString());
+        assertEquals(18086, ServiceApp.readListenAddress("0.0.0.0:18086").getPort());
+    }
+
+    @Test
     void harnessEventCarriesBuildTestDataClassAndCapability() {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", "ok");

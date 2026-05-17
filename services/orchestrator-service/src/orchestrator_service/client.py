@@ -13,7 +13,26 @@ from .artifacts import JsonValue
 
 
 class HttpClientError(Exception):
-    """Raised when an HTTP interaction fails."""
+    """Raised when an HTTP interaction fails.
+
+    ``str(error)`` intentionally stays short for logs and user-facing run
+    summaries, while ``body`` preserves structured upstream diagnostics for
+    workflow classification.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        body: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
+
+
+_MAX_HTTP_ERROR_BODY_BYTES = 65_536
 
 
 # noinspection PyClassHasNoInitInspection
@@ -73,8 +92,18 @@ class JSONHTTPClient:
                     payload = json.loads(body.decode("utf-8"))
                 return HttpResponse(response.status, payload)
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace") if exc.fp is not None else ""
+            body = ""
+            if exc.fp is not None:
+                raw_body = exc.read(_MAX_HTTP_ERROR_BODY_BYTES + 1)
+                truncated = len(raw_body) > _MAX_HTTP_ERROR_BODY_BYTES
+                body = raw_body[:_MAX_HTTP_ERROR_BODY_BYTES].decode("utf-8", errors="replace")
+                if truncated:
+                    body += "\n[truncated]"
             details = body[:200]
-            raise HttpClientError(f"{request.get_method()} {request.full_url} failed with {exc.code}: {details}") from exc
+            raise HttpClientError(
+                f"{request.get_method()} {request.full_url} failed with {exc.code}: {details}",
+                status_code=exc.code,
+                body=body,
+            ) from exc
         except urllib.error.URLError as exc:
             raise HttpClientError(f"{request.get_method()} {request.full_url} failed: {exc}") from exc

@@ -2,6 +2,7 @@ package com.c2c.w0.buildtest;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -11,6 +12,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -46,6 +48,18 @@ class CobolOracleTest {
             "    STOP RUN.",
             "");
 
+    private static final String COBOL_ACCEPT_INPUT = String.join("\n",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. INPRG.",
+            "DATA DIVISION.",
+            "WORKING-STORAGE SECTION.",
+            "01 WS-IN PIC X(16).",
+            "PROCEDURE DIVISION.",
+            "    ACCEPT WS-IN.",
+            "    DISPLAY WS-IN.",
+            "    STOP RUN.",
+            "");
+
     private static final String COBOL_BROKEN = String.join("\n",
             "IDENTIFICATION DIVISION.",
             "PROGRAM-ID. BROKENPR.",
@@ -62,7 +76,9 @@ class CobolOracleTest {
             "           STOP RUN.",
             "");
 
-    private final BuildTestRunnerService service = new BuildTestRunnerService(repoRoot());
+    private static final Path REPO_ROOT = repoRoot();
+
+    private final BuildTestRunnerService service = new BuildTestRunnerService(REPO_ROOT);
 
     @Test
     void oracleMatchesWhenJavaStdoutEqualsCobolStdout() {
@@ -105,9 +121,48 @@ class CobolOracleTest {
         Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
         assertEquals(true, comparison.get("matched"));
         assertEquals("oracle.cobol-runtime", comparison.get("source"));
+        assertEquals("java-stdout", ((Map<?, ?>) comparison.get("actualRef")).get("kind"));
+        assertEquals("cobol-oracle-stdout", ((Map<?, ?>) comparison.get("expectedRef")).get("kind"));
         Map<?, ?> goldenMaster = (Map<?, ?>) response.get("goldenMaster");
         assertEquals(false, goldenMaster.get("resolved"),
                 "registry Golden Master must not be consulted when an oracle is supplied");
+    }
+
+    @Test
+    void helloW02AcceptanceFixtureOracleMatchesCheckedInExpectedOutput() throws Exception {
+        assumeTrue(CobolRuntimeExecutor.isAvailable(),
+                "GnuCOBOL cobc/cobcrun must be installed for HELLOW02 oracle acceptance");
+        String source = readRepoFixture("corpus/synthetic/programs/hello-w02.cbl");
+        String expected = readRepoFixture("corpus/synthetic/fixtures/hello-w02-output.txt");
+        Map<String, Object> generatedProject = trivialProject(
+                "sample.HelloW02Acceptance",
+                "package sample; public class HelloW02Acceptance { "
+                        + "public static void main(String[] a) { System.out.print("
+                        + javaStringLiteral(expected) + "); } }");
+        Map<String, Object> request = Map.of(
+                "runId", "run-hello-w02-oracle",
+                "programId", "HELLOW02",
+                "generatedProject", generatedProject,
+                "oracle", Map.of(
+                        "mode", "cobol-runtime",
+                        "sourceText", source,
+                        "sourceRef", Map.of(
+                                "uri", "fixture://corpus/synthetic/programs/hello-w02.cbl",
+                                "sha256", "061074d14470643e3a8333a742ff0f5d4ea6285048d3b88e31f6ae0170ba231e",
+                                "byteSize", source.length()),
+                        "timeoutMs", 5000));
+
+        Map<String, Object> response = service.runVerification(request);
+
+        assertEquals("ok", response.get("status"),
+                () -> "HELLOW02 fixture oracle must match; response=" + response);
+        assertEquals("match", response.get("classification"));
+        Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
+        assertEquals(expected, oracle.get("stdout"));
+        Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
+        assertEquals(true, comparison.get("matched"));
+        assertEquals(((Map<?, ?>) comparison.get("actualRef")).get("sha256"), comparison.get("actualSha256"));
+        assertEquals(((Map<?, ?>) comparison.get("expectedRef")).get("sha256"), comparison.get("expectedSha256"));
     }
 
     @Test
@@ -138,6 +193,64 @@ class CobolOracleTest {
         assertEquals(false, comparison.get("matched"));
         assertEquals("oracle.cobol-runtime", comparison.get("source"));
         assertNotNull(comparison.get("diff"));
+    }
+
+    @Test
+    void userProvidedExpectedOutputOverridesCobolStdoutForPasteModeOracle() {
+        Map<String, Object> generatedProject = trivialProject(
+                "sample.UserExpectedMismatch",
+                "package sample; public class UserExpectedMismatch { "
+                        + "public static void main(String[] a) { System.out.println(\"PASS\"); } }");
+        Map<String, Object> request = Map.of(
+                "runId", "run-user-expected-mismatch",
+                "programId", "PASSPRG",
+                "generatedProject", generatedProject,
+                "oracle", Map.of(
+                        "mode", "cobol-runtime",
+                        "sourceText", COBOL_PRINT_PASS,
+                        "expectedOutput", "FAIL\n",
+                        "timeoutMs", 5000));
+
+        Map<String, Object> response = service.runVerification(request);
+
+        assertEquals("output-divergence", response.get("status"));
+        assertEquals("divergence-unknown", response.get("classification"));
+        Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
+        assertEquals(false, comparison.get("matched"));
+        assertEquals("oracle.user-provided", comparison.get("source"));
+        assertEquals("user-provided-expected-output", ((Map<?, ?>) comparison.get("expectedRef")).get("kind"));
+        assertEquals("java-stdout", ((Map<?, ?>) comparison.get("actualRef")).get("kind"));
+        Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
+        assertEquals("user-provided", oracle.get("mode"));
+        assertEquals(false, oracle.get("attempted"),
+                "explicit expectedOutput must not require executing the COBOL runtime");
+    }
+
+    @Test
+    void oracleInputIsPassedToCobolRuntime() {
+        assumeTrue(CobolRuntimeExecutor.isAvailable(),
+                "GnuCOBOL cobc/cobcrun must be installed for oracle stdin verification");
+        Map<String, Object> generatedProject = trivialProject(
+                "sample.OracleInputMatch",
+                "package sample; public class OracleInputMatch { "
+                        + "public static void main(String[] a) { System.out.println(\"ECHO\"); } }");
+        Map<String, Object> request = Map.of(
+                "runId", "run-oracle-input-match",
+                "programId", "INPRG",
+                "generatedProject", generatedProject,
+                "oracle", Map.of(
+                        "mode", "cobol-runtime",
+                        "sourceText", COBOL_ACCEPT_INPUT,
+                        "oracleInput", "ECHO\n",
+                        "timeoutMs", 5000));
+
+        Map<String, Object> response = service.runVerification(request);
+
+        assertEquals("ok", response.get("status"),
+                () -> "expected oracle stdin path to match; response=" + response);
+        Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
+        assertTrue(((String) oracle.get("stdout")).startsWith("ECHO"));
+        assertTrue(((String) oracle.get("oracleInputSha256")).matches("[0-9a-f]{64}"));
     }
 
     @Test
@@ -174,6 +287,43 @@ class CobolOracleTest {
             assertTrue(diagnostics.stream()
                     .map(d -> ((Map<?, ?>) d).get("code"))
                     .anyMatch("oracle-unavailable"::equals));
+        } finally {
+            restoreProperty("c2c.cobc.path", previousCobc);
+            restoreProperty("c2c.cobcrun.path", previousCobcrun);
+        }
+    }
+
+    @Test
+    void userProvidedExpectedOutputDoesNotRequireCobolRuntime() {
+        String previousCobc = System.getProperty("c2c.cobc.path");
+        String previousCobcrun = System.getProperty("c2c.cobcrun.path");
+        System.setProperty("c2c.cobc.path", "__missing_cobc_for_test__");
+        System.setProperty("c2c.cobcrun.path", "__missing_cobcrun_for_test__");
+        try {
+            Map<String, Object> generatedProject = trivialProject(
+                    "sample.UserExpectedNoRuntime",
+                    "package sample; public class UserExpectedNoRuntime { "
+                            + "public static void main(String[] a) { System.out.println(\"PASS\"); } }");
+            Map<String, Object> request = Map.of(
+                    "runId", "run-user-expected-no-runtime",
+                    "programId", "PASSPRG",
+                    "generatedProject", generatedProject,
+                    "oracle", Map.of(
+                            "mode", "cobol-runtime",
+                            "sourceText", COBOL_PRINT_PASS,
+                            "expectedOutput", "PASS\n"));
+
+            Map<String, Object> response = service.runVerification(request);
+
+            assertEquals("ok", response.get("status"),
+                    () -> "explicit expectedOutput should not require GnuCOBOL; response=" + response);
+            assertEquals("match", response.get("classification"));
+            Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
+            assertEquals("user-provided", oracle.get("mode"));
+            assertEquals(false, oracle.get("attempted"));
+            Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
+            assertEquals(true, comparison.get("matched"));
+            assertEquals("oracle.user-provided", comparison.get("source"));
         } finally {
             restoreProperty("c2c.cobc.path", previousCobc);
             restoreProperty("c2c.cobcrun.path", previousCobcrun);
@@ -347,12 +497,48 @@ class CobolOracleTest {
         assertEquals("BRNCH01", goldenMaster.get("programId"));
     }
 
+    @Test
+    void goldenMasterExpectedRefRejectsSymlinkEscape() throws Exception {
+        Path root = Files.createTempDirectory("c2c-golden-master-root-");
+        Path external = Files.createTempFile("c2c-golden-master-external-", ".txt");
+        try {
+            Files.writeString(external, "SECRET\n");
+            Path link = root.resolve("fixtures/link.txt");
+            Files.createDirectories(link.getParent());
+            Files.createSymbolicLink(link, external);
+
+            Map<String, Object> hint = Map.of(
+                    "expectedRef", Map.of("path", "fixtures/link.txt"));
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> GoldenMaster.resolve("ESCAPE", hint, root));
+        } finally {
+            Files.deleteIfExists(root.resolve("fixtures/link.txt"));
+            Files.deleteIfExists(root.resolve("fixtures"));
+            Files.deleteIfExists(root);
+            Files.deleteIfExists(external);
+        }
+    }
+
     private static Map<String, Object> trivialProject(String entryClass, String source) {
         String relativePath = "src/main/java/" + entryClass.replace('.', '/') + ".java";
         return Map.of(
                 "entryClass", entryClass,
                 "entryFilePath", relativePath,
                 "files", Map.of(relativePath, source));
+    }
+
+    private static String readRepoFixture(String relativePath) throws IOException {
+        return Files.readString(REPO_ROOT.resolve(relativePath));
+    }
+
+    private static String javaStringLiteral(String value) {
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                + "\"";
     }
 
     private static void restoreProperty(String key, String previous) {

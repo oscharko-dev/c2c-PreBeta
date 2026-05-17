@@ -22,6 +22,7 @@ export function SourceWorkspaceTree() {
         result.data.programId,
         result.data.cobolSource,
         result.data.cobolSourcePath.split('/').pop() || programId,
+        result.data.expectedOutput,
       );
     } else {
       console.error(result.message);

@@ -24,17 +24,7 @@ const NEGATIVE_SOURCE = readFileSync(
 
 const BFF_BASE_URL = process.env.NEXT_PUBLIC_C2C_BFF_BASE_URL || 'http://127.0.0.1:18089';
 
-// The W0.2 BFF surfaces a closed enum of failure codes. Either code below
-// is an honest non-success classification for unsupported source: the
-// parser emits an unsupported-feature diagnostic (orchestrator mapping
-// per docs/contracts/orchestrator-w02-workflow.md), and depending on
-// whether the diagnostic is reachable at parser-success or at
-// parser-422 boundary, the orchestrator surfaces either
-// `unsupported_cobol` (parsed-but-unsupported) or `parse_failed`
-// (parser rejected). Both are valid; the gate accepts the union so the
-// browser test is not coupled to the specific orchestrator mapping.
 const NON_SUCCESS_CLASSIFICATIONS = new Set(['blocked', 'failed', 'incomplete']);
-const ACCEPTED_UNSUPPORTED_FAILURE_CODES = new Set(['unsupported_cobol', 'parse_failed']);
 
 interface WorkflowView {
   runId: string;
@@ -129,13 +119,12 @@ test.describe('W0.2 release-gate browser acceptance', () => {
     const workflow = await waitForTerminalNonSuccess(page, runId, 120_000);
 
     // The orchestrator's W0.2 workflow contract MUST reach a terminal
-    // state, MUST carry a non-success classification, MUST attach one of
-    // the closed-set unsupported-source failure codes, and MUST NOT
-    // surface any generated Java artifact for unsupported source.
+    // blocked state, MUST attach the closed-set unsupported-source
+    // failure code, and MUST NOT surface any generated Java artifact for
+    // unsupported source.
     expect(workflow.runId).toBe(runId);
-    expect(NON_SUCCESS_CLASSIFICATIONS.has(workflow.finalClassification!)).toBe(true);
-    expect(workflow.failureCode).not.toBeNull();
-    expect(ACCEPTED_UNSUPPORTED_FAILURE_CODES.has(workflow.failureCode!)).toBe(true);
+    expect(workflow.finalClassification).toBe('blocked');
+    expect(workflow.failureCode).toBe('unsupported_cobol');
     expect(workflow.generatedJavaRef).toBeNull();
     expect(workflow.state).toBe('final_classification');
 
@@ -145,7 +134,7 @@ test.describe('W0.2 release-gate browser acceptance', () => {
     await page.getByRole('tab', { name: 'Agent' }).click();
     const agentPanel = page.getByTestId('agent-activity-panel');
     await expect(agentPanel).toBeVisible();
-    await expect(agentPanel).toContainText(/Unsupported COBOL|COBOL parsing failed/);
+    await expect(agentPanel).toContainText(/Unsupported COBOL/);
     await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('Final Java');
     await expect(agentPanel.getByTestId('agent-activity-artifact-refs')).toContainText('not published');
 

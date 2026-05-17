@@ -28,6 +28,7 @@ final class CobolRuntimeExecutor {
 
     private static final long DEFAULT_TIMEOUT_MS = Duration.ofSeconds(10).toMillis();
     private static final int MAX_SOURCE_BYTES = 1_048_576;
+    private static final int MAX_STDIN_BYTES = 1_048_576;
     private static final Pattern PROGRAM_ID_PATTERN =
             Pattern.compile("(?im)^\\s*PROGRAM-ID\\s*\\.\\s*([A-Za-z][A-Za-z0-9_-]{0,62})\\s*\\.");
     private static final Pattern MODULE_NAME_PATTERN =
@@ -100,7 +101,7 @@ final class CobolRuntimeExecutor {
      * @return a structured {@link OracleRun} describing availability, compile,
      *         run, stdout, stderr, and diagnostics
      */
-    static OracleRun executeSource(String requestedProgramId, String sourceText, long timeoutMs) {
+    static OracleRun executeSource(String requestedProgramId, String sourceText, String stdin, long timeoutMs) {
         long effectiveTimeoutMs = timeoutMs <= 0 ? DEFAULT_TIMEOUT_MS : timeoutMs;
         if (sourceText == null || sourceText.isBlank()) {
             return OracleRun.invalidInput("oracle.sourceText is required");
@@ -108,6 +109,11 @@ final class CobolRuntimeExecutor {
         if (sourceText.getBytes(StandardCharsets.UTF_8).length > MAX_SOURCE_BYTES) {
             return OracleRun.invalidInput(
                     "oracle.sourceText exceeds maximum size of " + MAX_SOURCE_BYTES + " bytes");
+        }
+        String safeStdin = stdin == null ? "" : stdin;
+        if (safeStdin.getBytes(StandardCharsets.UTF_8).length > MAX_STDIN_BYTES) {
+            return OracleRun.invalidInput(
+                    "oracle.oracleInput exceeds maximum size of " + MAX_STDIN_BYTES + " bytes");
         }
 
         String moduleName;
@@ -143,7 +149,7 @@ final class CobolRuntimeExecutor {
 
             Map<String, String> env = Map.of("COB_LIBRARY_PATH", workingRoot.toString());
             CommandResult run = runCommand(List.of(cobcrunCommand, moduleName),
-                    workingRoot, env, effectiveTimeoutMs);
+                    workingRoot, env, effectiveTimeoutMs, safeStdin);
             return OracleRun.ran(moduleName, compile, run,
                     cobcVersion.firstLine(), cobcrunVersion.firstLine());
         } catch (IOException e) {
@@ -290,6 +296,12 @@ final class CobolRuntimeExecutor {
 
     private static CommandResult runCommand(List<String> command, Path workingDirectory,
                                             Map<String, String> environment, long timeoutMs) {
+        return runCommand(command, workingDirectory, environment, timeoutMs, "");
+    }
+
+    private static CommandResult runCommand(List<String> command, Path workingDirectory,
+                                            Map<String, String> environment, long timeoutMs,
+                                            String stdin) {
         Instant started = Instant.now();
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
@@ -300,6 +312,12 @@ final class CobolRuntimeExecutor {
                     () -> readAll(process.getInputStream()));
             CompletableFuture<String> stderr = CompletableFuture.supplyAsync(
                     () -> readAll(process.getErrorStream()));
+            try (var processInput = process.getOutputStream()) {
+                if (stdin != null && !stdin.isEmpty()) {
+                    processInput.write(stdin.getBytes(StandardCharsets.UTF_8));
+                    processInput.flush();
+                }
+            }
 
             boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
             if (!finished) {

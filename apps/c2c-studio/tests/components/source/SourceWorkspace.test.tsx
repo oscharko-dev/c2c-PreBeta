@@ -122,7 +122,7 @@ describe('Source Workspace', () => {
         oracleMode: 'synthetic-fixture',
         knownLimitations: [],
         cobolSource: '      * THIS IS COBOL',
-        expectedOutput: '',
+        expectedOutput: 'EXPECTED\n',
         cobolSourcePath: '/path/to/P1.cbl',
         expectedOutputPath: '',
       },
@@ -142,7 +142,8 @@ describe('Source Workspace', () => {
     fireEvent.click(screen.getByText('Prog 1'));
 
     await waitFor(() => {
-      expect(screen.getByRole('textbox')).toHaveValue('      * THIS IS COBOL');
+      expect(screen.getByRole('textbox', { name: /COBOL source editor/i })).toHaveValue('      * THIS IS COBOL');
+      expect(screen.getByRole('textbox', { name: /optional expected output/i })).toHaveValue('EXPECTED\n');
       expect(screen.getByText('ID: P1')).toBeInTheDocument();
       expect(screen.getByText('P1.cbl')).toBeInTheDocument();
     });
@@ -157,10 +158,10 @@ describe('Source Workspace', () => {
 
     fireEvent.click(screen.getByText('Start Typing'));
 
-    const textarea = screen.getByRole('textbox');
+    const textarea = screen.getByRole('textbox', { name: /COBOL source editor/i });
     fireEvent.change(textarea, { target: { value: '      * NEW TEXT' } });
 
-    expect(screen.getByRole('textbox')).toHaveValue('      * NEW TEXT');
+    expect(screen.getByRole('textbox', { name: /COBOL source editor/i })).toHaveValue('      * NEW TEXT');
     expect(screen.getByText(/pasted-source\.cbl \*/i)).toBeInTheDocument();
 
     vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r1', programId: 'SRC-1', status: 'starting' } as unknown as TransformResponse });
@@ -172,6 +173,39 @@ describe('Source Workspace', () => {
         sourceText: '      * NEW TEXT',
         programId: undefined,
         sourceName: 'pasted-source.cbl',
+        targetLanguage: 'java',
+        expectedOutput: undefined,
+        oracleInput: undefined,
+      });
+    });
+  });
+
+  it('submits paste-mode expected output and oracle input when provided', async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({ ok: true, data: { runId: 'r-oracle', programId: 'SRC-1', status: 'starting' } as unknown as TransformResponse });
+
+    render(
+      <TransformationRunProvider><SourceWorkspaceProvider>
+        <CobolEditorPane />
+      </SourceWorkspaceProvider></TransformationRunProvider>
+    );
+
+    fireEvent.click(screen.getByText('Start Typing'));
+    fireEvent.change(screen.getByRole('textbox', { name: /optional expected output/i }), {
+      target: { value: 'HELLO-W02 DONE\n' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: /optional oracle input/i }), {
+      target: { value: 'stdin line\n' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
+
+    await waitFor(() => {
+      expect(apiClient.transform).toHaveBeenCalledWith({
+        sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
+        programId: undefined,
+        sourceName: 'pasted-source.cbl',
+        targetLanguage: 'java',
+        expectedOutput: 'HELLO-W02 DONE\n',
+        oracleInput: 'stdin line\n',
       });
     });
   });
@@ -210,7 +244,7 @@ describe('Source Workspace', () => {
     );
 
     fireEvent.click(await screen.findByText('Prog 1'));
-    const textbox = await screen.findByRole('textbox');
+    const textbox = await screen.findByRole('textbox', { name: /COBOL source editor/i });
     fireEvent.change(textbox, {
       target: { value: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P1A.\n' },
     });
@@ -221,6 +255,9 @@ describe('Source Workspace', () => {
         sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P1A.\n',
         programId: undefined,
         sourceName: 'P1.cbl',
+        targetLanguage: 'java',
+        expectedOutput: undefined,
+        oracleInput: undefined,
       });
     });
   });
@@ -243,6 +280,9 @@ describe('Source Workspace', () => {
         sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
         programId: undefined,
         sourceName: 'pasted-source.cbl',
+        targetLanguage: 'java',
+        expectedOutput: undefined,
+        oracleInput: undefined,
       });
     });
   });
@@ -268,6 +308,9 @@ describe('Source Workspace', () => {
         sourceText: '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
         programId: undefined,
         sourceName: 'pasted-source.cbl',
+        targetLanguage: 'java',
+        expectedOutput: undefined,
+        oracleInput: undefined,
       });
     });
   });
@@ -285,7 +328,7 @@ describe('Source Workspace', () => {
     fireEvent.click(screen.getByText('Start Typing'));
     
     // Now text is there, so we clear it
-    const textarea = screen.getByRole('textbox');
+    const textarea = screen.getByRole('textbox', { name: /COBOL source editor/i });
     fireEvent.change(textarea, { target: { value: '   ' } });
 
     const btn = screen.getByRole('button', { name: /Start Transformation/i });
@@ -328,7 +371,7 @@ describe('Source Workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
 
     expect(await screen.findByText('Backend unavailable. Try again shortly.')).toBeInTheDocument();
-    expect(screen.getByRole('textbox')).toHaveValue(
+    expect(screen.getByRole('textbox', { name: /COBOL source editor/i })).toHaveValue(
       '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
     );
   });
@@ -351,7 +394,7 @@ describe('Source Workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /start transformation/i }));
 
     expect(await screen.findByText('Transformation validation failed')).toBeInTheDocument();
-    expect(screen.getByRole('textbox')).toHaveValue(
+    expect(screen.getByRole('textbox', { name: /COBOL source editor/i })).toHaveValue(
       '       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG01.\n',
     );
   });

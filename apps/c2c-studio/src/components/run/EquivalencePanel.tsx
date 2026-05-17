@@ -8,7 +8,7 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
     return <div className="text-text-dim text-sm">Waiting for equivalence check...</div>;
   }
 
-  const { classification, expectedOutput, actualOutput } = buildTest;
+  const { classification, expectedOutput, actualOutput, expectedOutputRef, actualOutputRef } = buildTest;
 
   let classificationLabel: string = describeClassification(classification);
   let labelColor = 'text-text-dim';
@@ -35,6 +35,7 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
       <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
         <div className="flex flex-col">
           <div className="text-xs font-semibold mb-2 text-text-dim">COBOL Oracle (Expected)</div>
+          <OutputReferenceLabel label="Expected output ref" refValue={expectedOutputRef} />
           <CodeSurface
             className="flex-1 border border-line-2 rounded"
             label="Expected Output"
@@ -43,6 +44,7 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
         </div>
         <div className="flex flex-col">
           <div className="text-xs font-semibold mb-2 text-text-dim">Java Execution (Actual)</div>
+          <OutputReferenceLabel label="Actual output ref" refValue={actualOutputRef} />
           <CodeSurface
             className="flex-1 border border-line-2 rounded"
             label="Actual Output"
@@ -50,6 +52,26 @@ export function EquivalencePanel({ buildTest, isPending }: { buildTest: BuildTes
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function OutputReferenceLabel({
+  label,
+  refValue,
+}: {
+  label: string;
+  refValue: BuildTestView['expectedOutputRef'];
+}) {
+  if (!refValue) {
+    return null;
+  }
+  const shortHash = refValue.sha256.slice(0, 12);
+  const kind = refValue.kind || 'output';
+  const size = typeof refValue.byteSize === 'number' ? ` · ${refValue.byteSize} bytes` : '';
+  return (
+    <div className="mb-2 rounded border border-line bg-bg-1 px-2 py-1 font-mono text-[10px] text-text-dim">
+      {label}: {kind} #{shortHash}{size}
     </div>
   );
 }

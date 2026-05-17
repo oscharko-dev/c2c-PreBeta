@@ -94,6 +94,9 @@ test('createBffApi.transform posts COBOL source with optional metadata', async (
     sourceText: 'IDENTIFICATION DIVISION.',
     programId: 'BRNCH01',
     sourceName: 'fixtures/BRNCH01.cbl',
+    targetLanguage: 'java',
+    expectedOutput: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n',
+    oracleInput: 'INPUT\n',
     options: { skipExecution: true },
   });
   assert.equal(result.runId, 'run-2');
@@ -110,6 +113,9 @@ test('createBffApi.transform posts COBOL source with optional metadata', async (
     sourceText: 'IDENTIFICATION DIVISION.',
     programId: 'BRNCH01',
     sourceName: 'fixtures/BRNCH01.cbl',
+    targetLanguage: 'java',
+    expectedOutput: 'APPROVED-COUNT=2\nREJECTED-COUNT=2\n',
+    oracleInput: 'INPUT\n',
     options: { skipExecution: true },
   });
 });

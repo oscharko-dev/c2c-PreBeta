@@ -54,6 +54,32 @@
           aria-label="Editable COBOL source"
           placeholder="Paste or type COBOL source here, or load a reference program."
         ></textarea>
+        <div class="oracle-inputs" aria-label="Optional oracle inputs">
+          <label class="oracle-field" for="expected-output-editor">
+            <span>Optional expected output</span>
+            <textarea
+              id="expected-output-editor"
+              class="oracle-editor"
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              placeholder="Leave empty to derive the oracle through COBOL runtime when available."
+            ></textarea>
+          </label>
+          <label class="oracle-field" for="oracle-input-editor">
+            <span>Optional oracle input</span>
+            <textarea
+              id="oracle-input-editor"
+              class="oracle-editor"
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              placeholder="Stdin passed to the COBOL oracle; leave empty for no input."
+            ></textarea>
+          </label>
+        </div>
         <footer class="pane-footer" id="source-meta-row">
           <span id="source-meta" class="meta-line">No source yet.</span>
           <span id="source-post-start" class="meta-line meta-secondary" hidden></span>

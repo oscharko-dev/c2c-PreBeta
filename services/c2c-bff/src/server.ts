@@ -861,6 +861,14 @@ function deriveExpectedOutput(data: Record<string, unknown> | undefined, fallbac
   return fallback;
 }
 
+function deriveComparisonOutputRef(
+  data: Record<string, unknown> | undefined,
+  field: 'expectedRef' | 'actualRef',
+): OutputRef | null {
+  const comparison = asRecord(data?.comparison);
+  return comparison ? normalizeOutputRef(comparison[field]) : null;
+}
+
 async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorClient): Promise<Record<string, unknown>> {
   const liveRunId = liveArtifactRunId(stored);
   if (!liveRunId || !orchestrator.enabled) {
@@ -872,6 +880,8 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
       expectedOutput: stored.sample.expectedOutput,
       actualOutput: '',
       outputRef: null,
+      expectedOutputRef: null,
+      actualOutputRef: null,
       diagnostics: [],
     };
   }
@@ -886,6 +896,8 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
         expectedOutput: stored.sample.expectedOutput,
         actualOutput: '',
         outputRef: null,
+        expectedOutputRef: null,
+        actualOutputRef: null,
         diagnostics: [],
       };
     }
@@ -910,6 +922,8 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
       expectedOutput: deriveExpectedOutput(data, stored.sample.expectedOutput),
       actualOutput: deriveActualOutput(data),
       outputRef,
+      expectedOutputRef: deriveComparisonOutputRef(data, 'expectedRef'),
+      actualOutputRef: deriveComparisonOutputRef(data, 'actualRef'),
       diagnostics,
       missingArtifacts: missing,
       orchestratorRunId: liveRunId,
@@ -924,6 +938,8 @@ async function liveBuildTestView(stored: StoredRun, orchestrator: OrchestratorCl
       expectedOutput: stored.sample.expectedOutput,
       actualOutput: '',
       outputRef: null,
+      expectedOutputRef: null,
+      actualOutputRef: null,
       diagnostics: [],
     };
   }

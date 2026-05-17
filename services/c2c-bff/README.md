@@ -31,6 +31,12 @@ See [`openapi.yaml`](./openapi.yaml). Highlights:
   fields described below.
 - `GET /api/v0/samples` and `GET /api/v0/samples/{programId}` — sample
   COBOL registry derived from `fixtures/golden-master/index.json`.
+- `GET /api/v0/acceptance-fixtures` and
+  `GET /api/v0/acceptance-fixtures/{fixtureId}` — W0.2 acceptance fixture
+  and oracle contract from `fixtures/acceptance/index.json`.
+- `POST /api/v0/transform` — product-mode source submission. Accepts
+  `sourceText`, optional `expectedOutput` and `oracleInput`, and forwards
+  to the orchestrator when `C2C_ORCHESTRATOR_URL` is configured.
 - `POST /api/v0/runs` — start a run for a given `programId`. Returns
   `503` in product mode unless `C2C_ORCHESTRATOR_URL` is set.
 - `GET /api/v0/runs/{runId}` — current run status (proxied from
@@ -104,8 +110,10 @@ Those views always come from the orchestrator's persisted artifacts.
   shared with the UI (`placeholder-markers.ts`). A match downgrades the
   response to `incomplete` and adds `real-generated-java` to
   `missingArtifacts`.
-- No customer source code is uploaded or accepted; only repo-checked-in
-  corpus samples are visible.
+- Source submissions are accepted only through `POST /api/v0/transform`
+  and are forwarded to the configured orchestrator. When the orchestrator
+  is not configured, product mode fails closed instead of storing or
+  fabricating a successful run locally.
 - All upstream calls have a configurable timeout. On timeout or
   non-2xx response the BFF returns `502`/`incomplete`, never a local
   success.

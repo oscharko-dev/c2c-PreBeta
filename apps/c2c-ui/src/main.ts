@@ -649,6 +649,8 @@ function errorMessage(err: unknown): string {
 async function bootstrap(api: BffApi): Promise<void> {
   const state: UiState = { samples: [], busy: false };
   const editor = el<HTMLTextAreaElement>('cobol-editor');
+  const expectedOutputEditor = el<HTMLTextAreaElement>('expected-output-editor');
+  const oracleInputEditor = el<HTMLTextAreaElement>('oracle-input-editor');
   const referenceLoader = el<HTMLSelectElement>('reference-loader');
   const startButton = el<HTMLButtonElement>('start-run');
   const filePicker = el<HTMLSelectElement>('generated-file-picker');
@@ -688,6 +690,8 @@ async function bootstrap(api: BffApi): Promise<void> {
     try {
       const sample = await api.getSample(programId);
       editor.value = sample.cobolSource;
+      expectedOutputEditor.value = sample.expectedOutput;
+      oracleInputEditor.value = '';
       state.lastTransform = undefined;
       state.lastSourceHashHex = undefined;
       state.lastError = undefined;
@@ -733,9 +737,11 @@ async function bootstrap(api: BffApi): Promise<void> {
     try {
       const sourceHashHex = await computeSha256Hex(sourceText);
       state.lastSourceHashHex = sourceHashHex;
-      const request: TransformRequest = { sourceText };
+      const request: TransformRequest = { sourceText, targetLanguage: 'java' };
       const detected = sourceMetadata(sourceText).programId;
       if (detected) request.programId = detected;
+      if (expectedOutputEditor.value.length > 0) request.expectedOutput = expectedOutputEditor.value;
+      if (oracleInputEditor.value.length > 0) request.oracleInput = oracleInputEditor.value;
       const transform = await api.transform(request);
       state.lastTransform = transform;
       renderSourceMetadata(state);
