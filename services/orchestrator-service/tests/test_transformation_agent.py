@@ -468,6 +468,31 @@ class TransformationAgentBlockedTests(unittest.TestCase):
             self.assertIsNotNone(result.candidate)
             self.assertIn("src/main/java/com/c2c/generated/Hello.java", result.candidate.files)
 
+    def test_success_without_files_reuses_deterministic_baseline_files(self) -> None:
+        gateway_response = _ok_gateway_response()
+        gateway_response["output"].pop("files")
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RunArtifactStore(tmp)
+            store.init_run("run-1", "w0-migration-v0")
+            agent = TransformationAgent(
+                config=_config(),
+                artifact_store=store,
+                model_invoker=_StubInvoker(gateway_response),
+            )
+
+            result = agent.invoke(
+                _request(
+                    baseline_files={
+                        "src/main/java/com/c2c/generated/Hello.java": SAMPLE_JAVA,
+                    }
+                )
+            )
+
+            self.assertEqual(result.status, "success")
+            self.assertIsNotNone(result.candidate)
+            self.assertEqual(result.candidate.files["src/main/java/com/c2c/generated/Hello.java"], SAMPLE_JAVA)
+            self.assertIn("reused the deterministic baseline files", result.candidate.explanation)
+
 
 class TransformationAgentRejectionTests(unittest.TestCase):
     """Negative paths: invalid model output must be rejected, not silently
@@ -629,6 +654,14 @@ class TransformationAgentRejectionTests(unittest.TestCase):
         agent = self._agent_for_response(gateway_response)
         result = agent.invoke(_request())
         self.assertEqual(result.status, "success")
+
+    def test_success_without_files_and_without_baseline_is_rejected(self) -> None:
+        gateway_response = _ok_gateway_response()
+        gateway_response["output"].pop("files")
+        agent = self._agent_for_response(gateway_response)
+        with self.assertRaises(AgentContractInvalidAgentError) as ctx:
+            agent.invoke(_request(baseline_files=None, baseline_java_ref=None))
+        self.assertIn("success response must include non-empty 'files' map", str(ctx.exception))
 
 
 class TransformationAgentGatewayFailureTests(unittest.TestCase):
