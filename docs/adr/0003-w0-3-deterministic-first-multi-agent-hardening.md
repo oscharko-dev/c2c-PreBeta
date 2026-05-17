@@ -124,6 +124,9 @@ W0.3 does **not** introduce:
 
 - [c2c Fachkonzept](../concept/c2c-fachkonzept.md)
 - [ADR 0002: W0.2 Agentic AI Transformation Loop](0002-w0-2-agentic-ai-transformation-loop.md)
-- [Orchestrator W0.2 Workflow Contract](../contracts/orchestrator-w02-workflow.md)
+- [Orchestrator W0.3 Workflow Contract](../contracts/orchestrator-w03-workflow.md) — canonical W0.3 run-contract reference (Issue [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222)).
+- [Orchestrator W0.2 Workflow Contract](../contracts/orchestrator-w02-workflow.md) — retained for historical W0.2 wording.
+- [c2c-bff W0.2/W0.3 API contract](../c2c-bff/w0.2-api-contract.md) — BFF surface wrapping the W0.3 run contract.
+- [W0.3 Reference Runbook](../showcase/w0-3-reference-runbook.md) — procedural verification of this ADR (Issue [#222](https://github.com/oscharko-dev/c2c-PreBeta/issues/222)).
 - [W0.2 Epic #164 Closure Evidence](../release/w0-2-epic-164.md)
 - [Development Workflow Governance](../governance/development-workflow.md)
