@@ -31,6 +31,7 @@ import {
   type ExperienceLearningClient,
   type HttpClient,
   type OrchestratorClient,
+  type UpstreamResponse,
 } from "./upstream";
 import {
   coerceLiveStatus,
@@ -63,6 +64,31 @@ import {
   normaliseUpstreamResponse,
   validateFormatJavaRequest,
 } from "./formatJava";
+// Studio-IDE-10 (#249): editor-assist channel — validation, budget
+// store, gateway response mapping, and ledger-entry construction live
+// in their own module so the route handler stays thin and the rules
+// have direct unit-test coverage.
+import {
+  EDITOR_ASSIST_SCHEMA_VERSION,
+  buildEditorAssistRef,
+  buildErrorBody,
+  buildLedgerEntry,
+  buildLocalLedgerRef,
+  buildSuccessBody,
+  createEditorAssistBudgetStore,
+  createSequenceCounter,
+  defaultMessageForErrorCode,
+  mapGatewayResponse,
+  normaliseGatewayRedactedFields,
+  statusForErrorCode,
+  validateExplainRequest,
+  type BudgetSnapshot,
+  type EditorAssistBudgetStore,
+  type EditorAssistLedgerEntry,
+  type EditorExplainErrorCode,
+  type EditorRegion,
+  type SequenceCounter,
+} from "./editorExplain";
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -92,6 +118,20 @@ export interface ServerDeps {
   buildTestRunner?: BuildTestRunnerClient;
   httpClient?: HttpClient;
   runStore?: RunStore;
+  // Studio-IDE-10 (#249): the editor-assist budget store and sequence
+  // counter are process-scoped state. Tests inject pre-seeded
+  // instances so individual integration tests can drive the
+  // budget-exhaustion and per-tenant-per-day cap paths
+  // deterministically.
+  editorAssistBudgets?: EditorAssistBudgetStore;
+  editorAssistSequence?: SequenceCounter;
+  // Per-request collector for ledger entries the BFF would normally
+  // forward to the trajectory ledger pipeline. V1 keeps the entry
+  // in-process so the audit trail shape is contract-stable today
+  // (asserted by tests) and a future task can wire the sink without
+  // contract surgery. ``undefined`` means "discard"; tests pass a
+  // capturing array to inspect the entry.
+  editorAssistLedgerSink?: (entry: EditorAssistLedgerEntry) => void;
   now?: () => Date;
 }
 
@@ -106,6 +146,10 @@ interface ResolvedDeps {
   harness: HarnessClient;
   buildTestRunner: BuildTestRunnerClient;
   runStore: RunStore;
+  editorAssistBudgets: EditorAssistBudgetStore;
+  editorAssistSequence: SequenceCounter;
+  editorAssistLedgerSink: (entry: EditorAssistLedgerEntry) => void;
+  now: () => Date;
 }
 
 function resolveDeps(deps: ServerDeps): ResolvedDeps {
@@ -188,6 +232,12 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
         deps.config.buildTestRunnerControlToken,
       ),
     runStore: deps.runStore ?? createRunStore(deps.now),
+    editorAssistBudgets:
+      deps.editorAssistBudgets ??
+      createEditorAssistBudgetStore({ now: deps.now }),
+    editorAssistSequence: deps.editorAssistSequence ?? createSequenceCounter(),
+    editorAssistLedgerSink: deps.editorAssistLedgerSink ?? (() => undefined),
+    now: deps.now ?? (() => new Date()),
   };
 }
 
@@ -2461,6 +2511,257 @@ function applyLiveRunPayload(
   return updated ?? stored;
 }
 
+// Studio-IDE-10 (#249): editor-assist channel route handler. Pulled
+// out of ``createApp`` so the handler is one cohesive unit instead of
+// 200 lines of inline route body — `editorExplain.ts` carries the
+// rules, this function applies them. The body intentionally never
+// echoes upstream error text; only the closed-set default messages
+// flow back to the client.
+interface HandleEditorExplainArgs {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  modelGateway: ModelGatewayClient;
+  budgets: EditorAssistBudgetStore;
+  sequence: SequenceCounter;
+  ledgerSink: (entry: EditorAssistLedgerEntry) => void;
+  now: () => Date;
+}
+
+const EDITOR_EXPLAIN_MAX_BODY_BYTES = 256_000;
+
+function emitEditorExplainError(
+  res: http.ServerResponse,
+  errorCode: EditorExplainErrorCode,
+  snapshot: BudgetSnapshot | null,
+  messageOverride?: string,
+): void {
+  jsonResponse(
+    res,
+    statusForErrorCode(errorCode),
+    buildErrorBody(errorCode, snapshot, messageOverride),
+  );
+}
+
+async function handleEditorExplain(
+  args: HandleEditorExplainArgs,
+): Promise<void> {
+  const { req, res, modelGateway, budgets, sequence, ledgerSink, now } = args;
+  // Fast-path: gateway disabled means we never consume budget and never
+  // write a ledger entry — see ADR 0004 "Required follow-up" and the
+  // explicit AC in the issue body.
+  if (!modelGateway.enabled) {
+    emitEditorExplainError(res, "gateway_unavailable", null);
+    return;
+  }
+
+  // M1: reject requests whose Content-Type is not application/json.
+  // 415 Unsupported Media Type is the correct status for a media-type
+  // mismatch (not 400). DOMPurify and downstream parsing are not reached
+  // until this gate passes.
+  const contentType = req.headers["content-type"] ?? "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    jsonResponse(
+      res,
+      415,
+      buildErrorBody(
+        "invalid_region",
+        null,
+        "request must use Content-Type: application/json",
+      ),
+    );
+    return;
+  }
+
+  let raw: unknown;
+  try {
+    raw = await readJsonBody(req, EDITOR_EXPLAIN_MAX_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof Error && /too large/i.test(err.message)) {
+      emitEditorExplainError(
+        res,
+        "invalid_region",
+        null,
+        "request body too large",
+      );
+      return;
+    }
+    emitEditorExplainError(
+      res,
+      "invalid_region",
+      null,
+      err instanceof Error ? err.message : "invalid body",
+    );
+    return;
+  }
+
+  const validation = validateExplainRequest(raw);
+  if (!validation.ok) {
+    emitEditorExplainError(res, validation.errorCode, null, validation.message);
+    return;
+  }
+  const request = validation.value;
+
+  const scope = {
+    tenantId: request.tenantId,
+    userId: request.userId,
+    sessionId: request.sessionId,
+  };
+  const consume = await budgets.consume(scope);
+  if (!consume.ok) {
+    emitEditorExplainError(res, consume.errorCode, consume.snapshot);
+    return;
+  }
+
+  const startedAt = now().toISOString();
+  let gatewayResponse: UpstreamResponse | undefined;
+  let upstreamError = false;
+  try {
+    gatewayResponse = await modelGateway.explain({
+      schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
+      sessionId: request.sessionId,
+      tenantId: request.tenantId,
+      userId: request.userId,
+      runId: request.runId,
+      sourceHash: request.sourceHash,
+      region: request.region,
+      redactedBytes: request.redactedBytes,
+      byteHash: request.byteHash,
+      studioRedactionMetadata: request.studioRedactionMetadata,
+    });
+  } catch (err) {
+    if (err instanceof UpstreamResponseTooLargeError) {
+      upstreamError = true;
+      // M3: log oversize responses distinctly so operators can tune the cap.
+      console.warn(
+        JSON.stringify({
+          route: "/api/v0/editor/explain",
+          event: "gateway_call_failed",
+          errorClass: "UpstreamResponseTooLargeError",
+          message: sanitizeUpstreamMessage(
+            err instanceof Error ? err.message : String(err),
+            defaultMessageForErrorCode("gateway_unavailable"),
+          ),
+        }),
+      );
+    } else {
+      upstreamError = true;
+      // M3: log transport/gateway failures so operators can see failure patterns.
+      // sanitizeUpstreamMessage strips API keys, JWTs, URLs, file paths, and
+      // stack traces before the message is written to the log.
+      console.warn(
+        JSON.stringify({
+          route: "/api/v0/editor/explain",
+          event: "gateway_call_failed",
+          errorClass:
+            err != null &&
+            typeof (err as Record<string, unknown>).constructor === "function"
+              ? ((err as { constructor: { name: string } }).constructor.name ??
+                "Unknown")
+              : "Unknown",
+          message: sanitizeUpstreamMessage(
+            err instanceof Error ? err.message : String(err),
+            defaultMessageForErrorCode("gateway_unavailable"),
+          ),
+        }),
+      );
+    }
+  }
+
+  const mapped = upstreamError
+    ? ({
+        kind: "error",
+        errorCode: "gateway_unavailable",
+        message: defaultMessageForErrorCode("gateway_unavailable"),
+      } as const)
+    : mapGatewayResponse(gatewayResponse);
+
+  const endedAt = now().toISOString();
+  const seq = sequence.next({
+    tenantId: request.tenantId,
+    sessionId: request.sessionId,
+  });
+  const editorAssistRef = buildEditorAssistRef({
+    tenantId: request.tenantId,
+    sessionId: request.sessionId,
+    seq,
+  });
+  const localLedgerRef = buildLocalLedgerRef({
+    tenantId: request.tenantId,
+    sessionId: request.sessionId,
+    seq,
+  });
+
+  if (mapped.kind === "error") {
+    const ledgerEntry = buildLedgerEntry({
+      schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
+      tenantId: request.tenantId,
+      userId: request.userId,
+      sessionId: request.sessionId,
+      region: request.region,
+      byteHash: request.byteHash,
+      redactionApplied:
+        request.studioRedactionMetadata.matchedPatternIds.slice(),
+      editorAssistRef,
+      ledgerRef: localLedgerRef,
+      invocationId: null,
+      budgetSnapshot: consume.snapshot,
+      startedAt,
+      endedAt,
+      status: "failed",
+      failureCode: mapped.errorCode,
+      runIdRef: request.runId,
+    });
+    ledgerSink(ledgerEntry);
+    emitEditorExplainError(res, mapped.errorCode, consume.snapshot);
+    return;
+  }
+
+  const gatewayLedgerRef = mapped.gatewayLedgerRef;
+  const ledgerRef =
+    gatewayLedgerRef !== null && gatewayLedgerRef.length > 0
+      ? gatewayLedgerRef
+      : localLedgerRef;
+  const redactionApplied = normaliseGatewayRedactedFields({
+    studioMatchedPatternIds: request.studioRedactionMetadata.matchedPatternIds,
+    gatewayRedactedFields: mapped.gatewayRedactedFields,
+  });
+  const modelInvocationRef =
+    mapped.invocationId ?? `mi-${seq}-${editorAssistRef}`;
+
+  const ledgerEntry = buildLedgerEntry({
+    schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
+    tenantId: request.tenantId,
+    userId: request.userId,
+    sessionId: request.sessionId,
+    region: request.region,
+    byteHash: request.byteHash,
+    redactionApplied,
+    editorAssistRef,
+    ledgerRef,
+    invocationId: mapped.invocationId,
+    budgetSnapshot: consume.snapshot,
+    startedAt,
+    endedAt,
+    status: "success",
+    failureCode: null,
+    runIdRef: request.runId,
+  });
+  ledgerSink(ledgerEntry);
+
+  jsonResponse(
+    res,
+    200,
+    buildSuccessBody({
+      explanation: mapped.explanation,
+      modelInvocationRef,
+      editorAssistRef,
+      ledgerRef,
+      budgetSnapshot: consume.snapshot,
+      redactionApplied,
+    }),
+  );
+}
+
 export function createApp(deps: ServerDeps): http.RequestListener {
   const resolved = resolveDeps(deps);
   const {
@@ -2474,6 +2775,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
     harness,
     buildTestRunner,
     runStore,
+    editorAssistBudgets,
+    editorAssistSequence,
+    editorAssistLedgerSink,
+    now: nowFn,
   } = resolved;
 
   return async function handler(req, res) {
@@ -2612,6 +2917,54 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
+      }
+
+      // Studio-IDE-10 (#249): editor-assist channel — explain endpoint.
+      // Architecture: ADR 0004 (parallel-governed channel, distinct
+      // budget, distinct ledger kind). Pre-redaction contract: ADR
+      // 0005 §4 (BFF receives already-redacted bytes + matching
+      // byteHash). All model calls go through the Model Gateway.
+      if (pathname === "/api/v0/editor/explain" && method === "POST") {
+        await handleEditorExplain({
+          req,
+          res,
+          modelGateway,
+          budgets: editorAssistBudgets,
+          sequence: editorAssistSequence,
+          ledgerSink: editorAssistLedgerSink,
+          now: nowFn,
+        });
+        return;
+      }
+
+      // Studio-IDE-10 (#249): editor-assist channel — budget snapshot
+      // endpoint. The Studio uses this on session start to hide the
+      // primary action button when the per-session budget is already
+      // exhausted (AC8 in the issue body).
+      if (pathname === "/api/v0/editor/budget" && method === "GET") {
+        const sessionIdRaw = requestUrl.searchParams.get("sessionId");
+        if (!sessionIdRaw || sessionIdRaw.trim().length === 0) {
+          badRequest(res, "sessionId must be a non-empty string");
+          return;
+        }
+        const tenantIdRaw = requestUrl.searchParams.get("tenantId");
+        const userIdRaw = requestUrl.searchParams.get("userId");
+        const tenantId =
+          tenantIdRaw && tenantIdRaw.trim().length > 0
+            ? tenantIdRaw
+            : "default";
+        const userId =
+          userIdRaw && userIdRaw.trim().length > 0 ? userIdRaw : "local";
+        const snapshot = editorAssistBudgets.snapshot({
+          tenantId,
+          userId,
+          sessionId: sessionIdRaw,
+        });
+        jsonResponse(res, 200, {
+          schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
+          budget: snapshot,
+        });
+        return;
       }
 
       if (pathname === "/api/v0/transform" && method === "POST") {

@@ -520,6 +520,14 @@ export interface ModelGatewayClient {
   getHealth(): Promise<UpstreamResponse | undefined>;
   getModels(): Promise<UpstreamResponse | undefined>;
   getCapabilities(): Promise<UpstreamResponse | undefined>;
+  // Studio-IDE-10 (#249): editor-assist channel. Submits an already
+  // Studio-pre-redacted region to the gateway's /v0/explain endpoint per
+  // ADR 0004 / ADR 0005 §4. The BFF MUST NOT call any model API directly
+  // — this method is the only model boundary for the Explain action.
+  explain(
+    payload: unknown,
+    timeoutOverrideMs?: number,
+  ): Promise<UpstreamResponse | undefined>;
 }
 
 export interface HarnessClient {
@@ -544,6 +552,9 @@ export function createModelGatewayClient(
       async getCapabilities() {
         return undefined;
       },
+      async explain() {
+        return undefined;
+      },
     };
   }
   const normalized = baseUrl.replace(/\/+$/, "");
@@ -565,6 +576,13 @@ export function createModelGatewayClient(
       return http.request(`${normalized}/v0/capabilities`, {
         method: "GET",
         timeoutMs,
+      });
+    },
+    async explain(payload, timeoutOverrideMs) {
+      return http.request(`${normalized}/v0/explain`, {
+        method: "POST",
+        body: payload,
+        timeoutMs: timeoutOverrideMs ?? timeoutMs,
       });
     },
   };

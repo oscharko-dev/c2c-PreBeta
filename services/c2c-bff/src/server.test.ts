@@ -26,6 +26,10 @@ import {
   type UpstreamResponse,
 } from "./upstream";
 import { loadConfig, type BffConfig } from "./config";
+import {
+  createEditorAssistBudgetStore,
+  type BudgetSnapshot,
+} from "./editorExplain";
 
 const FIXED_SAMPLE: SampleDetail = {
   programId: "BRNCH01",
@@ -330,6 +334,9 @@ function liveEvidence(): EvidenceClient {
 function availableModelGateway(): ModelGatewayClient {
   return {
     enabled: true,
+    async explain() {
+      return undefined;
+    },
     async getHealth() {
       return {
         status: 200,
@@ -2495,6 +2502,9 @@ test("model gateway health route normalizes upstream service payload to the Stud
     experienceLearning: disabledLearning(),
     modelGateway: {
       enabled: true,
+      async explain() {
+        return undefined;
+      },
       async getHealth() {
         return {
           status: 200,
@@ -2578,6 +2588,9 @@ test("model gateway models route normalizes upstream registry payload to the Stu
     experienceLearning: disabledLearning(),
     modelGateway: {
       enabled: true,
+      async explain() {
+        return undefined;
+      },
       async getHealth() {
         return undefined;
       },
@@ -2625,6 +2638,9 @@ test("model gateway capabilities route exposes per-role availability for blocked
     experienceLearning: disabledLearning(),
     modelGateway: {
       enabled: true,
+      async explain() {
+        return undefined;
+      },
       async getHealth() {
         return undefined;
       },
@@ -5984,6 +6000,632 @@ test("POST /api/v0/verify stamps manualEditsCarriedOver and manualDriftRegionCou
     assert.equal(body.manualEditsCarriedOver, true);
     assert.equal(body.manualDriftRegionCount, 2);
   } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Studio-IDE-10 (#249): POST /api/v0/editor/explain + GET /api/v0/editor/budget
+// ---------------------------------------------------------------------------
+
+function explainGateway(
+  response: UpstreamResponse | undefined,
+  options: { enabled?: boolean; throwError?: Error } = {},
+): {
+  client: ModelGatewayClient;
+  calls: Array<{ payload: unknown }>;
+} {
+  const calls: Array<{ payload: unknown }> = [];
+  const enabled = options.enabled ?? true;
+  const client: ModelGatewayClient = {
+    enabled,
+    async explain(payload) {
+      calls.push({ payload });
+      if (options.throwError) {
+        throw options.throwError;
+      }
+      return response;
+    },
+    async getHealth() {
+      return undefined;
+    },
+    async getModels() {
+      return undefined;
+    },
+    async getCapabilities() {
+      return undefined;
+    },
+  };
+  return { client, calls };
+}
+
+function explainRequestBody(overrides: Record<string, unknown> = {}): unknown {
+  const redacted = "MOVE WS-A TO WS-B.";
+  const byteHash = createHash("sha256").update(redacted, "utf8").digest("hex");
+  return {
+    schemaVersion: "v0",
+    sessionId: "studio-session-explain-1",
+    tenantId: "tenant-a",
+    userId: "user-a",
+    runId: null,
+    sourceHash: "a".repeat(64),
+    region: {
+      filePath: "src/cobol/HELLO.cbl",
+      sourceKind: "cobol",
+      startLine: 12,
+      endLine: 18,
+    },
+    redactedBytes: redacted,
+    byteHash,
+    studioRedactionMetadata: {
+      studioRedactionProfileVersion: "v1.0.0",
+      matchedPatternIds: ["ssn-us"],
+    },
+    ...overrides,
+  };
+}
+
+test("POST /api/v0/editor/explain returns the success body and consumes one budget unit", async () => {
+  const { client: gateway, calls } = explainGateway({
+    status: 200,
+    body: {
+      explanation: "MOVE moves bytes from WS-A to WS-B.",
+      invocationId: "mi-explain-1",
+      ledgerRef: "urn:ledger/explain/abc",
+      redactedFields: ["customerName"],
+    },
+  });
+  const ledger: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    editorAssistLedgerSink: (entry) =>
+      ledger.push(entry as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody(),
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(body.explanation, "MOVE moves bytes from WS-A to WS-B.");
+    assert.equal(body.ledgerRef, "urn:ledger/explain/abc");
+    assert.equal(
+      typeof body.editorAssistRef === "string" &&
+        (body.editorAssistRef as string).startsWith("eai-tenant-a-"),
+      true,
+    );
+    assert.deepEqual(body.budgetSnapshot, { limit: 3, used: 1, remaining: 2 });
+    const redaction = body.redactionApplied as string[];
+    // Union of studio + gateway redactions, order-insensitive.
+    assert.equal(redaction.includes("ssn-us"), true);
+    assert.equal(redaction.includes("customerName"), true);
+    assert.equal(calls.length, 1);
+    assert.equal(ledger.length, 1);
+    const entry = ledger[0] as Record<string, unknown>;
+    assert.equal(entry.kind, "editor_assist");
+    assert.equal(entry.status, "success");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain returns 503 gateway_unavailable when modelGateway is disabled", async () => {
+  const { client: gateway, calls } = explainGateway(undefined, {
+    enabled: false,
+  });
+  const ledger: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    editorAssistLedgerSink: (entry) =>
+      ledger.push(entry as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody(),
+      },
+    );
+    assert.equal(response.status, 503);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "gateway_unavailable");
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(body.budgetSnapshot, null);
+    // No budget consumed, no ledger entry when the gateway is disabled.
+    assert.equal(calls.length, 0);
+    assert.equal(ledger.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain returns 400 invalid_region on byteHash mismatch and does NOT consume budget", async () => {
+  const { client: gateway, calls } = explainGateway({
+    status: 200,
+    body: { explanation: "should not be reached", invocationId: "mi-x" },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const tampered = explainRequestBody({ byteHash: "f".repeat(64) });
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: tampered,
+      },
+    );
+    assert.equal(response.status, 400);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "invalid_region");
+    assert.equal(body.schemaVersion, "v0");
+    assert.match(body.message as string, /byteHash mismatch/);
+    assert.equal(calls.length, 0);
+
+    // Budget endpoint confirms used=0.
+    const budget = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=studio-session-explain-1&tenantId=tenant-a&userId=user-a`,
+    );
+    assert.deepEqual((budget.body as { budget: BudgetSnapshot }).budget, {
+      limit: 3,
+      used: 0,
+      remaining: 3,
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain maps gateway 403 to policy_denied with HTTP 403", async () => {
+  const { client: gateway } = explainGateway({
+    status: 403,
+    body: { error: "policy denied" },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody(),
+      },
+    );
+    assert.equal(response.status, 403);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "policy_denied");
+    assert.deepEqual(body.budgetSnapshot, { limit: 3, used: 1, remaining: 2 });
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain maps gateway 504 to timeout with HTTP 504", async () => {
+  const { client: gateway } = explainGateway({
+    status: 504,
+    body: { error: "slow" },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody(),
+      },
+    );
+    assert.equal(response.status, 504);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "timeout");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain maps gateway 500 to gateway_unavailable with HTTP 503", async () => {
+  const { client: gateway } = explainGateway({
+    status: 500,
+    body: {
+      error:
+        "Traceback (most recent call last): leak\nsk-deadbeefdeadbeefdeadbeef",
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody(),
+      },
+    );
+    assert.equal(response.status, 503);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "gateway_unavailable");
+    // The user-facing message must NOT include the upstream stack
+    // trace marker or the leaked secret pattern.
+    assert.doesNotMatch(body.message as string, /Traceback/);
+    assert.doesNotMatch(body.message as string, /sk-deadbeef/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain returns 429 budget_exhausted when the session is empty", async () => {
+  const { client: gateway } = explainGateway({
+    status: 200,
+    body: { explanation: "ok", invocationId: "mi-1", ledgerRef: "urn:l/1" },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    // Inject a 1-unit budget store so a single call exhausts the
+    // session.
+    editorAssistBudgets: createEditorAssistBudgetStore({ defaultLimit: 1 }),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const first = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "POST",
+      body: explainRequestBody(),
+    });
+    assert.equal(first.status, 200);
+
+    const second = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "POST",
+      body: explainRequestBody(),
+    });
+    assert.equal(second.status, 429);
+    const body = second.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "budget_exhausted");
+    assert.deepEqual(body.budgetSnapshot, { limit: 1, used: 1, remaining: 0 });
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain enforces the per-tenant-per-day ceiling across sessions", async () => {
+  const { client: gateway } = explainGateway({
+    status: 200,
+    body: { explanation: "ok", invocationId: "mi-1", ledgerRef: "urn:l/1" },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    editorAssistBudgets: createEditorAssistBudgetStore({
+      defaultLimit: 10,
+      tenantDailyCap: 1,
+    }),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const first = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "POST",
+      body: explainRequestBody({ sessionId: "sess-A" }),
+    });
+    assert.equal(first.status, 200);
+    // Fresh sessionId, same tenantId — must still hit the daily cap.
+    const second = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "POST",
+      body: explainRequestBody({ sessionId: "sess-B" }),
+    });
+    assert.equal(second.status, 429);
+    const body = second.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "budget_exhausted");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain rejects malformed payloads with invalid_region", async () => {
+  const { client: gateway } = explainGateway({
+    status: 200,
+    body: { explanation: "ok", invocationId: "mi-1" },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+  });
+  const server = await startTestServer(handler);
+  try {
+    // Missing sessionId
+    const noSession = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: { ...(explainRequestBody() as object), sessionId: "" },
+      },
+    );
+    assert.equal(noSession.status, 400);
+    assert.equal(
+      (noSession.body as Record<string, unknown>).errorCode,
+      "invalid_region",
+    );
+
+    // Empty redactedBytes
+    const empty = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "POST",
+      body: {
+        ...(explainRequestBody() as object),
+        redactedBytes: "",
+        byteHash: createHash("sha256").update("", "utf8").digest("hex"),
+      },
+    });
+    assert.equal(empty.status, 400);
+
+    // sourceKind outside cobol|java
+    const wrongKind = explainRequestBody() as Record<string, unknown>;
+    (wrongKind.region as Record<string, unknown>).sourceKind = "python";
+    const wrongKindRes = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      { method: "POST", body: wrongKind },
+    );
+    assert.equal(wrongKindRes.status, 400);
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/editor/budget returns the current session snapshot", async () => {
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: explainGateway(undefined).client,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1&tenantId=t-1&userId=u-1`,
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.schemaVersion, "v0");
+    assert.deepEqual(body.budget, { limit: 3, used: 0, remaining: 3 });
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/editor/budget rejects missing sessionId with 400", async () => {
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: explainGateway(undefined).client,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/editor/budget`);
+    assert.equal(response.status, 400);
+    assert.match(
+      (response.body as Record<string, unknown>).error as string,
+      /sessionId/,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain falls back to local ledgerRef when gateway omits it", async () => {
+  const { client: gateway } = explainGateway({
+    status: 200,
+    body: {
+      explanation: "ok",
+      invocationId: "mi-2",
+      // No ledgerRef from gateway — BFF must emit the local placeholder.
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody({ sessionId: "fallback-sess" }),
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(
+      typeof body.ledgerRef === "string" &&
+        (body.ledgerRef as string).startsWith("edit-tenant-a-fallback-sess-"),
+      true,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain returns 415 when Content-Type is not application/json", async () => {
+  // M1: the route must reject non-JSON content types before reading the body.
+  // No budget is consumed and no ledger entry is written.
+  const { client: gateway, calls } = explainGateway({
+    status: 200,
+    body: { explanation: "ok", invocationId: "mi-1" },
+  });
+  const ledger: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    editorAssistLedgerSink: (entry) =>
+      ledger.push(entry as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const bodyBytes = Buffer.from(JSON.stringify(explainRequestBody()));
+    const response = await new Promise<{ status: number; body: unknown }>(
+      (resolve, reject) => {
+        const req = http.request(
+          {
+            method: "POST",
+            hostname: "127.0.0.1",
+            port: new URL(server.baseUrl).port,
+            path: "/api/v0/editor/explain",
+            headers: {
+              accept: "application/json",
+              "content-type": "text/plain",
+              "content-length": String(bodyBytes.length),
+            },
+          },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk: Buffer) => chunks.push(chunk));
+            res.on("end", () => {
+              const raw = Buffer.concat(chunks).toString("utf-8");
+              let parsed: unknown = raw;
+              try {
+                parsed = JSON.parse(raw);
+              } catch {
+                // leave as string
+              }
+              resolve({ status: res.statusCode ?? 0, body: parsed });
+            });
+            res.on("error", reject);
+          },
+        );
+        req.on("error", reject);
+        req.write(bodyBytes);
+        req.end();
+      },
+    );
+    assert.equal(response.status, 415);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(body.errorCode, "invalid_region");
+    assert.match(body.message as string, /Content-Type: application\/json/);
+    assert.equal(body.budgetSnapshot, null);
+    // No gateway call, no budget consumed, no ledger entry.
+    assert.equal(calls.length, 0);
+    assert.equal(ledger.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain emits structured console.warn on gateway throw", async () => {
+  // M3: when the gateway client throws, the BFF must log a JSON-structured
+  // warning containing route, event, errorClass, and message before
+  // returning 503 gateway_unavailable.
+  const { client: gateway } = explainGateway(undefined, {
+    throwError: new Error("transport failure: ECONNREFUSED"),
+  });
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+  });
+  const server = await startTestServer(handler);
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
+  };
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody(),
+      },
+    );
+    assert.equal(response.status, 503);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "gateway_unavailable");
+    // The structured warn must have been called at least once.
+    assert.ok(
+      warnings.length >= 1,
+      "expected console.warn to be called at least once",
+    );
+    // The first warn entry must be valid JSON with the required fields.
+    const parsed = JSON.parse(warnings[0] as string) as Record<string, unknown>;
+    assert.equal(parsed.route, "/api/v0/editor/explain");
+    assert.equal(parsed.event, "gateway_call_failed");
+    assert.equal(typeof parsed.errorClass, "string");
+    assert.equal(typeof parsed.message, "string");
+    // The raw error text must not have been echoed into the response body.
+    assert.doesNotMatch(body.message as string, /ECONNREFUSED/);
+  } finally {
+    console.warn = originalWarn;
     await server.close();
   }
 });

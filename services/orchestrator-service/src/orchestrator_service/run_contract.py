@@ -481,6 +481,100 @@ class ModelInvocationBudget:
 
 
 # ---------------------------------------------------------------------------
+# Editor-assist budget (Studio-IDE-10 / Issue #249 / ADR 0004)
+# ---------------------------------------------------------------------------
+
+# ADR 0004 defines the editor-assist channel as a parallel-governed
+# channel with its own budget, distinct from the per-run productive
+# budgets above. The default and range are intentionally tighter than
+# ``modelInvocationBudget``: productive runs are expensive and
+# intentional; editor-assist is cheap and abuse-prone. The bounds live
+# here so the W0.3 contract has a single source of truth even though
+# the budget itself is consumed by the BFF, not by the Orchestrator
+# state machine. ADR 0004 is explicit that ``editorAssistBudget`` does
+# **not** appear in the per-run contract payload returned by
+# ``GET /v0/runs/{runId}/workflow``, so ``W02RunContract`` does not
+# carry an ``editor_assist_budget`` field.
+EDITOR_ASSIST_BUDGET_MIN = 1
+EDITOR_ASSIST_BUDGET_MAX = 10
+DEFAULT_EDITOR_ASSIST_BUDGET = 3
+
+
+class EditorAssistBudgetExhaustedError(WorkflowContractError):
+    """Raised when the editor-assist channel has no units left.
+
+    Issue #249 (Studio-IDE-10): the editor-assist channel is governed
+    by a per-(tenantId, userId, sessionId) budget. Exhaustion forces
+    the BFF to return ``budget_exhausted`` to the Studio rather than
+    silently dropping the call.
+    """
+
+
+def clamp_editor_assist_budget(value: int) -> int:
+    """Clamp an editor-assist-budget value to the ADR 0004 range [1, 10]."""
+    if value < EDITOR_ASSIST_BUDGET_MIN:
+        return EDITOR_ASSIST_BUDGET_MIN
+    if value > EDITOR_ASSIST_BUDGET_MAX:
+        return EDITOR_ASSIST_BUDGET_MAX
+    return value
+
+
+# noinspection PyClassHasNoInitInspection
+@dataclass
+class EditorAssistBudget:
+    """Tracks editor-assist invocations against a bounded ADR 0004 limit.
+
+    Studio-IDE-10 (#249): the editor-assist channel writes its own
+    ``kind=editor_assist`` ledger entries and consumes this budget per
+    Studio editor session. The dataclass mirrors :class:`AssistBudget`
+    so the orchestrator-side budget tooling stays uniform; the BFF
+    holds the live in-process state for V1 (see
+    ``services/c2c-bff/src/editorExplain.ts``).
+    """
+
+    limit: int
+    used: int = 0
+
+    def __post_init__(self) -> None:
+        if self.limit < EDITOR_ASSIST_BUDGET_MIN or self.limit > EDITOR_ASSIST_BUDGET_MAX:
+            raise ValueError(
+                f"editor-assist budget must be within "
+                f"[{EDITOR_ASSIST_BUDGET_MIN}, {EDITOR_ASSIST_BUDGET_MAX}], "
+                f"got {self.limit}"
+            )
+        if self.used < 0:
+            raise ValueError("editor-assist budget used must be non-negative")
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.limit - self.used)
+
+    @property
+    def exhausted(self) -> bool:
+        return self.used >= self.limit
+
+    def consume(self) -> int:
+        """Consume one editor-assist invocation and return the new ``used`` counter.
+
+        Raises ``EditorAssistBudgetExhaustedError`` if no budget remains.
+        """
+        if self.exhausted:
+            raise EditorAssistBudgetExhaustedError(
+                f"editor-assist budget exhausted "
+                f"(limit={self.limit}, used={self.used})"
+            )
+        self.used += 1
+        return self.used
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "limit": self.limit,
+            "used": self.used,
+            "remaining": self.remaining,
+        }
+
+
+# ---------------------------------------------------------------------------
 # State transitions
 # ---------------------------------------------------------------------------
 
