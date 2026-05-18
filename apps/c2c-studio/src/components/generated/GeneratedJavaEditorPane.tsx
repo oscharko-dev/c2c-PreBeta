@@ -31,8 +31,8 @@ import {
   diagnosticsToMarkers,
   partitionByOwner,
 } from "@/lib/editor/diagnosticMarkers";
-import { useEditorMarkerRegistration } from "@/lib/editor/markerNavigation";
-import { getMonacoSync } from "@/lib/editor/lazyMonaco";
+import { useEditorMarkerRegistration, useMarkerNavigation } from "@/lib/editor/markerNavigation";
+import { useMonacoReady } from "@/lib/editor/lazyMonaco";
 import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
@@ -67,6 +67,7 @@ export function GeneratedJavaEditorPane() {
     fileFetchError,
     artifactDetails,
     unavailableFiles,
+    selectFile,
   } = useGeneratedArtifacts();
 
   const {
@@ -195,13 +196,37 @@ export function GeneratedJavaEditorPane() {
     id: "generated-java-editor",
     filePath: selectedFilePath ?? null,
   });
+  // Studio-IDE-5 (#244 review): the marker memo depends on Monaco
+  // having resolved. `useMonacoReady` returns null until the async
+  // loader completes, then re-renders so the memo recomputes with the
+  // real instance. Without this, a cold mount with diagnostics already
+  // in state would cache an empty marker group permanently.
+  const monaco = useMonacoReady();
+
+  // Studio-IDE-5 (#244 review): when Problems-panel clicks point at a
+  // generated file that is not currently selected, switch panes. The
+  // `target` token bumps on every dispatch, so we react to it even
+  // when the same filePath arrives twice.
+  const { target: navigationTarget } = useMarkerNavigation();
+  useEffect(() => {
+    if (!navigationTarget) return;
+    const targetPath = navigationTarget.filePath;
+    if (!targetPath) return;
+    if (targetPath === selectedFilePath) return;
+    // Only switch to files the BFF actually listed for this run. The
+    // marker context keeps its handle on whichever pane is registered
+    // for the requested filePath; if no pane is registered we still
+    // try the generated-files index because the user may have just
+    // clicked a row for a file the explorer hasn't focused yet.
+    selectFile(targetPath);
+  }, [navigationTarget, selectedFilePath, selectFile]);
+
   const javaMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
+    if (!monaco) return [];
     const diagnostics = [
       ...(state.generated?.diagnostics ?? []),
       ...(state.buildTest?.diagnostics ?? []),
     ];
-    const monaco = getMonacoSync();
-    if (!monaco) return [];
     const buckets = partitionByOwner(diagnostics);
     const model = editorInstanceRef.current?.getModel() ?? null;
     const groups: EditorMarkerGroup[] = [];
@@ -224,7 +249,7 @@ export function GeneratedJavaEditorPane() {
       groups.push({ owner, markers });
     }
     return groups;
-  }, [state.generated, state.buildTest, selectedFilePath]);
+  }, [monaco, state.generated, state.buildTest, selectedFilePath]);
 
   // Debounced onChange — schedules a single bufferModel update per
   // JAVA_BUFFER_DEBOUNCE_MS window. The handler captures the current

@@ -103,6 +103,7 @@ vi.mock("@/components/editor/CodeEditor", async () => {
 vi.mock("@/lib/editor/lazyMonaco", () => ({
   getMonaco: () => new Promise(() => {}),
   getMonacoSync: () => null,
+  useMonacoReady: () => null,
   __resetMonacoForTests: () => undefined,
 }));
 

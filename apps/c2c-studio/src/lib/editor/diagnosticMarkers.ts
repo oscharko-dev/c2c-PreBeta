@@ -144,7 +144,13 @@ function diagnosticToMarker(
     // startColumn for the marker to be visible, so add a 1-char span.
     endColumn = startColumn + 1;
   }
-  if (endColumn <= startColumn) {
+  // Studio-IDE-5 (#244 review): for *single-line* markers Monaco needs
+  // endColumn > startColumn. For *multi-line* markers the end position
+  // is on a later line, so an endColumn lower than startColumn is
+  // valid (e.g. start at L10:40, end at L11:5). Only clamp when the
+  // marker stays on one line; clamping multi-line ranges shifts the
+  // highlight onto the wrong text.
+  if (endLine === line && endColumn <= startColumn) {
     endColumn = startColumn + 1;
   }
 

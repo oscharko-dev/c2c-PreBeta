@@ -97,6 +97,7 @@ vi.mock("@/lib/editor/cobolMonarch", async () => {
 vi.mock("@/lib/editor/lazyMonaco", () => ({
   getMonaco: () => Promise.resolve({ languages: { getLanguages: () => [] } }),
   getMonacoSync: () => null,
+  useMonacoReady: () => null,
   __resetMonacoForTests: () => undefined,
 }));
 

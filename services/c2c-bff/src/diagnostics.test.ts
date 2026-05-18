@@ -314,3 +314,38 @@ test("normalizeDiagnostics passes large batches without modification", () => {
   assert.equal(result[0]?.line, 1);
   assert.equal(result[4999]?.line, 5000);
 });
+
+test("normalizeDiagnostics applies defaultSourceKind only when upstream did not supply one", () => {
+  const result = normalizeDiagnostics(
+    [
+      // No sourceKind — should pick up the default.
+      { severity: "warning", code: "javac", message: "deprecated" },
+      // Explicit sourceKind wins over the default.
+      {
+        severity: "info",
+        code: "ir-note",
+        message: "ir-tagged",
+        sourceKind: "ir",
+      },
+      // Unknown sourceKind from upstream is dropped during normalization,
+      // so the default fills in — guaranteed routing for build/test runs.
+      {
+        severity: "info",
+        code: "future",
+        message: "tagged with unknown kind",
+        sourceKind: "future-thing",
+      },
+    ],
+    { defaultSourceKind: "build" },
+  );
+  assert.equal(result[0]?.sourceKind, "build");
+  assert.equal(result[1]?.sourceKind, "ir");
+  assert.equal(result[2]?.sourceKind, "build");
+});
+
+test("normalizeDiagnostics keeps undefined sourceKind when no default is supplied", () => {
+  const result = normalizeDiagnostics([
+    { severity: "info", code: "x", message: "untagged" },
+  ]);
+  assert.equal(result[0]?.sourceKind, undefined);
+});

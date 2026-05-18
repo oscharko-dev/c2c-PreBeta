@@ -225,16 +225,32 @@ function normalizeOne(raw: unknown): Diagnostic | undefined {
   return diagnostic;
 }
 
+export interface NormalizeDiagnosticsOptions {
+  // Studio-IDE-5 (#244): Diagnostics emitted by build-test and
+  // generator endpoints historically arrive without `sourceKind`. The
+  // BFF endpoint knows the context (`build` vs `generated_java`), so
+  // callers can pass that here to backfill any untagged record. This
+  // is a default — explicit upstream `sourceKind` always wins.
+  defaultSourceKind?: DiagnosticSourceKind;
+}
+
 // Public entry point. Returns an array of typed Diagnostic records,
 // preserving every field the upstream payload contained that survives
 // the type guard. The function is total (no exceptions) so it is safe
 // to call inline within server handlers.
-export function normalizeDiagnostics(raw: unknown): Diagnostic[] {
+export function normalizeDiagnostics(
+  raw: unknown,
+  options: NormalizeDiagnosticsOptions = {},
+): Diagnostic[] {
   if (!Array.isArray(raw)) return [];
   const out: Diagnostic[] = [];
   for (const entry of raw) {
     const normalized = normalizeOne(entry);
-    if (normalized) out.push(normalized);
+    if (!normalized) continue;
+    if (normalized.sourceKind === undefined && options.defaultSourceKind) {
+      normalized.sourceKind = options.defaultSourceKind;
+    }
+    out.push(normalized);
   }
   return out;
 }

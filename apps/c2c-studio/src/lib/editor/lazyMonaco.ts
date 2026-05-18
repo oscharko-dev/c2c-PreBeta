@@ -84,3 +84,30 @@ function configureMonacoEnvironment(): void {
     },
   };
 }
+
+// Studio-IDE-5 (#244 review): React hook that returns the Monaco
+// instance (or null) and triggers a re-render once it resolves. Use
+// this in panes that derive marker groups from the typed Diagnostic
+// state — without it, the initial render happens before Monaco has
+// loaded and the marker memo caches an empty result indefinitely.
+import { useEffect, useState } from "react";
+
+export function useMonacoReady(): Monaco | null {
+  const [monaco, setMonaco] = useState<Monaco | null>(() => monacoCache);
+  useEffect(() => {
+    if (monaco) return;
+    let cancelled = false;
+    getMonaco()
+      .then((instance) => {
+        if (!cancelled) setMonaco(instance);
+      })
+      .catch(() => {
+        // Editor surfaces load failures via its own error UI; this
+        // hook keeps `null` so the marker memo simply falls through.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [monaco]);
+  return monaco;
+}

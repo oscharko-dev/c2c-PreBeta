@@ -1023,7 +1023,9 @@ async function liveGeneratedView(
     let status: GeneratedStatus = classifyGeneratedStatus(missing, runStatus);
     const generationResponse = asRecord(envelope.generationResponse);
     const outputRef = normalizeOutputRef(envelope.generationResponseRef);
-    const diagnostics = normalizeDiagnostics(generationResponse?.diagnostics);
+    const diagnostics = normalizeDiagnostics(generationResponse?.diagnostics, {
+      defaultSourceKind: "generated_java",
+    });
     const entryFilePath = asString(envelope.entryFilePath);
     let missingArtifacts = missing;
     let placeholderViolation: { path: string; marker: string } | null = null;
@@ -1219,7 +1221,9 @@ async function liveBuildTestView(
       data,
     );
     const outputRef = normalizeOutputRef(data?.outputRef);
-    const diagnostics = normalizeDiagnostics(data?.diagnostics);
+    const diagnostics = normalizeDiagnostics(data?.diagnostics, {
+      defaultSourceKind: "build",
+    });
     return {
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),

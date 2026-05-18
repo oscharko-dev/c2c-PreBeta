@@ -272,3 +272,45 @@ describe("sourceKindToOwner", () => {
     ).toBe("c2c-unknown");
   });
 });
+
+describe("diagnosticsToMarkers — multi-line ranges (review #244)", () => {
+  it("preserves an endColumn that is lower than startColumn when the range spans multiple lines", () => {
+    const diagnostics: Diagnostic[] = [
+      makeDiagnostic({
+        severity: "error",
+        line: 10,
+        column: 40,
+        endLine: 11,
+        endColumn: 5,
+        message: "multi-line block",
+      }),
+    ];
+    const { markers } = diagnosticsToMarkers(diagnostics, {
+      monaco: monacoStub,
+      model: makeModel(Array.from({ length: 12 }, () => 80)),
+    });
+    expect(markers[0]?.startLineNumber).toBe(10);
+    expect(markers[0]?.startColumn).toBe(40);
+    expect(markers[0]?.endLineNumber).toBe(11);
+    expect(markers[0]?.endColumn).toBe(5);
+  });
+
+  it("still clamps endColumn for single-line markers when it equals startColumn", () => {
+    const diagnostics: Diagnostic[] = [
+      makeDiagnostic({
+        severity: "warning",
+        line: 4,
+        column: 7,
+        endLine: 4,
+        endColumn: 7,
+        message: "zero-width same-line",
+      }),
+    ];
+    const { markers } = diagnosticsToMarkers(diagnostics, {
+      monaco: monacoStub,
+      model: makeModel([0, 0, 0, 30]),
+    });
+    expect(markers[0]?.startColumn).toBe(7);
+    expect(markers[0]?.endColumn).toBe(8);
+  });
+});

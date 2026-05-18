@@ -26,7 +26,7 @@ import {
   FixedFormatRuler,
   FixedFormatRulerToggle,
 } from "@/components/editor/FixedFormatRuler";
-import { getMonaco, getMonacoSync } from "@/lib/editor/lazyMonaco";
+import { getMonaco, useMonacoReady } from "@/lib/editor/lazyMonaco";
 import {
   COBOL_LANGUAGE_ID,
   FIXED_FORMAT_RULER_COLUMNS,
@@ -108,7 +108,14 @@ export function CobolEditorPane() {
     id: "cobol-editor",
     filePath: sourceName ?? DEFAULT_SOURCE_NAME,
   });
+  // Studio-IDE-5 (#244 review): the marker memo depends on Monaco
+  // having resolved. `useMonacoReady` returns null until the async
+  // loader completes, then re-renders so the memo recomputes with the
+  // real instance. Without this, a cold mount with diagnostics already
+  // in state would cache an empty marker group permanently.
+  const monaco = useMonacoReady();
   const cobolMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
+    if (!monaco) return [];
     const diagnostics = [
       ...(runState.generated?.diagnostics ?? []),
       ...(runState.buildTest?.diagnostics ?? []),
@@ -116,8 +123,6 @@ export function CobolEditorPane() {
     const buckets = partitionByOwner(diagnostics);
     const cobolGroup = buckets["c2c-cobol"];
     const irGroup = buckets["c2c-ir"];
-    const monaco = getMonacoSync();
-    if (!monaco) return [];
     // We do not have a stable handle to the live Monaco model here so
     // the marker mapper receives null; that degrades the whole-line
     // fallback to a single-character marker which the editor renders
@@ -137,7 +142,7 @@ export function CobolEditorPane() {
       { owner: "c2c-cobol", markers: cobolMarkers.markers },
       { owner: "c2c-ir", markers: irMarkers.markers },
     ];
-  }, [runState.generated, runState.buildTest]);
+  }, [monaco, runState.generated, runState.buildTest]);
 
   // Toast-equivalent visibility window for the "Saved locally" notice.
   useEffect(() => {
