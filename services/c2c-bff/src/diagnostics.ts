@@ -12,6 +12,30 @@
 
 export const DIAGNOSTIC_SCHEMA_VERSION = "v0" as const;
 
+// Studio-IDE-5 (#244 review): javac emits absolute filenames via
+// `JavaFileObject.getName()` (e.g. "/var/lib/orchestrator/run-X/
+// src/main/java/c2c/Foo.java"). The Studio expects relative paths
+// inside the generated project (e.g. "src/main/java/c2c/Foo.java")
+// so its file-segment matching does not pick the wrong file and the
+// content endpoint can resolve. We strip everything before the
+// canonical `src/main/java` (or `src/main/resources`) segment when
+// the input is absolute.
+function normalizeFilePath(raw: string): string {
+  if (raw.length === 0) return raw;
+  // Only re-anchor when the path looks absolute (POSIX or Windows).
+  const isAbsolute = raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw);
+  if (!isAbsolute) return raw;
+  // Normalize backslashes to forward slashes for the lookup; keep
+  // the original separator style otherwise.
+  const forward = raw.replace(/\\/g, "/");
+  // Anchor at the first `src/main/<x>` segment if present; this
+  // covers the standard Maven/Gradle layout the generator emits.
+  const match = forward.match(/(src\/main\/(?:java|resources)\/.*)$/);
+  if (match) return match[1] ?? raw;
+  return raw;
+}
+
+
 export type DiagnosticSeverity = "error" | "warning" | "info" | "hint";
 
 export type DiagnosticSourceKind =
@@ -217,11 +241,11 @@ function normalizeOne(raw: unknown): Diagnostic | undefined {
   }
 
   // `source` is the legacy path field used by the Java build-test runner.
-  const filePath =
+  const rawFilePath =
     asString(record.filePath).length > 0
       ? asString(record.filePath)
       : asString(record.source);
-  if (filePath.length > 0) diagnostic.filePath = filePath;
+  if (rawFilePath.length > 0) diagnostic.filePath = normalizeFilePath(rawFilePath);
 
   const sourceKind = normalizeSourceKind(record.sourceKind);
   if (sourceKind !== undefined) diagnostic.sourceKind = sourceKind;
@@ -260,7 +284,14 @@ export function normalizeDiagnostics(
     const normalized = normalizeOne(entry);
     if (!normalized) continue;
     if (normalized.sourceKind === undefined && options.defaultSourceKind) {
-      normalized.sourceKind = options.defaultSourceKind;
+      // Studio-IDE-5 (#244 review): apply the endpoint default only
+      // when the diagnostic actually attaches to a file. A fileless
+      // generator diagnostic typically references COBOL `sourceLine`;
+      // labelling it `generated_java` would mis-route it onto the
+      // Java pane and highlight an unrelated line.
+      if (normalized.filePath !== undefined) {
+        normalized.sourceKind = options.defaultSourceKind;
+      }
     }
     out.push(normalized);
   }

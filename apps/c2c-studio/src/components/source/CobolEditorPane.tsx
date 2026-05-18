@@ -96,6 +96,10 @@ export function CobolEditorPane() {
     "Model Gateway unavailable. AI-assisted transformation cannot start.";
 
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
+  // Studio-IDE-5 (#244 review): bump on editor mount so the marker
+  // memo recomputes with the live Monaco model — whole-line markers
+  // require model.getLineLength().
+  const [cobolEditorMountToken, setCobolEditorMountToken] = useState(0);
   const detectedProgramId = deriveDetectedProgramId(sourceText);
   const lineEnding = deriveDisplayedLineEnding(sourceText);
   const modelUri = useMemo(() => deriveModelUri(sourceName), [sourceName]);
@@ -162,7 +166,9 @@ export function CobolEditorPane() {
       { owner: "c2c-cobol", markers: cobolMarkers.markers },
       { owner: "c2c-ir", markers: irMarkers.markers },
     ];
-  }, [monaco, runState.generated, runState.buildTest, sourceName]);
+    // cobolEditorMountToken is intentional — see review #244 round 3.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monaco, runState.generated, runState.buildTest, sourceName, cobolEditorMountToken]);
 
   // Toast-equivalent visibility window for the "Saved locally" notice.
   useEffect(() => {
@@ -221,6 +227,7 @@ export function CobolEditorPane() {
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
       editorRef.current = editor;
       registerMarkerEditor(editor);
+      setCobolEditorMountToken((value) => value + 1);
       // Late-registration fallback in case the early effect lost the race
       // against CodeEditorInner's monaco resolution. registerCobolLanguage
       // is idempotent.

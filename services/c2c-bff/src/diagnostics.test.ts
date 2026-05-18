@@ -315,25 +315,44 @@ test("normalizeDiagnostics passes large batches without modification", () => {
   assert.equal(result[4999]?.line, 5000);
 });
 
-test("normalizeDiagnostics applies defaultSourceKind only when upstream did not supply one", () => {
+test("normalizeDiagnostics applies defaultSourceKind only when upstream did not supply one AND a filePath is present", () => {
   const result = normalizeDiagnostics(
     [
-      // No sourceKind — should pick up the default.
-      { severity: "warning", code: "javac", message: "deprecated" },
-      // Explicit sourceKind wins over the default.
+      // No sourceKind + filePath set → default applies. This matches
+      // the javac case where the build-test runner emits source/file
+      // but no explicit sourceKind.
+      {
+        severity: "warning",
+        code: "javac",
+        message: "deprecated",
+        filePath: "src/main/java/c2c/Foo.java",
+      },
+      // Explicit sourceKind wins over the default even with filePath.
       {
         severity: "info",
         code: "ir-note",
         message: "ir-tagged",
         sourceKind: "ir",
+        filePath: "src/main/java/c2c/Foo.java",
       },
-      // Unknown sourceKind from upstream is dropped during normalization,
-      // so the default fills in — guaranteed routing for build/test runs.
+      // Unknown sourceKind from upstream is dropped; default fills in
+      // when filePath is present.
       {
         severity: "info",
         code: "future",
         message: "tagged with unknown kind",
         sourceKind: "future-thing",
+        filePath: "src/main/java/c2c/Foo.java",
+      },
+      // No sourceKind AND no filePath: per Codex review #244 round 3,
+      // the default does NOT apply. These are typically COBOL
+      // sourceLine references emitted by the IR validator and would
+      // be mis-routed if labelled "generated_java" or "build".
+      {
+        severity: "warning",
+        code: "skipped-group-item",
+        message: "GROUP item skipped at COBOL line 42",
+        line: 42,
       },
     ],
     { defaultSourceKind: "build" },
@@ -341,6 +360,9 @@ test("normalizeDiagnostics applies defaultSourceKind only when upstream did not 
   assert.equal(result[0]?.sourceKind, "build");
   assert.equal(result[1]?.sourceKind, "ir");
   assert.equal(result[2]?.sourceKind, "build");
+  // Fileless diagnostic keeps undefined sourceKind — the Problems
+  // panel still lists it; it just does not get auto-routed to a pane.
+  assert.equal(result[3]?.sourceKind, undefined);
 });
 
 test("normalizeDiagnostics keeps undefined sourceKind when no default is supplied", () => {
@@ -380,4 +402,35 @@ test("normalizeDiagnostics preserves byteSize=0 on artifactRef (review #244)", (
     },
   ]);
   assert.equal(result[0]?.artifactRef?.byteSize, 0);
+});
+
+
+test("normalizeDiagnostics rewrites absolute javac source paths to relative ones (review #244)", () => {
+  const result = normalizeDiagnostics([
+    {
+      severity: "error",
+      code: "javac-syntax",
+      message: "missing semicolon",
+      line: 12,
+      column: 7,
+      source:
+        "/var/lib/orchestrator/runs/run-42/src/main/java/c2c/Foo.java",
+    },
+    {
+      severity: "warning",
+      code: "javac-deprecation",
+      message: "deprecated",
+      line: 4,
+      filePath: "C:\\runs\\run-42\\src\\main\\java\\c2c\\Bar.java",
+    },
+    {
+      severity: "info",
+      code: "x",
+      message: "no path",
+    },
+  ]);
+  assert.equal(result[0]?.filePath, "src/main/java/c2c/Foo.java");
+  // Windows absolute paths normalize to the same anchor.
+  assert.equal(result[1]?.filePath, "src/main/java/c2c/Bar.java");
+  assert.equal(result[2]?.filePath, undefined);
 });
