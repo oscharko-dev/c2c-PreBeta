@@ -91,10 +91,16 @@ function buildParsedTrace(envelope: TraceabilityEnvelope): ParsedTrace {
     string,
     readonly JavaRegionClassification[]
   >();
-  for (const [key, regions] of Object.entries(
-    envelope.javaRegionClassification,
-  )) {
-    javaRegionClassification.set(key, [...regions]);
+  // The wire field is nullable (BFF stub for diagnostic-fixture runs or the
+  // orchestrator-upstream-error fallback per ADR-0006 §4). Treat ``null`` as
+  // "no classification" → empty map, which the trust-pillar effect renders
+  // as "no decorations / Lineage: 0%".
+  if (envelope.javaRegionClassification) {
+    for (const [key, regions] of Object.entries(
+      envelope.javaRegionClassification,
+    )) {
+      javaRegionClassification.set(key, [...regions]);
+    }
   }
   return {
     runId: envelope.runId,
