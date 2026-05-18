@@ -20,7 +20,10 @@ type EditorMockProps = {
   mode: string;
   modelUri?: string;
   onMount?: (args: {
-    editor: { updateOptions: (options: unknown) => void };
+    editor: {
+      updateOptions: (options: unknown) => void;
+      addCommand: (keybinding: number, callback: () => void) => void;
+    };
     monaco: unknown;
   }) => void;
   className?: string;
@@ -49,8 +52,12 @@ vi.mock("@/components/editor/CodeEditor", async () => {
           updateOptions: (options) => {
             updateOptionsCalls.push(options as Record<string, unknown>);
           },
+          addCommand: () => undefined,
         },
-        monaco: {},
+        monaco: {
+          KeyMod: { CtrlCmd: 1 << 11 },
+          KeyCode: { KeyS: 49 },
+        },
       });
       // Effect intentionally runs only on mount — matching Monaco's real
       // onMount lifecycle. Including `props` in deps would re-fire on every

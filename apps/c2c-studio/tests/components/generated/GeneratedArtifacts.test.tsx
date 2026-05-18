@@ -25,7 +25,20 @@ vi.mock('@/stores/transformationRun', async (importOriginal) => {
       const state = mockTransformationState();
       return {
         state,
-        productState: deriveProductState(state)
+        productState: deriveProductState(state),
+        javaBuffers: {},
+        javaConflict: null,
+        saveNoticeAt: null,
+        ensureJavaBaseline: vi.fn(),
+        saveJavaDraft: vi.fn(),
+        loadJavaDraftFor: vi.fn(),
+        resolveJavaConflict: vi.fn(),
+        dismissJavaConflict: vi.fn(),
+        javaStatusFlags: vi.fn().mockReturnValue({
+          clean: false,
+          pendingReRun: false,
+          staleJava: false,
+        }),
       };
     }
   };

@@ -15,7 +15,6 @@ import {
   DEFAULT_SOURCE_NAME,
   deriveDetectedProgramId,
   deriveDisplayedLineEnding,
-  deriveSourceHash,
 } from "../../lib/sourceAnalysis";
 import { useC2cApi } from "../../hooks/useC2cApi";
 import { useTransformationRun } from "../../stores/transformationRun";
@@ -33,6 +32,10 @@ import {
   FIXED_FORMAT_RULER_COLUMNS,
   registerCobolLanguage,
 } from "../../lib/editor/cobolMonarch";
+import {
+  ConflictResolverDialog,
+  type ConflictPanel,
+} from "./ConflictResolverDialog";
 
 // View-state preservation in Monaco is keyed by model URI. Re-using the same
 // URI per source name keeps cursor / scroll / selection stable when the user
@@ -47,6 +50,8 @@ function deriveModelUri(sourceName: string | null): string {
   );
   return `inmemory://cobol-editor/${safeName}`;
 }
+
+const SAVE_NOTICE_VISIBLE_MS = 2500;
 
 export function CobolEditorPane() {
   const {
@@ -64,9 +69,16 @@ export function CobolEditorPane() {
     isTransforming,
     canSubmitTransform,
     submitTransform,
+    bufferHash,
+    statusFlags,
+    conflict,
+    resolveConflict,
+    dismissConflict,
+    saveDraftNow,
+    saveNoticeAt,
   } = useSourceWorkspace();
-  const [sourceHash, setSourceHash] = useState("00000000");
   const [rulerEnabled, setRulerEnabled] = useState(false);
+  const [showSaveNotice, setShowSaveNotice] = useState(false);
 
   const apiState = useC2cApi();
   const { productState, state: runState } = useTransformationRun();
@@ -81,19 +93,18 @@ export function CobolEditorPane() {
   const lineEnding = deriveDisplayedLineEnding(sourceText);
   const modelUri = useMemo(() => deriveModelUri(sourceName), [sourceName]);
 
+  // Toast-equivalent visibility window for the "Saved locally" notice.
   useEffect(() => {
-    let cancelled = false;
-
-    deriveSourceHash(sourceText).then((nextHash) => {
-      if (!cancelled) {
-        setSourceHash(nextHash);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sourceText]);
+    if (saveNoticeAt === null) {
+      return;
+    }
+    setShowSaveNotice(true);
+    const handle = setTimeout(
+      () => setShowSaveNotice(false),
+      SAVE_NOTICE_VISIBLE_MS,
+    );
+    return () => clearTimeout(handle);
+  }, [saveNoticeAt]);
 
   // Register the COBOL language as soon as Monaco resolves. This runs in
   // parallel with CodeEditorInner's own getMonaco() resolution so the
@@ -153,9 +164,43 @@ export function CobolEditorPane() {
         // until a dedicated language server lands.
         wordBasedSuggestions: "currentDocument",
       });
+      // Bind Cmd/Ctrl+S inside the editor surface to local-draft save.
+      // Monaco intercepts the keystroke before the browser does, so this
+      // works even when the editor has focus (where the global keyboard
+      // shortcut hook ignores keydowns).
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        void saveDraftNow();
+      });
     },
-    [rulerEnabled],
+    [rulerEnabled, saveDraftNow],
   );
+
+  const conflictPanels: ConflictPanel[] = useMemo(() => {
+    if (!conflict) {
+      return [];
+    }
+    return [
+      {
+        id: "backendSample",
+        title: "Backend sample",
+        description: "The content the BFF supplied when this file was opened.",
+        content: conflict.backendSample,
+      },
+      {
+        id: "localDraft",
+        title: "Local draft",
+        description: "The content saved locally on this device.",
+        content: conflict.localDraft,
+      },
+      {
+        id: "lastRunInput",
+        title: "Last run input",
+        description:
+          "The content that was sent to the last transformation run.",
+        content: conflict.lastRunInput,
+      },
+    ];
+  }, [conflict]);
 
   if (!sourceText && !isDirty) {
     return (
@@ -192,6 +237,10 @@ export function CobolEditorPane() {
               ID: {detectedProgramId}
             </span>
           )}
+          <CobolStatusChips
+            clean={statusFlags.clean}
+            pendingReRun={statusFlags.pendingReRun}
+          />
         </div>
         <div className="flex items-center gap-3">
           <FixedFormatRulerToggle
@@ -201,7 +250,7 @@ export function CobolEditorPane() {
           <div className="text-[10px] text-text-faint uppercase tracking-wider flex gap-3">
             <span>UTF-8</span>
             <span>{lineEnding}</span>
-            <span title="Source Hash">#{sourceHash}</span>
+            <span title="Source Hash">#{bufferHash}</span>
           </div>
           <button
             type="button"
@@ -216,6 +265,17 @@ export function CobolEditorPane() {
           </button>
         </div>
       </div>
+
+      {showSaveNotice ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="border-b border-success/20 bg-success-soft px-4 py-1.5 text-xs text-success"
+        >
+          Saved locally — this draft stays on your device. Use Start
+          Transformation to commit the change to a run.
+        </div>
+      ) : null}
 
       {transformError && (
         <div className="bg-error/10 text-error px-4 py-2 text-sm border-b border-error/20">
@@ -332,6 +392,45 @@ export function CobolEditorPane() {
           className="flex-1 min-h-0"
         />
       </div>
+
+      {conflict ? (
+        <ConflictResolverDialog
+          kind="cobol"
+          panels={conflictPanels}
+          onChoose={resolveConflict}
+          onDismiss={dismissConflict}
+        />
+      ) : null}
     </div>
+  );
+}
+
+// Status chips render the (buffer, lastRunInput, displayedArtifact) hash
+// relationships described in #247: `clean` (everything matches), and
+// `pending re-run` (buffer differs from last-run input). For COBOL the
+// `stale java` chip is N/A — that chip lives on the Java pane.
+function CobolStatusChips({
+  clean,
+  pendingReRun,
+}: {
+  clean: boolean;
+  pendingReRun: boolean;
+}) {
+  if (!clean && !pendingReRun) {
+    return null;
+  }
+  return (
+    <span className="flex items-center gap-1" data-testid="cobol-status-chips">
+      {clean ? (
+        <span className="inline-flex items-center rounded bg-success-soft px-2 py-0.5 text-[10px] font-medium text-success border border-success/20">
+          clean
+        </span>
+      ) : null}
+      {pendingReRun ? (
+        <span className="inline-flex items-center rounded bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn border border-warn/20">
+          pending re-run
+        </span>
+      ) : null}
+    </span>
   );
 }

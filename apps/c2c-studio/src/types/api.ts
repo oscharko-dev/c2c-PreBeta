@@ -384,9 +384,7 @@ export interface WorkflowArtifactRef {
 // outcome / reason-code / agent-role value outside these enums so an
 // unknown upstream value is surfaced honestly as a contract error
 // rather than silently mis-displayed.
-export type AssistDecisionOutcome =
-  | "assist_required"
-  | "assist_not_required";
+export type AssistDecisionOutcome = "assist_required" | "assist_not_required";
 
 // Deterministic uncertainty reason codes (Issue #215) followed by
 // caller-driven baseline codes (Issue #214) and the W0.3-5
@@ -452,4 +450,29 @@ export interface RunWorkflowView {
   generatedJavaRef: WorkflowArtifactRef | null;
   buildTestResultRef: WorkflowArtifactRef | null;
   evidencePackRef: WorkflowArtifactRef | null;
+}
+
+// Issue #247 / Studio-ADR-4 (#257): region-granular provenance for generated
+// Java files. IDE-6 populates the deterministic / agent_proposed /
+// repair_attempted region classes; IDE-13 populates manual_modified /
+// manual_edit when the developer edits a region. IDE-3 treats the whole
+// envelope as opaque pass-through inside the IndexedDB draft so reloads do
+// not lose the overlay alongside the buffer.
+export type JavaOriginClass =
+  | "deterministic"
+  | "agent_proposed"
+  | "repair_attempted"
+  | "manual_modified"
+  | "manual_edit";
+
+export interface JavaOriginRegion {
+  lineRange: { startLine: number; endLine: number };
+  originClass: JavaOriginClass;
+}
+
+export interface JavaOriginOverlay {
+  schemaVersion: "v0";
+  runId: string;
+  javaFile: string;
+  regions: JavaOriginRegion[];
 }

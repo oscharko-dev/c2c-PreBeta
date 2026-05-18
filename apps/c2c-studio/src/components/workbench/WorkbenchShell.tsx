@@ -1,21 +1,33 @@
-'use client';
+"use client";
 
-import { WorkbenchProvider } from '../../stores/workbench';
-import { SourceWorkspaceProvider } from '../../stores/sourceWorkspace';
-import { TransformationRunProvider } from '../../stores/transformationRun';
-import { useC2cApi } from '../../hooks/useC2cApi';
-import { GeneratedArtifactsProvider } from '../../hooks/useGeneratedArtifacts';
-import { AppTopBar } from './AppTopBar';
-import { ActivityBar } from './ActivityBar';
-import { SecondaryStripe } from './SecondaryStripe';
-import { SplitEditorArea } from './SplitEditorArea';
-import { TargetJavaInspector } from '../generated/TargetJavaInspector';
-import { BottomWorkbench } from './BottomWorkbench';
-import { StatusBar } from './StatusBar';
-import { RightObservabilityStripe } from '../observability/RightObservabilityStripe';
+import { useEffect } from "react";
+import { WorkbenchProvider } from "../../stores/workbench";
+import { SourceWorkspaceProvider } from "../../stores/sourceWorkspace";
+import { TransformationRunProvider } from "../../stores/transformationRun";
+import { useC2cApi } from "../../hooks/useC2cApi";
+import { GeneratedArtifactsProvider } from "../../hooks/useGeneratedArtifacts";
+import { AppTopBar } from "./AppTopBar";
+import { ActivityBar } from "./ActivityBar";
+import { SecondaryStripe } from "./SecondaryStripe";
+import { SplitEditorArea } from "./SplitEditorArea";
+import { TargetJavaInspector } from "../generated/TargetJavaInspector";
+import { BottomWorkbench } from "./BottomWorkbench";
+import { StatusBar } from "./StatusBar";
+import { RightObservabilityStripe } from "../observability/RightObservabilityStripe";
+import { editorPersistence } from "../../lib/editor/editorPersistence";
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
+
+  // Studio-IDE-3 (#247) / ADR-2 §1: purge expired drafts on Studio start.
+  // Fire-and-forget; IndexedDB is unavailable in some test environments
+  // and the rest of the workbench should keep functioning if the purge
+  // fails.
+  useEffect(() => {
+    void editorPersistence.purgeExpired().catch(() => {
+      // Ignored — see comment above.
+    });
+  }, []);
 
   return (
     <WorkbenchProvider>
