@@ -147,3 +147,8 @@ jobs:
         if: hashFiles('apps/c2c-studio/package.json') != ''
         working-directory: apps/c2c-studio
         run: npm run build
+
+      - name: Verify Monaco is lazy-loaded (no Monaco in initial bundle)
+        if: hashFiles('apps/c2c-studio/scripts/verify-monaco-lazy.mjs') != ''
+        working-directory: apps/c2c-studio
+        run: npm run verify:monaco-lazy
