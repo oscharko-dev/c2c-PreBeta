@@ -133,6 +133,35 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
     expect(standaloneSection).toMatch(/editor\.onDidChangeModel/);
     expect(standaloneSection).toMatch(/modelChangeDisposableRef/);
   });
+
+  it("restores view state on model swap, not only at onMount (Codex round-4)", () => {
+    // When `modelUri` changes mid-flight, @monaco-editor/react swaps the
+    // model. The new URI may already have saved view state; without
+    // restoring on the swap, the freshly-selected document loses cursor
+    // and scroll position.
+    expect(innerSource).toMatch(/resolvedUriRef/);
+    expect(innerSource).toMatch(
+      /restoreViewState\([\s\S]*?resolvedUriRef\.current\s*\)/,
+    );
+    expect(innerSource).toMatch(
+      /restoreDiffViewState\([\s\S]*?resolvedUriRef\.current\s*\)/,
+    );
+  });
+
+  it("re-applies decorations to the new model on swap (Codex round-4)", () => {
+    // The previous decorations collection was bound to the old model. When
+    // the model swaps, recreate from `decorationsPropRef` (the latest prop)
+    // so highlights survive URI changes even when the decorations array is
+    // identity-stable.
+    expect(innerSource).toMatch(/decorationsPropRef/);
+    // Re-creating from the prop ref must happen in BOTH the standalone
+    // and diff swap paths.
+    const swapBlocks = innerSource.match(
+      /decorationsPropRef\.current[\s\S]*?createDecorationsCollection\(currentDecorations\)/g,
+    );
+    expect(swapBlocks).not.toBeNull();
+    expect((swapBlocks ?? []).length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe("DiffCodeEditorProps surface (#258)", () => {

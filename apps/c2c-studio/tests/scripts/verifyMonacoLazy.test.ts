@@ -190,6 +190,44 @@ describe("verify-monaco-lazy regex tightening (#258 Copilot review)", () => {
     }
   });
 
+  it("DOES flag a first-load chunk that contains Monaco's vs/editor module IDs (Codex round-4)", () => {
+    // Webpack/Turbopack may strip the `monaco-editor/esm/` prefix from chunk
+    // module IDs and keep only the internal `vs/editor/...` path. Those IDs
+    // are specific enough to Monaco that the verifier must flag them too.
+    const firstLoadContent = `
+      "vs/editor/editor.api"
+      "vs/editor/editor.worker"
+    `;
+    const lazyContent = `
+      "./node_modules/monaco-editor/esm/vs/editor/editor.api.js"
+    `;
+    const fake = setupFakeBuild({ firstLoadContent, lazyContent });
+    try {
+      const result = runVerify(fake.studioRoot);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Monaco is statically reachable");
+    } finally {
+      fake.cleanup();
+    }
+  });
+
+  it("DOES flag a first-load chunk that imports the JSON worker module ID", () => {
+    const firstLoadContent = `
+      "vs/language/json/json.worker"
+    `;
+    const lazyContent = `
+      "./node_modules/monaco-editor/esm/vs/editor/editor.api.js"
+    `;
+    const fake = setupFakeBuild({ firstLoadContent, lazyContent });
+    try {
+      const result = runVerify(fake.studioRoot);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Monaco is statically reachable");
+    } finally {
+      fake.cleanup();
+    }
+  });
+
   it("requires the build manifest to exist", () => {
     const root = mkdtempSync(join(tmpdir(), "verify-monaco-lazy-empty-"));
     try {

@@ -48,6 +48,16 @@ const monacoMarkers = [
   /node_modules\/@monaco-editor\/react\//,
   /["']monaco-editor["']/,
   /["']@monaco-editor\/react["']/,
+  // Monaco's internal module IDs. Webpack/Turbopack may strip the
+  // `monaco-editor/esm/` prefix from chunk module IDs but the `vs/editor/`
+  // path stays. These IDs are specific enough that no other package
+  // produces them. Without these, a first-load chunk could carry the
+  // Monaco runtime via internal IDs alone and pass the package-path check.
+  /["'`]vs\/editor\/editor\.api["'`]/,
+  /["'`]vs\/editor\/editor\.worker["'`]/,
+  /["'`]vs\/language\/json\/json\.worker["'`]/,
+  /\bvs\/editor\/editor\.api\b/,
+  /\bvs\/editor\/editor\.worker\b/,
 ];
 
 function matchesAnyMarker(content) {
