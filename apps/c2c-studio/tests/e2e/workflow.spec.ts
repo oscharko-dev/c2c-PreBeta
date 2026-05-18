@@ -53,12 +53,24 @@ function topBarStartButton(page: Page) {
     .getByRole("button", { name: "Start Transformation" });
 }
 
+// Monaco's accessibility textarea forwards input events to the model but does
+// not mirror the full document into its `value` attribute (Monaco resets the
+// textarea contents to a small window around the cursor after each edit).
+// The existing `fill()` flow still drives the model — Monaco listens to the
+// emitted input events — but assertions that previously read `editor.value`
+// now read the rendered `.view-line` DOM, which Monaco keeps in sync with
+// the model content for the visible viewport. Issue #246.
 async function enterProductPathCobol(page: Page) {
   await page.getByRole("button", { name: "Start Typing" }).click();
 
   const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
   await editor.fill(PRODUCT_PATH_COBOL);
-  await expect(editor).toHaveValue(/PROGRAM-ID\. BRNCH01\./);
+  await expect(
+    page
+      .locator(".view-line")
+      .filter({ hasText: /PROGRAM-ID\. BRNCH01\./ })
+      .first(),
+  ).toBeVisible();
 }
 
 async function waitForJsonResponse(

@@ -1,18 +1,54 @@
-'use client';
+"use client";
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useSourceWorkspace } from '../../stores/sourceWorkspace';
-import { Play } from 'lucide-react';
-import { DEFAULT_SOURCE_NAME, deriveDetectedProgramId, deriveDisplayedLineEnding, deriveSourceHash } from '../../lib/sourceAnalysis';
-import { useC2cApi } from '../../hooks/useC2cApi';
-import { useTransformationRun } from '../../stores/transformationRun';
-import { UnsupportedConstructsPanel } from '../state/UnsupportedConstructsPanel';
-import { getWorkbenchReadiness } from '../workbench/workbenchReadiness';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type * as MonacoNs from "monaco-editor";
+import { Play } from "lucide-react";
+
+import { useSourceWorkspace } from "../../stores/sourceWorkspace";
+import {
+  DEFAULT_SOURCE_NAME,
+  deriveDetectedProgramId,
+  deriveDisplayedLineEnding,
+  deriveSourceHash,
+} from "../../lib/sourceAnalysis";
+import { useC2cApi } from "../../hooks/useC2cApi";
+import { useTransformationRun } from "../../stores/transformationRun";
+import { UnsupportedConstructsPanel } from "../state/UnsupportedConstructsPanel";
+import { getWorkbenchReadiness } from "../workbench/workbenchReadiness";
+import { CodeEditor } from "../editor/CodeEditor";
+import type { StandaloneEditorMountArgs } from "../editor/CodeEditor";
+import {
+  FixedFormatRuler,
+  FixedFormatRulerToggle,
+} from "../editor/FixedFormatRuler";
+import { getMonaco } from "../../lib/editor/lazyMonaco";
+import {
+  COBOL_LANGUAGE_ID,
+  FIXED_FORMAT_RULER_COLUMNS,
+  registerCobolLanguage,
+} from "../../lib/editor/cobolMonarch";
+
+// View-state preservation in Monaco is keyed by model URI. Re-using the same
+// URI per source name keeps cursor / scroll / selection stable when the user
+// switches between the COBOL editor and other panes; switching to a different
+// file changes the URI so each file gets its own view state. The `inmemory://`
+// scheme matches the convention used elsewhere in the studio (CodeEditorInner
+// derives the same scheme for its fallback URIs).
+function deriveModelUri(sourceName: string | null): string {
+  const safeName = (sourceName || DEFAULT_SOURCE_NAME).replace(
+    /[^a-zA-Z0-9_.\-]/g,
+    "_",
+  );
+  return `inmemory://cobol-editor/${safeName}`;
+}
 
 export function CobolEditorPane() {
-  const GUTTER_LINE_HEIGHT = 21;
-  const GUTTER_OVERSCAN = 10;
-  const DEFAULT_VIEWPORT_HEIGHT = 480;
   const {
     sourceText,
     setSourceText,
@@ -29,29 +65,21 @@ export function CobolEditorPane() {
     canSubmitTransform,
     submitTransform,
   } = useSourceWorkspace();
-  const [sourceHash, setSourceHash] = useState('00000000');
+  const [sourceHash, setSourceHash] = useState("00000000");
+  const [rulerEnabled, setRulerEnabled] = useState(false);
 
   const apiState = useC2cApi();
   const { productState, state: runState } = useTransformationRun();
   const readiness = getWorkbenchReadiness(apiState);
-  const modelGatewayReady = runState.modelGatewayHealth?.status === 'ok';
+  const modelGatewayReady = runState.modelGatewayHealth?.status === "ok";
   const modelGatewayMessage =
     runState.modelGatewayHealth?.error ||
-    'Model Gateway unavailable. AI-assisted transformation cannot start.';
+    "Model Gateway unavailable. AI-assisted transformation cannot start.";
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(DEFAULT_VIEWPORT_HEIGHT);
-  const lineCount = useMemo(() => sourceText.split('\n').length || 1, [sourceText]);
-  const gutterStartLine = Math.max(0, Math.floor(scrollTop / GUTTER_LINE_HEIGHT) - GUTTER_OVERSCAN);
-  const gutterVisibleCount = Math.ceil(viewportHeight / GUTTER_LINE_HEIGHT) + GUTTER_OVERSCAN * 2;
-  const gutterEndLine = Math.min(lineCount, gutterStartLine + gutterVisibleCount);
-  const visibleLineNumbers = useMemo(
-    () => Array.from({ length: gutterEndLine - gutterStartLine }, (_, index) => gutterStartLine + index + 1),
-    [gutterEndLine, gutterStartLine]
-  );
+  const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
   const detectedProgramId = deriveDetectedProgramId(sourceText);
   const lineEnding = deriveDisplayedLineEnding(sourceText);
+  const modelUri = useMemo(() => deriveModelUri(sourceName), [sourceName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,39 +95,82 @@ export function CobolEditorPane() {
     };
   }, [sourceText]);
 
+  // Register the COBOL language as soon as Monaco resolves. This runs in
+  // parallel with CodeEditorInner's own getMonaco() resolution so the
+  // language is typically registered before the initial model is created —
+  // avoiding a brief plaintext flash on first render. The registration is
+  // idempotent (see registerCobolLanguage) so the late onMount fallback
+  // below is safe even when this effect wins the race.
   useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
+    let cancelled = false;
+    getMonaco()
+      .then((monaco) => {
+        if (cancelled) {
+          return;
+        }
+        registerCobolLanguage(monaco);
+      })
+      .catch(() => {
+        // CodeEditor surfaces the load failure via its own error UI; nothing
+        // useful to do here beyond not crashing.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Apply / clear Monaco's vertical ruler guides when the fixed-format toggle
+  // flips. Monaco's `rulers` option draws thin vertical lines at the given
+  // 1-based column positions; combined with the FixedFormatRuler legend
+  // above the editor, this gives the user a precise per-column marker for
+  // sequence (1-6), indicator (7), area A (8-11), area B (12-72), and the
+  // identification area (73-80).
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
       return;
     }
+    editor.updateOptions({
+      rulers: rulerEnabled ? [...FIXED_FORMAT_RULER_COLUMNS] : [],
+    });
+  }, [rulerEnabled]);
 
-    const measure = () => {
-      setViewportHeight(textarea.clientHeight || DEFAULT_VIEWPORT_HEIGHT);
-    };
-
-    measure();
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', measure);
-      return () => window.removeEventListener('resize', measure);
-    }
-
-    const observer = new ResizeObserver(measure);
-    observer.observe(textarea);
-    return () => observer.disconnect();
-  }, []);
+  const handleEditorMount = useCallback(
+    ({ editor, monaco }: StandaloneEditorMountArgs) => {
+      editorRef.current = editor;
+      // Late-registration fallback in case the early effect lost the race
+      // against CodeEditorInner's monaco resolution. registerCobolLanguage
+      // is idempotent.
+      registerCobolLanguage(monaco);
+      // Apply the initial ruler state. The dedicated effect above handles
+      // subsequent toggles; this mount-time call covers the case where the
+      // toggle is already on before the editor mounted (e.g., a future
+      // preference that persists across reloads).
+      editor.updateOptions({
+        rulers: rulerEnabled ? [...FIXED_FORMAT_RULER_COLUMNS] : [],
+        // Word-based suggestions only — Monaco's default IntelliSense pulls
+        // from open documents, which is the right level of help for COBOL
+        // until a dedicated language server lands.
+        wordBasedSuggestions: "currentDocument",
+      });
+    },
+    [rulerEnabled],
+  );
 
   if (!sourceText && !isDirty) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-center">
         <div className="max-w-sm space-y-4">
-          <p className="text-sm font-medium text-text">No source file selected</p>
+          <p className="text-sm font-medium text-text">
+            No source file selected
+          </p>
           <p className="text-sm text-text-dim">
-            Open a COBOL file from the Explorer or paste your own COBOL code here.
+            Open a COBOL file from the Explorer or paste your own COBOL code
+            here.
           </p>
           <button
             type="button"
-            onClick={() => setSourceText('')}
+            onClick={() => setSourceText("")}
             className="rounded bg-bg-2 px-4 py-2 text-sm text-text hover:bg-bg-3"
           >
             Start Typing
@@ -114,7 +185,7 @@ export function CobolEditorPane() {
       <div className="flex items-center justify-between border-b border-line px-4 py-2 shrink-0">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-medium text-text">
-            {sourceName || DEFAULT_SOURCE_NAME} {isDirty && '*'}
+            {sourceName || DEFAULT_SOURCE_NAME} {isDirty && "*"}
           </h2>
           {detectedProgramId && (
             <span className="rounded bg-bg-2 px-2 py-1 text-[10px] text-text-dim">
@@ -123,6 +194,10 @@ export function CobolEditorPane() {
           )}
         </div>
         <div className="flex items-center gap-3">
+          <FixedFormatRulerToggle
+            enabled={rulerEnabled}
+            onToggle={setRulerEnabled}
+          />
           <div className="text-[10px] text-text-faint uppercase tracking-wider flex gap-3">
             <span>UTF-8</span>
             <span>{lineEnding}</span>
@@ -137,24 +212,29 @@ export function CobolEditorPane() {
             className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-bg-0 hover:bg-accent-dim disabled:opacity-50"
           >
             <Play className="w-3.5 h-3.5" />
-            {isTransforming ? 'Transforming...' : 'Start Transformation'}
+            {isTransforming ? "Transforming..." : "Start Transformation"}
           </button>
         </div>
       </div>
-      
+
       {transformError && (
         <div className="bg-error/10 text-error px-4 py-2 text-sm border-b border-error/20">
           {transformError}
         </div>
       )}
 
-      {productState.state === 'unsupported' ? (
+      {productState.state === "unsupported" ? (
         <div className="border-b border-line bg-bg-1 px-4 py-3">
-          <div className="text-sm font-medium text-warn">Unsupported COBOL constructs block this run.</div>
-          <div className="mt-1 text-xs text-text-dim">
-            Review the unsupported features before attempting another transformation.
+          <div className="text-sm font-medium text-warn">
+            Unsupported COBOL constructs block this run.
           </div>
-          <UnsupportedConstructsPanel constructs={productState.unsupportedFeatures || []} />
+          <div className="mt-1 text-xs text-text-dim">
+            Review the unsupported features before attempting another
+            transformation.
+          </div>
+          <UnsupportedConstructsPanel
+            constructs={productState.unsupportedFeatures || []}
+          />
         </div>
       ) : null}
 
@@ -191,24 +271,26 @@ export function CobolEditorPane() {
               AI Assist
             </span>
             <span className="mt-1 block text-text-dim">
-              Default on. The orchestrator still runs the deterministic
-              baseline first and may activate the Transformation Agent only
-              after the assist-decision gate.
+              Default on. The orchestrator still runs the deterministic baseline
+              first and may activate the Transformation Agent only after the
+              assist-decision gate.
             </span>
           </span>
           <span className="flex items-center justify-between gap-3">
-            <span className="font-medium">
-              Allow controlled assist
-            </span>
+            <span className="font-medium">Allow controlled assist</span>
             <input
               type="checkbox"
               checked={allowAiAssist}
-              onChange={(event) => setAllowAiAssist(event.currentTarget.checked)}
+              onChange={(event) =>
+                setAllowAiAssist(event.currentTarget.checked)
+              }
               aria-label="Allow AI assist after deterministic baseline"
               className="h-4 w-4 rounded border-line-2 bg-bg-1 text-accent focus:ring-accent"
             />
           </span>
-          {allowAiAssist && runState.modelGatewayHealth && !modelGatewayReady ? (
+          {allowAiAssist &&
+          runState.modelGatewayHealth &&
+          !modelGatewayReady ? (
             <span className="rounded border border-error/30 bg-error/10 p-2 text-error">
               {modelGatewayMessage} Disable AI Assist to run deterministic-only.
             </span>
@@ -216,39 +298,38 @@ export function CobolEditorPane() {
         </label>
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden font-mono text-[12px]">
-        <div
-          className="border-r border-line bg-bg-1 px-2 py-2 text-right text-text-faint overflow-hidden select-none"
-          aria-hidden="true"
-        >
-          <div
-            className="relative"
-            style={{ height: lineCount * GUTTER_LINE_HEIGHT }}
-          >
-            {visibleLineNumbers.map((num) => (
-              <div
-                key={num}
-                className="absolute min-w-8 pr-2"
-                style={{
-                  top: (num - 1) * GUTTER_LINE_HEIGHT,
-                  height: GUTTER_LINE_HEIGHT,
-                  lineHeight: `${GUTTER_LINE_HEIGHT}px`,
-                }}
-              >
-                {num}
-              </div>
-            ))}
-          </div>
+      {rulerEnabled ? (
+        <div className="border-b border-line bg-bg-1 px-4 py-2">
+          <FixedFormatRuler />
         </div>
-        <textarea
-          ref={textareaRef}
+      ) : null}
+
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/*
+          Controlled-input strategy (Issue #246): we pass `value={sourceText}`
+          and `onChange={setSourceText}` and rely on CodeEditorInner's hardened
+          wrapper to avoid the cursor-jump bug common in controlled Monaco
+          integrations. Specifically, CodeEditorInner suppresses onChange for
+          (a) whole-model `isFlush` replacements that fire when @monaco-editor/
+          react flushes a new value prop, and (b) `executeEdits`-driven prop
+          refreshes via value-equality against the latest sanitized prop
+          (see codeEditorWiring.test.ts). That combination keeps the React
+          state and Monaco's model in sync without the editor stealing or
+          resetting the user's caret position on every keystroke. The submit
+          path reads from `sourceText` directly (see submitTransform in
+          stores/sourceWorkspace.tsx), so the controlled prop already matches
+          the editor's current content at submit time — no race condition
+          and no need for an editor.getValue() round-trip.
+        */}
+        <CodeEditor
+          mode="editable"
+          language={COBOL_LANGUAGE_ID}
           value={sourceText}
-          onChange={(e) => setSourceText(e.target.value)}
-          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-          spellCheck={false}
-          aria-label={`${sourceName || DEFAULT_SOURCE_NAME} COBOL source editor`}
-          className="flex-1 w-full m-0 p-2 leading-[21px] bg-transparent text-text resize-none outline-none overflow-auto whitespace-pre"
-          style={{ tabSize: 4 }}
+          onChange={setSourceText}
+          modelUri={modelUri}
+          ariaLabel={`${sourceName || DEFAULT_SOURCE_NAME} COBOL source editor`}
+          onMount={handleEditorMount}
+          className="flex-1 min-h-0"
         />
       </div>
     </div>
