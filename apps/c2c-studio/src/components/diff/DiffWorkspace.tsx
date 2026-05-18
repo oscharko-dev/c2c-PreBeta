@@ -433,6 +433,24 @@ function DiffWorkspaceBody({
     };
   }, []);
 
+  // Studio-IDE-12 (#250): track Monaco command disposables from both
+  // diff editors so they are released on unmount. Without this each
+  // remount of the diff workspace stacks four more F7/Shift+F7 handlers
+  // per editor side.
+  const diffActionDisposablesRef = useRef<MonacoNs.IDisposable[]>([]);
+  const trackDiffDisposable = useCallback(
+    (disposable: MonacoNs.IDisposable | string | null) => {
+      if (
+        disposable &&
+        typeof disposable !== "string" &&
+        typeof disposable.dispose === "function"
+      ) {
+        diffActionDisposablesRef.current.push(disposable);
+      }
+    },
+    [],
+  );
+
   const handleJavaMount = useCallback(
     ({ editor, monaco }: DiffEditorMountArgs) => {
       javaDiffRef.current = editor;
@@ -443,17 +461,21 @@ function DiffWorkspaceBody({
       const modified = editor.getModifiedEditor();
       const original = editor.getOriginalEditor();
       const onFocus = () => setFocusSide("java");
-      modified.onDidFocusEditorWidget(onFocus);
-      original.onDidFocusEditorWidget(onFocus);
+      trackDiffDisposable(modified.onDidFocusEditorWidget(onFocus));
+      trackDiffDisposable(original.onDidFocusEditorWidget(onFocus));
       const goNext = () => jumpToHunk({ editor }, "next");
       const goPrev = () => jumpToHunk({ editor }, "prev");
-      modified.addCommand(monaco.KeyCode.F7, goNext);
-      modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
-      original.addCommand(monaco.KeyCode.F7, goNext);
-      original.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
-      modified.onDidScrollChange(scheduleScrollSync);
+      trackDiffDisposable(modified.addCommand(monaco.KeyCode.F7, goNext));
+      trackDiffDisposable(
+        modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev),
+      );
+      trackDiffDisposable(original.addCommand(monaco.KeyCode.F7, goNext));
+      trackDiffDisposable(
+        original.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev),
+      );
+      trackDiffDisposable(modified.onDidScrollChange(scheduleScrollSync));
     },
-    [scheduleScrollSync],
+    [scheduleScrollSync, trackDiffDisposable],
   );
 
   const handleCobolMount = useCallback(
@@ -462,19 +484,41 @@ function DiffWorkspaceBody({
       const modified = editor.getModifiedEditor();
       const original = editor.getOriginalEditor();
       const onFocus = () => setFocusSide("cobol");
-      modified.onDidFocusEditorWidget(onFocus);
-      original.onDidFocusEditorWidget(onFocus);
+      trackDiffDisposable(modified.onDidFocusEditorWidget(onFocus));
+      trackDiffDisposable(original.onDidFocusEditorWidget(onFocus));
       // Studio-IDE-7 review-finding (Copilot, PR #282): bind on both
       // sides — see corresponding note in ``handleJavaMount``.
       const goNext = () => jumpToHunk({ editor }, "next");
       const goPrev = () => jumpToHunk({ editor }, "prev");
-      modified.addCommand(monaco.KeyCode.F7, goNext);
-      modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
-      original.addCommand(monaco.KeyCode.F7, goNext);
-      original.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
+      trackDiffDisposable(modified.addCommand(monaco.KeyCode.F7, goNext));
+      trackDiffDisposable(
+        modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev),
+      );
+      trackDiffDisposable(original.addCommand(monaco.KeyCode.F7, goNext));
+      trackDiffDisposable(
+        original.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev),
+      );
     },
-    [],
+    [trackDiffDisposable],
   );
+
+  // Studio-IDE-12 (#250): unmount cleanup — dispose every command,
+  // action, and listener registration captured at mount time. Both
+  // diff editors share the same disposable list because the workspace
+  // owns the lifetime of both panes.
+  useEffect(() => {
+    return () => {
+      for (const disposable of diffActionDisposablesRef.current) {
+        try {
+          disposable.dispose();
+        } catch {
+          // Idempotent cleanup; the underlying editor may already be
+          // torn down by the time React invokes the effect.
+        }
+      }
+      diffActionDisposablesRef.current = [];
+    };
+  }, []);
 
   // ----- Render ---------------------------------------------------------
   // Stable model URIs scoped to (sourceKey, runId, filePath) so view state
