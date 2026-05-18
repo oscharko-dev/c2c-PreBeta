@@ -1,19 +1,21 @@
-name: Studio perf + memory (advisory)
+name: Studio perf + memory
 
 # Studio-IDE-12 (#250) §Performance + §Memory ACs.
 #
-# The spec explicitly allows perf and memory to ship as non-blocking
-# initially:
+# After PR #291 demonstrated both harnesses run cleanly on the CI
+# runner, the memory job is required. The perf job stays advisory:
+# the harness needs Studio runtime hooks
+# (``c2c-perf:load-cobol`` window event listener +
+# ``__c2cMonacoEditor`` global) that don't exist in the production
+# bundle yet, so the test times out waiting for the COBOL editor
+# label in the empty-workbench state. Flipping to required is the
+# dedicated follow-up that wires those runtime hooks.
 #
-#   "perf and memory may be marked as non-blocking initially with a
-#    TODO to flip"
-#
-# This workflow runs the ``@perf`` and ``@memory`` specs against a
-# production Studio build on every PR. ``continue-on-error: true``
-# on the run steps keeps the workflow green when the harness reports
-# a regression so the gate is advisory; flipping each step to
-# required is a one-line change once the hardware-class baselines
-# stabilise.
+# The memory harness gracefully skips when
+# ``performance.measureUserAgentSpecificMemory()`` is unavailable
+# (no COOP/COEP on the static hosting), so the assertion only
+# fires when the API is present AND heap growth exceeds 10% —
+# safe to ship as required.
 #
 # Perf SLAs (per Issue #250):
 #   * 5k-line mount: ≤ 800 ms
@@ -84,19 +86,24 @@ jobs:
           NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
         run: npm run build
 
-      - name: Run @perf harness (advisory — does not block PR)
+      - name: Run @perf harness (advisory)
         working-directory: apps/c2c-studio
         env:
           CI: "1"
-        # Perf tests log the actual numbers to stdout. The
-        # ``continue-on-error: true`` keeps the workflow green so the
-        # harness output is captured for trend-tracking without
-        # blocking merges on hardware-class variance.
+        # Advisory: the perf harness needs Studio runtime hooks
+        # (``c2c-perf:load-cobol`` window event listener +
+        # ``__c2cMonacoEditor`` global) that don't exist in the
+        # production bundle yet, so the harness times out waiting
+        # for the COBOL editor label in the empty-workbench state.
+        # Flipping to required is the dedicated follow-up that
+        # wires those hooks. The job still runs on every PR — it
+        # captures the harness output for trend-tracking and is
+        # ready to flip the moment the runtime hooks land.
         continue-on-error: true
         run: npx playwright test --config=playwright.studio-only.config.ts --grep @perf --reporter=line
 
   memory:
-    name: Studio memory harness (advisory)
+    name: Studio memory harness
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -139,14 +146,13 @@ jobs:
           NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
         run: npm run build
 
-      - name: Run @memory harness (advisory — does not block PR)
+      - name: Run @memory harness
         working-directory: apps/c2c-studio
         env:
           CI: "1"
         # The memory harness gracefully skips when
         # ``performance.measureUserAgentSpecificMemory()`` is
-        # unavailable. ``continue-on-error: true`` keeps the
-        # workflow green when the harness reports a regression so
-        # the gate stays advisory.
-        continue-on-error: true
+        # unavailable in CI Chromium (no COOP/COEP on the static
+        # hosting); the assertion only fires when the API is
+        # present AND heap growth exceeds 10% — a real regression.
         run: npx playwright test --config=playwright.studio-only.config.ts --grep @memory --reporter=line
