@@ -35,6 +35,9 @@ import {
   AssistDecisionReasonCode,
   AssistDecisionAgentRole,
   AssistDecisionArtifactRef,
+  GenerateResponse,
+  VerifyRequest,
+  VerifyResponse,
 } from "@/types/api";
 import { TransformRequest } from "@/types/transform-request";
 
@@ -609,6 +612,7 @@ const W02_UI_ERROR_CODES: ReadonlySet<W02UiErrorCode> = new Set([
   "oracle_mismatch",
   "evidence_incomplete",
   "cancelled",
+  "generate_only_complete",
   "service_unavailable",
   "internal_error",
 ]);
@@ -1089,6 +1093,102 @@ function parseTransformResponse(
   return { ok: true, data: payload };
 }
 
+// Studio-IDE-13 (#255): /api/v0/generate response is a TransformResponse
+// plus the literal ``runMode: "generate"`` marker. The marker is required
+// so the Studio can distinguish a generator-only run from a composed
+// Generate & Verify run when both flow through the same polling path.
+function parseGenerateResponse(payload: unknown): ApiResult<GenerateResponse> {
+  if (!isTransformResponsePayload(payload)) {
+    return createFailure(
+      "Contract error: generate payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  const record = payload as unknown as Record<string, unknown>;
+  if (record.runMode !== "generate") {
+    return createFailure(
+      'Contract error: /api/v0/generate response must carry runMode="generate".',
+      { kind: "contract", body: payload },
+    );
+  }
+  return { ok: true, data: payload as GenerateResponse };
+}
+
+// Studio-IDE-13 (#255): /api/v0/verify response carries the build-test
+// outcome plus the manual-edit summary fields stamped by the BFF from the
+// optional ``manualEditOverlay`` request field. We validate the load-
+// bearing fields strictly so unknown future fields are preserved as
+// opaque pass-through per ADR-0006 §3.
+function parseVerifyResponse(payload: unknown): ApiResult<VerifyResponse> {
+  if (!isRecord(payload)) {
+    return createFailure("Contract error: verify payload must be an object.", {
+      kind: "contract",
+      body: payload,
+    });
+  }
+  if (payload.schemaVersion !== undefined && payload.schemaVersion !== "v0") {
+    return createFailure(
+      'Contract error: verify payload schemaVersion must be "v0" when present.',
+      { kind: "contract", body: payload },
+    );
+  }
+  if (
+    !isString(payload.runId) ||
+    !isString(payload.programId) ||
+    !isString(payload.status) ||
+    !isString(payload.classification)
+  ) {
+    return createFailure(
+      "Contract error: verify payload requires runId/programId/status/classification strings.",
+      { kind: "contract", body: payload },
+    );
+  }
+  if (typeof payload.manualEditsCarriedOver !== "boolean") {
+    return createFailure(
+      "Contract error: verify payload manualEditsCarriedOver must be a boolean.",
+      { kind: "contract", body: payload },
+    );
+  }
+  if (
+    typeof payload.manualDriftRegionCount !== "number" ||
+    !Number.isInteger(payload.manualDriftRegionCount) ||
+    payload.manualDriftRegionCount < 0
+  ) {
+    return createFailure(
+      "Contract error: verify payload manualDriftRegionCount must be a non-negative integer.",
+      { kind: "contract", body: payload },
+    );
+  }
+  const diagnostics = Array.isArray(payload.diagnostics)
+    ? (payload.diagnostics as Diagnostic[])
+    : [];
+  const normalised: VerifyResponse = {
+    schemaVersion: "v0",
+    runId: payload.runId,
+    programId: payload.programId,
+    status: payload.status,
+    classification: payload.classification,
+    diagnostics,
+    manualEditsCarriedOver: payload.manualEditsCarriedOver,
+    manualDriftRegionCount: payload.manualDriftRegionCount,
+  };
+  if (isRecord(payload.build)) normalised.build = payload.build;
+  if (isRecord(payload.execution)) normalised.execution = payload.execution;
+  if (isRecord(payload.tests)) normalised.tests = payload.tests;
+  if (isRecord(payload.goldenMaster))
+    normalised.goldenMaster = payload.goldenMaster;
+  if (isRecord(payload.comparison)) normalised.comparison = payload.comparison;
+  if (payload.outputRef === null) {
+    normalised.outputRef = null;
+  } else if (
+    isRecord(payload.outputRef) &&
+    isString(payload.outputRef.sha256)
+  ) {
+    normalised.outputRef = payload.outputRef as unknown as OutputRef;
+  }
+  return { ok: true, data: normalised };
+}
+
 function parseRunSummary(payload: unknown): ApiResult<RunSummary> {
   if (!isRunSummaryPayload(payload)) {
     return createFailure(
@@ -1313,6 +1413,31 @@ export const apiClient = {
   getMode: () => fetchJson("/api/v0/mode", parseModeResponse),
   transform: (request: TransformRequest) =>
     fetchJson("/api/v0/transform", parseTransformResponse, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    }),
+  // Studio-IDE-13 (#255): Generator-Run-only action. Equivalent to the
+  // legacy ``transform`` request shape; the BFF tags the response with
+  // ``runMode: "generate"`` so the Studio can distinguish the slot
+  // (Generate Java toolbar action) from the composed Generate & Verify
+  // legacy path.
+  generate: (request: TransformRequest) =>
+    fetchJson("/api/v0/generate", parseGenerateResponse, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    }),
+  // Studio-IDE-13 (#255): explicit Verify action. Accepts arbitrary
+  // ``javaFiles`` (manual-edited or generator-produced) plus an optional
+  // ``manualEditOverlay`` from which the BFF derives the run-summary
+  // manual-edit fields per ADR-0007 §4.
+  verify: (request: VerifyRequest) =>
+    fetchJson("/api/v0/verify", parseVerifyResponse, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

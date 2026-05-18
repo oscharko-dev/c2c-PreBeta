@@ -48,11 +48,7 @@ import {
   useJavaEditorActions,
   useRegisterCompileCheckHandler,
 } from "@/stores/javaEditorActions";
-import type {
-  Diagnostic,
-  JavaOriginRegion,
-  JavaRegionClassification,
-} from "@/types/api";
+import type { Diagnostic, JavaOriginRegion } from "@/types/api";
 import { useOriginOverlayApi, useOverlay } from "@/lib/editor/originOverlay";
 import { useLineageCoverageApi } from "@/stores/lineageCoverage";
 import {
@@ -63,7 +59,21 @@ import { resolveJavaToCobol } from "@/lib/editor/lineageNavigation";
 import {
   buildTrustPillarDecorations,
   lineageCoveragePct,
+  mergeRegionsForTrustPillars,
 } from "@/lib/editor/trustPillars";
+// Studio-IDE-13 (#255): manual-edit overlay computation and 3-Way Merge
+// dialog wiring. The overlay is recomputed on every debounced buffer
+// change so trust-pillar decorations and the manual-edits chip stay in
+// sync within the 500 ms AC budget.
+import { computeManualEditOverlay } from "@/lib/editor/manualEditOverlay";
+import {
+  defaultRegionId,
+  type ConflictRegionResolution,
+} from "@/lib/editor/conflictDetection";
+import {
+  ThreeWayMergeDialog,
+  type MergeChoice,
+} from "@/components/diff/ThreeWayMergeDialog";
 
 // Studio-IDE-6 (#248): synthetic Monaco marker owner for lineage-jump
 // feedback (e.g. "lineage stale due to manual edit"). Kept distinct from
@@ -128,11 +138,16 @@ export function GeneratedJavaEditorPane() {
     saveNoticeAt,
     ensureJavaBaseline,
     setJavaBufferContent,
+    setJavaManualOverlay,
     saveJavaDraft,
     loadJavaDraftFor,
     resolveJavaConflict,
     dismissJavaConflict,
     javaStatusFlags,
+    javaMergeReview,
+    requestJavaMergeReview,
+    applyJavaMergeSelections,
+    cancelJavaMergeReview,
   } = useTransformationRun();
 
   // Studio-IDE-6 (#248): origin-overlay + lineage-coverage wiring. The
@@ -192,6 +207,91 @@ export function GeneratedJavaEditorPane() {
     ensureJavaBaseline,
     loadJavaDraftFor,
   ]);
+
+  // Studio-IDE-13 (#255) AC3: when a new generator run lands while the
+  // current Java buffer holds manual edits, open the 3-Way Merge dialog
+  // instead of silently keeping the old (dirty) buffer. The check fires
+  // when (a) the BFF-delivered file content arrives for the current run,
+  // (b) the existing buffer is dirty (i.e., diverges from its previous
+  // generator baseline), and (c) the new generator output differs from
+  // the current buffer. The merge review is keyed by (filePath, runId)
+  // so it does not re-trigger on every poll for the same content.
+  const lastMergeReviewKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !selectedFilePath ||
+      fileContent === null ||
+      !state.runId ||
+      isFetchingFile
+    ) {
+      return;
+    }
+    const entry = javaBuffers[selectedFilePath];
+    if (!entry) return;
+    if (!entry.isDirty) return;
+    // The buffer is dirty AND a fresh run is in scope. Skip if the run
+    // that produced the buffer is the same as the current run (no new
+    // generator output to compare against).
+    if (entry.generatorBaselineRunId === state.runId) return;
+    if (fileContent === entry.content) return;
+    const key = `${state.runId}::${selectedFilePath}`;
+    if (lastMergeReviewKeyRef.current === key) return;
+    lastMergeReviewKeyRef.current = key;
+    requestJavaMergeReview({
+      filePath: selectedFilePath,
+      baselineContent: entry.generatorBaselineContent,
+      manualContent: entry.content,
+      newGeneratorContent: fileContent,
+      newGeneratorRunId: state.runId,
+    });
+  }, [
+    selectedFilePath,
+    fileContent,
+    state.runId,
+    isFetchingFile,
+    javaBuffers,
+    requestJavaMergeReview,
+  ]);
+
+  // Studio-IDE-13 (#255) AC8: recompute the manual-edit overlay on
+  // every buffer change. The 500 ms debounce on ``setJavaBufferContent``
+  // already gates this effect, so trust-pillar decorations and the
+  // overlay propagation stay within the AC budget. The overlay is
+  // persisted on the buffer entry (so editorPersistence round-trips it
+  // through IndexedDB) and merged with the traceability overlay at
+  // decoration time below — we deliberately do NOT call
+  // ``overlayApi.setOverlay`` here because that path is owned by the
+  // traceability fetch and would clobber its trust-pillar regions.
+  useEffect(() => {
+    if (!selectedFilePath || !state.runId) return;
+    const entry = javaBuffers[selectedFilePath];
+    if (!entry) return;
+    const computed = computeManualEditOverlay({
+      baselineContent: entry.generatorBaselineContent,
+      currentContent: entry.content,
+      runId: state.runId,
+      javaFile: selectedFilePath,
+      generatorBaselineRunId: entry.generatorBaselineRunId,
+    });
+    // Only push if the overlay actually changed; otherwise the effect
+    // would loop forever through the javaBuffers dep.
+    const prev = entry.manualEditOverlay;
+    const same =
+      (prev === null && computed === null) ||
+      (prev !== null &&
+        computed !== null &&
+        prev.regions.length === computed.regions.length &&
+        prev.regions.every((r, i) => {
+          const c = computed.regions[i]!;
+          return (
+            r.originClass === c.originClass &&
+            r.lineRange.startLine === c.lineRange.startLine &&
+            r.lineRange.endLine === c.lineRange.endLine
+          );
+        }));
+    if (same) return;
+    setJavaManualOverlay(selectedFilePath, computed);
+  }, [selectedFilePath, state.runId, javaBuffers, setJavaManualOverlay]);
 
   useEffect(() => {
     if (saveNoticeAt === null) {
@@ -623,36 +723,28 @@ export function GeneratedJavaEditorPane() {
       window as unknown as { monaco?: typeof import("monaco-editor") }
     ).monaco;
     if (!editor) return;
-    const regions: readonly JavaRegionClassification[] = overlay?.regions
-      ? overlay.regions
-          .filter(
-            (
-              r,
-            ): r is JavaOriginRegion & {
-              verificationOutcome: NonNullable<
-                JavaOriginRegion["verificationOutcome"]
-              >;
-              mappingClass: NonNullable<JavaOriginRegion["mappingClass"]>;
-            } =>
-              r.verificationOutcome !== undefined &&
-              r.mappingClass !== undefined,
-          )
-          .map<JavaRegionClassification>((r) => ({
-            schemaVersion: "v0",
-            lineRange: r.lineRange,
-            originClass: r.originClass,
-            verificationOutcome: r.verificationOutcome,
-            mappingClass: r.mappingClass,
-          }))
-      : [];
-    if (monacoGlobal && regions.length > 0) {
+    // Studio-IDE-13 (#255) AC8: union the trust-pillar overlay
+    // (deterministic / agent_proposed / repair_attempted from the
+    // traceability fetch) with the manual-edit overlay (manual_modified
+    // / manual_edit from local diff) so manual regions render in purple
+    // / orange per the issue spec. Manual regions synthesize a
+    // ``no_oracle`` verification outcome and ``synthesized`` mapping
+    // class so they pass the trust-pillar painter's type filter (which
+    // requires both fields to be present); this is consistent with
+    // ADR-0007 §6 which states manual lineage is stale or unavailable
+    // and therefore cannot carry a real verification outcome.
+    const combined = mergeRegionsForTrustPillars({
+      traceabilityOverlay: overlay ?? null,
+      manualOverlay: javaBufferEntry?.manualEditOverlay ?? null,
+    });
+    if (monacoGlobal && combined.length > 0) {
       const repairCount =
         state.workflow?.repairAttempts?.filter(
           (a) => a.repairDecision === "propose_candidate",
         ).length ?? 0;
       const decorations = buildTrustPillarDecorations({
         monaco: monacoGlobal,
-        regions,
+        regions: combined,
         repairCount,
       });
       if (decorationCollectionRef.current) {
@@ -671,13 +763,14 @@ export function GeneratedJavaEditorPane() {
     if (selectedFilePath && totalLines > 0) {
       lineageCoverageApi.publish({
         filePath: selectedFilePath,
-        pct: lineageCoveragePct(totalLines, regions),
+        pct: lineageCoveragePct(totalLines, combined),
       });
     } else {
       lineageCoverageApi.publish(null);
     }
   }, [
     overlay,
+    javaBufferEntry?.manualEditOverlay,
     selectedFilePath,
     state.workflow,
     lineageCoverageApi,
@@ -1286,6 +1379,42 @@ export function GeneratedJavaEditorPane() {
           panels={conflictPanels}
           onChoose={resolveJavaConflict}
           onDismiss={dismissJavaConflict}
+        />
+      ) : null}
+
+      {/*
+       * Studio-IDE-13 (#255): 3-Way Merge dialog. Opens when a new
+       * generator run lands while the buffer holds manual edits (per
+       * AC3) or when the user explicitly invokes Generate / Regenerate
+       * on a dirty buffer. Selections are keyed by the same
+       * ``defaultRegionId`` the store uses to apply them back to the
+       * buffer, so the round-trip is lossless.
+       */}
+      {javaMergeReview && javaMergeReview.filePath === selectedFilePath ? (
+        <ThreeWayMergeDialog
+          filePath={javaMergeReview.filePath}
+          baselineContent={javaMergeReview.baselineContent}
+          manualContent={javaMergeReview.manualContent}
+          newGeneratorContent={javaMergeReview.newGeneratorContent}
+          regions={javaMergeReview.regions.map((r) => ({
+            id: defaultRegionId(r),
+            lineRange: r.lineRange,
+            conflictKind: r.conflictKind,
+            baselineContent: r.baselineContent,
+            manualContent: r.manualContent,
+            newGeneratorContent: r.newGeneratorContent,
+            suggestedResolution: r.suggestedResolution as MergeChoice | null,
+            needsUserPick: r.needsUserPick,
+          }))}
+          onApply={(selections) => {
+            // The dialog produces a Record<id, MergeChoice>; the store
+            // accepts Record<id, ConflictRegionResolution> which has
+            // the identical string union, so a direct cast is safe.
+            void applyJavaMergeSelections(
+              selections as Record<string, ConflictRegionResolution>,
+            );
+          }}
+          onCancel={cancelJavaMergeReview}
         />
       ) : null}
     </div>

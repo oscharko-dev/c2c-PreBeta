@@ -181,6 +181,12 @@ FAILURE_CANCELLED = "cancelled"
 # model invocation reference, missing generated Java artifact reference, or
 # unapproved artifact references.
 FAILURE_AGENT_CONTRACT_INVALID = "agent_contract_invalid"
+# Issue #255 / Studio-IDE-13: sentinel applied to a run that finished its
+# generator-only pipeline by request (``runMode == "generate"``).  The
+# classification is ``incomplete`` because verification was not requested,
+# not because anything failed — UI consumers render this as a successful
+# generator outcome rather than as an error per W02_UI_ERROR_CODES.
+FAILURE_GENERATE_ONLY_COMPLETE = "generate_only_complete"
 
 FAILURE_CODES: tuple[str, ...] = (
     FAILURE_UNSUPPORTED_COBOL,
@@ -196,6 +202,7 @@ FAILURE_CODES: tuple[str, ...] = (
     FAILURE_ORACLE_MISMATCH,
     FAILURE_EVIDENCE_INCOMPLETE,
     FAILURE_CANCELLED,
+    FAILURE_GENERATE_ONLY_COMPLETE,
 )
 
 

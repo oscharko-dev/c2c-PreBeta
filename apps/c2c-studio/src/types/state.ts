@@ -1,5 +1,5 @@
-import { TransformationRunState } from './run';
-import { W02UiErrorCode } from './api';
+import { TransformationRunState } from "./run";
+import { W02UiErrorCode } from "./api";
 
 // Issue #173: W0.2 Studio state machine. Lifecycle states (submitting,
 // awaiting-agent, repairing, verifying, cancelled) drive in-progress UI;
@@ -8,27 +8,27 @@ import { W02UiErrorCode } from './api';
 // existing artifact-driven panels keep their semantics for runs that
 // predate the W0.2 workflow contract.
 export type ProductState =
-  | 'empty'
-  | 'submitting'
-  | 'running'
-  | 'awaiting-agent'
-  | 'repairing'
-  | 'verifying'
-  | 'success'
-  | 'blocked'
-  | 'cancelled'
-  | 'backend-unavailable'
-  | 'upstream-unavailable'
-  | 'unsupported'
-  | 'validation-error'
-  | 'failed'
-  | 'generated-pending'
-  | 'generated-incomplete'
-  | 'build-failed'
-  | 'equivalence-mismatch'
-  | 'evidence-incomplete'
-  | 'hash-mismatch'
-  | 'stale-ignored';
+  | "empty"
+  | "submitting"
+  | "running"
+  | "awaiting-agent"
+  | "repairing"
+  | "verifying"
+  | "success"
+  | "blocked"
+  | "cancelled"
+  | "backend-unavailable"
+  | "upstream-unavailable"
+  | "unsupported"
+  | "validation-error"
+  | "failed"
+  | "generated-pending"
+  | "generated-incomplete"
+  | "build-failed"
+  | "equivalence-mismatch"
+  | "evidence-incomplete"
+  | "hash-mismatch"
+  | "stale-ignored";
 
 export interface StateContext {
   state: ProductState;
@@ -48,28 +48,36 @@ function hasUnavailableProductMode(runState: TransformationRunState): boolean {
     runState.generatedFiles?.productMode,
     runState.buildTest?.productMode,
     runState.evidence?.productMode,
-  ].includes('unavailable');
+  ].includes("unavailable");
 }
 
 function collectHashMismatches(
-  runState: TransformationRunState
-): NonNullable<StateContext['mismatchedHashes']> {
-  const mismatches: NonNullable<StateContext['mismatchedHashes']> = [];
+  runState: TransformationRunState,
+): NonNullable<StateContext["mismatchedHashes"]> {
+  const mismatches: NonNullable<StateContext["mismatchedHashes"]> = [];
   const generatedHash = runState.generated?.artifactRef?.sha256;
 
-  if (generatedHash && runState.buildTest?.generatedArtifactRef?.sha256 && generatedHash !== runState.buildTest.generatedArtifactRef.sha256) {
+  if (
+    generatedHash &&
+    runState.buildTest?.generatedArtifactRef?.sha256 &&
+    generatedHash !== runState.buildTest.generatedArtifactRef.sha256
+  ) {
     mismatches.push({
       expected: generatedHash,
       actual: runState.buildTest.generatedArtifactRef.sha256,
-      context: 'Generated vs Build/Test',
+      context: "Generated vs Build/Test",
     });
   }
 
-  if (generatedHash && runState.evidence?.generatedArtifactRef?.sha256 && generatedHash !== runState.evidence.generatedArtifactRef.sha256) {
+  if (
+    generatedHash &&
+    runState.evidence?.generatedArtifactRef?.sha256 &&
+    generatedHash !== runState.evidence.generatedArtifactRef.sha256
+  ) {
     mismatches.push({
       expected: generatedHash,
       actual: runState.evidence.generatedArtifactRef.sha256,
-      context: 'Generated vs Evidence',
+      context: "Generated vs Evidence",
     });
   }
 
@@ -78,76 +86,102 @@ function collectHashMismatches(
 
 function failureCodeToState(code: W02UiErrorCode): ProductState {
   switch (code) {
-    case 'unsupported_cobol':
-      return 'unsupported';
-    case 'parse_failed':
-    case 'semantic_ir_failed':
-    case 'agent_timeout':
-    case 'agent_contract_invalid':
-    case 'java_generation_failed':
-    case 'internal_error':
-      return 'failed';
-    case 'model_gateway_unavailable':
-    case 'model_policy_denied':
-      return 'blocked';
-    case 'java_compile_failed':
-    case 'java_runtime_failed':
-      return 'build-failed';
-    case 'oracle_mismatch':
-      return 'equivalence-mismatch';
-    case 'evidence_incomplete':
-      return 'evidence-incomplete';
-    case 'cancelled':
-      return 'cancelled';
-    case 'service_unavailable':
-      return 'backend-unavailable';
+    case "unsupported_cobol":
+      return "unsupported";
+    case "parse_failed":
+    case "semantic_ir_failed":
+    case "agent_timeout":
+    case "agent_contract_invalid":
+    case "java_generation_failed":
+    case "internal_error":
+      return "failed";
+    case "model_gateway_unavailable":
+    case "model_policy_denied":
+      return "blocked";
+    case "java_compile_failed":
+    case "java_runtime_failed":
+      return "build-failed";
+    case "oracle_mismatch":
+      return "equivalence-mismatch";
+    case "evidence_incomplete":
+      return "evidence-incomplete";
+    case "cancelled":
+      return "cancelled";
+    case "generate_only_complete":
+      // Studio-IDE-13 (#255): not a failure — the user invoked
+      // /api/v0/generate and the generator pipeline produced Java
+      // artifacts. The Studio renders the editor as ready for the
+      // explicit Verify action; ``generated-pending`` is the closest
+      // existing UX label ("Java is here; verification hasn't run").
+      return "generated-pending";
+    case "service_unavailable":
+      return "backend-unavailable";
   }
 }
 
 // Issue #173: map BFF active agent identifier to the in-progress product
 // state the UI shows during that step.
-function activeAgentToState(activeAgent: string | null | undefined): ProductState | null {
+function activeAgentToState(
+  activeAgent: string | null | undefined,
+): ProductState | null {
   switch (activeAgent) {
-    case 'transformation_agent':
-      return 'awaiting-agent';
-    case 'verification_repair_agent':
-      return 'repairing';
-    case 'build_test_runner':
-    case 'evidence_service':
-      return 'verifying';
+    case "transformation_agent":
+      return "awaiting-agent";
+    case "verification_repair_agent":
+      return "repairing";
+    case "build_test_runner":
+    case "evidence_service":
+      return "verifying";
     default:
       return null;
   }
 }
 
-export function deriveProductState(runState: TransformationRunState): StateContext {
-  if (runState.error === 'Backend unavailable. Try again shortly.' || runState.error?.includes('503')) {
-    return { state: 'backend-unavailable', message: runState.error };
+export function deriveProductState(
+  runState: TransformationRunState,
+): StateContext {
+  if (
+    runState.error === "Backend unavailable. Try again shortly." ||
+    runState.error?.includes("503")
+  ) {
+    return { state: "backend-unavailable", message: runState.error };
   }
-  if (runState.error?.includes('400') || runState.error?.includes('Validation')) {
-    return { state: 'validation-error', message: runState.error };
+  if (
+    runState.error?.includes("400") ||
+    runState.error?.includes("Validation")
+  ) {
+    return { state: "validation-error", message: runState.error };
   }
-  if (runState.phase === 'idle') {
-    return { state: 'empty' };
+  if (runState.phase === "idle") {
+    return { state: "empty" };
   }
-  if (runState.phase === 'unavailable') {
-    return { state: 'backend-unavailable', message: runState.error ?? 'Backend unavailable. Try again shortly.' };
+  if (runState.phase === "unavailable") {
+    return {
+      state: "backend-unavailable",
+      message: runState.error ?? "Backend unavailable. Try again shortly.",
+    };
   }
   const workflow = runState.workflow;
   const finalClassification =
-    workflow?.finalClassification ?? runState.summary?.finalClassification ?? null;
-  const failureCode = workflow?.failureCode ?? runState.summary?.failureCode ?? null;
+    workflow?.finalClassification ??
+    runState.summary?.finalClassification ??
+    null;
+  const failureCode =
+    workflow?.failureCode ?? runState.summary?.failureCode ?? null;
   const failureMessage =
     workflow?.failureMessage ?? runState.summary?.failureMessage ?? null;
 
-  if (finalClassification === 'cancelled' || failureCode === 'cancelled') {
-    return { state: 'cancelled', message: failureMessage ?? 'Run was cancelled.' };
+  if (finalClassification === "cancelled" || failureCode === "cancelled") {
+    return {
+      state: "cancelled",
+      message: failureMessage ?? "Run was cancelled.",
+    };
   }
 
   if (
-    (finalClassification === 'blocked' ||
-      finalClassification === 'failed' ||
-      finalClassification === 'incomplete') &&
+    (finalClassification === "blocked" ||
+      finalClassification === "failed" ||
+      finalClassification === "incomplete") &&
     failureCode
   ) {
     return {
@@ -157,35 +191,45 @@ export function deriveProductState(runState: TransformationRunState): StateConte
     };
   }
 
-  if (finalClassification === 'incomplete') {
+  if (finalClassification === "incomplete") {
     return {
-      state: 'evidence-incomplete',
-      message: failureMessage ?? runState.summary?.message ?? 'Evidence pack is incomplete.',
+      state: "evidence-incomplete",
+      message:
+        failureMessage ??
+        runState.summary?.message ??
+        "Evidence pack is incomplete.",
       failureCode: failureCode ?? undefined,
     };
   }
 
-  if (finalClassification === 'blocked' || finalClassification === 'failed') {
+  if (finalClassification === "blocked" || finalClassification === "failed") {
     return {
       state: finalClassification,
-      message: failureMessage ?? runState.error ?? runState.summary?.message ?? undefined,
+      message:
+        failureMessage ??
+        runState.error ??
+        runState.summary?.message ??
+        undefined,
       failureCode: failureCode ?? undefined,
     };
   }
 
   if (
     hasUnavailableProductMode(runState) &&
-    runState.phase !== 'completed' &&
-    runState.phase !== 'failed' &&
-    runState.phase !== 'incomplete'
+    runState.phase !== "completed" &&
+    runState.phase !== "failed" &&
+    runState.phase !== "incomplete"
   ) {
     return {
-      state: 'upstream-unavailable',
-      message: runState.summary?.message ?? runState.generated?.note ?? runState.evidence?.note,
+      state: "upstream-unavailable",
+      message:
+        runState.summary?.message ??
+        runState.generated?.note ??
+        runState.evidence?.note,
     };
   }
 
-  if (runState.phase === 'starting' || runState.phase === 'running') {
+  if (runState.phase === "starting" || runState.phase === "running") {
     // Issue #173: when workflow contract is available, refine the running
     // phase into awaiting-agent / repairing / verifying based on the active
     // agent. Otherwise: 'starting' phase = submitting (request acknowledged,
@@ -194,14 +238,14 @@ export function deriveProductState(runState: TransformationRunState): StateConte
     if (fromAgent) {
       return { state: fromAgent };
     }
-    return { state: runState.phase === 'starting' ? 'submitting' : 'running' };
+    return { state: runState.phase === "starting" ? "submitting" : "running" };
   }
 
   const generated = runState.generated;
   if (generated) {
-    if (generated.status === 'unsupported') {
+    if (generated.status === "unsupported") {
       return {
-        state: 'unsupported',
+        state: "unsupported",
         unsupportedFeatures: generated.unsupportedFeatures || [],
         message: generated.note,
       };
@@ -211,49 +255,63 @@ export function deriveProductState(runState: TransformationRunState): StateConte
       ...(runState.generatedFiles?.missingArtifacts || []),
     ];
     if (
-      generated.status === 'incomplete' ||
-      runState.generatedFiles?.status === 'incomplete' ||
+      generated.status === "incomplete" ||
+      runState.generatedFiles?.status === "incomplete" ||
       generatedMissingArtifacts.length > 0
     ) {
       return {
-        state: 'generated-incomplete',
+        state: "generated-incomplete",
         missingArtifacts: generatedMissingArtifacts,
         message: generated.note ?? runState.generatedFiles?.note,
       };
     }
-  } else if (runState.phase === 'completed') {
-    return { state: 'generated-pending' };
+  } else if (runState.phase === "completed") {
+    return { state: "generated-pending" };
   }
 
-  if (runState.phase === 'incomplete') {
+  if (runState.phase === "incomplete") {
     return {
-      state: 'generated-incomplete',
-      missingArtifacts: runState.generatedFiles?.missingArtifacts || generated?.missingArtifacts || [],
+      state: "generated-incomplete",
+      missingArtifacts:
+        runState.generatedFiles?.missingArtifacts ||
+        generated?.missingArtifacts ||
+        [],
       message:
         runState.generatedFiles?.note ||
         generated?.note ||
-        'Required generated artifacts are unavailable for this run.',
+        "Required generated artifacts are unavailable for this run.",
     };
   }
 
   const buildTest = runState.buildTest;
   if (buildTest) {
-    if (buildTest.status === 'compile-failed' || buildTest.status === 'run-failed' || buildTest.classification === 'compile-error' || buildTest.classification === 'run-error') {
-      return { state: 'build-failed', message: buildTest.note };
+    if (
+      buildTest.status === "compile-failed" ||
+      buildTest.status === "run-failed" ||
+      buildTest.classification === "compile-error" ||
+      buildTest.classification === "run-error"
+    ) {
+      return { state: "build-failed", message: buildTest.note };
     }
-    if (buildTest.classification?.startsWith('divergence')) {
-      return { state: 'equivalence-mismatch', message: buildTest.note };
+    if (buildTest.classification?.startsWith("divergence")) {
+      return { state: "equivalence-mismatch", message: buildTest.note };
     }
-    if (buildTest.status === 'incomplete') {
-      return { state: 'build-failed', message: buildTest.note ?? 'Build/test results are incomplete.' };
+    if (buildTest.status === "incomplete") {
+      return {
+        state: "build-failed",
+        message: buildTest.note ?? "Build/test results are incomplete.",
+      };
     }
   }
 
   const evidence = runState.evidence;
   if (evidence) {
-    if (evidence.status === 'incomplete' || (evidence.missingArtifacts && evidence.missingArtifacts.length > 0)) {
+    if (
+      evidence.status === "incomplete" ||
+      (evidence.missingArtifacts && evidence.missingArtifacts.length > 0)
+    ) {
       return {
-        state: 'evidence-incomplete',
+        state: "evidence-incomplete",
         missingArtifacts: evidence.missingArtifacts || [],
         message: evidence.note,
       };
@@ -262,33 +320,38 @@ export function deriveProductState(runState: TransformationRunState): StateConte
 
   const mismatches = collectHashMismatches(runState);
   if (mismatches.length > 0) {
-    return { state: 'hash-mismatch', mismatchedHashes: mismatches };
+    return { state: "hash-mismatch", mismatchedHashes: mismatches };
   }
 
-  if (runState.phase === 'failed' || runState.summary?.status === 'failed') {
+  if (runState.phase === "failed" || runState.summary?.status === "failed") {
     const code = failureCode ?? undefined;
     return {
-      state: code ? failureCodeToState(code) : 'failed',
-      message: failureMessage ?? runState.error ?? runState.summary?.message ?? undefined,
+      state: code ? failureCodeToState(code) : "failed",
+      message:
+        failureMessage ??
+        runState.error ??
+        runState.summary?.message ??
+        undefined,
       failureCode: code,
     };
   }
 
-  if (runState.phase === 'completed') {
+  if (runState.phase === "completed") {
     // Issue #173: the Studio claims "success" only when the BFF classifies
     // the run as success AND build/test and evidence agree. For runs that
     // predate the workflow contract, artifact agreement alone is not enough
     // to claim a product success verdict.
-    const buildTestOk = buildTest?.status === 'ok';
-    const evidenceOk = evidence?.status === 'complete';
-    const bffConfirmedSuccess = finalClassification === 'success';
+    const buildTestOk = buildTest?.status === "ok";
+    const evidenceOk = evidence?.status === "complete";
+    const bffConfirmedSuccess = finalClassification === "success";
     if (bffConfirmedSuccess && buildTestOk && evidenceOk) {
-      return { state: 'success' };
+      return { state: "success" };
     }
     if (finalClassification === null && buildTestOk && evidenceOk) {
       return {
-        state: 'failed',
-        message: 'BFF final classification is unavailable; verified success cannot be claimed.',
+        state: "failed",
+        message:
+          "BFF final classification is unavailable; verified success cannot be claimed.",
       };
     }
     // Completed without success agreement: surface the most specific
@@ -296,8 +359,11 @@ export function deriveProductState(runState: TransformationRunState): StateConte
     // verdict. The earlier artifact-level branches (build-failed,
     // equivalence-mismatch, evidence-incomplete, hash-mismatch) take
     // precedence over this fallback.
-    return { state: 'failed', message: failureMessage ?? runState.summary?.message ?? undefined };
+    return {
+      state: "failed",
+      message: failureMessage ?? runState.summary?.message ?? undefined,
+    };
   }
 
-  return { state: 'empty' };
+  return { state: "empty" };
 }

@@ -78,9 +78,12 @@ async function expectReadyWorkbench(page: Page) {
 }
 
 function topBarStartButton(page: Page) {
+  // Studio-IDE-13 (#255): the legacy "Start Transformation" topbar
+  // button was renamed to "Generate & Verify" — the composed action
+  // remains the same, only the label changed.
   return page
     .getByLabel("Workbench Top Bar")
-    .getByRole("button", { name: "Start Transformation" });
+    .getByRole("button", { name: "Generate & Verify" });
 }
 
 // Issue #246: Monaco's accessibility textarea does not mirror the full

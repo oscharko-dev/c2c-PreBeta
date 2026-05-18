@@ -2827,6 +2827,595 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
       }
 
+      // Studio-IDE-13 (#255): semantic-intent alias for the orchestrator
+      // transform entry point. Delegates to startTransformRun identically to
+      // /api/v0/transform, but signals "Generator-only invocation; verification
+      // is invoked separately via /verify". Returns 201 with a `runMode` marker.
+      if (pathname === "/api/v0/generate" && method === "POST") {
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, { error: "request body too large" });
+            return;
+          }
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!body || typeof body !== "object") {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const genBody = body as Record<string, unknown>;
+        const genSourceTextRaw = genBody.sourceText;
+        const genProgramIdRaw = genBody.programId;
+        const genSourceNameRaw = genBody.sourceName;
+        const genOptionsRaw = genBody.options;
+        const genTargetLanguageRaw = genBody.targetLanguage;
+        const genExpectedOutputRaw = genBody.expectedOutput;
+        const genOracleInputRaw = genBody.oracleInput;
+        const genUseTransformationAgentRaw = genBody.useTransformationAgent;
+        if (
+          typeof genSourceTextRaw !== "string" ||
+          genSourceTextRaw.trim().length === 0
+        ) {
+          badRequest(res, "sourceText must be a non-empty string");
+          return;
+        }
+        if (
+          genProgramIdRaw !== undefined &&
+          (typeof genProgramIdRaw !== "string" ||
+            genProgramIdRaw.trim().length === 0)
+        ) {
+          badRequest(res, "programId must be a non-empty string when provided");
+          return;
+        }
+        if (
+          genSourceNameRaw !== undefined &&
+          (typeof genSourceNameRaw !== "string" ||
+            genSourceNameRaw.trim().length === 0)
+        ) {
+          badRequest(
+            res,
+            "sourceName must be a non-empty string when provided",
+          );
+          return;
+        }
+        if (
+          genOptionsRaw !== undefined &&
+          (typeof genOptionsRaw !== "object" ||
+            genOptionsRaw === null ||
+            Array.isArray(genOptionsRaw))
+        ) {
+          badRequest(res, "options must be an object when provided");
+          return;
+        }
+        let genTargetLanguage: "java" = "java";
+        if (genTargetLanguageRaw !== undefined) {
+          if (
+            typeof genTargetLanguageRaw !== "string" ||
+            genTargetLanguageRaw.trim().length === 0
+          ) {
+            badRequest(
+              res,
+              "targetLanguage must be a non-empty string when provided",
+            );
+            return;
+          }
+          const normalizedLang = genTargetLanguageRaw.trim().toLowerCase();
+          if (normalizedLang !== "java") {
+            badRequest(
+              res,
+              `targetLanguage ${JSON.stringify(genTargetLanguageRaw)} is not supported; only "java" is available in W0.2`,
+            );
+            return;
+          }
+          genTargetLanguage = "java";
+        }
+        if (
+          genExpectedOutputRaw !== undefined &&
+          typeof genExpectedOutputRaw !== "string"
+        ) {
+          badRequest(res, "expectedOutput must be a string when provided");
+          return;
+        }
+        if (
+          genOracleInputRaw !== undefined &&
+          typeof genOracleInputRaw !== "string"
+        ) {
+          badRequest(res, "oracleInput must be a string when provided");
+          return;
+        }
+        if (
+          genUseTransformationAgentRaw !== undefined &&
+          typeof genUseTransformationAgentRaw !== "boolean"
+        ) {
+          badRequest(
+            res,
+            "useTransformationAgent must be a boolean when provided",
+          );
+          return;
+        }
+        if (!orchestrator.enabled) {
+          jsonResponse(res, 503, {
+            error: "orchestrator URL is required for /api/v0/generate",
+          });
+          return;
+        }
+        const genSourceText = genSourceTextRaw;
+        const genProgramId = resolveTransformProgramId(
+          genSourceText,
+          typeof genProgramIdRaw === "string" ? genProgramIdRaw : undefined,
+        );
+        const genSourceName =
+          typeof genSourceNameRaw === "string" ? genSourceNameRaw : undefined;
+        const genExpectedOutput =
+          typeof genExpectedOutputRaw === "string"
+            ? genExpectedOutputRaw
+            : undefined;
+        const genOracleInput =
+          typeof genOracleInputRaw === "string" ? genOracleInputRaw : undefined;
+        const genUseTransformationAgent =
+          typeof genUseTransformationAgentRaw === "boolean"
+            ? genUseTransformationAgentRaw
+            : true;
+        if (genUseTransformationAgent) {
+          const gatewayAvailability =
+            await verifyTransformationModelGatewayAvailable(modelGateway);
+          if (!gatewayAvailability.ok) {
+            jsonResponse(res, 503, {
+              error: gatewayAvailability.message,
+              failureCode: "model_gateway_unavailable",
+            });
+            return;
+          }
+        }
+        try {
+          const generateInput: Parameters<
+            typeof orchestrator.startTransformRun
+          >[0] = {
+            programId: genProgramId,
+            sourceText: genSourceText,
+            requester: "c2c-ui",
+            sourceName: genSourceName,
+            options: genOptionsRaw,
+            targetLanguage: genTargetLanguage,
+            expectedOutput: genExpectedOutput,
+            oracleInput: genOracleInput,
+            useTransformationAgent: genUseTransformationAgent,
+            // Studio-IDE-13 (#255): generator-only intent — the
+            // orchestrator stops after the generate-java step and
+            // finalises with the ``generate_only_complete`` failure
+            // code. ``/api/v0/transform`` does NOT set this so the
+            // composed Generate & Verify pipeline keeps running unchanged.
+            generateOnly: true,
+          };
+          const upstream = await orchestrator.startTransformRun(generateInput);
+          if (upstream && upstream.status >= 200 && upstream.status < 300) {
+            const liveRunId = extractLiveRunId(upstream.body);
+            const stored = runStore.create(
+              createSourceTextSample(
+                genProgramId,
+                genSourceText,
+                genSourceName,
+              ),
+              "live",
+              liveRunId,
+              {
+                status: "starting",
+                message: "run accepted by orchestrator",
+              },
+            );
+            const synced = applyLiveRunPayload(stored, runStore, upstream.body);
+            res.writeHead(201, {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+            });
+            res.end(
+              JSON.stringify({
+                ...transformResponse(synced),
+                runMode: "generate",
+              }),
+            );
+            return;
+          }
+          const genStatus = upstream?.status ?? 502;
+          const genFailure = mapUpstreamUnavailable(
+            `orchestrator rejected generate request${genStatus ? ` (status ${genStatus})` : ""}`,
+          );
+          jsonResponse(res, 502, {
+            error: genFailure.message,
+            failureCode: genFailure.code,
+          });
+          return;
+        } catch (err) {
+          const genFailure = mapUpstreamUnavailable(
+            sanitizeUpstreamMessage(
+              err instanceof Error ? err.message : "",
+              "orchestrator request failed",
+            ),
+          );
+          jsonResponse(res, 502, {
+            error: genFailure.message,
+            failureCode: genFailure.code,
+          });
+          return;
+        }
+      }
+
+      // Studio-IDE-13 (#255): compile-check route. Sends the provided Java
+      // files to the build-test-runner-service for a build-only check
+      // (skipExecution: true). Returns normalised diagnostics.
+      if (pathname === "/api/v0/compile-check" && method === "POST") {
+        if (!buildTestRunner.enabled) {
+          jsonResponse(res, 503, {
+            error:
+              "compile-check unavailable: build-test-runner-service URL is not configured",
+          });
+          return;
+        }
+        let ccBody: unknown;
+        try {
+          ccBody = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, { error: "request body too large" });
+            return;
+          }
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!ccBody || typeof ccBody !== "object" || Array.isArray(ccBody)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const ccRecord = ccBody as Record<string, unknown>;
+        const ccJavaFiles = ccRecord.javaFiles;
+        if (!Array.isArray(ccJavaFiles) || ccJavaFiles.length === 0) {
+          badRequest(res, "javaFiles must be a non-empty array");
+          return;
+        }
+        for (let i = 0; i < ccJavaFiles.length; i += 1) {
+          const entry = ccJavaFiles[i];
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            badRequest(res, `javaFiles[${i}] must be an object`);
+            return;
+          }
+          const entryRecord = entry as Record<string, unknown>;
+          if (
+            typeof entryRecord.path !== "string" ||
+            entryRecord.path.length === 0
+          ) {
+            badRequest(res, `javaFiles[${i}].path must be a non-empty string`);
+            return;
+          }
+          if (typeof entryRecord.content !== "string") {
+            badRequest(res, `javaFiles[${i}].content must be a string`);
+            return;
+          }
+        }
+        // Total content size guard (mirrors /transform body cap).
+        let ccTotalBytes = 0;
+        for (const entry of ccJavaFiles as Array<{
+          path: string;
+          content: string;
+        }>) {
+          ccTotalBytes += Buffer.byteLength(entry.content, "utf8");
+        }
+        if (ccTotalBytes > config.transformSourceMaxBytes) {
+          jsonResponse(res, 413, { error: "request body too large" });
+          return;
+        }
+        const ccRunId =
+          typeof ccRecord.runId === "string" && ccRecord.runId.length > 0
+            ? ccRecord.runId
+            : "compile-check";
+        const ccEntryClass =
+          typeof ccRecord.entryClass === "string" ? ccRecord.entryClass : "";
+        const ccEntryFilePath =
+          typeof ccRecord.entryFilePath === "string"
+            ? ccRecord.entryFilePath
+            : "";
+        const ccFiles: Record<string, string> = {};
+        for (const entry of ccJavaFiles as Array<{
+          path: string;
+          content: string;
+        }>) {
+          ccFiles[entry.path] = entry.content;
+        }
+        const ccPayload = {
+          programId: ccRunId,
+          generatedProject: {
+            files: ccFiles,
+            entryClass: ccEntryClass,
+            entryFilePath: ccEntryFilePath,
+          },
+          options: {
+            skipExecution: true,
+            compareOutput: false,
+            timeoutMs: 5000,
+          },
+          oracle: {},
+        };
+        try {
+          const upstream = await buildTestRunner.runVerification(
+            ccPayload,
+            5000,
+          );
+          if (!upstream) {
+            jsonResponse(res, 503, {
+              error:
+                "compile check unavailable: no response from build-test-runner",
+              failureCode: "service_unavailable",
+            });
+            return;
+          }
+          if (upstream.status >= 200 && upstream.status < 300) {
+            const upRecord =
+              upstream.body &&
+              typeof upstream.body === "object" &&
+              !Array.isArray(upstream.body)
+                ? (upstream.body as Record<string, unknown>)
+                : {};
+            const rawDiagnostics = upRecord.diagnostics;
+            const diagnostics = normalizeDiagnostics(rawDiagnostics, {
+              defaultSourceKind: "build",
+            });
+            jsonResponse(res, 200, {
+              schemaVersion: "v0",
+              diagnostics,
+            });
+            return;
+          }
+          const upstreamError =
+            upstream.body &&
+            typeof upstream.body === "object" &&
+            !Array.isArray(upstream.body)
+              ? String((upstream.body as Record<string, unknown>).error ?? "")
+              : "";
+          jsonResponse(res, 503, {
+            error: `compile check unavailable: ${upstreamError || `status ${upstream.status}`}`,
+            failureCode: "service_unavailable",
+          });
+          return;
+        } catch (err) {
+          jsonResponse(res, 503, {
+            error: `compile check unavailable: ${err instanceof Error ? err.message : "unknown error"}`,
+            failureCode: "service_unavailable",
+          });
+          return;
+        }
+      }
+
+      // Studio-IDE-13 (#255): explicit verify route. Sends the provided Java
+      // files to the build-test-runner-service for a full verification run
+      // (build + test + oracle). Returns the run summary including manual-edit
+      // provenance fields derived from the optional manualEditOverlay.
+      if (pathname === "/api/v0/verify" && method === "POST") {
+        if (!buildTestRunner.enabled) {
+          jsonResponse(res, 503, {
+            error:
+              "verify unavailable: build-test-runner-service URL is not configured",
+          });
+          return;
+        }
+        let vBody: unknown;
+        try {
+          vBody = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, { error: "request body too large" });
+            return;
+          }
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!vBody || typeof vBody !== "object" || Array.isArray(vBody)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const vRecord = vBody as Record<string, unknown>;
+        if (typeof vRecord.runId !== "string" || vRecord.runId.length === 0) {
+          badRequest(res, "runId must be a non-empty string");
+          return;
+        }
+        const vRunId = vRecord.runId;
+        const vJavaFiles = vRecord.javaFiles;
+        if (!Array.isArray(vJavaFiles) || vJavaFiles.length === 0) {
+          badRequest(res, "javaFiles must be a non-empty array");
+          return;
+        }
+        for (let i = 0; i < vJavaFiles.length; i += 1) {
+          const entry = vJavaFiles[i];
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            badRequest(res, `javaFiles[${i}] must be an object`);
+            return;
+          }
+          const entryRecord = entry as Record<string, unknown>;
+          if (
+            typeof entryRecord.path !== "string" ||
+            entryRecord.path.length === 0
+          ) {
+            badRequest(res, `javaFiles[${i}].path must be a non-empty string`);
+            return;
+          }
+          if (typeof entryRecord.content !== "string") {
+            badRequest(res, `javaFiles[${i}].content must be a string`);
+            return;
+          }
+        }
+        // Total content size guard.
+        let vTotalBytes = 0;
+        for (const entry of vJavaFiles as Array<{
+          path: string;
+          content: string;
+        }>) {
+          vTotalBytes += Buffer.byteLength(entry.content, "utf8");
+        }
+        if (vTotalBytes > config.transformSourceMaxBytes) {
+          jsonResponse(res, 413, { error: "request body too large" });
+          return;
+        }
+        const vProgramId =
+          typeof vRecord.programId === "string" && vRecord.programId.length > 0
+            ? vRecord.programId
+            : `verify-${vRunId}`;
+        const vEntryClass =
+          typeof vRecord.entryClass === "string" ? vRecord.entryClass : "";
+        const vEntryFilePath =
+          typeof vRecord.entryFilePath === "string"
+            ? vRecord.entryFilePath
+            : "";
+        const vExpectedOutput =
+          typeof vRecord.expectedOutput === "string"
+            ? vRecord.expectedOutput
+            : undefined;
+        const vOracleInput =
+          typeof vRecord.oracleInput === "string"
+            ? vRecord.oracleInput
+            : undefined;
+        const vFiles: Record<string, string> = {};
+        for (const entry of vJavaFiles as Array<{
+          path: string;
+          content: string;
+        }>) {
+          vFiles[entry.path] = entry.content;
+        }
+        const vOracle: Record<string, unknown> = {};
+        if (vExpectedOutput !== undefined)
+          vOracle.expectedOutput = vExpectedOutput;
+        if (vOracleInput !== undefined) vOracle.oracleInput = vOracleInput;
+        const vPayload = {
+          runId: vRunId,
+          programId: vProgramId,
+          generatedProject: {
+            files: vFiles,
+            entryClass: vEntryClass,
+            entryFilePath: vEntryFilePath,
+          },
+          options: {
+            skipExecution: false,
+            compareOutput: true,
+            timeoutMs: 30000,
+          },
+          oracle: vOracle,
+        };
+        // Studio-IDE-13 / ADR-0007: derive manual-edit provenance fields from
+        // the optional overlay submitted by the Studio. Both fields default to
+        // false/0 when the overlay is absent (per ADR 0007 §4).
+        let manualEditsCarriedOver = false;
+        let manualDriftRegionCount = 0;
+        const vOverlayRaw = vRecord.manualEditOverlay;
+        if (
+          vOverlayRaw &&
+          typeof vOverlayRaw === "object" &&
+          !Array.isArray(vOverlayRaw)
+        ) {
+          const overlayRecord = vOverlayRaw as Record<string, unknown>;
+          const overlayRegions = overlayRecord.regions;
+          if (Array.isArray(overlayRegions)) {
+            for (const region of overlayRegions) {
+              if (
+                region &&
+                typeof region === "object" &&
+                !Array.isArray(region)
+              ) {
+                const regionRecord = region as Record<string, unknown>;
+                if (
+                  regionRecord.originClass === "manual_modified" ||
+                  regionRecord.originClass === "manual_edit"
+                ) {
+                  manualDriftRegionCount += 1;
+                }
+              }
+            }
+            manualEditsCarriedOver = manualDriftRegionCount > 0;
+          }
+        }
+        try {
+          const upstream = await buildTestRunner.runVerification(
+            vPayload,
+            30000,
+          );
+          if (!upstream) {
+            jsonResponse(res, 503, {
+              error: "verify unavailable: no response from build-test-runner",
+              failureCode: "service_unavailable",
+            });
+            return;
+          }
+          if (upstream.status >= 200 && upstream.status < 300) {
+            const upRecord =
+              upstream.body &&
+              typeof upstream.body === "object" &&
+              !Array.isArray(upstream.body)
+                ? (upstream.body as Record<string, unknown>)
+                : {};
+            const rawDiagnostics = upRecord.diagnostics;
+            const diagnostics = normalizeDiagnostics(rawDiagnostics, {
+              defaultSourceKind: "build",
+            });
+            // Studio-IDE-13 / ADR-0007: ``status`` and ``classification`` are
+            // string fields on the wire. The build-test-runner always
+            // populates them; defaulting to "incomplete" guards the
+            // (defensive) case where an upstream returns 2xx with a partial
+            // body, so the Studio's parser never sees a missing field.
+            const verifyStatus =
+              typeof upRecord.status === "string" && upRecord.status.length > 0
+                ? upRecord.status
+                : "incomplete";
+            const verifyClassification =
+              typeof upRecord.classification === "string" &&
+              upRecord.classification.length > 0
+                ? upRecord.classification
+                : "skipped-no-execution";
+            jsonResponse(res, 200, {
+              schemaVersion: "v0",
+              runId: vRunId,
+              programId: vProgramId,
+              status: verifyStatus,
+              classification: verifyClassification,
+              build: upRecord.build ?? null,
+              execution: upRecord.execution ?? null,
+              tests: upRecord.tests ?? null,
+              goldenMaster: upRecord.goldenMaster ?? null,
+              comparison: upRecord.comparison ?? null,
+              diagnostics,
+              outputRef: upRecord.outputRef ?? null,
+              manualEditsCarriedOver,
+              manualDriftRegionCount,
+            });
+            return;
+          }
+          const vUpstreamError =
+            upstream.body &&
+            typeof upstream.body === "object" &&
+            !Array.isArray(upstream.body)
+              ? String((upstream.body as Record<string, unknown>).error ?? "")
+              : "";
+          if (upstream.status >= 400 && upstream.status < 500) {
+            jsonResponse(res, 400, {
+              error:
+                vUpstreamError ||
+                `upstream rejected verify request (status ${upstream.status})`,
+            });
+            return;
+          }
+          jsonResponse(res, 503, {
+            error: `verify unavailable: ${vUpstreamError || `status ${upstream.status}`}`,
+            failureCode: "service_unavailable",
+          });
+          return;
+        } catch (err) {
+          jsonResponse(res, 503, {
+            error: `verify unavailable: ${err instanceof Error ? err.message : "unknown error"}`,
+            failureCode: "service_unavailable",
+          });
+          return;
+        }
+      }
+
       if (pathname === "/api/v0/model-gateway/health" && method === "GET") {
         if (!modelGateway.enabled) {
           jsonResponse(res, 503, {
