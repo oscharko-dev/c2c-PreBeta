@@ -9,10 +9,8 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Every TypeScript package that owns a package.json with build/lint/test
-# scripts. Order matters: the c2c-bff serves the c2c-ui static bundle, so
-# build the UI before the BFF so the BFF dist references the latest UI.
+# scripts.
 TS_PACKAGES=(
-  "apps/c2c-ui"
   "apps/c2c-studio"
   "services/c2c-bff"
   "services/typescript/w0-service"
