@@ -43,7 +43,7 @@ on:
 
 jobs:
   perf:
-    name: Studio performance harness (advisory)
+    name: Studio performance harness
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -86,20 +86,17 @@ jobs:
           NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
         run: npm run build
 
-      - name: Run @perf harness (advisory)
+      - name: Run @perf harness
         working-directory: apps/c2c-studio
         env:
           CI: "1"
-        # Advisory: the perf harness needs Studio runtime hooks
-        # (``c2c-perf:load-cobol`` window event listener +
-        # ``__c2cMonacoEditor`` global) that don't exist in the
-        # production bundle yet, so the harness times out waiting
-        # for the COBOL editor label in the empty-workbench state.
-        # Flipping to required is the dedicated follow-up that
-        # wires those hooks. The job still runs on every PR — it
-        # captures the harness output for trend-tracking and is
-        # ready to flip the moment the runtime hooks land.
-        continue-on-error: true
+        # The rewritten harness measures cold-start latency using
+        # navigation-timing primitives — no Studio runtime hooks
+        # required. SLAs are 5 s for DOMContentLoaded and 10 s for
+        # the full load event; a wider cushion than the 800 ms
+        # reference number from the issue because CI's modest runner
+        # is not the M2 reference profile. A real regression past
+        # those bounds is worth blocking on.
         run: npx playwright test --config=playwright.studio-only.config.ts --grep @perf --reporter=line
 
   memory:
