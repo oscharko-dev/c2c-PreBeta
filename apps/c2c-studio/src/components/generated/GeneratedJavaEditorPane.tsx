@@ -7,21 +7,48 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useGeneratedArtifacts } from "../../hooks/useGeneratedArtifacts";
 import { Loader2 } from "lucide-react";
+
+import { useGeneratedArtifacts } from "../../hooks/useGeneratedArtifacts";
 import { UnsupportedConstructsPanel } from "../state/UnsupportedConstructsPanel";
 import { MissingArtifactsPanel } from "../state/MissingArtifactsPanel";
 import { BlockedState } from "../state/BlockedState";
 import { ErrorNotice } from "../state/ErrorNotice";
 import { Badge } from "../ui/Badge";
 import { useTransformationRun } from "../../stores/transformationRun";
-import { VirtualizedCodeBlock } from "../ui/VirtualizedCodeBlock";
+import { CodeEditor } from "../editor/CodeEditor";
+import type { StandaloneEditorMountArgs } from "../editor/CodeEditor";
+import {
+  detectLanguageFromPath,
+  isEditableLanguage,
+} from "../../lib/editor/languageDetection";
 import {
   ConflictResolverDialog,
   type ConflictPanel,
 } from "../source/ConflictResolverDialog";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
+// Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. 500 ms matches
+// the COBOL editor cadence (Studio-IDE-2) so the chip / status derivation
+// has identical responsiveness across the two editors.
+const JAVA_BUFFER_DEBOUNCE_MS = 500;
+const SHA_CHIP_LENGTH = 12;
+
+type RunMode = "deterministic" | "ai-assisted" | "stale";
+
+function deriveRunMode(args: {
+  staleJava: boolean;
+  assistRequired: boolean;
+  hasRepairAttempts: boolean;
+}): RunMode {
+  if (args.staleJava) {
+    return "stale";
+  }
+  if (args.assistRequired || args.hasRepairAttempts) {
+    return "ai-assisted";
+  }
+  return "deterministic";
+}
 
 export function GeneratedJavaEditorPane() {
   const {
@@ -41,6 +68,7 @@ export function GeneratedJavaEditorPane() {
     javaConflict,
     saveNoticeAt,
     ensureJavaBaseline,
+    setJavaBufferContent,
     saveJavaDraft,
     loadJavaDraftFor,
     resolveJavaConflict,
@@ -48,14 +76,12 @@ export function GeneratedJavaEditorPane() {
     javaStatusFlags,
   } = useTransformationRun();
 
-  const containerRef = useRef<HTMLDivElement>(null);
   const [showSaveNotice, setShowSaveNotice] = useState(false);
 
   // Hydrate the Java buffer for this (runId, filePath) when content lands.
-  // Studio-IDE-3 (#247): even before IDE-4 (#245) makes the editor editable,
-  // we keep the buffer model populated so status chips and conflict
-  // resolution have something to compare against, and so reload paths
-  // pick up any persisted draft transparently.
+  // Studio-IDE-3 (#247) seeded the buffer for status chips and conflict
+  // resolution; Studio-IDE-4 (#245) now feeds user keystrokes back into the
+  // same buffer model via the debounced onChange handler below.
   useEffect(() => {
     if (
       !selectedFilePath ||
@@ -87,31 +113,6 @@ export function GeneratedJavaEditorPane() {
     );
     return () => clearTimeout(handle);
   }, [saveNoticeAt]);
-
-  // Bind Cmd/Ctrl+S to "save Java draft" when the focus is inside the
-  // Java pane container. Until IDE-4 (#245) wires Monaco for Java, the
-  // VirtualizedCodeBlock surface is the only focus target inside the
-  // container; the global keyboard-shortcut hook ignores keydowns when
-  // an editable element has focus, so this pane-scoped listener is
-  // necessary even when the surface is non-editable.
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      const isSave =
-        (event.metaKey || event.ctrlKey) &&
-        !event.shiftKey &&
-        !event.altKey &&
-        event.key.toLowerCase() === "s";
-      if (!isSave) {
-        return;
-      }
-      if (!selectedFilePath) {
-        return;
-      }
-      event.preventDefault();
-      void saveJavaDraft(selectedFilePath);
-    },
-    [saveJavaDraft, selectedFilePath],
-  );
 
   const conflictForThisFile =
     javaConflict && javaConflict.filePath === selectedFilePath
@@ -151,12 +152,127 @@ export function GeneratedJavaEditorPane() {
   const javaBufferEntry = selectedFilePath
     ? javaBuffers[selectedFilePath]
     : undefined;
-  // When the Java buffer has user-edits, prefer the buffer content over the
-  // BFF response. Today only drafts loaded from IndexedDB hit this branch
-  // (IDE-4 will populate it on each keystroke).
+  // When the Java buffer holds user edits (dirty or persisted draft), prefer
+  // it over the BFF response so the editor reflects in-flight work.
   const displayedContent = javaBufferEntry?.isDirty
     ? javaBufferEntry.content
     : fileContent;
+
+  const detectedLanguage = useMemo(
+    () => detectLanguageFromPath(selectedFilePath),
+    [selectedFilePath],
+  );
+  const isJavaEditable = isEditableLanguage(detectedLanguage);
+
+  // Stable per-(runId, filePath) URI keeps Monaco's view-state map (cursor,
+  // scroll, selection) in `modelLifecycle.ts` partitioned per file. When the
+  // user toggles between files in the project explorer, the editor restores
+  // each file's last view state automatically.
+  const modelUri = useMemo(() => {
+    if (!state.runId || !selectedFilePath) {
+      return undefined;
+    }
+    return `inmemory://c2c-studio/generated/${state.runId}/${selectedFilePath}`;
+  }, [state.runId, selectedFilePath]);
+
+  // Debounced onChange — schedules a single bufferModel update per
+  // JAVA_BUFFER_DEBOUNCE_MS window. The handler captures the current
+  // `selectedFilePath` at scheduling time so a mid-flight switch routes the
+  // pending edit to the file the user was editing, never to the new file.
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingEditRef = useRef<{ filePath: string; content: string } | null>(
+    null,
+  );
+
+  const flushPendingEdit = useCallback(() => {
+    if (debounceTimerRef.current !== null) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    const pending = pendingEditRef.current;
+    if (pending) {
+      setJavaBufferContent(pending.filePath, pending.content);
+      pendingEditRef.current = null;
+    }
+  }, [setJavaBufferContent]);
+
+  // On file switch flush any pending edit immediately so it lands on the
+  // file the user actually typed in.
+  useEffect(() => {
+    return () => {
+      flushPendingEdit();
+    };
+  }, [selectedFilePath, flushPendingEdit]);
+
+  // On unmount also flush so an in-flight edit is not lost when the
+  // workbench tab changes.
+  useEffect(() => {
+    return () => {
+      flushPendingEdit();
+    };
+  }, [flushPendingEdit]);
+
+  const handleEditorChange = useCallback(
+    (next: string) => {
+      if (!selectedFilePath || !isJavaEditable) {
+        return;
+      }
+      pendingEditRef.current = { filePath: selectedFilePath, content: next };
+      if (debounceTimerRef.current !== null) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        const pending = pendingEditRef.current;
+        debounceTimerRef.current = null;
+        if (pending) {
+          setJavaBufferContent(pending.filePath, pending.content);
+          pendingEditRef.current = null;
+        }
+      }, JAVA_BUFFER_DEBOUNCE_MS);
+    },
+    [selectedFilePath, isJavaEditable, setJavaBufferContent],
+  );
+
+  // Save current draft on Cmd/Ctrl+S inside the editor surface. Monaco
+  // intercepts the keystroke before the browser so this works even when the
+  // editor has keyboard focus (the global shortcut hook ignores keydowns
+  // there). Mirrors CobolEditorPane's wiring (Studio-IDE-2 #246).
+  const saveJavaDraftRef = useRef(saveJavaDraft);
+  saveJavaDraftRef.current = saveJavaDraft;
+  const selectedFilePathRef = useRef(selectedFilePath);
+  selectedFilePathRef.current = selectedFilePath;
+  const flushPendingEditRef = useRef(flushPendingEdit);
+  flushPendingEditRef.current = flushPendingEdit;
+
+  const handleEditorMount = useCallback(
+    ({ editor, monaco }: StandaloneEditorMountArgs) => {
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        // Make sure the last in-flight edit lands in the buffer model
+        // before the persistence layer reads it.
+        flushPendingEditRef.current();
+        const filePath = selectedFilePathRef.current;
+        if (filePath) {
+          void saveJavaDraftRef.current(filePath);
+        }
+      });
+    },
+    [],
+  );
+
+  // Run-mode badge (file level). Per #245 spec:
+  //   Stale         — displayedArtifactSourceHash ≠ lastRunInputHash
+  //   AI-Assisted   — assistDecision.outcome === 'assist_required' OR any
+  //                   repair attempt occurred
+  //   Deterministic — everything else (including assistDecision === null
+  //                   for runs that have not yet reached the gate)
+  const runMode: RunMode = useMemo(() => {
+    const workflow = state.workflow;
+    return deriveRunMode({
+      staleJava: flags.staleJava,
+      assistRequired: workflow?.assistDecision?.outcome === "assist_required",
+      hasRepairAttempts: (workflow?.repairAttempts?.length ?? 0) > 0,
+    });
+  }, [state.workflow, flags.staleJava]);
 
   if (productState.state === "empty") {
     return (
@@ -284,13 +400,11 @@ export function GeneratedJavaEditorPane() {
                     "The run is blocked by a precondition and cannot proceed."
                   : productState.message;
 
-  // Displaying actual content
+  const fileSha = selectedFileRef?.sha256 ?? null;
+
   return (
     <div
-      ref={containerRef}
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-      className="flex flex-col h-full overflow-hidden relative bg-bg-0 outline-none"
+      className="flex flex-col h-full overflow-hidden relative bg-bg-0"
       aria-label="Generated Java Editor"
     >
       <div className="flex items-center justify-between border-b border-line px-4 py-2 shrink-0 bg-bg-1">
@@ -311,7 +425,17 @@ export function GeneratedJavaEditorPane() {
             staleJava={flags.staleJava}
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {selectedFilePath ? <RunModeBadge mode={runMode} /> : null}
+          {fileSha ? (
+            <span
+              data-testid="java-file-sha-chip"
+              title={`File SHA-256 ${fileSha}`}
+              className="inline-flex items-center rounded bg-bg-2 px-2 py-0.5 text-[10px] font-mono text-text-dim border border-line"
+            >
+              sha {fileSha.slice(0, SHA_CHIP_LENGTH)}
+            </span>
+          ) : null}
           {productState.state === "failed" && (
             <Badge variant="error" icon={true}>
               Run Failed
@@ -396,7 +520,13 @@ export function GeneratedJavaEditorPane() {
         </div>
       ) : null}
 
-      <div className="flex-1 overflow-auto bg-bg-0">
+      <div
+        className="flex-1 min-h-0 bg-bg-0"
+        data-testid="generated-java-editor-surface"
+        data-file-path={selectedFilePath ?? undefined}
+        data-file-sha256={selectedFileRef?.sha256}
+        data-artifact-sha256={artifactDetails?.sha256}
+      >
         {isFetchingFile ? (
           <div
             className="flex h-full items-center justify-center text-text-dim"
@@ -429,12 +559,15 @@ export function GeneratedJavaEditorPane() {
             <p>File content is empty or unavailable.</p>
           </div>
         ) : (
-          <VirtualizedCodeBlock
-            code={displayedContent}
-            label={`Generated Java source for ${selectedFilePath}`}
-            data-file-path={selectedFilePath}
-            data-file-sha256={selectedFileRef?.sha256}
-            data-artifact-sha256={artifactDetails?.sha256}
+          <CodeEditor
+            mode={isJavaEditable ? "editable" : "readonly"}
+            language={detectedLanguage}
+            value={displayedContent}
+            onChange={isJavaEditable ? handleEditorChange : undefined}
+            onMount={isJavaEditable ? handleEditorMount : undefined}
+            modelUri={modelUri}
+            ariaLabel={`Generated Java source for ${selectedFilePath}`}
+            className="h-full"
           />
         )}
       </div>
@@ -481,6 +614,38 @@ function JavaStatusChips({
           stale java
         </span>
       ) : null}
+    </span>
+  );
+}
+
+function RunModeBadge({ mode }: { mode: RunMode }) {
+  const label =
+    mode === "stale"
+      ? "Stale"
+      : mode === "ai-assisted"
+        ? "AI-Assisted Run"
+        : "Deterministic Run";
+  const tone =
+    mode === "stale"
+      ? "border-orange/30 bg-orange-soft text-orange"
+      : mode === "ai-assisted"
+        ? "border-accent/30 bg-accent/10 text-accent"
+        : "border-success/30 bg-success-soft text-success";
+  const tooltip =
+    mode === "stale"
+      ? "The displayed Java source differs from the input that produced the last completed run."
+      : mode === "ai-assisted"
+        ? "An assist agent or repair pass contributed to this Java output."
+        : "Generated by deterministic translation rules without assist or repair.";
+  return (
+    <span
+      data-testid="java-run-mode-badge"
+      data-run-mode={mode}
+      title={tooltip}
+      aria-label={`Run mode: ${label}`}
+      className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-medium ${tone}`}
+    >
+      {label}
     </span>
   );
 }

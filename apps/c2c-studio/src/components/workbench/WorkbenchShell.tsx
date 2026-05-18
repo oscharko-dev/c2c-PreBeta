@@ -15,6 +15,7 @@ import { BottomWorkbench } from "./BottomWorkbench";
 import { StatusBar } from "./StatusBar";
 import { RightObservabilityStripe } from "../observability/RightObservabilityStripe";
 import { editorPersistence } from "../../lib/editor/editorPersistence";
+import { OriginOverlayProvider } from "../../lib/editor/originOverlay";
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
@@ -34,31 +35,33 @@ export function WorkbenchShell() {
       <TransformationRunProvider>
         <SourceWorkspaceProvider>
           <GeneratedArtifactsProvider>
-            <div
-              className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-bg-0 text-text font-ui"
-              data-testid="studio-workbench-shell"
-            >
-              <a
-                href="#studio-main-workbench"
-                className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded focus:border focus:border-accent focus:bg-bg-1 focus:px-3 focus:py-2 focus:text-sm focus:text-text-bright"
+            <OriginOverlayProvider>
+              <div
+                className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-bg-0 text-text font-ui"
+                data-testid="studio-workbench-shell"
               >
-                Skip to transformation workbench
-              </a>
-              <AppTopBar apiState={apiState} />
-              <div className="relative flex min-h-0 flex-1 overflow-hidden">
-                <ActivityBar />
-                <SecondaryStripe />
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                  <div className="relative flex min-h-0 flex-1 overflow-hidden">
-                    <SplitEditorArea />
+                <a
+                  href="#studio-main-workbench"
+                  className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded focus:border focus:border-accent focus:bg-bg-1 focus:px-3 focus:py-2 focus:text-sm focus:text-text-bright"
+                >
+                  Skip to transformation workbench
+                </a>
+                <AppTopBar apiState={apiState} />
+                <div className="relative flex min-h-0 flex-1 overflow-hidden">
+                  <ActivityBar />
+                  <SecondaryStripe />
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+                      <SplitEditorArea />
+                    </div>
+                    <BottomWorkbench />
                   </div>
-                  <BottomWorkbench />
+                  <TargetJavaInspector />
+                  <RightObservabilityStripe />
                 </div>
-                <TargetJavaInspector />
-                <RightObservabilityStripe />
+                <StatusBar apiState={apiState} />
               </div>
-              <StatusBar apiState={apiState} />
-            </div>
+            </OriginOverlayProvider>
           </GeneratedArtifactsProvider>
         </SourceWorkspaceProvider>
       </TransformationRunProvider>
