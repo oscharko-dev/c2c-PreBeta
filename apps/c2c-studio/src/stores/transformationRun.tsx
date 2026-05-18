@@ -39,6 +39,14 @@ import {
   type ConflictRegion,
   type ConflictRegionResolution,
 } from "../lib/editor/conflictDetection";
+import {
+  appendCobolSnapshot,
+  appendJavaSnapshot,
+  type CobolHistoryEntry,
+  type CobolSnapshot,
+  type JavaFileHistoryEntry,
+  type JavaFileSnapshot,
+} from "../lib/editor/diffHistory";
 
 // Studio-IDE-3 (#247): Java buffer state model. One entry per generated
 // Java file the user has interacted with. IDE-4 (#245) will wire Monaco
@@ -155,6 +163,22 @@ export interface TransformationRunContextValue {
   // Latest VerifyResponse — surfaces the manual-edit summary fields to UI
   // consumers without re-fetching.
   latestVerifyResult: VerifyResponse | null;
+  // ----- Studio-IDE-7 (#252) synchronized-diff history ------------------
+  // In-memory, session-scoped accumulator. Keyed by ``sourceKey`` (the
+  // active programId; same convention as the BFF / ADR-0007). Java
+  // history is per-(sourceKey, filePath); COBOL history is per-sourceKey.
+  // ``hydrateDiffHistory`` from useRunPolling does not reset these — only
+  // ``setState`` to a fresh ``idle`` phase from a new programId or a hard
+  // reload clears them, consistent with the issue body's session-only
+  // persistence model.
+  javaDiffHistory: Record<string, Record<string, JavaFileHistoryEntry>>;
+  cobolDiffHistory: Record<string, CobolHistoryEntry>;
+  recordJavaDiffSnapshot: (
+    sourceKey: string,
+    filePath: string,
+    snapshot: JavaFileSnapshot,
+  ) => void;
+  recordCobolDiffSnapshot: (sourceKey: string, snapshot: CobolSnapshot) => void;
 }
 
 const TransformationRunContext =
@@ -197,6 +221,48 @@ export function TransformationRunProvider({
     useState<JavaMergeReview | null>(null);
   const [latestVerifyResult, setLatestVerifyResult] =
     useState<VerifyResponse | null>(null);
+  // Studio-IDE-7 (#252): per-program / per-file diff history. Held as
+  // React state (not refs) so consumers re-render when a new snapshot
+  // shifts the previous entry — the Compare Runs button needs to flip
+  // from disabled to enabled the moment a second run lands.
+  const [javaDiffHistory, setJavaDiffHistory] = useState<
+    Record<string, Record<string, JavaFileHistoryEntry>>
+  >({});
+  const [cobolDiffHistory, setCobolDiffHistory] = useState<
+    Record<string, CobolHistoryEntry>
+  >({});
+
+  const recordJavaDiffSnapshot = useCallback(
+    (sourceKey: string, filePath: string, snapshot: JavaFileSnapshot) => {
+      setJavaDiffHistory((prev) => {
+        const perSource = prev[sourceKey] ?? {};
+        const next = appendJavaSnapshot(perSource[filePath], snapshot);
+        if (next === perSource[filePath]) {
+          // Idempotent re-poll for the same runId; preserve referential
+          // identity so memoized DiffWorkspace consumers do not re-render.
+          return prev;
+        }
+        return {
+          ...prev,
+          [sourceKey]: { ...perSource, [filePath]: next },
+        };
+      });
+    },
+    [],
+  );
+
+  const recordCobolDiffSnapshot = useCallback(
+    (sourceKey: string, snapshot: CobolSnapshot) => {
+      setCobolDiffHistory((prev) => {
+        const next = appendCobolSnapshot(prev[sourceKey], snapshot);
+        if (next === prev[sourceKey]) {
+          return prev;
+        }
+        return { ...prev, [sourceKey]: next };
+      });
+    },
+    [],
+  );
 
   const productState = useMemo(() => deriveProductState(state), [state]);
 
@@ -259,6 +325,23 @@ export function TransformationRunProvider({
       error: null,
       summary: result.data,
     }));
+
+    // Studio-IDE-7 (#252): snapshot the COBOL input this run consumed so
+    // the synchronized diff workflow has a previous→current pair to
+    // diff against on the next run. Recording at submit-time (rather
+    // than at completion) means a failed run still anchors history, so
+    // the next successful run can be diffed against the failed attempt.
+    const cobolRunId = result.data.runId;
+    const cobolProgramId = result.data.programId;
+    if (cobolProgramId) {
+      void deriveSourceHash(request.sourceText).then((hash) => {
+        recordCobolDiffSnapshot(cobolProgramId, {
+          content: request.sourceText,
+          sourceHash: hash,
+          runId: cobolRunId,
+        });
+      });
+    }
 
     if (result.data.status === "completed" || result.data.status === "failed") {
       void hydrateRunArtifacts(result.data.runId, setState, result.data.status);
@@ -333,6 +416,21 @@ export function TransformationRunProvider({
       error: null,
       summary: result.data,
     }));
+
+    // Studio-IDE-7 (#252): mirror the COBOL snapshot recorded by
+    // ``startTransform`` so a Generator-only run also feeds the
+    // synchronized-diff history.
+    const cobolRunId = result.data.runId;
+    const cobolProgramId = result.data.programId;
+    if (cobolProgramId) {
+      void deriveSourceHash(request.sourceText).then((hash) => {
+        recordCobolDiffSnapshot(cobolProgramId, {
+          content: request.sourceText,
+          sourceHash: hash,
+          runId: cobolRunId,
+        });
+      });
+    }
 
     if (result.data.status === "completed" || result.data.status === "failed") {
       void hydrateRunArtifacts(result.data.runId, setState, result.data.status);
@@ -741,6 +839,10 @@ export function TransformationRunProvider({
         requestJavaMergeReview,
         applyJavaMergeSelections,
         cancelJavaMergeReview,
+        javaDiffHistory,
+        cobolDiffHistory,
+        recordJavaDiffSnapshot,
+        recordCobolDiffSnapshot,
         latestVerifyResult,
       }}
     >
