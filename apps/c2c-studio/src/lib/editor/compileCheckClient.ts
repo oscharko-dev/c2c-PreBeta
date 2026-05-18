@@ -10,6 +10,11 @@
 // buffer intact.
 
 import { resolveApiBaseUrl } from "@/lib/apiClient";
+import {
+  bucketCompileLatency,
+  bucketDiagnosticCount,
+  emit as emitTelemetry,
+} from "@/lib/editor/editorTelemetry";
 import type { Diagnostic } from "@/types/api";
 
 export type CompileCheckErrorCode =
@@ -40,6 +45,10 @@ export interface CompileCheckClientOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  // Studio-IDE-11 (#251): closed-enum trigger for the
+  // `compile_check.invoked` telemetry event. Defaults to `"toolbar"`
+  // when the caller does not specify.
+  telemetryTrigger?: "toolbar" | "shortcut";
 }
 
 // 6 s — covers the 5 s Compile Check AC plus the BFF roundtrip headroom.
@@ -163,12 +172,34 @@ export async function compileCheck(
   payload: CompileCheckRequestPayload,
   options: CompileCheckClientOptions = {},
 ): Promise<CompileCheckResult> {
+  const trigger = options.telemetryTrigger ?? "toolbar";
+  emitTelemetry({
+    eventType: "compile_check.invoked",
+    payload: { trigger },
+  });
+  const startedAt = Date.now();
+  const emitResult = (
+    outcome: "ok" | "errors" | "gateway_unavailable" | "timeout",
+    diagnosticCount: number,
+  ) => {
+    emitTelemetry({
+      eventType: "compile_check.result",
+      payload: {
+        outcome,
+        diagnosticCountBucket: bucketDiagnosticCount(diagnosticCount),
+        latencyBucket: bucketCompileLatency(Date.now() - startedAt),
+      },
+    });
+  };
+
   const baseUrlResult = resolveApiBaseUrl();
   if (!baseUrlResult.ok) {
+    emitResult("gateway_unavailable", 0);
     return buildFailure("compile_check_unavailable", baseUrlResult.message);
   }
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (!fetchImpl) {
+    emitResult("gateway_unavailable", 0);
     return buildFailure(
       "compile_check_unavailable",
       "Compile Check unavailable: fetch is not available in this environment",
@@ -201,17 +232,20 @@ export async function compileCheck(
     });
   } catch (err) {
     if (timeoutFired) {
+      emitResult("timeout", 0);
       return buildFailure(
         "compile_check_unavailable",
         `Compile Check unavailable: request exceeded ${timeoutMs} ms`,
       );
     }
     if (isAbortError(err)) {
+      emitResult("gateway_unavailable", 0);
       return buildFailure(
         "compile_check_unavailable",
         "Compile Check request cancelled",
       );
     }
+    emitResult("gateway_unavailable", 0);
     return buildFailure(
       "compile_check_unavailable",
       err instanceof Error
@@ -230,6 +264,7 @@ export async function compileCheck(
     try {
       parsed = JSON.parse(rawBody);
     } catch {
+      emitResult("gateway_unavailable", 0);
       return buildFailure(
         "compile_check_upstream_error",
         "Compile Check returned malformed JSON",
@@ -249,9 +284,11 @@ export async function compileCheck(
       typeof errorField === "string" && errorField.length > 0
         ? errorField
         : `Compile Check unavailable (HTTP ${response.status})`;
+    emitResult("gateway_unavailable", 0);
     return buildFailure("compile_check_unavailable", message, response.status);
   }
   if (!parsed || typeof parsed !== "object") {
+    emitResult("ok", 0);
     return { ok: true, diagnostics: [] };
   }
   const record = parsed as Record<string, unknown>;
@@ -262,5 +299,8 @@ export async function compileCheck(
     : Array.isArray(record.diagnostics)
       ? record.diagnostics
       : [];
-  return { ok: true, diagnostics: parseDiagnostics(diagnosticsRaw) };
+  const diagnostics = parseDiagnostics(diagnosticsRaw);
+  const hasErrors = diagnostics.some((d) => d.severity === "error");
+  emitResult(hasErrors ? "errors" : "ok", diagnostics.length);
+  return { ok: true, diagnostics };
 }

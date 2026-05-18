@@ -13,6 +13,7 @@
 // flows through the BFF.
 
 import { resolveApiBaseUrl } from "@/lib/apiClient";
+import { emit as emitTelemetry } from "@/lib/editor/editorTelemetry";
 import {
   EDITOR_ASSIST_ERROR_CODES,
   EDITOR_ASSIST_SCHEMA_VERSION,
@@ -161,8 +162,29 @@ export async function requestExplanation(
   payload: EditorAssistRequest,
   options: RequestExplanationOptions = {},
 ): Promise<EditorAssistResult> {
+  // Studio-IDE-11 (#251): assist.invoked tagged event — only the
+  // redaction count (never the field names) and the bucketed region
+  // size are reported.
+  const regionLineCount = Math.max(
+    0,
+    payload.region.endLine - payload.region.startLine + 1,
+  );
+  emitTelemetry({
+    eventType: "assist.invoked",
+    payload: {
+      sourceKind: payload.region.sourceKind,
+      regionLineCount,
+      redactionApplied:
+        payload.studioRedactionMetadata.matchedPatternIds.length,
+    },
+  });
+
   const baseUrlResult = resolveApiBaseUrl();
   if (!baseUrlResult.ok) {
+    emitTelemetry({
+      eventType: "assist.result",
+      payload: { outcome: "gateway_unavailable" },
+    });
     return unavailableResult(baseUrlResult.message);
   }
 
@@ -175,6 +197,10 @@ export async function requestExplanation(
       signal: options.signal,
     });
   } catch {
+    emitTelemetry({
+      eventType: "assist.result",
+      payload: { outcome: "gateway_unavailable" },
+    });
     return unavailableResult();
   }
 
@@ -182,20 +208,43 @@ export async function requestExplanation(
   try {
     rawBody = await response.text();
   } catch {
+    emitTelemetry({
+      eventType: "assist.result",
+      payload: { outcome: "gateway_unavailable" },
+    });
     return unavailableResult();
   }
   const parsed = safeParseJson(rawBody);
 
   if (!response.ok) {
     if (parsed === null) {
+      emitTelemetry({
+        eventType: "assist.result",
+        payload: { outcome: "gateway_unavailable" },
+      });
       return unavailableResult();
     }
-    return parseEditorAssistError(parsed, response.status);
+    const errorResult = parseEditorAssistError(parsed, response.status);
+    emitTelemetry({
+      eventType: "assist.result",
+      payload: {
+        outcome: errorResult.ok ? "success" : errorResult.errorCode,
+      },
+    });
+    return errorResult;
   }
 
   if (!isSuccessResponse(parsed)) {
+    emitTelemetry({
+      eventType: "assist.result",
+      payload: { outcome: "gateway_unavailable" },
+    });
     return unavailableResult();
   }
+  emitTelemetry({
+    eventType: "assist.result",
+    payload: { outcome: "success" },
+  });
   return { ok: true, data: parsed };
 }
 
@@ -216,9 +265,7 @@ function buildBudgetUrl(base: string, scope: EditorAssistBudgetScope): string {
   return `${base}/api/v0/editor/budget?${params.join("&")}`;
 }
 
-function isBudgetResponse(
-  value: unknown,
-): value is {
+function isBudgetResponse(value: unknown): value is {
   schemaVersion: typeof EDITOR_ASSIST_SCHEMA_VERSION;
   budget: EditorAssistBudgetSnapshot;
 } {

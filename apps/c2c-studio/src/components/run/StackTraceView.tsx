@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { apiClient } from "@/lib/apiClient";
+import { emit as emitTelemetry } from "@/lib/editor/editorTelemetry";
 import {
   mapStackFrames,
   parseStackTrace,
@@ -136,6 +137,13 @@ export function StackTraceView({
   const toggleRaw = useCallback(() => setShowRaw((value) => !value), []);
   const handleRevealCobol = useCallback((frame: ResolvedStackFrame) => {
     if (!frame.cobol) return;
+    // Studio-IDE-11 (#251): stacktrace.frame_click → resolved=true.
+    // Only the resolution boolean ships; no file paths or line numbers
+    // appear in the telemetry payload.
+    emitTelemetry({
+      eventType: "stacktrace.frame_click",
+      payload: { resolved: true },
+    });
     dispatchRevealCobol({
       cobolFile: frame.cobol.file,
       cobolLine: frame.cobol.line,
@@ -143,6 +151,10 @@ export function StackTraceView({
   }, []);
   const handleOpenJava = useCallback((frame: ResolvedStackFrame) => {
     if (!frame.javaFilePath) return;
+    emitTelemetry({
+      eventType: "stacktrace.frame_click",
+      payload: { resolved: Boolean(frame.cobol) },
+    });
     dispatchRevealJava({
       javaFile: frame.javaFilePath,
       javaLine: frame.javaLine,

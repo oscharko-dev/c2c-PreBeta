@@ -23,6 +23,7 @@ import type {
   CobolSnapshot,
   JavaFileHistoryEntry,
 } from "@/lib/editor/diffHistory";
+import { emit as emitTelemetry } from "@/lib/editor/editorTelemetry";
 import {
   fetchTraceability,
   TraceabilityNotFoundError,
@@ -203,14 +204,11 @@ export function DiffWorkspace({
 }: DiffWorkspaceProps) {
   // ----- Empty state: no previous run for this file ---------------------
   if (!javaHistory || javaHistory.previous === null) {
-    return (
-      <EmptyShell
-        filePath={filePath}
-        message="No previous run for this file to compare."
-        hint="Start a new transformation to build up comparison history."
-        onClose={onClose}
-      />
-    );
+    // Studio-IDE-11 (#251): emit the empty-shell case once with the
+    // load-bearing booleans. The body owns the populated case so
+    // ``lineageAvailable`` reports the real resolved state instead of a
+    // constant ``false``.
+    return <DiffWorkspaceEmpty filePath={filePath} onClose={onClose} />;
   }
 
   return (
@@ -220,6 +218,28 @@ export function DiffWorkspace({
       runId={runId}
       javaHistory={javaHistory}
       cobolSnapshotsByRun={cobolSnapshotsByRun}
+      onClose={onClose}
+    />
+  );
+}
+
+interface DiffWorkspaceEmptyProps {
+  filePath: string;
+  onClose: () => void;
+}
+
+function DiffWorkspaceEmpty({ filePath, onClose }: DiffWorkspaceEmptyProps) {
+  useEffect(() => {
+    emitTelemetry({
+      eventType: "diff.open",
+      payload: { hasPrevious: false, lineageAvailable: false },
+    });
+  }, [filePath]);
+  return (
+    <EmptyShell
+      filePath={filePath}
+      message="No previous run for this file to compare."
+      hint="Start a new transformation to build up comparison history."
       onClose={onClose}
     />
   );
@@ -306,6 +326,20 @@ function DiffWorkspaceBody({
       setLinkedScroll(false);
     }
   }, [lineageReady, lineageAvailable, cobolPresent]);
+
+  // Studio-IDE-11 (#251): emit diff.open once per (runId, filePath)
+  // when the traceability fetch resolves so ``lineageAvailable`` is
+  // the real resolved value (true/false), not a placeholder. The
+  // body component is only mounted when ``hasPrevious`` is true (the
+  // outer ``DiffWorkspace`` early-returns the empty case), so the
+  // payload field is a constant ``true`` here.
+  useEffect(() => {
+    if (!lineageReady) return;
+    emitTelemetry({
+      eventType: "diff.open",
+      payload: { hasPrevious: true, lineageAvailable },
+    });
+  }, [lineageReady, lineageAvailable, runId, filePath]);
 
   const couplingDisabled = !lineageAvailable || !cobolPresent;
 

@@ -41,11 +41,22 @@ func main() {
 		}
 	}()
 
+	editorTelemetryStore, err := NewJSONLEditorTelemetryStore(cfg.editorTelemetryEventPath)
+	if err != nil {
+		log.Fatalf("init editor telemetry store failed: %v", err)
+	}
+	defer func() {
+		if err := editorTelemetryStore.Close(); err != nil {
+			log.Printf("close editor telemetry store failed: %v", err)
+		}
+	}()
+
 	service := NewExperienceLearningService(
 		cfg,
 		harnessEventStore,
 		trajectoryStore,
 		experienceEventStore,
+		editorTelemetryStore,
 		policy,
 		time.Now().UTC,
 	)

@@ -15,6 +15,11 @@
 // a single atomic edit / single undo step.
 
 import { resolveApiBaseUrl } from "@/lib/apiClient";
+import {
+  bucketFileLineCount,
+  bucketFormatLatency,
+  emit as emitTelemetry,
+} from "@/lib/editor/editorTelemetry";
 
 export type FormatJavaErrorCode =
   | "format_unavailable"
@@ -55,6 +60,10 @@ export interface FormatJavaClientOptions {
   timeoutMs?: number;
   // Test seam — defaults to `globalThis.fetch`.
   fetchImpl?: typeof fetch;
+  // Studio-IDE-11 (#251): how the format was triggered. Drives the
+  // closed-enum `format.invoked.trigger` field. Defaults to
+  // `"shortcut"` when the caller does not pass anything.
+  telemetryTrigger?: "shortcut" | "on_save";
 }
 
 const DEFAULT_TIMEOUT_MS = 1500;
@@ -85,12 +94,39 @@ export async function formatJava(
   payload: FormatJavaRequestPayload,
   options: FormatJavaClientOptions = {},
 ): Promise<FormatJavaResult> {
+  const trigger = options.telemetryTrigger ?? "shortcut";
+  // Studio-IDE-11 (#251): emit format.invoked with the file-line-count
+  // bucket derived from the payload. The exact content never leaves
+  // the function — only the bucket label.
+  const lineCount = payload.content.split(/\r?\n/).length;
+  emitTelemetry({
+    eventType: "format.invoked",
+    payload: {
+      trigger,
+      fileLineCountBucket: bucketFileLineCount(lineCount),
+    },
+  });
+  const startedAt = Date.now();
+  const emitResult = (
+    outcome: "success" | "unavailable" | "timeout" | "noop",
+  ) => {
+    emitTelemetry({
+      eventType: "format.result",
+      payload: {
+        outcome,
+        latencyBucket: bucketFormatLatency(Date.now() - startedAt),
+      },
+    });
+  };
+
   const baseUrlResult = resolveApiBaseUrl();
   if (!baseUrlResult.ok) {
+    emitResult("unavailable");
     return buildFailure("format_unavailable", baseUrlResult.message);
   }
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (!fetchImpl) {
+    emitResult("unavailable");
     return buildFailure(
       "format_unavailable",
       "Formatter unavailable: fetch is not available in this environment",
@@ -123,14 +159,17 @@ export async function formatJava(
     });
   } catch (err) {
     if (timeoutFired) {
+      emitResult("timeout");
       return buildFailure(
         "format_unavailable",
         `Formatter unavailable: request exceeded ${timeoutMs} ms`,
       );
     }
     if (isAbortError(err)) {
+      emitResult("unavailable");
       return buildFailure("format_unavailable", "Formatter request cancelled");
     }
+    emitResult("unavailable");
     return buildFailure(
       "format_unavailable",
       err instanceof Error
@@ -149,6 +188,7 @@ export async function formatJava(
     try {
       parsed = JSON.parse(rawBody);
     } catch {
+      emitResult("unavailable");
       return buildFailure(
         "format_upstream_error",
         "Formatter returned malformed JSON",
@@ -163,12 +203,15 @@ export async function formatJava(
       !Array.isArray(parsed) &&
       typeof (parsed as Record<string, unknown>).formattedContent === "string"
     ) {
+      const formattedContent =
+        (parsed as Record<string, string>).formattedContent ?? "";
+      emitResult(formattedContent === payload.content ? "noop" : "success");
       return {
         ok: true,
-        formattedContent:
-          (parsed as Record<string, string>).formattedContent ?? "",
+        formattedContent,
       };
     }
+    emitResult("unavailable");
     return buildFailure(
       "format_upstream_error",
       "Formatter returned an unexpected payload",
@@ -201,6 +244,7 @@ export async function formatJava(
     record.column > 0
       ? record.column
       : undefined;
+  emitResult("unavailable");
   return buildFailure(
     code,
     messageRaw.length > 0

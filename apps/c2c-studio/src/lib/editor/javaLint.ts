@@ -21,8 +21,23 @@
 //   * jl-trailing-ws       — trailing whitespace (info-only nudge).
 
 import type { Diagnostic } from "@/types/api";
+import {
+  bucketLintMarkerCount,
+  emit as emitTelemetry,
+} from "@/lib/editor/editorTelemetry";
 
 export const JAVA_LINT_OWNER = "c2c-java-lint" as const;
+
+// Studio-IDE-11 (#251): per-file debounce window for the
+// `lint.markers_changed` telemetry. The issue body limits emission to
+// "at most once per 5 seconds per file". The map keys are file paths
+// from the lint invocation; values are the most recent emit timestamps.
+const LINT_TELEMETRY_DEBOUNCE_MS = 5_000;
+const lintTelemetryLastEmit = new Map<string, number>();
+
+export function __resetJavaLintTelemetryForTests(): void {
+  lintTelemetryLastEmit.clear();
+}
 
 const SCHEMA_VERSION = "v0" as const;
 // Issue #256 lint codes — see header. Centralised so tests can reference
@@ -347,10 +362,24 @@ export function lintJava(
     budget,
   );
   const lineIssues = scanLineLevelRules(source, options.filePath, budget);
-  return [...bracketIssues, ...lineIssues].sort((a, b) => {
+  const sorted = [...bracketIssues, ...lineIssues].sort((a, b) => {
     const lineA = a.line ?? 0;
     const lineB = b.line ?? 0;
     if (lineA !== lineB) return lineA - lineB;
     return (a.column ?? 0) - (b.column ?? 0);
   });
+  // Studio-IDE-11 (#251): debounced telemetry — at most one emit per
+  // 5 seconds per file. The closed-enum count bucket is the only thing
+  // shipped; line/column data stay inside the editor.
+  const filePathKey = options.filePath ?? "";
+  const nowMs = Date.now();
+  const last = lintTelemetryLastEmit.get(filePathKey) ?? 0;
+  if (nowMs - last >= LINT_TELEMETRY_DEBOUNCE_MS) {
+    lintTelemetryLastEmit.set(filePathKey, nowMs);
+    emitTelemetry({
+      eventType: "lint.markers_changed",
+      payload: { countBucket: bucketLintMarkerCount(sorted.length) },
+    });
+  }
+  return sorted;
 }
