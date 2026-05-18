@@ -10,10 +10,14 @@ import {
   MoreHorizontal,
   Trash2,
   Hammer,
+  Wand2,
+  RotateCw,
+  ShieldCheck,
 } from "lucide-react";
 import { type StudioApiState } from "../../hooks/useC2cApi";
 import { getWorkbenchReadiness } from "./workbenchReadiness";
 import { useSourceWorkspace } from "../../stores/sourceWorkspace";
+import { useTransformationRun } from "../../stores/transformationRun";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { AppLogo } from "../icons/AppLogo";
 import {
@@ -29,7 +33,9 @@ interface AppTopBarProps {
 export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
-  const { canSubmitTransform, submitTransform } = useSourceWorkspace();
+  const { canSubmitTransform, submitTransform, submitGenerate } =
+    useSourceWorkspace();
+  const { state: runState, javaBuffers, startVerify } = useTransformationRun();
   const canStart = readiness.startEnabled && !loading && canSubmitTransform;
   // Studio-IDE-14 (#256): Compile Check is rendered as a sibling of the
   // Start button. The Java editor pane registers an imperative handler
@@ -40,8 +46,79 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Studio-IDE-13 (#255): Regenerate confirmation modal. The Regenerate
+  // toolbar action always confirms first per the issue spec.
+  const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);
+  const [verifyPending, setVerifyPending] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Whether *any* generated Java buffer the Studio has hydrated currently
+  // diverges from its captured Generator Baseline. Used to short-circuit
+  // Generate / Regenerate into the confirmation modal so manual edits
+  // never silently disappear (AC3 of #255).
+  const hasManualEditsAnywhere = Object.values(javaBuffers).some(
+    (entry) =>
+      entry.generatorBaselineHash.length > 0 &&
+      entry.bufferHash !== entry.generatorBaselineHash,
+  );
+
+  const handleGenerate = useCallback(() => {
+    if (hasManualEditsAnywhere) {
+      // Per AC3, even "Generate Java" must not silently overwrite manual
+      // edits. We open the confirmation modal so the user explicitly
+      // proceeds; the actual merge UI fires from the editor pane when
+      // the new run lands.
+      setRegenerateConfirmOpen(true);
+      return;
+    }
+    void submitGenerate();
+  }, [hasManualEditsAnywhere, submitGenerate]);
+
+  const handleRegenerate = useCallback(() => {
+    // Regenerate always confirms first (AC: "always confirms via modal
+    // first"), regardless of whether manual edits exist.
+    setRegenerateConfirmOpen(true);
+  }, []);
+
+  const handleConfirmRegenerate = useCallback(() => {
+    setRegenerateConfirmOpen(false);
+    void submitGenerate();
+  }, [submitGenerate]);
+
+  const handleVerifyCurrentBuffers = useCallback(async () => {
+    const runId = runState.runId;
+    if (!runId) return;
+    const entries = Object.entries(javaBuffers);
+    if (entries.length === 0) return;
+    setVerifyPending(true);
+    try {
+      const javaFiles = entries.map(([path, entry]) => ({
+        path,
+        content: entry.content,
+      }));
+      // Pick the first non-null overlay if any buffer has one (single-
+      // file Studio scope today); the BFF only needs aggregate counts
+      // for stamping the run-summary fields.
+      const firstOverlay = entries
+        .map(([, entry]) => entry.manualEditOverlay)
+        .find((overlay) => overlay !== null);
+      await startVerify({
+        runId,
+        javaFiles,
+        ...(firstOverlay ? { manualEditOverlay: firstOverlay } : {}),
+      });
+    } finally {
+      setVerifyPending(false);
+    }
+  }, [runState.runId, javaBuffers, startVerify]);
+
+  const canVerifyCurrentBuffers =
+    runState.runId !== null &&
+    Object.keys(javaBuffers).length > 0 &&
+    !verifyPending;
+  const canGenerate = canStart;
+  const canRegenerate = canStart;
 
   useKeyboardShortcuts({
     onStartTransform: () => {
@@ -105,15 +182,46 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         </div>
         <button
           type="button"
+          data-testid="topbar-generate-and-verify-button"
           disabled={!canStart}
           className="flex items-center justify-center rounded bg-teal hover:bg-teal-soft active:bg-teal disabled:opacity-50 disabled:cursor-not-allowed p-1.5 focus-visible:ring-1 focus-visible:ring-accent outline-none"
-          aria-label="Start Transformation"
-          title="Start Transformation (Cmd/Ctrl + Enter)"
+          aria-label="Generate & Verify"
+          title="Generate & Verify (Cmd/Ctrl + Enter) — runs the deterministic generator and the full verification pipeline"
           onClick={() => {
             void submitTransform();
           }}
         >
           <Play className="h-4 w-4 text-bg-0 fill-current" />
+        </button>
+        {/* Studio-IDE-13 (#255): explicit Generate Java toolbar action.
+            Invokes /api/v0/generate; if any Java buffer holds manual
+            edits the confirmation modal opens first so the user can
+            consciously proceed into the 3-Way Merge. */}
+        <button
+          type="button"
+          data-testid="topbar-generate-button"
+          disabled={!canGenerate}
+          className="flex items-center justify-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1 text-xs text-text-dim hover:text-text hover:bg-bg-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-1 focus-visible:ring-accent outline-none"
+          aria-label="Generate Java"
+          title="Generate Java — invoke the deterministic generator only"
+          onClick={handleGenerate}
+        >
+          <Wand2 className="h-3.5 w-3.5" />
+          <span>Generate</span>
+        </button>
+        {/* Studio-IDE-13 (#255): Regenerate Java. Same as Generate but
+            always confirms via modal first per the issue spec. */}
+        <button
+          type="button"
+          data-testid="topbar-regenerate-button"
+          disabled={!canRegenerate}
+          className="flex items-center justify-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1 text-xs text-text-dim hover:text-text hover:bg-bg-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-1 focus-visible:ring-accent outline-none"
+          aria-label="Regenerate Java"
+          title="Regenerate Java — confirms first, then re-runs the generator"
+          onClick={handleRegenerate}
+        >
+          <RotateCw className="h-3.5 w-3.5" />
+          <span>Regenerate</span>
         </button>
         <button
           type="button"
@@ -126,6 +234,21 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         >
           <Hammer className="h-3.5 w-3.5" />
           <span>{compileCheckPending ? "Compile…" : "Compile Check"}</span>
+        </button>
+        {/* Studio-IDE-13 (#255): Verify action. Runs /api/v0/verify on
+            the current Java buffer state; the response stamps the
+            manual-edit summary fields per ADR-0007 §4. */}
+        <button
+          type="button"
+          data-testid="topbar-verify-button"
+          disabled={!canVerifyCurrentBuffers}
+          className="flex items-center justify-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1 text-xs text-text-dim hover:text-text hover:bg-bg-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-1 focus-visible:ring-accent outline-none"
+          aria-label="Verify the current Java buffer"
+          title="Verify — run the full build/test/oracle pipeline on the current Java buffer"
+          onClick={() => void handleVerifyCurrentBuffers()}
+        >
+          <ShieldCheck className="h-3.5 w-3.5" />
+          <span>{verifyPending ? "Verifying…" : "Verify"}</span>
         </button>
       </div>
 
@@ -217,7 +340,82 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           onConfirm={onClearDrafts}
         />
       ) : null}
+
+      {regenerateConfirmOpen ? (
+        <RegenerateConfirmDialog
+          hasManualEdits={hasManualEditsAnywhere}
+          onCancel={() => setRegenerateConfirmOpen(false)}
+          onConfirm={handleConfirmRegenerate}
+        />
+      ) : null}
     </header>
+  );
+}
+
+function RegenerateConfirmDialog({
+  hasManualEdits,
+  onCancel,
+  onConfirm,
+}: {
+  hasManualEdits: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dialogRef.current?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="regenerate-title"
+      data-testid="topbar-regenerate-confirm-dialog"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-bg-0/80 p-6"
+    >
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="w-full max-w-md space-y-4 rounded-lg border border-line-2 bg-bg-1 p-6 outline-none focus:ring-2 focus:ring-accent"
+      >
+        <h2 id="regenerate-title" className="text-base font-semibold text-text">
+          {hasManualEdits
+            ? "Re-run the generator with manual edits present?"
+            : "Re-run the generator?"}
+        </h2>
+        <p className="text-sm text-text-dim">
+          {hasManualEdits
+            ? "Your Java buffer has manual edits. The generator will produce a fresh baseline; if the new output diverges, a 3-Way Merge will open so you can pick per region. Your manual edits will not be silently overwritten."
+            : "The generator will produce a fresh baseline for the current COBOL input. Continue?"}
+        </p>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            data-testid="topbar-regenerate-confirm-cancel"
+            onClick={onCancel}
+            className="rounded border border-line-2 px-3 py-1 text-xs text-text-dim hover:text-text"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            data-testid="topbar-regenerate-confirm-proceed"
+            onClick={onConfirm}
+            className="rounded bg-teal px-3 py-1 text-xs font-medium text-bg-0 hover:bg-teal-soft"
+          >
+            Run generator
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

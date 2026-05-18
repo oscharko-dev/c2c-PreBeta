@@ -14,7 +14,7 @@ import {
   getSourceByteSize,
   deriveSourceHash,
 } from "../lib/sourceAnalysis";
-import { ApiResult, TransformResponse } from "../types/api";
+import { ApiResult, TransformResponse, GenerateResponse } from "../types/api";
 import { useTransformationRun } from "./transformationRun";
 import {
   editorPersistence,
@@ -65,7 +65,15 @@ export interface SourceWorkspaceState {
   setOracleInput: (text: string) => void;
   setAllowAiAssist: (enabled: boolean) => void;
   clearWorkspace: () => void;
+  // Composed Generate & Verify (renamed in toolbar but kept as
+  // ``submitTransform`` here for backwards compatibility with existing
+  // call sites and tests).
   submitTransform: () => Promise<ApiResult<TransformResponse>>;
+  // Studio-IDE-13 (#255): explicit Generator-Run-only action.
+  // Equivalent inputs to ``submitTransform`` but invokes the
+  // ``/api/v0/generate`` BFF endpoint (which the BFF tags with
+  // ``runMode: "generate"``).
+  submitGenerate: () => Promise<ApiResult<GenerateResponse>>;
   // Studio-IDE-3 actions.
   saveDraftNow: () => Promise<void>;
   resolveConflict: (
@@ -90,7 +98,11 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [conflict, setConflict] = useState<CobolConflict | null>(null);
   const [saveNoticeAt, setSaveNoticeAt] = useState<number | null>(null);
 
-  const { state: runState, startTransform } = useTransformationRun();
+  const {
+    state: runState,
+    startTransform,
+    startGenerate,
+  } = useTransformationRun();
   const isTransforming =
     runState.phase === "starting" || runState.phase === "running";
   const modelGatewayUnavailable =
@@ -245,6 +257,64 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     return result;
   };
 
+  // Studio-IDE-13 (#255): Generator-only submission. Mirrors
+  // ``submitTransform`` validation but delegates to ``startGenerate`` so
+  // the BFF tags the run with ``runMode: "generate"``. The Studio's
+  // existing run-polling, generated-files hydration, and Java-buffer
+  // baselining all keep working unchanged because the orchestrator
+  // returns the same TransformResponse shape.
+  const submitGenerate = async (): Promise<ApiResult<GenerateResponse>> => {
+    const trimmed = sourceText.trim();
+    if (trimmed.length === 0) {
+      const result = {
+        ok: false,
+        message: "Source text is required.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+    if (getSourceByteSize(sourceText) > MAX_SOURCE_BYTES) {
+      const result = {
+        ok: false,
+        message: "Source text exceeds the 1 MB product-mode limit.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+    if (modelGatewayUnavailable) {
+      const result = {
+        ok: false,
+        message:
+          "AI Assist is enabled, but the Model Gateway is unavailable. Disable AI Assist to run deterministic-only.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+    setTransformError(null);
+    const request = {
+      sourceText,
+      programId: undefined,
+      sourceName: sourceName || DEFAULT_SOURCE_NAME,
+      targetLanguage: "java",
+      expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
+      oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
+    } as const;
+    const result = await startGenerate({
+      ...request,
+      useTransformationAgent: allowAiAssist,
+    });
+    if (!result.ok) {
+      setTransformError(
+        result.status === 503
+          ? "Backend unavailable. Try again shortly."
+          : result.message,
+      );
+    } else {
+      void deriveSourceHash(sourceText).then(setLastRunInputHash);
+    }
+    return result;
+  };
+
   // ----- Persistence integration ---------------------------------------
 
   function makeCobolKey(currentProgramId: string | null) {
@@ -356,6 +426,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         setAllowAiAssist,
         clearWorkspace,
         submitTransform,
+        submitGenerate,
         saveDraftNow,
         resolveConflict,
         dismissConflict,

@@ -544,16 +544,36 @@ export type JavaMappingClass =
   | "synthesized"
   | "agent_originated";
 
-// Studio-IDE-6 (#248): IDE-13 will extend this with richer overlay fields,
-// but the optional shape lands here so the IndexedDB envelope (IDE-3) can
-// carry the v1 overlay forward without a schema bump. ``verificationOutcome``
-// and ``mappingClass`` are optional so older fixtures and the IDE-4 baseline
-// overlay keep typechecking.
+// Studio-IDE-6 (#248) / Studio-IDE-13 (#255) / ADR-0007 §3: per-region
+// overlay record. ``lineRange`` and ``originClass`` are the only fields
+// required at runtime (the in-memory overlay produced by IDE-13's
+// ``computeManualEditOverlay`` stamps only those two). The remaining
+// fields are persisted alongside ``manual_modified`` / ``manual_edit``
+// regions when the IDE-13 governance flow saves a Java draft: they let
+// audit reviewers locate the baseline and the actor without consulting
+// the orchestrator log. ``verificationOutcome`` and ``mappingClass`` are
+// optional so older fixtures and the IDE-4 baseline overlay keep
+// typechecking.
+export interface ManualEditAuthor {
+  userId: string;
+  tenantId: string;
+}
+
 export interface JavaOriginRegion {
   lineRange: { startLine: number; endLine: number };
   originClass: JavaOriginClass;
   verificationOutcome?: JavaVerificationOutcome;
   mappingClass?: JavaMappingClass;
+  // ADR-0007 §3 per-region metadata. Optional in the in-memory shape; the
+  // IDE-13 governance flow stamps them at save time for ``manual_*``
+  // regions. ``generatorBaselineRegionHash`` is only meaningful for
+  // ``manual_modified`` regions (per ADR-0007 §3); the runtime treats it
+  // as optional everywhere so older overlays round-trip unchanged.
+  generatorBaselineRunId?: string;
+  generatorBaselineRegionHash?: string;
+  lastModifiedAt?: string;
+  lastModifiedBy?: ManualEditAuthor;
+  manualEditCount?: number;
 }
 
 export interface JavaOriginOverlay {
@@ -605,4 +625,60 @@ export interface TraceabilityEnvelope {
   // ADR-0006 §4). Consumers MUST treat ``null`` as "no classification
   // available" and fall back to the unclassified rendering path.
   javaRegionClassification: Record<string, JavaRegionClassification[]> | null;
+}
+
+// Studio-IDE-13 (#255): explicit generator-run + verification request /
+// response contracts for the new toolbar actions. The ``generate`` /
+// ``compile-check`` / ``verify`` endpoints decompose what the legacy
+// ``/api/v0/transform`` (now "Generate & Verify") used to do in a single
+// monolithic call.
+
+// Java file pair carried on /api/v0/compile-check and /api/v0/verify.
+export interface JavaFileInput {
+  path: string;
+  content: string;
+}
+
+// Studio-IDE-13: response from POST /api/v0/generate. Mirrors
+// ``TransformResponse`` plus the ``runMode: "generate"`` marker the BFF
+// stamps so consumers can distinguish a generator-only run from a
+// composed Generate & Verify run.
+export interface GenerateResponse extends TransformResponse {
+  runMode: "generate";
+}
+
+// Studio-IDE-13: request payload for POST /api/v0/verify. The
+// ``manualEditOverlay`` field is optional — when present the BFF stamps
+// the run-summary fields ``manualEditsCarriedOver`` and
+// ``manualDriftRegionCount`` from it per ADR-0007 §4.
+export interface VerifyRequest {
+  runId: string;
+  javaFiles: JavaFileInput[];
+  entryClass?: string;
+  entryFilePath?: string;
+  programId?: string;
+  expectedOutput?: string;
+  oracleInput?: string;
+  manualEditOverlay?: JavaOriginOverlay;
+}
+
+// Studio-IDE-13: response from POST /api/v0/verify. Carries the
+// build-test-runner outcome plus the manual-edit summary fields from
+// ADR-0007 §4. Unknown fields the BFF may emit are opaquely preserved
+// per ADR-0006 §3.
+export interface VerifyResponse {
+  schemaVersion: "v0";
+  runId: string;
+  programId: string;
+  status: string;
+  classification: string;
+  build?: Record<string, unknown>;
+  execution?: Record<string, unknown>;
+  tests?: Record<string, unknown>;
+  goldenMaster?: Record<string, unknown>;
+  comparison?: Record<string, unknown>;
+  diagnostics: Diagnostic[];
+  outputRef?: OutputRef | null;
+  manualEditsCarriedOver: boolean;
+  manualDriftRegionCount: number;
 }

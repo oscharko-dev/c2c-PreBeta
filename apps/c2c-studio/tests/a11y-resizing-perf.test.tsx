@@ -124,7 +124,7 @@ describe("A11y, Keyboard, Resizing, and Performance Hardening", () => {
     render(<WorkbenchShell />);
 
     const startButton = screen.getByRole("button", {
-      name: "Start Transformation",
+      name: "Generate & Verify",
     });
     expect(startButton).toBeDisabled(); // Because no program is selected initially
 

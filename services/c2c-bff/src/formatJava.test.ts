@@ -114,6 +114,9 @@ function disabledBuildTestRunner(): BuildTestRunnerClient {
     async formatJava() {
       return undefined;
     },
+    async runVerification() {
+      return undefined;
+    },
   };
 }
 
@@ -134,6 +137,9 @@ function fakeBuildTestRunner(
         throw options.error;
       }
       return options.response;
+    },
+    async runVerification() {
+      return undefined;
     },
   };
 }

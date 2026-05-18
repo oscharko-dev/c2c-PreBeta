@@ -17,6 +17,7 @@ import type { SampleDetail, SampleRegistry, SampleSummary } from "./samples";
 import {
   createEvidenceClient,
   createOrchestratorClient,
+  type BuildTestRunnerClient,
   type EvidenceClient,
   type HttpClient,
   type HttpRequestOptions,
@@ -5364,6 +5365,583 @@ test("GET /api/v0/runs/{runId}/traceability returns stub envelope for diagnostic
     // diagnostic-fixture runs must not proxy to the orchestrator (getTraceability === 0
     // is verified structurally: disabledOrchestrator has enabled:false so the route
     // returns the stub envelope directly without calling getTraceability).
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Studio-IDE-13 (#255): POST /api/v0/generate
+// ---------------------------------------------------------------------------
+
+function stubBuildTestRunner(
+  verificationResponse?: UpstreamResponse,
+): BuildTestRunnerClient {
+  return {
+    enabled: true,
+    async formatJava() {
+      return undefined;
+    },
+    async runVerification() {
+      return verificationResponse;
+    },
+  };
+}
+
+function disabledBuildTestRunner(): BuildTestRunnerClient {
+  return {
+    enabled: false,
+    async formatJava() {
+      return undefined;
+    },
+    async runVerification() {
+      return undefined;
+    },
+  };
+}
+
+test("POST /api/v0/generate returns 400 when sourceText is missing", async () => {
+  const runStore = createRunStore();
+  const { client: orch } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
+      method: "POST",
+      body: { programId: "HELLO01" },
+    });
+    assert.equal(response.status, 400);
+    assert.ok(
+      (response.body as { error: string }).error.includes("sourceText"),
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/generate returns 413 when body is too large", async () => {
+  const runStore = createRunStore();
+  const { client: orch } = stubOrchestrator();
+  const handler = createApp({
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      transformSourceMaxBytes: 10,
+    },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
+      method: "POST",
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+      },
+    });
+    assert.equal(response.status, 413);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/generate happy path returns 201 with runMode=generate", async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
+      method: "POST",
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        useTransformationAgent: false,
+      },
+    });
+    assert.equal(response.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    const body = response.body as { runMode: string; runId: string };
+    assert.equal(body.runMode, "generate");
+    assert.ok(typeof body.runId === "string" && body.runId.length > 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/generate returns 503 when orchestrator is not configured", async () => {
+  const runStore = createRunStore();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
+      method: "POST",
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+      },
+    });
+    assert.equal(response.status, 503);
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Studio-IDE-13 (#255): POST /api/v0/compile-check
+// ---------------------------------------------------------------------------
+
+test("POST /api/v0/compile-check returns 400 when javaFiles is missing", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
+      method: "POST",
+      body: { runId: "r1" },
+    });
+    assert.equal(response.status, 400);
+    assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/compile-check returns 400 when javaFiles is empty array", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
+      method: "POST",
+      body: { javaFiles: [] },
+    });
+    assert.equal(response.status, 400);
+    assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/compile-check returns 400 when javaFiles entry has no path", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
+      method: "POST",
+      body: { javaFiles: [{ path: "", content: "class Foo {}" }] },
+    });
+    assert.equal(response.status, 400);
+    assert.ok((response.body as { error: string }).error.includes("path"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/compile-check returns 413 when total content exceeds cap", async () => {
+  const handler = createApp({
+    config: { ...baseConfig, transformSourceMaxBytes: 10 },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
+      method: "POST",
+      body: {
+        javaFiles: [
+          { path: "Foo.java", content: "class Foo { /* large content */ }" },
+        ],
+      },
+    });
+    assert.equal(response.status, 413);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/compile-check happy path returns 200 with diagnostics", async () => {
+  const upstreamBody = {
+    status: "build_failed",
+    diagnostics: [
+      {
+        severity: "error",
+        code: "compiler.err.cant.resolve.sym",
+        message: "cannot find symbol",
+        line: 3,
+        column: 5,
+        filePath: "Foo.java",
+        sourceKind: "build",
+      },
+    ],
+  };
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner({ status: 200, body: upstreamBody }),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
+      method: "POST",
+      body: {
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+      },
+    });
+    assert.equal(response.status, 200);
+    const body = response.body as {
+      schemaVersion: string;
+      diagnostics: Array<{
+        severity: string;
+        code: string;
+        message: string;
+        sourceKind: string;
+      }>;
+    };
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(body.diagnostics.length, 1);
+    assert.equal(body.diagnostics[0]?.severity, "error");
+    assert.equal(body.diagnostics[0]?.sourceKind, "build");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/compile-check returns 503 when build-test-runner is not configured", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: disabledBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
+      method: "POST",
+      body: {
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.ok(
+      (response.body as { error: string }).error.includes(
+        "build-test-runner-service URL is not configured",
+      ),
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/compile-check returns 503 when build-test-runner returns 5xx", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner({
+      status: 500,
+      body: { error: "internal error" },
+    }),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
+      method: "POST",
+      body: {
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(
+      (response.body as { failureCode: string }).failureCode,
+      "service_unavailable",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Studio-IDE-13 (#255): POST /api/v0/verify
+// ---------------------------------------------------------------------------
+
+test("POST /api/v0/verify returns 400 when runId is missing", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      body: { javaFiles: [{ path: "Foo.java", content: "class Foo {}" }] },
+    });
+    assert.equal(response.status, 400);
+    assert.ok((response.body as { error: string }).error.includes("runId"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify returns 400 when javaFiles is missing", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      body: { runId: "run-1" },
+    });
+    assert.equal(response.status, 400);
+    assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify returns 413 when total content exceeds cap", async () => {
+  const handler = createApp({
+    config: { ...baseConfig, transformSourceMaxBytes: 10 },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      body: {
+        runId: "run-1",
+        javaFiles: [
+          { path: "Foo.java", content: "class Foo { /* lots of content */ }" },
+        ],
+      },
+    });
+    assert.equal(response.status, 413);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify happy path returns 200 with verify response shape", async () => {
+  const upstreamBody = {
+    status: "success",
+    classification: "success",
+    build: { status: "ok" },
+    execution: { exitCode: 0 },
+    tests: { total: 1, passed: 1, failed: 0 },
+    goldenMaster: null,
+    comparison: { match: true },
+    diagnostics: [],
+    outputRef: null,
+  };
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner({ status: 200, body: upstreamBody }),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      body: {
+        runId: "run-abc",
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+      },
+    });
+    assert.equal(response.status, 200);
+    const body = response.body as {
+      schemaVersion: string;
+      runId: string;
+      programId: string;
+      status: string;
+      classification: string;
+      manualEditsCarriedOver: boolean;
+      manualDriftRegionCount: number;
+      diagnostics: unknown[];
+    };
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(body.runId, "run-abc");
+    assert.equal(body.programId, "verify-run-abc");
+    assert.equal(body.status, "success");
+    assert.equal(body.classification, "success");
+    assert.equal(body.manualEditsCarriedOver, false);
+    assert.equal(body.manualDriftRegionCount, 0);
+    assert.ok(Array.isArray(body.diagnostics));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify returns 503 when build-test-runner is not configured", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: disabledBuildTestRunner(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      body: {
+        runId: "run-1",
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+      },
+    });
+    assert.equal(response.status, 503);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify returns 503 when build-test-runner returns 5xx", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner({
+      status: 503,
+      body: { error: "service down" },
+    }),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      body: {
+        runId: "run-1",
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(
+      (response.body as { failureCode: string }).failureCode,
+      "service_unavailable",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify stamps manualEditsCarriedOver and manualDriftRegionCount from overlay", async () => {
+  const upstreamBody = {
+    status: "success",
+    classification: "success",
+    diagnostics: [],
+  };
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner({ status: 200, body: upstreamBody }),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      body: {
+        runId: "run-xyz",
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+        manualEditOverlay: {
+          schemaVersion: "v0",
+          runId: "run-xyz",
+          javaFile: "Foo.java",
+          regions: [
+            {
+              lineRange: { startLine: 10, endLine: 12 },
+              originClass: "manual_modified",
+            },
+            {
+              lineRange: { startLine: 20, endLine: 25 },
+              originClass: "manual_edit",
+            },
+            {
+              lineRange: { startLine: 1, endLine: 9 },
+              originClass: "deterministic",
+            },
+          ],
+        },
+      },
+    });
+    assert.equal(response.status, 200);
+    const body = response.body as {
+      manualEditsCarriedOver: boolean;
+      manualDriftRegionCount: number;
+    };
+    assert.equal(body.manualEditsCarriedOver, true);
+    assert.equal(body.manualDriftRegionCount, 2);
   } finally {
     await server.close();
   }

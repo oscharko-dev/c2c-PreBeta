@@ -597,6 +597,12 @@ export interface BuildTestRunnerClient {
     payload: { content: string; filePath?: string },
     timeoutOverrideMs?: number,
   ): Promise<UpstreamResponse | undefined>;
+  // Studio-IDE-13 (#255): compile-check and explicit-verify routes call
+  // /v0/run-verification on the build-test-runner-service directly.
+  runVerification(
+    payload: unknown,
+    timeoutOverrideMs?: number,
+  ): Promise<UpstreamResponse | undefined>;
 }
 
 export function createBuildTestRunnerClient(
@@ -611,6 +617,9 @@ export function createBuildTestRunnerClient(
       async formatJava() {
         return undefined;
       },
+      async runVerification() {
+        return undefined;
+      },
     };
   }
   const normalized = baseUrl.replace(/\/+$/, "");
@@ -622,6 +631,14 @@ export function createBuildTestRunnerClient(
     enabled: true,
     async formatJava(payload, timeoutOverrideMs) {
       return http.request(`${normalized}/v0/format-java`, {
+        method: "POST",
+        headers: controlHeaders,
+        body: payload,
+        timeoutMs: timeoutOverrideMs ?? timeoutMs,
+      });
+    },
+    async runVerification(payload, timeoutOverrideMs) {
+      return http.request(`${normalized}/v0/run-verification`, {
         method: "POST",
         headers: controlHeaders,
         body: payload,

@@ -65,7 +65,18 @@ function makeContextValue(
       clean: false,
       pendingReRun: false,
       staleJava: false,
+      manualEditsPresent: false,
     }),
+    // Studio-IDE-13 (#255) additions — Observability tests do not
+    // exercise the generator-run / 3-Way Merge surface, but the context
+    // value type requires the full surface, so we wire no-op stubs.
+    startGenerate: vi.fn(),
+    startVerify: vi.fn(),
+    javaMergeReview: null,
+    requestJavaMergeReview: vi.fn(),
+    applyJavaMergeSelections: vi.fn(),
+    cancelJavaMergeReview: vi.fn(),
+    latestVerifyResult: null,
   };
 }
 
