@@ -12,6 +12,7 @@
     "test:e2e:ci": "playwright test --grep-invert \"@visual|@perf|@memory\"",
     "test:e2e:update-snapshots": "playwright test --grep @visual --update-snapshots",
     "test:e2e:a11y": "playwright test --grep @a11y",
+    "test:e2e:a11y:ci": "playwright test --config=playwright.a11y.config.ts",
     "test:e2e:perf": "playwright test --grep @perf",
     "test:e2e:memory": "playwright test --grep @memory",
     "verify:monaco-lazy": "node scripts/verify-monaco-lazy.mjs"
