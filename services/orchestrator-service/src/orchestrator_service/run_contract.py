@@ -747,6 +747,42 @@ class AssistDecision:
 
 
 # ---------------------------------------------------------------------------
+# Manual-edit provenance taxonomy (ADR 0007 / Issue #257)
+# ---------------------------------------------------------------------------
+
+# ADR 0007 defines a closed five-class taxonomy for the origin of a Java
+# region. The first three classes describe machine-produced regions that
+# have not been edited by hand since the Generator-Run; the last two
+# describe regions whose authority has shifted to a human editor.
+#
+# Consumers MUST treat any string outside this closed set as opaque (per
+# ADR 0006 §3 — Studio-BFF Contract Versioning Policy).
+
+JAVA_REGION_ORIGIN_DETERMINISTIC = "deterministic"
+JAVA_REGION_ORIGIN_AGENT_PROPOSED = "agent_proposed"
+JAVA_REGION_ORIGIN_REPAIR_ATTEMPTED = "repair_attempted"
+JAVA_REGION_ORIGIN_MANUAL_MODIFIED = "manual_modified"
+JAVA_REGION_ORIGIN_MANUAL_EDIT = "manual_edit"
+
+JAVA_REGION_ORIGIN_CLASSES: tuple[str, ...] = (
+    JAVA_REGION_ORIGIN_DETERMINISTIC,
+    JAVA_REGION_ORIGIN_AGENT_PROPOSED,
+    JAVA_REGION_ORIGIN_REPAIR_ATTEMPTED,
+    JAVA_REGION_ORIGIN_MANUAL_MODIFIED,
+    JAVA_REGION_ORIGIN_MANUAL_EDIT,
+)
+
+# Subset whose presence triggers the manual-edit assist-interaction rule
+# (ADR 0007 §5): the Verification/Repair Agent MUST NOT propose changes
+# to such a region unless the assist decision carries
+# ``ASSIST_REASON_CALLER_EXPLICIT_OPT_IN``.
+JAVA_REGION_ORIGIN_MANUAL_CLASSES: tuple[str, ...] = (
+    JAVA_REGION_ORIGIN_MANUAL_MODIFIED,
+    JAVA_REGION_ORIGIN_MANUAL_EDIT,
+)
+
+
+# ---------------------------------------------------------------------------
 # Run contract
 # ---------------------------------------------------------------------------
 
@@ -789,6 +825,15 @@ class W02RunContract:
     failure_message: str | None = None
     repair_attempts: list[JsonObject] = field(default_factory=list)
     assist_decision: AssistDecision | None = None
+    # ADR 0007 (#257): manual-edit provenance fields stamped on the run
+    # summary when the run finalises. ``manual_edits_carried_over`` is
+    # true iff the verified Java buffer contained at least one
+    # ``manual_modified`` or ``manual_edit`` region; ``manual_drift_region_count``
+    # is the number of such regions. Both fields are additive over the
+    # pre-ADR-0007 contract — older persisted runs that lack them MUST be
+    # read as ``False`` / ``0`` respectively.
+    manual_edits_carried_over: bool = False
+    manual_drift_region_count: int = 0
     created_at: str = field(default_factory=_iso_now)
     updated_at: str = field(default_factory=_iso_now)
 
@@ -799,6 +844,16 @@ class W02RunContract:
             raise ValueError("workflow_id is required")
         if self.final_classification is not None and self.final_classification not in FINAL_CLASSIFICATIONS:
             raise ValueError(f"unknown final classification: {self.final_classification}")
+        if self.manual_drift_region_count < 0:
+            raise ValueError("manual_drift_region_count must be non-negative")
+        if self.manual_edits_carried_over and self.manual_drift_region_count == 0:
+            raise ValueError(
+                "manual_edits_carried_over=True requires manual_drift_region_count > 0"
+            )
+        if not self.manual_edits_carried_over and self.manual_drift_region_count > 0:
+            raise ValueError(
+                "manual_drift_region_count > 0 requires manual_edits_carried_over=True"
+            )
 
     def touch(self, now: str | None = None) -> None:
         self.updated_at = now or _iso_now()
@@ -901,6 +956,35 @@ class W02RunContract:
         self.evidence_pack_ref = dict(ref) if ref else None
         self.touch()
 
+    def set_manual_edit_summary(
+        self,
+        *,
+        carried_over: bool,
+        drift_region_count: int,
+    ) -> None:
+        """Record ADR 0007 manual-edit provenance summary on the run contract.
+
+        Issue #257: ``carried_over`` is true iff the verified Java buffer
+        contained at least one ``manual_modified`` or ``manual_edit``
+        region; ``drift_region_count`` is the number of such regions.
+        The orchestrator calls this once before finalising the run so
+        every consumer of the contract — BFF, Studio, evidence-service —
+        reads the same provenance summary.
+        """
+        if drift_region_count < 0:
+            raise ValueError("drift_region_count must be non-negative")
+        if carried_over and drift_region_count == 0:
+            raise ValueError(
+                "carried_over=True requires drift_region_count > 0"
+            )
+        if not carried_over and drift_region_count > 0:
+            raise ValueError(
+                "drift_region_count > 0 requires carried_over=True"
+            )
+        self.manual_edits_carried_over = carried_over
+        self.manual_drift_region_count = drift_region_count
+        self.touch()
+
     def finalize(
         self,
         classification: str,
@@ -953,6 +1037,8 @@ class W02RunContract:
             "failureMessage": self.failure_message,
             "repairAttempts": [dict(entry) for entry in self.repair_attempts],
             "assistDecision": self.assist_decision.to_dict() if self.assist_decision else None,
+            "manualEditsCarriedOver": self.manual_edits_carried_over,
+            "manualDriftRegionCount": self.manual_drift_region_count,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         }
