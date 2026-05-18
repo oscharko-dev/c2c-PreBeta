@@ -21,8 +21,17 @@
     --line-2: #2c313b;
     --line-3: #393f4b;
     --text: #d6d9e0;
-    --text-dim: #8a90a0;
-    --text-faint: #747b8c;
+    /* Studio-IDE-12 (#250) §Accessibility: bumped text-dim and
+       text-faint so every shipped combination of these tokens against
+       the bg-0 / bg-1 / bg-2 / bg-3 background scale meets the WCAG
+       2.2 AA ≥ 4.5:1 contrast ratio. The previous values
+       (text-dim #8a90a0, text-faint #747b8c) hovered around the
+       threshold and produced 7 axe-core color-contrast violations on
+       the workbench shell. The new values keep the visual hierarchy
+       intact (dim < default < bright) while pushing every contrast
+       ratio comfortably above the AA threshold. */
+    --text-dim: #a3aab8;
+    --text-faint: #909bb0;
     --text-bright: #eef0f4;
     --accent: #4eba87;
     --accent-dim: #3f9e73;

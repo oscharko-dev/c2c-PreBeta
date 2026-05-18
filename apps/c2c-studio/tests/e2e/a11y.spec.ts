@@ -37,17 +37,6 @@ test.describe("@a11y workbench shell", () => {
       // ``hoverMarkdownSanitizer`` and ``diagnosticMarkers`` test
       // suites.
       .exclude(".monaco-editor textarea")
-      // Studio-IDE-12 (#250) follow-up: the workbench shell currently
-      // ships 7 color-contrast nodes that fall short of the
-      // ≥ 4.5:1 (normal text) / ≥ 3:1 (icon / large text) thresholds
-      // axe-core enforces. The remediation is design-token work
-      // (Tailwind theme adjustments + Monaco theme overrides) that
-      // belongs in its own focused PR; until then the CI gate
-      // intentionally lets the color-contrast rule pass so the
-      // structural gate (ARIA, heading order, landmark roles, region
-      // labels, etc.) lands without being blocked on a theme audit.
-      // See PR description for the tracked follow-up.
-      .disableRules(["color-contrast"])
       .analyze();
 
     const severe = results.violations.filter((v) =>
