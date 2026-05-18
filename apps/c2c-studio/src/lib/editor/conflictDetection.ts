@@ -7,6 +7,20 @@
 // Algorithm: diff baseline against each child independently (Myers line
 // diff), align the two diff streams over baseline coordinate space, and emit
 // regions per the classification rules in issue #255.
+//
+// Known algorithmic note: Myers' minimum edit-script ordering is not unique
+// when a logical "replace N baseline lines with N child lines" operation is
+// expressible as either ``N deletes followed by N inserts`` or ``N
+// delete-insert pairs``. The alignment pass folds adjacent delete-then-
+// insert into ``changed`` regions, but a ``delete delete insert insert``
+// sequence promotes only the first delete to ``changed`` and parks the
+// trailing insert as a pure insertion at the same anchor. The resulting
+// classification is correct per ADR-0007 §2 (every drift line is accounted
+// for as ``manual_modified`` / ``manual_edit``) but may emit two adjacent
+// regions where a human would expect one. The merge dialog renders both
+// regions with the same resolution and the Apply helper composes the
+// merged buffer consistently — so the user impact is purely cosmetic. A
+// future PR could collapse adjacent same-resolution regions for display.
 
 export type ConflictRegionResolution = "manual" | "newGenerator" | "baseline";
 
@@ -373,6 +387,30 @@ export interface ApplyMergeSelectionsInput {
   regionId: (region: ConflictRegion) => string;
 }
 
+// Studio-IDE-13 (#255): thrown when ``applyMergeSelections`` encounters a
+// conflict region with ``needsUserPick: true`` and no explicit selection
+// (and no ``suggestedResolution`` fallback). The ThreeWayMergeDialog
+// blocks Apply when this would happen, so the error is a defensive
+// guard that surfaces a programmer mistake (caller bypassed the dialog
+// or supplied an incomplete selections map) rather than silently
+// dropping the user's work.
+export class UnresolvedMergeConflictError extends Error {
+  readonly regionId: string;
+  readonly lineRange: { startLine: number; endLine: number };
+  constructor(
+    regionId: string,
+    lineRange: { startLine: number; endLine: number },
+  ) {
+    super(
+      `Unresolved merge conflict at lines ${lineRange.startLine}-${lineRange.endLine}; ` +
+        `the caller did not supply a selection for region ${regionId}.`,
+    );
+    this.name = "UnresolvedMergeConflictError";
+    this.regionId = regionId;
+    this.lineRange = lineRange;
+  }
+}
+
 function chosenContentFor(
   region: ConflictRegion,
   selections: ReadonlyMap<string, ConflictRegionResolution>,
@@ -383,10 +421,9 @@ function chosenContentFor(
   if (choice === "manual") return region.manualContent;
   if (choice === "newGenerator") return region.newGeneratorContent;
   if (choice === "baseline") return region.baselineContent;
-  // Unresolved conflict — preserve the manual content so the user does not
-  // lose work. The dialog should block Apply when this happens but the
-  // helper still has to return *something* safe.
-  return region.manualContent;
+  // Unresolved conflict — caller violated the dialog contract. Surface
+  // the violation explicitly so the buffer is never silently corrupted.
+  throw new UnresolvedMergeConflictError(regionId(region), region.lineRange);
 }
 
 export function applyMergeSelections(input: ApplyMergeSelectionsInput): string {

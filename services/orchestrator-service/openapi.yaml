@@ -617,6 +617,7 @@ components:
                 - oracle_mismatch
                 - evidence_incomplete
                 - cancelled
+                - generate_only_complete
             - type: 'null'
         repairAttempts:
           type: array

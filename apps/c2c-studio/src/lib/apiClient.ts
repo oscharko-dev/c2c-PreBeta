@@ -612,6 +612,7 @@ const W02_UI_ERROR_CODES: ReadonlySet<W02UiErrorCode> = new Set([
   "oracle_mismatch",
   "evidence_incomplete",
   "cancelled",
+  "generate_only_complete",
   "service_unavailable",
   "internal_error",
 ]);

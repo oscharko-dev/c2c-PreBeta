@@ -705,6 +705,51 @@ class W0WorkflowRunnerTests(unittest.TestCase):
         self.assertIn("orchestrator.workflow.failed", event_types)
         self.assertNotIn("orchestrator.workflow.completed", event_types)
 
+    def test_generate_only_short_circuits_after_generate_java(self):
+        """Issue #255 / Studio-IDE-13: ``generate_only`` finalises after
+        generate-java without invoking build-test or evidence-writer."""
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-gen",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            model_prompt=None,
+            generate_only=True,
+        )
+
+        result = runner.run(
+            context=context,
+            input_ref={
+                "uri": "urn:source/main.cob",
+                "source": "IDENTIFICATION DIVISION.",
+            },
+        )
+
+        # The run finalises as incomplete with the sentinel failure code;
+        # build-test and evidence-writer are NEVER invoked.
+        self.assertEqual(result["status"], "incomplete")
+        invoked_caps = [entry[1] for entry in gateway.calls if entry[0] == "invoke"]
+        self.assertEqual(
+            invoked_caps,
+            ["cobol.parse", "cobol.ir", "java.generator"],
+        )
+        self.assertNotIn("java.build-test", invoked_caps)
+        self.assertNotIn("evidence.writer", invoked_caps)
+        # Workflow contract carries the generate_only_complete sentinel.
+        workflow_contract = result["workflowContract"]
+        self.assertEqual(workflow_contract["finalClassification"], "incomplete")
+        self.assertEqual(
+            workflow_contract["failureCode"], "generate_only_complete"
+        )
+        # Run is reported as completed to the harness (the user got
+        # what they asked for) — not failed.
+        self.assertEqual(gateway.updated_runs[-1][1], "completed")
+        event_types = [event.get("eventType") for event in gateway.posted_events]
+        self.assertIn("orchestrator.workflow.completed", event_types)
+        self.assertNotIn("orchestrator.workflow.failed", event_types)
+
 
 class WorkflowArtifactPersistenceTests(unittest.TestCase):
     """Workflow persists run-scoped artifacts on success and failure paths."""

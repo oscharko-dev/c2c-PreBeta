@@ -173,3 +173,106 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
     });
   });
 });
+
+// Studio-IDE-13 (#255) AC3 / AC5 / AC6: 3-Way Merge state lifecycle in
+// the store. These tests pin the contract between
+// ``requestJavaMergeReview``, ``applyJavaMergeSelections``, and
+// ``cancelJavaMergeReview`` so the GeneratedJavaEditorPane's auto-open
+// path and the ThreeWayMergeDialog's Apply/Cancel paths stay aligned
+// with the buffer model.
+describe("transformationRun: 3-Way Merge state (IDE-13)", () => {
+  it("requestJavaMergeReview computes conflict regions and exposes them on the store", () => {
+    const { result } = renderHook(() => useTransformationRun(), { wrapper });
+    act(() => {
+      result.current.requestJavaMergeReview({
+        filePath: "src/App.java",
+        baselineContent: "a\nb\nc\n",
+        manualContent: "a\nMAN\nc\n",
+        newGeneratorContent: "a\nGEN\nc\n",
+        newGeneratorRunId: "run-2",
+      });
+    });
+    const review = result.current.javaMergeReview;
+    expect(review).not.toBeNull();
+    expect(review?.filePath).toBe("src/App.java");
+    expect(review?.regions.length).toBeGreaterThan(0);
+    // The middle line is a true conflict — both diverged differently.
+    const conflict = review?.regions.find((r) => r.conflictKind === "conflict");
+    expect(conflict).toBeDefined();
+    expect(conflict?.needsUserPick).toBe(true);
+  });
+
+  it("applyJavaMergeSelections writes merged content + advances the generator baseline (AC5)", async () => {
+    const { result } = renderHook(() => useTransformationRun(), { wrapper });
+    await act(async () => {
+      await result.current.ensureJavaBaseline(
+        "src/App.java",
+        "a\nb\nc\n",
+        "run-1",
+      );
+    });
+    act(() => {
+      result.current.setJavaBufferContent("src/App.java", "a\nMAN\nc\n");
+    });
+    act(() => {
+      result.current.requestJavaMergeReview({
+        filePath: "src/App.java",
+        baselineContent: "a\nb\nc\n",
+        manualContent: "a\nMAN\nc\n",
+        newGeneratorContent: "a\nGEN\nc\n",
+        newGeneratorRunId: "run-2",
+      });
+    });
+    const review = result.current.javaMergeReview;
+    expect(review).not.toBeNull();
+    const conflict = review!.regions.find(
+      (r) => r.conflictKind === "conflict",
+    )!;
+    const conflictKey = `${conflict.conflictKind}:${conflict.lineRange.startLine}-${conflict.lineRange.endLine}`;
+    await act(async () => {
+      await result.current.applyJavaMergeSelections({
+        [conflictKey]: "newGenerator",
+      });
+    });
+    // Dialog cleared.
+    expect(result.current.javaMergeReview).toBeNull();
+    // Buffer now matches the new generator output; baseline metadata
+    // advanced to the run that produced it.
+    const entry = result.current.javaBuffers["src/App.java"]!;
+    expect(entry.content).toBe("a\nGEN\nc\n");
+    expect(entry.generatorBaselineContent).toBe("a\nGEN\nc\n");
+    expect(entry.generatorBaselineRunId).toBe("run-2");
+    expect(entry.isDirty).toBe(false);
+  });
+
+  it("cancelJavaMergeReview clears the review without touching the buffer (AC6)", async () => {
+    const { result } = renderHook(() => useTransformationRun(), { wrapper });
+    await act(async () => {
+      await result.current.ensureJavaBaseline(
+        "src/App.java",
+        "a\nb\nc\n",
+        "run-1",
+      );
+    });
+    act(() => {
+      result.current.setJavaBufferContent("src/App.java", "a\nMAN\nc\n");
+    });
+    act(() => {
+      result.current.requestJavaMergeReview({
+        filePath: "src/App.java",
+        baselineContent: "a\nb\nc\n",
+        manualContent: "a\nMAN\nc\n",
+        newGeneratorContent: "a\nGEN\nc\n",
+        newGeneratorRunId: "run-2",
+      });
+    });
+    const beforeCancel = result.current.javaBuffers["src/App.java"]!.content;
+    act(() => {
+      result.current.cancelJavaMergeReview();
+    });
+    expect(result.current.javaMergeReview).toBeNull();
+    expect(result.current.javaBuffers["src/App.java"]!.content).toBe(
+      beforeCancel,
+    );
+  });
+});

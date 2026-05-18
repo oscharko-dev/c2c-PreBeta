@@ -763,6 +763,26 @@ class OrchestratorService:
             use_transformation_agent = False
         else:
             raise ValueError("useTransformationAgent must be a boolean")
+        # Issue #255 / Studio-IDE-13: optional ``generateOnly`` flag.
+        # When ``True`` the orchestrator stops after the generate-java
+        # step (build/test/oracle are skipped) and finalises the run
+        # with the ``generate_only_complete`` failure code. Defaults to
+        # ``False`` so existing /api/v0/transform callers preserve the
+        # composed Generate & Verify pipeline.
+        generate_only_raw = payload.get("generateOnly", False)
+        if isinstance(generate_only_raw, str):
+            generate_only = generate_only_raw.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        elif isinstance(generate_only_raw, bool):
+            generate_only = generate_only_raw
+        elif generate_only_raw is None:
+            generate_only = False
+        else:
+            raise ValueError("generateOnly must be a boolean")
 
         run = self.runner.gateway.create_run(
             self.config.workflow_id,
@@ -780,6 +800,7 @@ class OrchestratorService:
             evidence_refs=[str(value) for value in evidence_refs],
             model_prompt=str(model_prompt).strip() if model_prompt else None,
             use_transformation_agent=use_transformation_agent,
+            generate_only=generate_only,
         )
 
         thread = threading.Thread(

@@ -587,6 +587,10 @@ class W02RunContractShapeTests(unittest.TestCase):
             "oracle_mismatch",
             "evidence_incomplete",
             "cancelled",
+            # Issue #255 / Studio-IDE-13: sentinel for generator-only runs.
+            # Not a real failure — the user requested generation without
+            # verification and the orchestrator delivered Java artifacts.
+            "generate_only_complete",
         }
         self.assertEqual(required, set(FAILURE_CODES))
 

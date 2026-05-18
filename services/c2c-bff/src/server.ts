@@ -2984,6 +2984,12 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             expectedOutput: genExpectedOutput,
             oracleInput: genOracleInput,
             useTransformationAgent: genUseTransformationAgent,
+            // Studio-IDE-13 (#255): generator-only intent — the
+            // orchestrator stops after the generate-java step and
+            // finalises with the ``generate_only_complete`` failure
+            // code. ``/api/v0/transform`` does NOT set this so the
+            // composed Generate & Verify pipeline keeps running unchanged.
+            generateOnly: true,
           };
           const upstream = await orchestrator.startTransformRun(generateInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {

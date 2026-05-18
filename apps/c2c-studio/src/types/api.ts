@@ -39,6 +39,10 @@ export interface RunLinks {
 }
 
 // Issue #172: closed set of UI-safe failure codes the BFF exposes.
+// Studio-IDE-13 (#255) adds ``generate_only_complete`` — applied when
+// /api/v0/generate finishes its generator pipeline by request. The
+// Studio renders this as a successful generator outcome rather than as
+// an error (see ``deriveProductState`` for the mapping).
 export type W02UiErrorCode =
   | "unsupported_cobol"
   | "parse_failed"
@@ -53,6 +57,7 @@ export type W02UiErrorCode =
   | "oracle_mismatch"
   | "evidence_incomplete"
   | "cancelled"
+  | "generate_only_complete"
   | "service_unavailable"
   | "internal_error";
 

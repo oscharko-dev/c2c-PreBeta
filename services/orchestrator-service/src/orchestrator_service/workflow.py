@@ -79,6 +79,7 @@ from .run_contract import (
     FAILURE_AGENT_CONTRACT_INVALID,
     FAILURE_AGENT_TIMEOUT,
     FAILURE_EVIDENCE_INCOMPLETE,
+    FAILURE_GENERATE_ONLY_COMPLETE,
     FAILURE_JAVA_GENERATION_FAILED,
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
@@ -209,6 +210,16 @@ class W0RunContext:
     # default) the orchestrator preserves the W0/W0.2 deterministic-only
     # path.
     use_transformation_agent: bool = False
+    # Issue #255 / Studio-IDE-13: when ``True``, the orchestrator stops
+    # after the generate-java step (i.e. the generator pipeline has
+    # produced Java artifacts) and finalises the run with classification
+    # ``incomplete`` + failure_code ``generate_only_complete``. The Studio
+    # consumes this signal as "Java artifacts ready; verification was not
+    # requested" and renders the new files in the editor without
+    # surfacing a verification error. Defaults to ``False`` so existing
+    # ``/api/v0/transform`` callers preserve their composed
+    # Generate & Verify behaviour.
+    generate_only: bool = False
 
 
 # noinspection PyClassHasNoInitInspection
@@ -2116,6 +2127,71 @@ class W0WorkflowRunner:
                 active_step=W02_STEP_COMPILE_TEST_JAVA,
                 message="java candidate persisted to artifact store",
             )
+            # Issue #255 / Studio-IDE-13: ``generate_only`` short-circuit.
+            # When the caller invoked /api/v0/generate the orchestrator
+            # finishes the generator pipeline and stops; build/test/oracle
+            # and evidence-write are deliberately skipped (per the issue
+            # spec) and the run finalises as ``incomplete`` with the
+            # sentinel failure code ``generate_only_complete``. UI
+            # consumers render this as "Java artifacts ready; verification
+            # was not requested" rather than as a real failure (see
+            # ``W02UiErrorCode`` in the Studio).
+            if context.generate_only and not w02_blocked:
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_RUN_BLOCKED,
+                    active_step=None,
+                    message=(
+                        "generator-only run completed; verification was not requested"
+                    ),
+                    failure_code=FAILURE_GENERATE_ONLY_COMPLETE,
+                )
+                self._finalize_w02(
+                    context,
+                    w02_contract,
+                    CLASSIFICATION_INCOMPLETE,
+                    failure_code=FAILURE_GENERATE_ONLY_COMPLETE,
+                    failure_message=(
+                        "generator-only run completed; verification was not requested"
+                    ),
+                )
+                self._record_marker_step(
+                    context,
+                    name=STEP_COMPLETED,
+                    status=STEP_STATUS_OK,
+                    run_status="completed",
+                )
+                self._emit_workflow_decision_event(
+                    context,
+                    "orchestrator.workflow.completed",
+                    "generator-only run completed",
+                )
+                _write_summary(
+                    "completed", message="generator-only run completed"
+                )
+                self.gateway.update_run(
+                    context.run_id,
+                    "completed",
+                    updated_by=self.config.service_name,
+                    message="generator-only run completed",
+                    evidence_refs=evidence_refs,
+                    policy_decision=POLICY_ALLOW,
+                )
+                try:
+                    self._flush_to_experience_learning(
+                        context.run_id, trajectory_payload
+                    )
+                except Exception:  # pragma: no cover - best-effort
+                    pass
+                return {
+                    "runId": context.run_id,
+                    "workflowId": context.workflow_id,
+                    "status": CLASSIFICATION_INCOMPLETE,
+                    "stepCount": len(step_results),
+                    "artifacts": list(artifact_refs),
+                    "workflowContract": w02_contract.to_dict(),
+                }
             if w02_blocked:
                 # When the productive agent failed we record run_blocked
                 # immediately and skip build/test so the deterministic

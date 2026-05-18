@@ -199,6 +199,11 @@ export interface OrchestratorClient {
     expectedOutput?: string;
     oracleInput?: string;
     useTransformationAgent?: boolean;
+    // Studio-IDE-13 (#255): when ``true`` the orchestrator stops after
+    // the generate-java step and finalises the run with the
+    // ``generate_only_complete`` failure code. The BFF /api/v0/generate
+    // handler sets this; /api/v0/transform never does.
+    generateOnly?: boolean;
   }): Promise<UpstreamResponse | undefined>;
   getRun(runId: string): Promise<UpstreamResponse | undefined>;
   getArtifacts(runId: string): Promise<UpstreamResponse | undefined>;
@@ -336,6 +341,7 @@ export function createOrchestratorClient(
       expectedOutput,
       oracleInput,
       useTransformationAgent,
+      generateOnly,
     }) {
       const sha256 = createHash("sha256")
         .update(sourceText, "utf8")
@@ -370,6 +376,9 @@ export function createOrchestratorClient(
       }
       if (typeof useTransformationAgent === "boolean") {
         payload.useTransformationAgent = useTransformationAgent;
+      }
+      if (typeof generateOnly === "boolean") {
+        payload.generateOnly = generateOnly;
       }
       return http.request(`${baseUrl}/v0/runs`, {
         method: "POST",

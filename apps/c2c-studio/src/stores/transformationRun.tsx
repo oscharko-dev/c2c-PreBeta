@@ -412,12 +412,28 @@ export function TransformationRunProvider({
       const selectionMap = new Map<string, ConflictRegionResolution>(
         Object.entries(selections),
       );
-      const merged = applyMergeSelections({
-        baseline: review.baselineContent,
-        regions: review.regions,
-        selections: selectionMap,
-        regionId: defaultRegionId,
-      });
+      // ``applyMergeSelections`` throws ``UnresolvedMergeConflictError``
+      // when a conflict region has no selection AND no suggested
+      // resolution. The ThreeWayMergeDialog blocks Apply in that case,
+      // so reaching this catch path is a programmer error — surface it
+      // by leaving the merge review open and logging to console so the
+      // user does not see a silently-corrupted buffer.
+      let merged: string;
+      try {
+        merged = applyMergeSelections({
+          baseline: review.baselineContent,
+          regions: review.regions,
+          selections: selectionMap,
+          regionId: defaultRegionId,
+        });
+      } catch (err) {
+        // Keep the dialog open; consumers can fix the selection and
+        // re-Apply.
+        if (typeof console !== "undefined" && console.error) {
+          console.error("applyJavaMergeSelections refused merge: ", err);
+        }
+        return;
+      }
 
       // Update generator baseline metadata first so subsequent overlay
       // recomputations diff against the new baseline rather than the

@@ -4,6 +4,7 @@ import {
   applyMergeSelections,
   defaultRegionId,
   detectConflicts,
+  UnresolvedMergeConflictError,
   type ConflictRegion,
   type ConflictRegionResolution,
 } from "./conflictDetection";
@@ -268,7 +269,7 @@ describe("applyMergeSelections", () => {
     expect(result).toBe("a\nB-MAN\nc\nD-NEW\ne\n");
   });
 
-  it("falls back to manual content for an unresolved conflict (defensive)", () => {
+  it("throws UnresolvedMergeConflictError when the caller bypasses the dialog", () => {
     const baseline = "a\nb\nc\n";
     const conflict = regionOf(
       "conflict",
@@ -279,15 +280,41 @@ describe("applyMergeSelections", () => {
       "GENERATOR\n",
       null,
     );
-    // No selection supplied — applyMergeSelections preserves manual so the
-    // user does not lose their work even if the dialog was bypassed.
+    // No selection supplied AND no suggestedResolution — the dialog
+    // contract says Apply is blocked in this case. Calling the helper
+    // anyway is a programmer error; we surface it explicitly so the
+    // buffer is never silently corrupted.
+    expect(() =>
+      applyMergeSelections({
+        baseline,
+        regions: [conflict],
+        selections: new Map(),
+        regionId: defaultRegionId,
+      }),
+    ).toThrowError(UnresolvedMergeConflictError);
+  });
+
+  it("uses suggestedResolution when no explicit selection is supplied", () => {
+    const baseline = "a\nb\nc\n";
+    // A conflict-shaped region with a suggested resolution acts like an
+    // auto-resolved choice; the dialog can pre-fill the radio with
+    // suggestedResolution and Apply works without an explicit selection.
+    const suggested = regionOf(
+      "manual_only",
+      2,
+      2,
+      "b\n",
+      "B-MAN\n",
+      "b\n",
+      "manual",
+    );
     const result = applyMergeSelections({
       baseline,
-      regions: [conflict],
+      regions: [suggested],
       selections: new Map(),
       regionId: defaultRegionId,
     });
-    expect(result).toBe("a\nMANUAL\nc\n");
+    expect(result).toBe("a\nB-MAN\nc\n");
   });
 });
 
