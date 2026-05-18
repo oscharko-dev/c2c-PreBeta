@@ -23,6 +23,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+  /v0/format-java:
+    post:
+      summary: Format Java source via google-java-format
+      operationId: formatJava
+      description: >
+        Studio-IDE-14 (#256): deterministic Java formatter for the
+        c2c-studio Java editor. The supplied content is formatted with
+        google-java-format. The call is stateless and emits no Harness/
+        Experience events: formatting is a UI affordance, not a
+        verification outcome.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FormatJavaRequest"
+      responses:
+        "200":
+          description: Source formatted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormatJavaResponse"
+        "400":
+          description: Malformed request payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormatJavaError"
+        "401":
+          description: Unauthorised
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Source could not be formatted (parse error, invalid Java)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormatJavaError"
   /v0/run-verification:
     post:
       summary: Compile, run, and compare a generated Java project
@@ -69,6 +110,48 @@ components:
           enum: [ok]
         service:
           type: string
+    FormatJavaRequest:
+      type: object
+      required: [content]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+          default: v0
+        content:
+          type: string
+          description: Java source to format.
+        filePath:
+          type: string
+          description: Optional file path included in upstream error messages.
+    FormatJavaResponse:
+      type: object
+      required: [schemaVersion, formattedContent]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        formattedContent:
+          type: string
+          description: Formatted Java source. Idempotent on already-formatted input.
+    FormatJavaError:
+      type: object
+      required: [schemaVersion, status, error]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        status:
+          type: string
+          enum: [failed]
+        error:
+          type: string
+        line:
+          type: integer
+          minimum: 1
+        column:
+          type: integer
+          minimum: 1
     RunVerificationRequest:
       type: object
       description: >

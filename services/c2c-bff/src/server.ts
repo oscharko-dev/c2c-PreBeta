@@ -16,10 +16,12 @@ import {
   type AcceptanceFixtureDetail,
 } from "./acceptance-fixtures";
 import {
+  createBuildTestRunnerClient,
   createEvidenceClient,
   createExperienceLearningClient,
   createModelGatewayClient,
   createHarnessClient,
+  type BuildTestRunnerClient,
   type ModelGatewayClient,
   type HarnessClient,
   createNodeHttpClient,
@@ -54,6 +56,13 @@ import {
 // normalization rules live in `./diagnostics.ts` so the BFF handlers
 // and the dedicated unit tests share a single source of truth.
 import { normalizeDiagnostics, type Diagnostic } from "./diagnostics";
+// Studio-IDE-14 (#256): typed request validation + upstream response
+// normalisation for the Java formatter route.
+import {
+  formatUnavailable,
+  normaliseUpstreamResponse,
+  validateFormatJavaRequest,
+} from "./formatJava";
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -77,6 +86,10 @@ export interface ServerDeps {
   experienceLearning?: ExperienceLearningClient;
   modelGateway?: ModelGatewayClient;
   harness?: HarnessClient;
+  // Studio-IDE-14 (#256): direct client for the deterministic Java
+  // formatter on the build-test-runner-service. Optional so tests can
+  // stub it.
+  buildTestRunner?: BuildTestRunnerClient;
   httpClient?: HttpClient;
   runStore?: RunStore;
   now?: () => Date;
@@ -91,6 +104,7 @@ interface ResolvedDeps {
   experienceLearning: ExperienceLearningClient;
   modelGateway: ModelGatewayClient;
   harness: HarnessClient;
+  buildTestRunner: BuildTestRunnerClient;
   runStore: RunStore;
 }
 
@@ -164,6 +178,14 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
         deps.config.harnessUrl,
         httpClient,
         deps.config.upstreamTimeoutMs,
+      ),
+    buildTestRunner:
+      deps.buildTestRunner ??
+      createBuildTestRunnerClient(
+        deps.config.buildTestRunnerUrl,
+        httpClient,
+        deps.config.formatJavaTimeoutMs,
+        deps.config.buildTestRunnerControlToken,
       ),
     runStore: deps.runStore ?? createRunStore(deps.now),
   };
@@ -669,10 +691,7 @@ async function verifyTransformationModelGatewayAvailable(
       capabilitiesBody = undefined;
     }
 
-    const view = normalizeModelGatewayHealthView(
-      health.body,
-      capabilitiesBody,
-    );
+    const view = normalizeModelGatewayHealthView(health.body, capabilitiesBody);
     if (!modelGatewayViewHasCallableTransformationModel(view)) {
       return {
         ok: false,
@@ -895,7 +914,6 @@ function normalizeRunArtifact(raw: unknown): Record<string, unknown> | null {
   }
   return artifact;
 }
-
 
 type GeneratedStatus = "generated" | "unsupported" | "skipped" | "incomplete";
 
@@ -2328,6 +2346,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
     experienceLearning,
     modelGateway,
     harness,
+    buildTestRunner,
     runStore,
   } = resolved;
 
@@ -2373,6 +2392,100 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
         }
         return;
+      }
+
+      // Studio-IDE-14 (#256): deterministic Java formatter route. Proxies
+      // to /v0/format-java on the build-test-runner-service. The Studio
+      // client (lib/editor/javaFormatClient.ts) calls this on
+      // Cmd/Ctrl+Shift+F and on opt-in format-on-save.
+      if (pathname === "/api/v0/format/java" && method === "POST") {
+        if (!buildTestRunner.enabled) {
+          jsonResponse(
+            res,
+            503,
+            formatUnavailable(
+              "formatter unavailable: build-test-runner-service URL is not configured",
+            ),
+          );
+          return;
+        }
+        let raw: unknown;
+        try {
+          raw = await readJsonBody(req, config.formatJavaSourceMaxBytes);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, formatUnavailable("request body too large"));
+            return;
+          }
+          jsonResponse(
+            res,
+            400,
+            formatUnavailable(
+              err instanceof Error ? err.message : "invalid body",
+            ),
+          );
+          return;
+        }
+        const validation = validateFormatJavaRequest(raw, {
+          maxContentBytes: config.formatJavaSourceMaxBytes,
+        });
+        if (!validation.ok) {
+          jsonResponse(res, validation.status, validation.body);
+          return;
+        }
+        try {
+          const upstream = await buildTestRunner.formatJava({
+            content: validation.value.content,
+            ...(validation.value.filePath
+              ? { filePath: validation.value.filePath }
+              : {}),
+          });
+          if (!upstream) {
+            jsonResponse(
+              res,
+              503,
+              formatUnavailable("formatter returned no response"),
+            );
+            return;
+          }
+          if (upstream.truncated) {
+            jsonResponse(
+              res,
+              502,
+              formatUnavailable("formatter response exceeded the BFF size cap"),
+            );
+            return;
+          }
+          const normalised = normaliseUpstreamResponse({
+            status: upstream.status,
+            body: upstream.body,
+          });
+          if (normalised.kind === "ok") {
+            jsonResponse(res, 200, normalised.body);
+            return;
+          }
+          jsonResponse(res, normalised.status, normalised.body);
+          return;
+        } catch (err) {
+          if (err instanceof UpstreamResponseTooLargeError) {
+            jsonResponse(
+              res,
+              502,
+              formatUnavailable("formatter response exceeded the BFF size cap"),
+            );
+            return;
+          }
+          jsonResponse(
+            res,
+            503,
+            formatUnavailable(
+              err instanceof Error
+                ? `formatter unavailable: ${err.message}`
+                : "formatter unavailable",
+            ),
+          );
+          return;
+        }
       }
 
       if (pathname === "/api/v0/transform" && method === "POST") {

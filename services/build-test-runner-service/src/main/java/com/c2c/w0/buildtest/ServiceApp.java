@@ -65,6 +65,13 @@ public final class ServiceApp {
         server.createContext("/v0/run-verification",
                 exchange -> handleRunVerification(exchange, service, harnessEndpoint, harnessEventToken, experienceEndpoint, controlToken));
 
+        // Studio-IDE-14 (#256): deterministic Java formatter (google-java-format
+        // in-process). Stateless per-request handler; no events emitted since
+        // formatting is a UI affordance, not a verification outcome.
+        JavaFormatter formatter = new JavaFormatter();
+        server.createContext("/v0/format-java",
+                exchange -> handleFormatJava(exchange, formatter, controlToken));
+
         server.start();
         System.out.printf("%s listening on %s:%d%n",
                 SERVICE_NAME, listenAddress.getHostString(), listenAddress.getPort());
@@ -98,6 +105,58 @@ public final class ServiceApp {
             sendJson(exchange, 500, Map.of("status", "failed",
                     "error", e.getMessage() == null ? "unknown" : e.getMessage()));
         }
+    }
+
+    private static void handleFormatJava(HttpExchange exchange,
+                                         JavaFormatter formatter,
+                                         String controlToken) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            sendText(exchange, 405, "method not allowed");
+            return;
+        }
+        if (!isAuthorized(exchange, controlToken)) {
+            sendJson(exchange, 401, Map.of("status", "failed", "error", "unauthorized"));
+            return;
+        }
+        Map<String, Object> request;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = JSON.readValue(exchange.getRequestBody(), Map.class);
+            request = parsed;
+        } catch (Exception e) {
+            sendJson(exchange, 400, Map.of(
+                    "schemaVersion", "v0",
+                    "status", "failed",
+                    "error", "invalid json"));
+            return;
+        }
+        Object contentValue = request == null ? null : request.get("content");
+        if (!(contentValue instanceof String)) {
+            sendJson(exchange, 400, Map.of(
+                    "schemaVersion", "v0",
+                    "status", "failed",
+                    "error", "content must be a string"));
+            return;
+        }
+        String content = (String) contentValue;
+        JavaFormatter.FormatResult result = formatter.format(content);
+        if (result.isOk()) {
+            sendJson(exchange, 200, Map.of(
+                    "schemaVersion", "v0",
+                    "formattedContent", result.formattedContent()));
+            return;
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("schemaVersion", "v0");
+        body.put("status", "failed");
+        body.put("error", result.errorMessage() == null ? "format failed" : result.errorMessage());
+        if (result.errorLine() != null) {
+            body.put("line", result.errorLine());
+        }
+        if (result.errorColumn() != null) {
+            body.put("column", result.errorColumn());
+        }
+        sendJson(exchange, 422, body);
     }
 
     static boolean isAuthorized(HttpExchange exchange, String controlToken) {

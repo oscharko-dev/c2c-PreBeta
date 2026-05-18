@@ -37,13 +37,30 @@ import {
 } from "@/lib/editor/markerNavigation";
 import { useMonacoReady } from "@/lib/editor/lazyMonaco";
 import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
+import { formatJava } from "@/lib/editor/javaFormatClient";
+import { JAVA_LINT_OWNER, lintJava } from "@/lib/editor/javaLint";
+import {
+  getJavaFormatOnSave,
+  setJavaFormatOnSave,
+} from "@/lib/editor/javaFormatOnSave";
+import { compileCheck } from "@/lib/editor/compileCheckClient";
+import {
+  useJavaEditorActions,
+  useRegisterCompileCheckHandler,
+} from "@/stores/javaEditorActions";
+import type { Diagnostic } from "@/types/api";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
+const FORMAT_NOTICE_VISIBLE_MS = 4000;
 // Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. 500 ms matches
 // the COBOL editor cadence (Studio-IDE-2) so the chip / status derivation
 // has identical responsiveness across the two editors.
 const JAVA_BUFFER_DEBOUNCE_MS = 500;
+// Studio-IDE-14 (#256): lint cadence. 300 ms matches the slice contract;
+// shorter intervals risk flooding the Problems panel mid-keystroke.
+const JAVA_LINT_DEBOUNCE_MS = 300;
 const SHA_CHIP_LENGTH = 12;
+const JAVA_BUILD_OWNER = "c2c-java-build" as const;
 
 type RunMode = "deterministic" | "ai-assisted" | "stale";
 
@@ -89,6 +106,30 @@ export function GeneratedJavaEditorPane() {
   } = useTransformationRun();
 
   const [showSaveNotice, setShowSaveNotice] = useState(false);
+  // Studio-IDE-14 (#256): lint state, compile-check diagnostics, and the
+  // transient format toast are hoisted up here so the auto-dismiss effect
+  // below can subscribe to `formatNotice` before the rest of the component
+  // is fully built up. Keep the declarations together so the file stays
+  // navigable.
+  const [lintDiagnostics, setLintDiagnostics] = useState<Diagnostic[]>([]);
+  const [compileCheckDiagnostics, setCompileCheckDiagnostics] = useState<
+    Diagnostic[]
+  >([]);
+  const [formatNotice, setFormatNotice] = useState<{
+    tone: "info" | "warning" | "error";
+    message: string;
+  } | null>(null);
+  const [formatOnSave, setFormatOnSaveState] = useState<boolean>(false);
+  useEffect(() => {
+    setFormatOnSaveState(getJavaFormatOnSave());
+  }, []);
+  const handleFormatOnSaveToggle = useCallback(() => {
+    setFormatOnSaveState((previous) => {
+      const next = !previous;
+      setJavaFormatOnSave(next);
+      return next;
+    });
+  }, []);
 
   // Hydrate the Java buffer for this (runId, filePath) when content lands.
   // Studio-IDE-3 (#247) seeded the buffer for status chips and conflict
@@ -125,6 +166,16 @@ export function GeneratedJavaEditorPane() {
     );
     return () => clearTimeout(handle);
   }, [saveNoticeAt]);
+
+  // Studio-IDE-14 (#256): format / compile-check notice auto-dismiss.
+  useEffect(() => {
+    if (formatNotice === null) return;
+    const handle = setTimeout(
+      () => setFormatNotice(null),
+      FORMAT_NOTICE_VISIBLE_MS,
+    );
+    return () => clearTimeout(handle);
+  }, [formatNotice]);
 
   const conflictForThisFile =
     javaConflict && javaConflict.filePath === selectedFilePath
@@ -336,6 +387,38 @@ export function GeneratedJavaEditorPane() {
       remaining = Math.max(0, remaining - markers.length);
       groups.push({ owner, markers });
     }
+    // Studio-IDE-14 (#256): client-side lint markers live in their own
+    // owner so toggling the editor's "Clear lint" or repainting from a
+    // Compile Check pass never erases the other groups.
+    if (selectedFilePath && lintDiagnostics.length > 0) {
+      const { markers: lintMarkers } = diagnosticsToMarkers(lintDiagnostics, {
+        monaco,
+        model,
+        limit: remaining,
+      });
+      remaining = Math.max(0, remaining - lintMarkers.length);
+      groups.push({ owner: JAVA_LINT_OWNER, markers: lintMarkers });
+    }
+    // Studio-IDE-14 (#256): Compile Check diagnostics. Owner is
+    // `c2c-java-build` per the slice contract so it lives alongside the
+    // existing `c2c-build` (workflow-run build) channel without
+    // overwriting it.
+    if (selectedFilePath && compileCheckDiagnostics.length > 0) {
+      const buildScoped = compileCheckDiagnostics.filter((d) => {
+        if (!d.filePath) return true;
+        return (
+          d.filePath === selectedFilePath ||
+          segmentsMatch(d.filePath, selectedFilePath)
+        );
+      });
+      const { markers: buildMarkers } = diagnosticsToMarkers(buildScoped, {
+        monaco,
+        model,
+        limit: remaining,
+      });
+      remaining = Math.max(0, remaining - buildMarkers.length);
+      groups.push({ owner: JAVA_BUILD_OWNER, markers: buildMarkers });
+    }
     return groups;
     // editorMountToken is intentional — see review #244 round 3.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -345,6 +428,8 @@ export function GeneratedJavaEditorPane() {
     state.buildTest,
     selectedFilePath,
     editorMountToken,
+    lintDiagnostics,
+    compileCheckDiagnostics,
   ]);
 
   // Debounced onChange — schedules a single bufferModel update per
@@ -410,6 +495,159 @@ export function GeneratedJavaEditorPane() {
   selectedFilePathRef.current = selectedFilePath;
   const flushPendingEditRef = useRef(flushPendingEdit);
   flushPendingEditRef.current = flushPendingEdit;
+  const formatOnSaveRef = useRef(formatOnSave);
+  formatOnSaveRef.current = formatOnSave;
+  const lintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const formatInFlightRef = useRef(false);
+
+  // Studio-IDE-14 (#256): debounced lint. 300 ms after the last keystroke
+  // we re-run the static rules; the markers refresh under the
+  // `c2c-java-lint` owner via the marker memo above. Lint never mutates
+  // the buffer.
+  useEffect(() => {
+    if (!selectedFilePath || displayedContent === null) {
+      setLintDiagnostics([]);
+      return;
+    }
+    if (lintTimerRef.current !== null) {
+      clearTimeout(lintTimerRef.current);
+    }
+    const filePath = selectedFilePath;
+    const content = displayedContent;
+    lintTimerRef.current = setTimeout(() => {
+      lintTimerRef.current = null;
+      const next = lintJava(content, { filePath });
+      setLintDiagnostics(next);
+    }, JAVA_LINT_DEBOUNCE_MS);
+    return () => {
+      if (lintTimerRef.current !== null) {
+        clearTimeout(lintTimerRef.current);
+        lintTimerRef.current = null;
+      }
+    };
+  }, [selectedFilePath, displayedContent]);
+
+  // Studio-IDE-14 (#256): replace the editor buffer with the supplied
+  // content as a single atomic edit so the format is one undo step. The
+  // function also re-seeds the buffer model via `setJavaBufferContent`
+  // so the provenance overlay recomputes per ADR-4 (a format is a manual
+  // edit unless the content is byte-identical).
+  const applyFormattedContent = useCallback(
+    (filePath: string, formatted: string) => {
+      const editor = editorInstanceRef.current;
+      if (!editor) return;
+      const model = editor.getModel();
+      if (!model) return;
+      const current = model.getValue();
+      if (current === formatted) {
+        // Idempotent — nothing to apply, no provenance recompute needed.
+        return;
+      }
+      const fullRange = model.getFullModelRange();
+      editor.executeEdits("c2c.format-java", [
+        {
+          range: fullRange,
+          text: formatted,
+          forceMoveMarkers: true,
+        },
+      ]);
+      pendingEditRef.current = null;
+      if (debounceTimerRef.current !== null) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      setJavaBufferContent(filePath, formatted);
+    },
+    [setJavaBufferContent],
+  );
+
+  // Studio-IDE-14 (#256): the Cmd/Ctrl+Shift+F handler. Reused by the
+  // format-on-save path on Cmd/Ctrl+S.
+  const performFormat = useCallback(async (): Promise<boolean> => {
+    const editor = editorInstanceRef.current;
+    if (!editor || formatInFlightRef.current) return false;
+    const model = editor.getModel();
+    if (!model) return false;
+    const filePath = selectedFilePathRef.current;
+    if (!filePath) return false;
+    flushPendingEditRef.current();
+    const content = model.getValue();
+    formatInFlightRef.current = true;
+    try {
+      const result = await formatJava({ content, filePath });
+      if (!result.ok) {
+        setFormatNotice({
+          tone: result.code === "format_parse_error" ? "warning" : "error",
+          message:
+            result.code === "format_parse_error"
+              ? `Could not format: ${result.message}`
+              : `Formatter unavailable — buffer unchanged. ${result.message}`,
+        });
+        return false;
+      }
+      applyFormattedContent(filePath, result.formattedContent);
+      return true;
+    } finally {
+      formatInFlightRef.current = false;
+    }
+  }, [applyFormattedContent]);
+
+  const performFormatRef = useRef(performFormat);
+  performFormatRef.current = performFormat;
+
+  // Studio-IDE-14 (#256): Compile Check handler. Sends the current Java
+  // buffer to `POST /api/v0/compile-check` (owned by Studio-IDE-13) and
+  // surfaces the response as build-flavoured markers. A 404 / 5xx degrades
+  // gracefully to a toast.
+  const javaActions = useJavaEditorActions();
+  const compileCheckPending = javaActions.compileCheckPending;
+  const setCompileCheckPending = javaActions.setCompileCheckPending;
+  const performCompileCheck = useCallback(async (): Promise<void> => {
+    const editor = editorInstanceRef.current;
+    const filePath = selectedFilePathRef.current;
+    if (!editor || !filePath) return;
+    const model = editor.getModel();
+    if (!model) return;
+    flushPendingEditRef.current();
+    setCompileCheckPending(true);
+    try {
+      const result = await compileCheck({
+        content: model.getValue(),
+        filePath,
+        ...(state.runId ? { runId: state.runId } : {}),
+      });
+      if (!result.ok) {
+        setFormatNotice({
+          tone: "error",
+          message: `Compile Check unavailable — ${result.message}`,
+        });
+        setCompileCheckDiagnostics([]);
+        return;
+      }
+      setCompileCheckDiagnostics(
+        result.diagnostics.map((d) => ({
+          ...d,
+          // Re-anchor the diagnostic to the current file when the
+          // upstream did not provide one.
+          filePath: d.filePath ?? filePath,
+          sourceKind: d.sourceKind ?? "build",
+        })),
+      );
+      if (result.diagnostics.length === 0) {
+        setFormatNotice({
+          tone: "info",
+          message: "Compile Check passed — no diagnostics reported.",
+        });
+      }
+    } finally {
+      setCompileCheckPending(false);
+    }
+  }, [setCompileCheckPending, state.runId]);
+
+  useRegisterCompileCheckHandler(performCompileCheck);
+
+  const performCompileCheckRef = useRef(performCompileCheck);
+  performCompileCheckRef.current = performCompileCheck;
 
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
@@ -419,14 +657,35 @@ export function GeneratedJavaEditorPane() {
       // live model — without this, whole-line markers stay narrowed
       // to a single character.
       setEditorMountToken((value) => value + 1);
+      // Cmd/Ctrl+S — local save, with opt-in format-on-save.
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        // Make sure the last in-flight edit lands in the buffer model
-        // before the persistence layer reads it.
         flushPendingEditRef.current();
         const filePath = selectedFilePathRef.current;
-        if (filePath) {
+        if (!filePath) return;
+        if (formatOnSaveRef.current) {
+          void performFormatRef.current().then(() => {
+            void saveJavaDraftRef.current(filePath);
+          });
+        } else {
           void saveJavaDraftRef.current(filePath);
         }
+      });
+      // Cmd/Ctrl+Shift+F — Studio-IDE-14 format action.
+      editor.addAction({
+        id: "c2c.format-java",
+        label: "Format Document (Java)",
+        keybindings: [
+          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+        ],
+        contextMenuGroupId: "1_modification",
+        contextMenuOrder: 1,
+        run: () => {
+          void performFormatRef.current();
+        },
+      });
+      // F5 — Studio-IDE-14 Compile Check (Studio-IDE-13 endpoint).
+      editor.addCommand(monaco.KeyCode.F5, () => {
+        void performCompileCheckRef.current();
       });
     },
     [registerMarkerEditor],
@@ -600,6 +859,48 @@ export function GeneratedJavaEditorPane() {
           />
         </div>
         <div className="flex gap-2 items-center">
+          {isJavaEditable && selectedFilePath ? (
+            <label
+              data-testid="java-format-on-save-toggle"
+              className="flex items-center gap-1 text-[10px] text-text-dim select-none cursor-pointer"
+              title="Format Java on Save (Cmd/Ctrl+S)"
+            >
+              <input
+                type="checkbox"
+                checked={formatOnSave}
+                onChange={handleFormatOnSaveToggle}
+                aria-label="Format Java on Save"
+                className="h-3 w-3"
+              />
+              <span>Format on Save</span>
+            </label>
+          ) : null}
+          {isJavaEditable && selectedFilePath ? (
+            <button
+              type="button"
+              onClick={() => void performFormat()}
+              data-testid="java-format-button"
+              title="Format Document (Cmd/Ctrl+Shift+F)"
+              aria-label="Format Java document"
+              className="rounded border border-line px-2 py-0.5 text-[10px] font-medium text-text-dim hover:bg-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={formatInFlightRef.current}
+            >
+              Format
+            </button>
+          ) : null}
+          {isJavaEditable && selectedFilePath ? (
+            <button
+              type="button"
+              onClick={() => void performCompileCheck()}
+              data-testid="java-compile-check-pane-button"
+              title="Compile Check (F5)"
+              aria-label="Run Compile Check on the Java buffer"
+              className="rounded border border-line px-2 py-0.5 text-[10px] font-medium text-text-dim hover:bg-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={compileCheckPending}
+            >
+              {compileCheckPending ? "Compile…" : "Compile Check"}
+            </button>
+          ) : null}
           {selectedFilePath ? <RunModeBadge mode={runMode} /> : null}
           {fileSha ? (
             <span
@@ -660,6 +961,24 @@ export function GeneratedJavaEditorPane() {
           className="border-b border-success/20 bg-success-soft px-4 py-1.5 text-xs text-success"
         >
           Saved locally — this Java draft stays on your device.
+        </div>
+      ) : null}
+
+      {formatNotice ? (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="java-format-notice"
+          data-tone={formatNotice.tone}
+          className={
+            formatNotice.tone === "warning"
+              ? "border-b border-warn/20 bg-warn-soft px-4 py-1.5 text-xs text-warn"
+              : formatNotice.tone === "error"
+                ? "border-b border-error/20 bg-error/10 px-4 py-1.5 text-xs text-error"
+                : "border-b border-line bg-bg-1 px-4 py-1.5 text-xs text-text-dim"
+          }
+        >
+          {formatNotice.message}
         </div>
       ) : null}
 

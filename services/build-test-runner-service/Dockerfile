@@ -24,4 +24,15 @@ COPY fixtures/golden-master /app/fixtures/golden-master
 COPY corpus/synthetic/programs /app/corpus/synthetic/programs
 COPY corpus/synthetic/fixtures /app/corpus/synthetic/fixtures
 EXPOSE 8084
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# Studio-IDE-14 (#256): google-java-format reaches into jdk.compiler
+# internals to drive its own parser; keep these flags in sync with the
+# maven-surefire-plugin argLine in pom.xml so CI and the runtime image
+# agree.
+ENTRYPOINT ["java", \
+    "--add-exports", "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED", \
+    "--add-exports", "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED", \
+    "--add-exports", "jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED", \
+    "--add-exports", "jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED", \
+    "--add-exports", "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED", \
+    "--add-exports", "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED", \
+    "-jar", "/app/app.jar"]

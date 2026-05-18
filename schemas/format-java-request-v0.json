@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/format-java-request-v0.json",
+  "title": "Format Java Request v0",
+  "description": "Studio-IDE-14 (#256): request body for `POST /api/v0/format/java` on the c2c BFF and for the upstream `POST /v0/format-java` on build-test-runner-service. Governed by ADR 0006 (Studio-BFF Contract Versioning). The BFF caps `content` size via C2C_FORMAT_JAVA_SOURCE_MAX_BYTES (default 1 MiB).",
+  "type": "object",
+  "required": ["content"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v0"],
+      "default": "v0",
+      "description": "DTO version per ADR 0006. Optional on the wire; absence means \"v0\"."
+    },
+    "content": {
+      "type": "string",
+      "description": "Java source to format. Idempotent on already-formatted content per the Studio-IDE-14 acceptance criteria."
+    },
+    "filePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional path included in upstream error messages. Has no effect on the formatted output."
+    }
+  }
+}

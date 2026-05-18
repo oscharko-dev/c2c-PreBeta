@@ -377,6 +377,10 @@ const baseConfig: BffConfig = {
   experienceLearningUrl: "",
   modelGatewayUrl: "",
   harnessUrl: "",
+  buildTestRunnerUrl: "",
+  buildTestRunnerControlToken: "",
+  formatJavaTimeoutMs: 5_000,
+  formatJavaSourceMaxBytes: 1_048_576,
   upstreamTimeoutMs: 1_000,
   transformSourceMaxBytes: 1_000_000,
   artifactContentMaxBytes: 1_048_576,
@@ -1494,7 +1498,8 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
     // sha256 and metadata intact so the Studio Problems panel can
     // jump to the originating artifact.
     assert.equal(
-      (body.diagnostics[0] as { artifactRef?: { sha256: string } })?.artifactRef?.sha256,
+      (body.diagnostics[0] as { artifactRef?: { sha256: string } })?.artifactRef
+        ?.sha256,
       "f".repeat(64),
     );
     assert.deepEqual(body.files, {});
@@ -1788,7 +1793,10 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     assert.equal(body.diagnostics[0]?.code, "javac-deprecation");
     assert.equal(body.diagnostics[0]?.line, 12);
     assert.equal(body.diagnostics[0]?.column, 7);
-    assert.equal(body.diagnostics[0]?.filePath, "src/main/java/c2c/CASE01.java");
+    assert.equal(
+      body.diagnostics[0]?.filePath,
+      "src/main/java/c2c/CASE01.java",
+    );
     assert.equal(body.diagnostics[0]?.sourceKind, "generated_java");
   } finally {
     await server.close();

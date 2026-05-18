@@ -17,6 +17,7 @@ import { RightObservabilityStripe } from "@/components/observability/RightObserv
 import { editorPersistence } from "@/lib/editor/editorPersistence";
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
 import { MarkerNavigationProvider } from "@/lib/editor/markerNavigation";
+import { JavaEditorActionsProvider } from "@/stores/javaEditorActions";
 import { useMarkerNavigationShortcuts } from "@/hooks/useMarkerNavigationShortcuts";
 
 export function WorkbenchShell() {
@@ -39,7 +40,9 @@ export function WorkbenchShell() {
           <GeneratedArtifactsProvider>
             <OriginOverlayProvider>
               <MarkerNavigationProvider>
-                <WorkbenchShellBody apiState={apiState} />
+                <JavaEditorActionsProvider>
+                  <WorkbenchShellBody apiState={apiState} />
+                </JavaEditorActionsProvider>
               </MarkerNavigationProvider>
             </OriginOverlayProvider>
           </GeneratedArtifactsProvider>

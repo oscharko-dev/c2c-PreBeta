@@ -1,7 +1,7 @@
-import * as http from 'node:http';
-import * as https from 'node:https';
-import { createHash } from 'node:crypto';
-import { URL } from 'node:url';
+import * as http from "node:http";
+import * as https from "node:https";
+import { createHash } from "node:crypto";
+import { URL } from "node:url";
 
 export interface UpstreamResponse {
   status: number;
@@ -37,14 +37,17 @@ export class UpstreamResponseTooLargeError extends Error {
         ? `upstream response too large: declared ${declaredByteSize} bytes exceeds limit ${limit}`
         : `upstream response too large: exceeded limit ${limit} bytes`,
     );
-    this.name = 'UpstreamResponseTooLargeError';
+    this.name = "UpstreamResponseTooLargeError";
     this.limit = limit;
     this.declaredByteSize = declaredByteSize;
   }
 }
 
 export interface HttpClient {
-  request(targetUrl: string, options: HttpRequestOptions): Promise<UpstreamResponse>;
+  request(
+    targetUrl: string,
+    options: HttpRequestOptions,
+  ): Promise<UpstreamResponse>;
 }
 
 export function createNodeHttpClient(): HttpClient {
@@ -70,31 +73,32 @@ export function createNodeHttpClient(): HttpClient {
         try {
           parsed = new URL(targetUrl);
         } catch (err) {
-          safeReject(err instanceof Error ? err : new Error('invalid url'));
+          safeReject(err instanceof Error ? err : new Error("invalid url"));
           return;
         }
 
-        const transport = parsed.protocol === 'https:' ? https : http;
-        const bodyBytes = options.body === undefined
-          ? undefined
-          : Buffer.from(JSON.stringify(options.body), 'utf-8');
+        const transport = parsed.protocol === "https:" ? https : http;
+        const bodyBytes =
+          options.body === undefined
+            ? undefined
+            : Buffer.from(JSON.stringify(options.body), "utf-8");
 
         const headers: Record<string, string> = {
-          accept: 'application/json',
+          accept: "application/json",
           ...(options.headers ?? {}),
         };
         if (bodyBytes) {
-          headers['content-type'] = 'application/json';
-          headers['content-length'] = String(bodyBytes.length);
+          headers["content-type"] = "application/json";
+          headers["content-length"] = String(bodyBytes.length);
         }
 
         const maxResponseBytes = options.maxResponseBytes;
 
         const req = transport.request(
           {
-            method: options.method ?? 'GET',
+            method: options.method ?? "GET",
             hostname: parsed.hostname,
-            port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+            port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
             path: `${parsed.pathname}${parsed.search}`,
             headers,
           },
@@ -104,13 +108,18 @@ export function createNodeHttpClient(): HttpClient {
             // before reading any body bytes is the cheapest defence
             // against an upstream that tries to ship a multi-GB payload.
             if (maxResponseBytes !== undefined) {
-              const rawLen = res.headers['content-length'];
-              if (typeof rawLen === 'string') {
+              const rawLen = res.headers["content-length"];
+              if (typeof rawLen === "string") {
                 const declared = Number(rawLen);
                 if (Number.isFinite(declared) && declared > maxResponseBytes) {
                   res.resume();
                   req.destroy();
-                  safeReject(new UpstreamResponseTooLargeError(maxResponseBytes, declared));
+                  safeReject(
+                    new UpstreamResponseTooLargeError(
+                      maxResponseBytes,
+                      declared,
+                    ),
+                  );
                   return;
                 }
               }
@@ -118,20 +127,27 @@ export function createNodeHttpClient(): HttpClient {
             const chunks: Buffer[] = [];
             let received = 0;
             let truncated = false;
-            res.on('data', (chunk: Buffer) => {
+            res.on("data", (chunk: Buffer) => {
               if (truncated) return;
               received += chunk.length;
-              if (maxResponseBytes !== undefined && received > maxResponseBytes) {
+              if (
+                maxResponseBytes !== undefined &&
+                received > maxResponseBytes
+              ) {
                 truncated = true;
                 req.destroy();
-                safeResolve({ status: res.statusCode ?? 0, body: null, truncated: true });
+                safeResolve({
+                  status: res.statusCode ?? 0,
+                  body: null,
+                  truncated: true,
+                });
                 return;
               }
               chunks.push(chunk);
             });
-            res.on('end', () => {
+            res.on("end", () => {
               if (truncated) return;
-              const raw = Buffer.concat(chunks).toString('utf-8');
+              const raw = Buffer.concat(chunks).toString("utf-8");
               let body: unknown;
               if (raw.length > 0) {
                 try {
@@ -144,7 +160,7 @@ export function createNodeHttpClient(): HttpClient {
               }
               safeResolve({ status: res.statusCode ?? 0, body });
             });
-            res.on('error', (err) => {
+            res.on("error", (err) => {
               if (truncated) return;
               safeReject(err);
             });
@@ -152,9 +168,13 @@ export function createNodeHttpClient(): HttpClient {
         );
 
         req.setTimeout(options.timeoutMs, () => {
-          req.destroy(new Error(`upstream request timed out after ${options.timeoutMs}ms`));
+          req.destroy(
+            new Error(
+              `upstream request timed out after ${options.timeoutMs}ms`,
+            ),
+          );
         });
-        req.on('error', safeReject);
+        req.on("error", safeReject);
         if (bodyBytes) req.write(bodyBytes);
         req.end();
       });
@@ -164,7 +184,11 @@ export function createNodeHttpClient(): HttpClient {
 
 export interface OrchestratorClient {
   enabled: boolean;
-  startRun(input: { programId: string; cobolSourcePath: string; requester?: string }): Promise<UpstreamResponse | undefined>;
+  startRun(input: {
+    programId: string;
+    cobolSourcePath: string;
+    requester?: string;
+  }): Promise<UpstreamResponse | undefined>;
   startTransformRun(input: {
     programId: string;
     sourceText: string;
@@ -180,7 +204,11 @@ export interface OrchestratorClient {
   getArtifacts(runId: string): Promise<UpstreamResponse | undefined>;
   getGenerated(runId: string): Promise<UpstreamResponse | undefined>;
   getGeneratedFiles(runId: string): Promise<UpstreamResponse | undefined>;
-  getGeneratedFile(runId: string, filePath: string, maxResponseBytes?: number): Promise<UpstreamResponse | undefined>;
+  getGeneratedFile(
+    runId: string,
+    filePath: string,
+    maxResponseBytes?: number,
+  ): Promise<UpstreamResponse | undefined>;
   getBuildTest(runId: string): Promise<UpstreamResponse | undefined>;
   getEvidence(runId: string): Promise<UpstreamResponse | undefined>;
   getEvents(runId: string): Promise<UpstreamResponse | undefined>;
@@ -211,7 +239,7 @@ export function createOrchestratorClient(
   baseUrl: string,
   http: HttpClient,
   timeoutMs: number,
-  controlToken = '',
+  controlToken = "",
 ): OrchestratorClient {
   if (!baseUrl) {
     return {
@@ -261,10 +289,13 @@ export function createOrchestratorClient(
   const controlHeaders = trimmedControlToken
     ? { Authorization: `Bearer ${trimmedControlToken}` }
     : undefined;
-  const getRunScopedArtifact = async (runId: string, segment: string): Promise<UpstreamResponse | undefined> => {
+  const getRunScopedArtifact = async (
+    runId: string,
+    segment: string,
+  ): Promise<UpstreamResponse | undefined> => {
     const safe = encodeURIComponent(runId);
     return http.request(`${baseUrl}/v0/runs/${safe}/${segment}`, {
-      method: 'GET',
+      method: "GET",
       headers: controlHeaders,
       timeoutMs,
     });
@@ -273,17 +304,17 @@ export function createOrchestratorClient(
     enabled: true,
     async startRun({ programId, cobolSourcePath, requester }) {
       const payload = {
-        requester: requester ?? 'c2c-bff',
+        requester: requester ?? "c2c-bff",
         inputRef: {
           uri: `urn:c2c-bff/sample/${programId}`,
         },
         evidenceRefs: [],
-        modelPrompt: '',
+        modelPrompt: "",
         programId,
         cobolSourcePath,
       };
       return http.request(`${baseUrl}/v0/runs`, {
-        method: 'POST',
+        method: "POST",
         headers: controlHeaders,
         body: payload,
         timeoutMs,
@@ -300,40 +331,42 @@ export function createOrchestratorClient(
       oracleInput,
       useTransformationAgent,
     }) {
-      const sha256 = createHash('sha256').update(sourceText, 'utf8').digest('hex');
+      const sha256 = createHash("sha256")
+        .update(sourceText, "utf8")
+        .digest("hex");
       const inputRef: Record<string, unknown> = {
-        kind: 'source',
+        kind: "source",
         uri: `urn:c2c/ui-source/${sha256}`,
         sourceText,
         sha256,
-        byteSize: Buffer.byteLength(sourceText, 'utf8'),
-        mimeType: 'text/x-cobol',
+        byteSize: Buffer.byteLength(sourceText, "utf8"),
+        mimeType: "text/x-cobol",
       };
-      if (typeof expectedOutput === 'string' && expectedOutput.length > 0) {
+      if (typeof expectedOutput === "string" && expectedOutput.length > 0) {
         inputRef.expectedOutput = expectedOutput;
       }
-      if (typeof oracleInput === 'string' && oracleInput.length > 0) {
+      if (typeof oracleInput === "string" && oracleInput.length > 0) {
         inputRef.oracleInput = oracleInput;
       }
       const payload: Record<string, unknown> = {
-        requester: requester ?? 'c2c-ui',
+        requester: requester ?? "c2c-ui",
         inputRef,
         evidenceRefs: [],
-        modelPrompt: '',
+        modelPrompt: "",
         programId,
-        targetLanguage: targetLanguage ?? 'java',
+        targetLanguage: targetLanguage ?? "java",
       };
-      if (typeof sourceName === 'string' && sourceName.length > 0) {
+      if (typeof sourceName === "string" && sourceName.length > 0) {
         payload.sourceName = sourceName;
       }
       if (options !== undefined) {
         payload.options = options;
       }
-      if (typeof useTransformationAgent === 'boolean') {
+      if (typeof useTransformationAgent === "boolean") {
         payload.useTransformationAgent = useTransformationAgent;
       }
       return http.request(`${baseUrl}/v0/runs`, {
-        method: 'POST',
+        method: "POST",
         headers: controlHeaders,
         body: payload,
         timeoutMs,
@@ -342,63 +375,71 @@ export function createOrchestratorClient(
     async getRun(runId: string) {
       const safe = encodeURIComponent(runId);
       return http.request(`${baseUrl}/v0/runs/${safe}`, {
-        method: 'GET',
+        method: "GET",
         headers: controlHeaders,
         timeoutMs,
       });
     },
     async getArtifacts(runId: string) {
-      return getRunScopedArtifact(runId, 'artifacts');
+      return getRunScopedArtifact(runId, "artifacts");
     },
     async getGenerated(runId: string) {
-      return getRunScopedArtifact(runId, 'generated');
+      return getRunScopedArtifact(runId, "generated");
     },
     async getGeneratedFiles(runId: string) {
       const safe = encodeURIComponent(runId);
       return http.request(`${baseUrl}/v0/runs/${safe}/generated/files`, {
-        method: 'GET',
+        method: "GET",
         headers: controlHeaders,
         timeoutMs,
       });
     },
-    async getGeneratedFile(runId: string, filePath: string, maxResponseBytes?: number) {
+    async getGeneratedFile(
+      runId: string,
+      filePath: string,
+      maxResponseBytes?: number,
+    ) {
       const safeRun = encodeURIComponent(runId);
       const encodedPath = filePath
-        .split('/')
+        .split("/")
         .filter((segment) => segment.length > 0)
         .map((segment) => encodeURIComponent(segment))
-        .join('/');
+        .join("/");
       // Issue #172 follow-up: the artifact-content path is the only response
       // that can carry arbitrarily large user-controlled bytes (a generated
       // Java file). The streaming cap stops a malicious orchestrator from
       // pinning the BFF process before the per-file 413 check runs.
       // The cap is the per-file limit plus a small JSON-envelope budget so a
       // valid file exactly at the limit still round-trips.
-      const responseCap = maxResponseBytes === undefined ? undefined : maxResponseBytes + 4096;
-      return http.request(`${baseUrl}/v0/runs/${safeRun}/generated/files/${encodedPath}`, {
-        method: 'GET',
-        headers: controlHeaders,
-        timeoutMs,
-        maxResponseBytes: responseCap,
-      });
+      const responseCap =
+        maxResponseBytes === undefined ? undefined : maxResponseBytes + 4096;
+      return http.request(
+        `${baseUrl}/v0/runs/${safeRun}/generated/files/${encodedPath}`,
+        {
+          method: "GET",
+          headers: controlHeaders,
+          timeoutMs,
+          maxResponseBytes: responseCap,
+        },
+      );
     },
     async getBuildTest(runId: string) {
-      return getRunScopedArtifact(runId, 'build-test');
+      return getRunScopedArtifact(runId, "build-test");
     },
     async getEvidence(runId: string) {
-      return getRunScopedArtifact(runId, 'evidence');
+      return getRunScopedArtifact(runId, "evidence");
     },
     async getEvents(runId: string) {
-      return getRunScopedArtifact(runId, 'events');
+      return getRunScopedArtifact(runId, "events");
     },
     async getProgress(runId: string) {
-      return getRunScopedArtifact(runId, 'progress');
+      return getRunScopedArtifact(runId, "progress");
     },
     async getLearning(runId: string) {
-      return getRunScopedArtifact(runId, 'learning');
+      return getRunScopedArtifact(runId, "learning");
     },
     async getWorkflow(runId: string) {
-      return getRunScopedArtifact(runId, 'workflow');
+      return getRunScopedArtifact(runId, "workflow");
     },
   };
 }
@@ -411,27 +452,31 @@ export function createExperienceLearningClient(
   if (!baseUrl) {
     return {
       enabled: false,
-      baseUrl: '',
+      baseUrl: "",
       async getRunSummary() {
         return undefined;
       },
     };
   }
-  const normalized = baseUrl.replace(/\/+$/, '');
+  const normalized = baseUrl.replace(/\/+$/, "");
   return {
     enabled: true,
     baseUrl: normalized,
     async getRunSummary(runId: string) {
       const safe = encodeURIComponent(runId);
       return http.request(`${normalized}/v0/runs/${safe}/summary`, {
-        method: 'GET',
+        method: "GET",
         timeoutMs,
       });
     },
   };
 }
 
-export function createEvidenceClient(baseUrl: string, http: HttpClient, timeoutMs: number): EvidenceClient {
+export function createEvidenceClient(
+  baseUrl: string,
+  http: HttpClient,
+  timeoutMs: number,
+): EvidenceClient {
   if (!baseUrl) {
     return {
       enabled: false,
@@ -445,7 +490,7 @@ export function createEvidenceClient(baseUrl: string, http: HttpClient, timeoutM
     async getPack(packId: string) {
       const safe = encodeURIComponent(packId);
       return http.request(`${baseUrl}/v0/packs/${safe}`, {
-        method: 'GET',
+        method: "GET",
         timeoutMs,
       });
     },
@@ -464,42 +509,115 @@ export interface HarnessClient {
   getReady(): Promise<UpstreamResponse | undefined>;
 }
 
-export function createModelGatewayClient(baseUrl: string, http: HttpClient, timeoutMs: number): ModelGatewayClient {
+export function createModelGatewayClient(
+  baseUrl: string,
+  http: HttpClient,
+  timeoutMs: number,
+): ModelGatewayClient {
   if (!baseUrl) {
     return {
       enabled: false,
-      async getHealth() { return undefined; },
-      async getModels() { return undefined; },
-      async getCapabilities() { return undefined; },
+      async getHealth() {
+        return undefined;
+      },
+      async getModels() {
+        return undefined;
+      },
+      async getCapabilities() {
+        return undefined;
+      },
     };
   }
-  const normalized = baseUrl.replace(/\/+$/, '');
+  const normalized = baseUrl.replace(/\/+$/, "");
   return {
     enabled: true,
     async getHealth() {
-      return http.request(`${normalized}/v0/health`, { method: 'GET', timeoutMs });
+      return http.request(`${normalized}/v0/health`, {
+        method: "GET",
+        timeoutMs,
+      });
     },
     async getModels() {
-      return http.request(`${normalized}/v0/models`, { method: 'GET', timeoutMs });
+      return http.request(`${normalized}/v0/models`, {
+        method: "GET",
+        timeoutMs,
+      });
     },
     async getCapabilities() {
-      return http.request(`${normalized}/v0/capabilities`, { method: 'GET', timeoutMs });
+      return http.request(`${normalized}/v0/capabilities`, {
+        method: "GET",
+        timeoutMs,
+      });
     },
   };
 }
 
-export function createHarnessClient(baseUrl: string, http: HttpClient, timeoutMs: number): HarnessClient {
+export function createHarnessClient(
+  baseUrl: string,
+  http: HttpClient,
+  timeoutMs: number,
+): HarnessClient {
   if (!baseUrl) {
     return {
       enabled: false,
-      async getReady() { return undefined; },
+      async getReady() {
+        return undefined;
+      },
     };
   }
-  const normalized = baseUrl.replace(/\/+$/, '');
+  const normalized = baseUrl.replace(/\/+$/, "");
   return {
     enabled: true,
     async getReady() {
-      return http.request(`${normalized}/v0/ready`, { method: 'GET', timeoutMs });
+      return http.request(`${normalized}/v0/ready`, {
+        method: "GET",
+        timeoutMs,
+      });
+    },
+  };
+}
+
+// Studio-IDE-14 (#256): direct client for the build-test-runner-service.
+// The deterministic Java formatter lives there because the JVM is already
+// present and google-java-format is invoked in-process. The BFF only needs
+// the format endpoint right now; verification still flows through the
+// orchestrator.
+export interface BuildTestRunnerClient {
+  enabled: boolean;
+  formatJava(
+    payload: { content: string; filePath?: string },
+    timeoutOverrideMs?: number,
+  ): Promise<UpstreamResponse | undefined>;
+}
+
+export function createBuildTestRunnerClient(
+  baseUrl: string,
+  http: HttpClient,
+  timeoutMs: number,
+  controlToken = "",
+): BuildTestRunnerClient {
+  if (!baseUrl) {
+    return {
+      enabled: false,
+      async formatJava() {
+        return undefined;
+      },
+    };
+  }
+  const normalized = baseUrl.replace(/\/+$/, "");
+  const trimmedControlToken = controlToken.trim();
+  const controlHeaders = trimmedControlToken
+    ? { Authorization: `Bearer ${trimmedControlToken}` }
+    : undefined;
+  return {
+    enabled: true,
+    async formatJava(payload, timeoutOverrideMs) {
+      return http.request(`${normalized}/v0/format-java`, {
+        method: "POST",
+        headers: controlHeaders,
+        body: payload,
+        timeoutMs: timeoutOverrideMs ?? timeoutMs,
+      });
     },
   };
 }
