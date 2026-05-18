@@ -7,11 +7,21 @@ import type { Monaco } from "./lazyMonaco";
 export type EditorViewState = MonacoNs.editor.ICodeEditorViewState;
 export type DiffEditorViewState = MonacoNs.editor.IDiffEditorViewState;
 
+// The lifecycle helpers only use a small slice of the Monaco namespace.
+// Narrowing the parameter type to this surface (instead of the full `Monaco`
+// type) keeps the helpers easy to fake in tests without resorting to casts.
+export type MonacoLifecycleSurface = Pick<Monaco, "Uri"> & {
+  editor: Pick<
+    Monaco["editor"],
+    "getModel" | "createModel" | "setModelLanguage" | "getModels"
+  >;
+};
+
 const viewStates = new Map<string, EditorViewState>();
 const diffViewStates = new Map<string, DiffEditorViewState>();
 
 export function createModel(
-  monaco: Monaco,
+  monaco: MonacoLifecycleSurface,
   uri: string,
   content: string,
   language: string,
@@ -30,7 +40,10 @@ export function createModel(
   return monaco.editor.createModel(content, language, parsed);
 }
 
-export function disposeModel(monaco: Monaco, uri: string): boolean {
+export function disposeModel(
+  monaco: MonacoLifecycleSurface,
+  uri: string,
+): boolean {
   const model = monaco.editor.getModel(monaco.Uri.parse(uri));
   if (!model) {
     return false;
@@ -54,8 +67,16 @@ export function saveViewState(
   }
 }
 
+export interface ViewStateRestorable {
+  restoreViewState(state: EditorViewState): void;
+}
+
+export interface DiffViewStateRestorable {
+  restoreViewState(state: DiffEditorViewState): void;
+}
+
 export function restoreViewState(
-  editor: MonacoNs.editor.ICodeEditor,
+  editor: ViewStateRestorable,
   uri: string,
 ): boolean {
   const state = viewStates.get(uri);
@@ -82,7 +103,7 @@ export function saveDiffViewState(
 }
 
 export function restoreDiffViewState(
-  editor: MonacoNs.editor.IDiffEditor,
+  editor: DiffViewStateRestorable,
   uri: string,
 ): boolean {
   const state = diffViewStates.get(uri);
@@ -103,6 +124,6 @@ export function __resetLifecycleForTests(): void {
   diffViewStates.clear();
 }
 
-export function getDisposableBaseline(monaco: Monaco): number {
+export function getDisposableBaseline(monaco: MonacoLifecycleSurface): number {
   return monaco.editor.getModels().length;
 }
