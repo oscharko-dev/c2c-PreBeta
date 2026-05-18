@@ -93,6 +93,17 @@ export interface RevealCobolDetail {
 }
 const REVEAL_COBOL_EVENT = "c2c:reveal-cobol";
 
+// Studio-IDE-8 (#253): inverse of REVEAL_COBOL_EVENT. The COBOL pane
+// (Alt+C) and the stack-trace view both emit `c2c:reveal-java` with a
+// (javaFile, javaLine) detail; this pane resolves the path against
+// generated files and reveals the line, switching files first when
+// needed.
+export interface RevealJavaDetail {
+  javaFile: string;
+  javaLine: number;
+}
+const REVEAL_JAVA_EVENT = "c2c:reveal-java";
+
 const SAVE_NOTICE_VISIBLE_MS = 2500;
 const FORMAT_NOTICE_VISIBLE_MS = 4000;
 // Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. 500 ms matches
@@ -533,6 +544,92 @@ export function GeneratedJavaEditorPane() {
     editorInstanceRef.current.focus();
     pendingTokenRef.current = null;
   }, [navigationTarget, selectedFilePath, editorMountToken]);
+
+  // Studio-IDE-8 (#253): listen for `c2c:reveal-java` events emitted
+  // by the COBOL pane (Alt+J) and by the stack-trace view. The detail
+  // carries the full Java file path the lineage envelope advertises;
+  // we suffix-match it against generated files (defensive against
+  // path-root drift) and either reveal the line in the current editor
+  // or switch files first. The token pattern mirrors the
+  // useMarkerNavigation jump so a stale event cannot land on the wrong
+  // file mid-switch.
+  const [revealJavaTarget, setRevealJavaTarget] = useState<{
+    filePath: string;
+    line: number;
+    token: number;
+  } | null>(null);
+  const revealJavaTokenRef = useRef(0);
+  const pendingRevealJavaTokenRef = useRef<number | null>(null);
+  useEffect(() => {
+    function onReveal(ev: Event) {
+      const detail = (ev as CustomEvent<RevealJavaDetail>).detail;
+      if (!detail || typeof detail.javaFile !== "string") return;
+      const line = Math.max(1, Math.floor(detail.javaLine));
+      revealJavaTokenRef.current += 1;
+      setRevealJavaTarget({
+        filePath: detail.javaFile,
+        line,
+        token: revealJavaTokenRef.current,
+      });
+    }
+    window.addEventListener(REVEAL_JAVA_EVENT, onReveal);
+    return () => {
+      window.removeEventListener(REVEAL_JAVA_EVENT, onReveal);
+    };
+  }, []);
+
+  // File-switching step. If the requested file is not the current
+  // selection, find a generated file whose path matches by suffix and
+  // call selectFile; the reveal completes in the effect below once the
+  // editor mounts with the new file. If the file IS the current
+  // selection, this effect is a no-op — the reveal effect runs on the
+  // same tick.
+  useEffect(() => {
+    if (!revealJavaTarget) return;
+    if (revealJavaTarget.filePath === selectedFilePath) return;
+    const generatedPaths = state.generatedFiles?.files ?? [];
+    const matched = generatedPaths.find((file) => {
+      if (file.path === revealJavaTarget.filePath) return true;
+      const a = file.path.split(/[\\/]+/).filter(Boolean);
+      const b = revealJavaTarget.filePath.split(/[\\/]+/).filter(Boolean);
+      if (a.length === 0 || b.length === 0) return false;
+      const minLen = Math.min(a.length, b.length);
+      for (let i = 0; i < minLen; i += 1) {
+        if (a[a.length - 1 - i] !== b[b.length - 1 - i]) return false;
+      }
+      return true;
+    });
+    if (!matched) return;
+    pendingRevealJavaTokenRef.current = revealJavaTarget.token;
+    selectFile(matched.path);
+  }, [
+    revealJavaTarget,
+    selectedFilePath,
+    selectFile,
+    state.generatedFiles?.files,
+  ]);
+
+  // Reveal step. Fires when the editor is mounted on the resolved file
+  // and the pending token still matches the current target.
+  useEffect(() => {
+    if (!revealJavaTarget) return;
+    const editor = editorInstanceRef.current;
+    if (!editor) return;
+    const sameFile = revealJavaTarget.filePath === selectedFilePath;
+    // Same-file path: no token gating required — the reveal can fire
+    // synchronously on the event. Cross-file path: only fire when the
+    // file switch resolved to the same file the event targeted.
+    if (!sameFile) {
+      if (pendingRevealJavaTokenRef.current !== revealJavaTarget.token) return;
+      // Match the existing file-switching logic — selectedFilePath is
+      // a full path from generatedFiles; the event detail may carry a
+      // suffix path. Both refer to the same file when we reach here.
+    }
+    editor.revealLineInCenterIfOutsideViewport(revealJavaTarget.line);
+    editor.setPosition({ lineNumber: revealJavaTarget.line, column: 1 });
+    editor.focus();
+    pendingRevealJavaTokenRef.current = null;
+  }, [revealJavaTarget, selectedFilePath, editorMountToken]);
 
   const javaMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
     if (!monaco) return [];
