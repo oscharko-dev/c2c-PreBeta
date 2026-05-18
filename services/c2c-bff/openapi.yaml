@@ -807,6 +807,12 @@ components:
 
     RunSummary:
       type: object
+      description: >
+        Run envelope published by the BFF. Governed by ADR 0006
+        (Studio-BFF Contract Versioning). New optional fields may be
+        added without a ``schemaVersion`` bump per the additive-only
+        rule; removal of an existing field requires a deprecation
+        period of at least one minor wave.
       required:
         - runId
         - programId
@@ -822,6 +828,13 @@ components:
         - failureCode
         - failureMessage
       properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+          default: v0
+          description: >
+            DTO version per ADR 0006. Optional on the wire; absence
+            means "v0".
         runId: { type: string }
         programId: { type: string }
         status:
@@ -872,6 +885,52 @@ components:
           oneOf:
             - type: string
             - type: 'null'
+        javaRegionClassification:
+          description: >
+            Optional trust-pillar overlay used by Studio-IDE-13 to
+            colour the generated-Java buffer. Absent for runs older
+            than W0.3 or for runs where overlay computation was
+            skipped. Studio renders no decoration when absent per
+            ADR 0006 Decision 4.
+          oneOf:
+            - $ref: "#/components/schemas/JavaOriginOverlay"
+            - type: 'null'
+
+    JavaOriginOverlay:
+      type: object
+      description: >
+        Region-granular provenance overlay for a generated Java file.
+        Originally defined inline in
+        ``apps/c2c-studio/src/types/api.ts`` (Studio-ADR-4 / #257);
+        promoted to the BFF wire surface so the contract is reviewable
+        on both sides. Governed by ADR 0006.
+      required: [schemaVersion, runId, javaFile, regions]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        runId: { type: string }
+        javaFile: { type: string }
+        regions:
+          type: array
+          items:
+            type: object
+            required: [lineRange, originClass]
+            properties:
+              lineRange:
+                type: object
+                required: [startLine, endLine]
+                properties:
+                  startLine: { type: integer, minimum: 1 }
+                  endLine: { type: integer, minimum: 1 }
+              originClass:
+                type: string
+                enum:
+                  - deterministic
+                  - agent_proposed
+                  - repair_attempted
+                  - manual_modified
+                  - manual_edit
 
     RunLinks:
       type: object
@@ -1252,8 +1311,21 @@ components:
 
     GeneratedTraceability:
       type: object
+      description: >
+        Lineage triple emitted alongside generated Java. Governed by
+        ADR 0006 (Studio-BFF Contract Versioning). When the BFF cannot
+        emit lineage for a run, the entire object is omitted from
+        ``GeneratedView`` rather than null-stuffed; Studio renders the
+        "Lineage unavailable" state per ADR 0006 Decision 4.
       required: [programId, irId, sourceHash]
       properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+          default: v0
+          description: >
+            DTO version per ADR 0006. Optional on the wire; absence
+            means "v0". Bumped only on a non-additive change.
         programId: { type: string }
         irId: { type: string }
         sourceHash: { type: string }
@@ -1273,8 +1345,22 @@ components:
 
     Diagnostic:
       type: object
+      description: >
+        BFF-shaped diagnostic record consumed by the Studio Problems
+        panel and editor markers. Governed by ADR 0006 (Studio-BFF
+        Contract Versioning). Positional fields and ``artifactRef``
+        are optional; Studio fallback rules for missing fields are
+        enumerated in ADR 0006 Decision 4.
       required: [severity, code, message]
       properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+          default: v0
+          description: >
+            DTO version per ADR 0006. Optional on the wire; absence
+            means "v0". Bumped only on a non-additive change such as
+            removal of a field or tightening of an enum.
         severity: { type: string }
         code: { type: string }
         message: { type: string }
@@ -1285,6 +1371,16 @@ components:
         filePath: { type: string }
         sourceKind: { type: string }
         originStep: { type: string }
+        artifactRef:
+          description: >
+            Optional reference to the artifact this diagnostic
+            attaches to (e.g. semantic-IR node id, generated-Java
+            file). Populated by Studio-IDE-5 (#244) and Studio-IDE-6
+            (#248); absent on diagnostics produced by older steps or
+            replayed from v0 Evidence-Pack fixtures.
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
 
     GeneratedFilesIndex:
       type: object

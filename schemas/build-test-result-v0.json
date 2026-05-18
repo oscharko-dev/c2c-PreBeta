@@ -193,8 +193,37 @@
       }
     },
     "diagnostics": {
-      "type": "array"
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
     }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "$defs": {
+    "Diagnostic": {
+      "type": "object",
+      "description": "BFF-shaped diagnostic record. Governed by ADR 0006 (Studio-BFF Contract Versioning). schemaVersion is optional on the wire; absence means 'v0'. All positional fields and artifactRef are optional per the additive-only rule.",
+      "required": ["severity", "code", "message"],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "enum": ["v0"]
+        },
+        "severity": { "type": "string" },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 },
+        "endColumn": { "type": "integer", "minimum": 1 },
+        "filePath": { "type": "string" },
+        "sourceKind": { "type": "string" },
+        "originStep": { "type": "string" },
+        "artifactRef": {
+          "type": ["object", "null"],
+          "description": "Reference to the artifact this diagnostic attaches to (sha256, kind, optional path). Absent on diagnostics from older steps or replayed v0 fixtures."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
 }
