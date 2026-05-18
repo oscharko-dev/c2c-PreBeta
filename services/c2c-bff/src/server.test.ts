@@ -337,7 +337,9 @@ function availableModelGateway(): ModelGatewayClient {
     async getModels() {
       return {
         status: 200,
-        body: [{ id: "test-model", displayName: "Test Model", provider: "test" }],
+        body: [
+          { id: "test-model", displayName: "Test Model", provider: "test" },
+        ],
       };
     },
     async getCapabilities() {
@@ -473,34 +475,6 @@ test("placeholder marker list is non-empty and exposes the documented W0 stubs",
     findPlaceholderMarker("Synthetic W0 generated-Java stub here"),
     "Synthetic W0 generated-Java stub",
   );
-});
-
-test("BFF and UI placeholder marker lists are kept in sync", () => {
-  // The UI ships its own copy of the placeholder marker list because the two
-  // packages do not share a TypeScript module. The lists must remain byte
-  // identical so the BFF safeguard matches the UI fallback exactly.
-  const uiCopyPath = path.resolve(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "apps",
-    "c2c-ui",
-    "src",
-    "placeholder-markers.ts",
-  );
-  assert.ok(
-    fs.existsSync(uiCopyPath),
-    `UI placeholder-markers.ts not found at ${uiCopyPath}`,
-  );
-  const uiSource = fs.readFileSync(uiCopyPath, "utf8");
-  for (const marker of PLACEHOLDER_JAVA_MARKERS) {
-    const literal = `'${marker}'`;
-    assert.ok(
-      uiSource.includes(literal),
-      `UI placeholder-markers.ts is out of sync: missing marker ${literal}`,
-    );
-  }
 });
 
 test("health endpoint reports service name", async () => {

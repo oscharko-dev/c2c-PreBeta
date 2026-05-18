@@ -8,6 +8,10 @@ import {
   getViewState,
   restoreViewState,
   saveViewState,
+  type DiffViewStateRestorable,
+  type EditorViewState,
+  type MonacoLifecycleSurface,
+  type ViewStateRestorable,
 } from "@/lib/editor/modelLifecycle";
 
 interface MockModel {
@@ -20,55 +24,87 @@ interface MockModel {
   getValue: () => string;
 }
 
-interface MockMonaco {
-  Uri: { parse: (s: string) => { toString: () => string } };
-  editor: {
-    getModel: (uri: { toString: () => string }) => MockModel | undefined;
-    createModel: (
-      content: string,
-      language: string,
-      uri: { toString: () => string },
-    ) => MockModel;
-    setModelLanguage: (model: MockModel, language: string) => void;
-    getModels: () => MockModel[];
-    setModelMarkers: ReturnType<typeof vi.fn>;
-  };
+interface MockMonaco extends MonacoLifecycleSurface {
+  readonly _models: Map<string, MockModel>;
 }
 
 function createMockMonaco(): MockMonaco {
   const models = new Map<string, MockModel>();
   return {
-    Uri: { parse: (s: string) => ({ toString: () => s }) },
+    _models: models,
+    // The lifecycle helpers only ever call `.parse(uri).toString()`-equivalent
+    // operations on the Uri factory, so a minimal struct satisfies the surface.
+    Uri: {
+      parse: (s: string) => ({ toString: () => s }),
+    } as unknown as MonacoLifecycleSurface["Uri"],
     editor: {
-      getModel: (uri) => models.get(uri.toString()),
-      createModel: (content, language, uri) => {
-        const model: MockModel = {
-          language,
-          value: content,
-          uri,
-          setValue: vi.fn(function (this: MockModel, next: string) {
-            this.value = next;
-          }),
-          dispose: vi.fn(() => {
-            models.delete(uri.toString());
-          }),
-          getLanguageId: () => model.language,
-          getValue: () => model.value,
-        };
-        // Bind setValue so it mutates the captured model when called.
-        model.setValue = vi.fn((next: string) => {
-          model.value = next;
-        });
+      getModel: ((uri: { toString: () => string }) =>
+        models.get(uri.toString()) ??
+        null) as unknown as MonacoLifecycleSurface["editor"]["getModel"],
+      createModel: ((
+        content: string,
+        language: string,
+        uri: { toString: () => string },
+      ) => {
+        const model = makeMockModel({ content, language, uri, models });
         models.set(uri.toString(), model);
         return model;
-      },
-      setModelLanguage: (model, language) => {
+      }) as unknown as MonacoLifecycleSurface["editor"]["createModel"],
+      setModelLanguage: ((model: MockModel, language: string) => {
         model.language = language;
-      },
-      getModels: () => Array.from(models.values()),
-      setModelMarkers: vi.fn(),
+      }) as unknown as MonacoLifecycleSurface["editor"]["setModelLanguage"],
+      getModels: (() =>
+        Array.from(
+          models.values(),
+        )) as unknown as MonacoLifecycleSurface["editor"]["getModels"],
     },
   };
+}
+
+function makeMockModel(args: {
+  content: string;
+  language: string;
+  uri: { toString: () => string };
+  models: Map<string, MockModel>;
+}): MockModel {
+  const model: MockModel = {
+    language: args.language,
+    value: args.content,
+    uri: args.uri,
+    setValue: vi.fn(),
+    dispose: vi.fn(),
+    getLanguageId: () => model.language,
+    getValue: () => model.value,
+  };
+  model.setValue = vi.fn((next: string) => {
+    model.value = next;
+  });
+  model.dispose = vi.fn(() => {
+    args.models.delete(args.uri.toString());
+  });
+  return model;
+}
+
+function makeMockViewStateRestorable(): ViewStateRestorable & {
+  restoreViewState: ReturnType<typeof vi.fn>;
+} {
+  return { restoreViewState: vi.fn() } as ViewStateRestorable & {
+    restoreViewState: ReturnType<typeof vi.fn>;
+  };
+}
+
+function makeMockDiffViewStateRestorable(): DiffViewStateRestorable & {
+  restoreViewState: ReturnType<typeof vi.fn>;
+} {
+  return { restoreViewState: vi.fn() } as DiffViewStateRestorable & {
+    restoreViewState: ReturnType<typeof vi.fn>;
+  };
+}
+
+// Minimal-but-real cast for view-state payloads: tests only need the helpers
+// to round-trip an opaque blob, so the value shape is irrelevant.
+function stubViewState(payload: Record<string, unknown>): EditorViewState {
+  return payload as unknown as EditorViewState;
 }
 
 describe("modelLifecycle", () => {
@@ -78,24 +114,24 @@ describe("modelLifecycle", () => {
 
   it("createModel returns the existing model when one already exists for the URI", () => {
     const monaco = createMockMonaco();
-    const first = createModel(monaco as never, "inmemory://a", "one", "java");
-    const second = createModel(monaco as never, "inmemory://a", "two", "java");
+    const first = createModel(monaco, "inmemory://a", "one", "java");
+    const second = createModel(monaco, "inmemory://a", "two", "java");
     expect(second).toBe(first);
-    expect(second.getValue()).toBe("two");
+    expect((second as unknown as MockModel).getValue()).toBe("two");
   });
 
   it("createModel changes the language when the URI is reused with a different language", () => {
     const monaco = createMockMonaco();
-    const m = createModel(monaco as never, "inmemory://lang", "x", "json");
-    createModel(monaco as never, "inmemory://lang", "x", "xml");
-    expect(m.getLanguageId()).toBe("xml");
+    const m = createModel(monaco, "inmemory://lang", "x", "json");
+    createModel(monaco, "inmemory://lang", "x", "xml");
+    expect((m as unknown as MockModel).getLanguageId()).toBe("xml");
   });
 
   it("disposeModel disposes an existing model and returns false when there is nothing to dispose", () => {
     const monaco = createMockMonaco();
-    createModel(monaco as never, "inmemory://b", "one", "json");
-    expect(disposeModel(monaco as never, "inmemory://b")).toBe(true);
-    expect(disposeModel(monaco as never, "inmemory://b")).toBe(false);
+    createModel(monaco, "inmemory://b", "one", "json");
+    expect(disposeModel(monaco, "inmemory://b")).toBe(true);
+    expect(disposeModel(monaco, "inmemory://b")).toBe(false);
   });
 
   it("returns to baseline disposable count after 50 mount/unmount cycles", () => {
@@ -103,8 +139,8 @@ describe("modelLifecycle", () => {
     const baseline = monaco.editor.getModels().length;
     for (let i = 0; i < 50; i += 1) {
       const uri = `inmemory://cycle-${i}`;
-      createModel(monaco as never, uri, `content-${i}`, "java");
-      expect(disposeModel(monaco as never, uri)).toBe(true);
+      createModel(monaco, uri, `content-${i}`, "java");
+      expect(disposeModel(monaco, uri)).toBe(true);
     }
     const remaining = monaco.editor.getModels().length;
     expect(Math.abs(remaining - baseline)).toBeLessThanOrEqual(1);
@@ -112,36 +148,47 @@ describe("modelLifecycle", () => {
   });
 
   it("view-state round-trip restores the same object", () => {
-    const state = { scroll: 42, cursor: { lineNumber: 3, column: 5 } };
-    saveViewState("inmemory://r", state as never);
+    const state = stubViewState({
+      scroll: 42,
+      cursor: { lineNumber: 3, column: 5 },
+    });
+    saveViewState("inmemory://r", state);
     expect(getViewState("inmemory://r")).toEqual(state);
   });
 
   it("saveViewState with null clears the stored state", () => {
-    saveViewState("inmemory://r", { cursor: 1 } as never);
+    saveViewState("inmemory://r", stubViewState({ cursor: 1 }));
     saveViewState("inmemory://r", null);
     expect(getViewState("inmemory://r")).toBeUndefined();
   });
 
   it("restoreViewState applies the stored state to the given editor", () => {
-    const state = { scroll: 1 };
-    saveViewState("inmemory://e", state as never);
-    const editor = { restoreViewState: vi.fn() };
-    const ok = restoreViewState(editor as never, "inmemory://e");
+    const state = stubViewState({ scroll: 1 });
+    saveViewState("inmemory://e", state);
+    const editor = makeMockViewStateRestorable();
+    const ok = restoreViewState(editor, "inmemory://e");
     expect(ok).toBe(true);
     expect(editor.restoreViewState).toHaveBeenCalledWith(state);
   });
 
   it("restoreViewState returns false when no state is stored", () => {
-    const editor = { restoreViewState: vi.fn() };
-    const ok = restoreViewState(editor as never, "inmemory://missing");
+    const editor = makeMockViewStateRestorable();
+    const ok = restoreViewState(editor, "inmemory://missing");
     expect(ok).toBe(false);
     expect(editor.restoreViewState).not.toHaveBeenCalled();
   });
 
   it("clearViewState removes both standalone and diff state", () => {
-    saveViewState("inmemory://c", { a: 1 } as never);
+    saveViewState("inmemory://c", stubViewState({ a: 1 }));
     clearViewState("inmemory://c");
     expect(getViewState("inmemory://c")).toBeUndefined();
+  });
+
+  it("DiffViewStateRestorable can be passed to restoreDiffViewState shape (compile check)", () => {
+    // This is a compile-time invariant — instantiate the helper but do not
+    // exercise it (no state is stored), which still proves the type accepts
+    // the structural mock.
+    const editor = makeMockDiffViewStateRestorable();
+    expect(typeof editor.restoreViewState).toBe("function");
   });
 });

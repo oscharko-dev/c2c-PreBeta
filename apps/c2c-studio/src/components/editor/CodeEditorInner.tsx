@@ -193,7 +193,7 @@ function StandaloneEditorView({
               editor.addAction(action);
             }
           }
-          onMount?.({ editor, monaco: monacoInstance as Monaco });
+          onMount?.({ editor, monaco: monacoInstance });
         }}
         onChange={(next) => {
           if (next !== undefined) {
@@ -334,7 +334,7 @@ function DiffEditorView({
           modifiedEditor.updateOptions({
             ariaLabel: ariaLabel ?? `Diff editor (${language})`,
           });
-          onMount?.({ editor: diffEditor, monaco: monacoInstance as Monaco });
+          onMount?.({ editor: diffEditor, monaco: monacoInstance });
         }}
       />
     </div>
