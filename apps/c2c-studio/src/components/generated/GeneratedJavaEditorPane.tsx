@@ -1085,11 +1085,23 @@ export function GeneratedJavaEditorPane() {
       // live model — without this, whole-line markers stay narrowed
       // to a single character.
       setEditorMountToken((value) => value + 1);
-      // Studio-IDE-12 (#250): every addCommand / addAction call below
-      // returns a disposable that is captured here and released in the
-      // pane's unmount effect. Without tracking, repeated navigation
-      // into and out of the workbench leaks one closure per registered
-      // command per remount.
+      // Studio-IDE-12 (#250): track every Monaco lifecycle handle this
+      // pane creates so the listener set is released on unmount.
+      // Coverage breakdown by Monaco return type:
+      //   * ``addAction``                 → ``IDisposable`` (tracked)
+      //   * ``addCommand``                → ``string`` command id —
+      //                                      lifetime is bound to the
+      //                                      editor instance itself.
+      //                                      When the React component
+      //                                      unmounts, the underlying
+      //                                      editor is disposed by
+      //                                      ``@monaco-editor/react``
+      //                                      and the keybinding goes
+      //                                      with it. The string is
+      //                                      passed through here for
+      //                                      symmetry; the tracker
+      //                                      skips non-disposables.
+      //   * ``onDid*`` event subscriptions → ``IDisposable`` (tracked)
       const trackDisposable = (
         disposable: import("monaco-editor").IDisposable | string | null,
       ) => {

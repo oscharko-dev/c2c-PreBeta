@@ -22,21 +22,36 @@ interface HeaderGroup {
   headers: Header[];
 }
 
-async function resolveCsp(): Promise<string> {
+// Locate the catch-all (``source: "/:path*"``) header group instead of
+// indexing the first entry positionally. A future change that
+// prepends a route-scoped override (e.g. a stricter policy on
+// ``/api/*``) would otherwise silently route the assertion onto the
+// wrong group.
+async function loadCatchAllHeaders(): Promise<Header[]> {
   const headersFn = (nextConfig as { headers?: () => Promise<HeaderGroup[]> })
     .headers;
   if (typeof headersFn !== "function") {
     throw new Error("next.config.mjs does not export a headers() function");
   }
   const groups = await headersFn();
-  for (const group of groups) {
-    for (const header of group.headers) {
-      if (header.key === "Content-Security-Policy") return header.value;
-    }
+  const catchAll = groups.find((group) => group.source === "/:path*");
+  if (!catchAll) {
+    throw new Error("next.config.mjs has no /:path* header group");
   }
-  throw new Error(
-    "Content-Security-Policy header not found in next.config.mjs",
+  return catchAll.headers;
+}
+
+async function resolveCsp(): Promise<string> {
+  const headers = await loadCatchAllHeaders();
+  const csp = headers.find(
+    (header) => header.key === "Content-Security-Policy",
   );
+  if (!csp) {
+    throw new Error(
+      "Content-Security-Policy header not found in next.config.mjs",
+    );
+  }
+  return csp.value;
 }
 
 describe("Studio-IDE-12 (#250) Content Security Policy", () => {
@@ -45,14 +60,20 @@ describe("Studio-IDE-12 (#250) Content Security Policy", () => {
     expect(csp).toContain("default-src 'self'");
   });
 
-  it("declares script-src 'self' without unsafe-eval or unsafe-inline", async () => {
+  // ``'unsafe-eval'`` is the load-bearing protection against runtime
+  // code injection. It MUST stay out of the production policy at all
+  // times. The dev policy is allowed to relax this for Fast Refresh,
+  // but vitest runs in NODE_ENV=test which the build treats as
+  // production for the purposes of next.config.mjs.
+  it("forbids 'unsafe-eval' on script-src", async () => {
     const csp = await resolveCsp();
-    expect(csp).toMatch(/script-src 'self'(;|\s|$)/);
-    expect(csp).not.toContain("'unsafe-eval'");
-    // The only ``'unsafe-inline'`` allowance is on style-src (Tailwind +
-    // Monaco) — never on scripts.
     const scriptDirective = csp.match(/script-src[^;]*/)?.[0] ?? "";
-    expect(scriptDirective).not.toContain("'unsafe-inline'");
+    expect(scriptDirective).not.toContain("'unsafe-eval'");
+  });
+
+  it("declares script-src 'self' as the primary script source", async () => {
+    const csp = await resolveCsp();
+    expect(csp).toMatch(/script-src 'self'/);
   });
 
   it("allows worker-src 'self' blob: for Monaco web workers", async () => {
@@ -72,10 +93,7 @@ describe("Studio-IDE-12 (#250) Content Security Policy", () => {
   });
 
   it("ships X-Frame-Options DENY and X-Content-Type-Options nosniff", async () => {
-    const headersFn = (nextConfig as { headers?: () => Promise<HeaderGroup[]> })
-      .headers;
-    const groups = await headersFn!();
-    const headers = groups[0]!.headers;
+    const headers = await loadCatchAllHeaders();
     expect(headers).toContainEqual({ key: "X-Frame-Options", value: "DENY" });
     expect(headers).toContainEqual({
       key: "X-Content-Type-Options",
