@@ -77,6 +77,11 @@ function makeContextValue(
     applyJavaMergeSelections: vi.fn(),
     cancelJavaMergeReview: vi.fn(),
     latestVerifyResult: null,
+    // Studio-IDE-7 (#252) additions — synchronized diff history.
+    javaDiffHistory: {},
+    cobolDiffHistory: {},
+    recordJavaDiffSnapshot: vi.fn(),
+    recordCobolDiffSnapshot: vi.fn(),
   };
 }
 

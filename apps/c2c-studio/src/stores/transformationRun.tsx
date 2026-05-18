@@ -39,6 +39,13 @@ import {
   type ConflictRegion,
   type ConflictRegionResolution,
 } from "../lib/editor/conflictDetection";
+import {
+  appendJavaSnapshot,
+  recordCobolByRun,
+  type CobolSnapshot,
+  type JavaFileHistoryEntry,
+  type JavaFileSnapshot,
+} from "../lib/editor/diffHistory";
 
 // Studio-IDE-3 (#247): Java buffer state model. One entry per generated
 // Java file the user has interacted with. IDE-4 (#245) will wire Monaco
@@ -155,6 +162,24 @@ export interface TransformationRunContextValue {
   // Latest VerifyResponse — surfaces the manual-edit summary fields to UI
   // consumers without re-fetching.
   latestVerifyResult: VerifyResponse | null;
+  // ----- Studio-IDE-7 (#252) synchronized-diff history ------------------
+  // In-memory, session-scoped accumulator. Keyed by ``sourceKey`` (the
+  // active programId; same convention as the BFF / ADR-0007). Java
+  // history is a (previous, current) slot pair per (sourceKey, filePath);
+  // COBOL snapshots are keyed by runId — DiffWorkspace looks up the
+  // entries whose runIds match the Java history's previous and current
+  // so the panes never desynchronize when failed runs sit between
+  // successes (Copilot review #282).
+  // Session-only persistence: a fresh ``idle`` phase from a new programId
+  // or a hard reload clears these, consistent with the issue body.
+  javaDiffHistory: Record<string, Record<string, JavaFileHistoryEntry>>;
+  cobolDiffHistory: Record<string, Record<string, CobolSnapshot>>;
+  recordJavaDiffSnapshot: (
+    sourceKey: string,
+    filePath: string,
+    snapshot: JavaFileSnapshot,
+  ) => void;
+  recordCobolDiffSnapshot: (sourceKey: string, snapshot: CobolSnapshot) => void;
 }
 
 const TransformationRunContext =
@@ -197,6 +222,51 @@ export function TransformationRunProvider({
     useState<JavaMergeReview | null>(null);
   const [latestVerifyResult, setLatestVerifyResult] =
     useState<VerifyResponse | null>(null);
+  // Studio-IDE-7 (#252): per-program / per-file diff history. Held as
+  // React state (not refs) so consumers re-render when a new snapshot
+  // shifts the previous entry — the Compare Runs button needs to flip
+  // from disabled to enabled the moment a second run lands.
+  const [javaDiffHistory, setJavaDiffHistory] = useState<
+    Record<string, Record<string, JavaFileHistoryEntry>>
+  >({});
+  const [cobolDiffHistory, setCobolDiffHistory] = useState<
+    Record<string, Record<string, CobolSnapshot>>
+  >({});
+
+  const recordJavaDiffSnapshot = useCallback(
+    (sourceKey: string, filePath: string, snapshot: JavaFileSnapshot) => {
+      setJavaDiffHistory((prev) => {
+        const perSource = prev[sourceKey] ?? {};
+        const next = appendJavaSnapshot(perSource[filePath], snapshot);
+        if (next === perSource[filePath]) {
+          // Idempotent re-poll for the same runId; preserve referential
+          // identity so memoized DiffWorkspace consumers do not re-render.
+          return prev;
+        }
+        return {
+          ...prev,
+          [sourceKey]: { ...perSource, [filePath]: next },
+        };
+      });
+    },
+    [],
+  );
+
+  const recordCobolDiffSnapshot = useCallback(
+    (sourceKey: string, snapshot: CobolSnapshot) => {
+      setCobolDiffHistory((prev) => {
+        const perSource = prev[sourceKey];
+        const next = recordCobolByRun(perSource, snapshot);
+        if (next === perSource) {
+          // Idempotent: same runId, same content. Preserve referential
+          // identity so memoized DiffWorkspace consumers do not re-render.
+          return prev;
+        }
+        return { ...prev, [sourceKey]: next };
+      });
+    },
+    [],
+  );
 
   const productState = useMemo(() => deriveProductState(state), [state]);
 
@@ -259,6 +329,25 @@ export function TransformationRunProvider({
       error: null,
       summary: result.data,
     }));
+
+    // Studio-IDE-7 (#252): snapshot the COBOL input this run consumed so
+    // the synchronized diff workflow has a per-runId snapshot the
+    // workspace can pair against the Java history. Because COBOL is
+    // keyed by runId (not a sliding previous/current slot), an
+    // out-of-order hash resolution from an earlier submit is safe by
+    // construction — the late write lands at its own ``[oldRunId]``
+    // entry and cannot clobber the latest run's snapshot.
+    const cobolRunId = result.data.runId;
+    const cobolProgramId = result.data.programId;
+    if (cobolProgramId) {
+      void deriveSourceHash(request.sourceText).then((hash) => {
+        recordCobolDiffSnapshot(cobolProgramId, {
+          content: request.sourceText,
+          sourceHash: hash,
+          runId: cobolRunId,
+        });
+      });
+    }
 
     if (result.data.status === "completed" || result.data.status === "failed") {
       void hydrateRunArtifacts(result.data.runId, setState, result.data.status);
@@ -333,6 +422,22 @@ export function TransformationRunProvider({
       error: null,
       summary: result.data,
     }));
+
+    // Studio-IDE-7 (#252): mirror the COBOL snapshot recorded by
+    // ``startTransform`` so a Generator-only run also feeds the
+    // synchronized-diff history. Out-of-order hash resolution is safe
+    // here too — see the corresponding note in ``startTransform``.
+    const cobolRunId = result.data.runId;
+    const cobolProgramId = result.data.programId;
+    if (cobolProgramId) {
+      void deriveSourceHash(request.sourceText).then((hash) => {
+        recordCobolDiffSnapshot(cobolProgramId, {
+          content: request.sourceText,
+          sourceHash: hash,
+          runId: cobolRunId,
+        });
+      });
+    }
 
     if (result.data.status === "completed" || result.data.status === "failed") {
       void hydrateRunArtifacts(result.data.runId, setState, result.data.status);
@@ -741,6 +846,10 @@ export function TransformationRunProvider({
         requestJavaMergeReview,
         applyJavaMergeSelections,
         cancelJavaMergeReview,
+        javaDiffHistory,
+        cobolDiffHistory,
+        recordJavaDiffSnapshot,
+        recordCobolDiffSnapshot,
         latestVerifyResult,
       }}
     >

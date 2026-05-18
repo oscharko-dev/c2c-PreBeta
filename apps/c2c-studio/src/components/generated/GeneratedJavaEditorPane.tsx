@@ -74,6 +74,9 @@ import {
   ThreeWayMergeDialog,
   type MergeChoice,
 } from "@/components/diff/ThreeWayMergeDialog";
+// Studio-IDE-7 (#252): synchronized Java + COBOL diff workspace.
+import { DiffWorkspace } from "@/components/diff/DiffWorkspace";
+import { deriveSourceHash } from "@/lib/sourceAnalysis";
 
 // Studio-IDE-6 (#248): synthetic Monaco marker owner for lineage-jump
 // feedback (e.g. "lineage stale due to manual edit"). Kept distinct from
@@ -148,6 +151,9 @@ export function GeneratedJavaEditorPane() {
     requestJavaMergeReview,
     applyJavaMergeSelections,
     cancelJavaMergeReview,
+    javaDiffHistory,
+    cobolDiffHistory,
+    recordJavaDiffSnapshot,
   } = useTransformationRun();
 
   // Studio-IDE-6 (#248): origin-overlay + lineage-coverage wiring. The
@@ -159,6 +165,8 @@ export function GeneratedJavaEditorPane() {
   const overlay = useOverlay(state.runId ?? null, selectedFilePath ?? null);
 
   const [showSaveNotice, setShowSaveNotice] = useState(false);
+  // Studio-IDE-7 (#252): Compare Runs overlay open/close state.
+  const [showDiffWorkspace, setShowDiffWorkspace] = useState(false);
   // Studio-IDE-14 (#256): lint state, compile-check diagnostics, and the
   // transient format toast are hoisted up here so the auto-dismiss effect
   // below can subscribe to `formatNotice` before the rest of the component
@@ -206,6 +214,56 @@ export function GeneratedJavaEditorPane() {
     isFetchingFile,
     ensureJavaBaseline,
     loadJavaDraftFor,
+  ]);
+
+  // Studio-IDE-7 (#252): record this run's Java content into the diff
+  // history accumulator the moment the BFF delivers it. The accumulator
+  // is a no-op for repeat polls of the same (sourceKey, filePath, runId)
+  // triple, so the effect can safely fire on every fileContent change
+  // without disturbing the "previous" snapshot. We key by programId
+  // because the BFF's traceability + run identity contract uses it as
+  // the canonical sourceKey (ADR-0007 §3).
+  //
+  // Studio-IDE-7 review-finding (Codex P2, PR #282): ``deriveSourceHash``
+  // is async, so two rapid runs could resolve out of order. The
+  // ``cancelled`` guard captured in the effect closure ensures only the
+  // hash for the run/file currently in scope reaches
+  // ``recordJavaDiffSnapshot`` — a late callback from a superseded run
+  // can never shift the newer snapshot into ``previous`` and invert the
+  // displayed diff.
+  useEffect(() => {
+    if (
+      !selectedFilePath ||
+      fileContent === null ||
+      !state.runId ||
+      !state.programId ||
+      isFetchingFile
+    ) {
+      return;
+    }
+    const programId = state.programId;
+    const runId = state.runId;
+    const filePath = selectedFilePath;
+    const content = fileContent;
+    let cancelled = false;
+    void deriveSourceHash(content).then((hash) => {
+      if (cancelled) return;
+      recordJavaDiffSnapshot(programId, filePath, {
+        content,
+        sourceHash: hash,
+        runId,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedFilePath,
+    fileContent,
+    state.runId,
+    state.programId,
+    isFetchingFile,
+    recordJavaDiffSnapshot,
   ]);
 
   // Studio-IDE-13 (#255) AC3: when a new generator run lands while the
@@ -1207,6 +1265,18 @@ export function GeneratedJavaEditorPane() {
               {compileCheckPending ? "Compile…" : "Compile Check"}
             </button>
           ) : null}
+          {selectedFilePath && state.programId ? (
+            <button
+              type="button"
+              onClick={() => setShowDiffWorkspace(true)}
+              data-testid="java-compare-runs-button"
+              title="Open the synchronized Java + COBOL diff for the previous run."
+              aria-label="Compare runs"
+              className="rounded border border-line px-2 py-0.5 text-[10px] font-medium text-text-dim hover:bg-bg-2"
+            >
+              Compare Runs
+            </button>
+          ) : null}
           {selectedFilePath ? <RunModeBadge mode={runMode} /> : null}
           {fileSha ? (
             <span
@@ -1415,6 +1485,26 @@ export function GeneratedJavaEditorPane() {
             );
           }}
           onCancel={cancelJavaMergeReview}
+        />
+      ) : null}
+
+      {/*
+       * Studio-IDE-7 (#252): Compare Runs overlay. Opens on the toolbar
+       * button click and pulls the previous→current snapshots for this
+       * (programId, filePath) out of the in-memory diff history.
+       * Empty / un-coupled states are handled internally by DiffWorkspace.
+       */}
+      {showDiffWorkspace &&
+      selectedFilePath &&
+      state.programId &&
+      state.runId ? (
+        <DiffWorkspace
+          filePath={selectedFilePath}
+          sourceKey={state.programId}
+          runId={state.runId}
+          javaHistory={javaDiffHistory[state.programId]?.[selectedFilePath]}
+          cobolSnapshotsByRun={cobolDiffHistory[state.programId]}
+          onClose={() => setShowDiffWorkspace(false)}
         />
       ) : null}
     </div>
