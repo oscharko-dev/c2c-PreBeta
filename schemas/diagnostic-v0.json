@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/diagnostic-v0.json",
+  "title": "Diagnostic v0",
+  "description": "BFF-shaped diagnostic record consumed by the Studio Problems panel and editor markers. Governed by ADR 0006 (Studio-BFF Contract Versioning). Owns the Diagnostic sub-shape that nested orchestrator artifacts (build-test-result, generation-response) reference via $ref. Positional fields and artifactRef are optional; Studio fallback rules for missing fields are enumerated in ADR 0006 Decision 4.",
+  "type": "object",
+  "required": ["severity", "code", "message"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v0"],
+      "default": "v0",
+      "description": "DTO version per ADR 0006. Optional on the wire; absence means \"v0\". Bumped only on a non-additive change such as removal of a field or tightening of an enum."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["error", "warning", "info", "hint"],
+      "description": "Canonical severity. Upstream synonyms (warn, information, fatal, note, ...) are mapped to this closed set by the BFF normalizer; unknown values fall through to \"info\" per ADR 0006 Decision 3."
+    },
+    "code": {
+      "type": "string",
+      "description": "Stable diagnostic identifier (e.g. \"javac-syntax\", \"cobol-parse\"). Empty string means the upstream did not supply a code; consumers render the message alone."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable description. Required. Entries without a message are dropped by the BFF normalizer because they have nothing to render."
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-indexed source line. Absent → marker placed at file level; no source jump."
+    },
+    "column": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-indexed source column. Absent → marker spans the whole line."
+    },
+    "endLine": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-indexed last line of the marker range. Absent → point marker at (line, column)."
+    },
+    "endColumn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-indexed last column of the marker range. Absent → point marker at (line, column)."
+    },
+    "filePath": {
+      "type": "string",
+      "description": "Source file the diagnostic attaches to. Absent → diagnostic is run-level and never tagged onto an editor tab."
+    },
+    "sourceKind": {
+      "type": "string",
+      "enum": ["cobol", "ir", "generated_java", "build", "test"],
+      "description": "Pipeline stage that produced the diagnostic. Routes markers to the correct editor pane and the matching Monaco marker owner namespace."
+    },
+    "originStep": {
+      "type": "string",
+      "description": "Orchestrator state name (e.g. \"parse-cobol\", \"compile-test-java\"). Renders an originated-step pill in the Problems panel."
+    },
+    "artifactRef": {
+      "description": "Optional reference to the artifact this diagnostic attaches to (semantic-IR node, generated-Java file, etc.). Populated by Studio-IDE-5 (#244) and Studio-IDE-6 (#248); absent on diagnostics produced by older steps or replayed from v0 Evidence-Pack fixtures.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["sha256"],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "byteSize": { "type": "integer", "minimum": 0 },
+            "kind": { "type": "string" },
+            "path": { "type": "string" },
+            "name": { "type": "string" },
+            "mimeType": { "type": "string" },
+            "createdBy": { "type": "string" },
+            "createdAt": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        { "type": "null" }
+      ]
+    }
+  }
+}

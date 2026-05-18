@@ -11,6 +11,15 @@ type MonacoEnvironmentLike = NonNullable<
 >;
 
 let monacoPromise: Promise<Monaco> | null = null;
+// Studio-IDE-5 (#244): cached Monaco instance for callers that only
+// run after the async loader has resolved. `getMonacoSync` returns
+// null until the promise resolves so callers can fall back to a
+// no-op marker render rather than blocking on async import.
+let monacoCache: Monaco | null = null;
+
+export function getMonacoSync(): Monaco | null {
+  return monacoCache;
+}
 
 export function getMonaco(): Promise<Monaco> {
   if (typeof window === "undefined") {
@@ -27,6 +36,7 @@ export function getMonaco(): Promise<Monaco> {
 // Exposed for tests; resets the cached promise so that the next call re-runs the loader.
 export function __resetMonacoForTests(): void {
   monacoPromise = null;
+  monacoCache = null;
   if (typeof self !== "undefined") {
     delete (self as { MonacoEnvironment?: MonacoEnvironmentLike })
       .MonacoEnvironment;
@@ -42,6 +52,7 @@ async function loadMonaco(): Promise<Monaco> {
     import("monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution"),
     import("monaco-editor/esm/vs/language/json/monaco.contribution"),
   ]);
+  monacoCache = monaco;
   return monaco;
 }
 

@@ -26,6 +26,14 @@ import {
   ConflictResolverDialog,
   type ConflictPanel,
 } from "../source/ConflictResolverDialog";
+import {
+  DEFAULT_MARKER_LIMIT,
+  diagnosticsToMarkers,
+  partitionByOwner,
+} from "../../lib/editor/diagnosticMarkers";
+import { useEditorMarkerRegistration } from "../../lib/editor/markerNavigation";
+import { getMonacoSync } from "../../lib/editor/lazyMonaco";
+import type { EditorMarkerGroup } from "../editor/codeEditorTypes";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
 // Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. 500 ms matches
@@ -175,6 +183,49 @@ export function GeneratedJavaEditorPane() {
     return `inmemory://c2c-studio/generated/${state.runId}/${selectedFilePath}`;
   }, [state.runId, selectedFilePath]);
 
+  // Studio-IDE-5 (#244): typed diagnostics that target the generated
+  // Java pane (`sourceKind: generated_java | build | test`).
+  // Diagnostics without a filePath route to the active file; ones with
+  // a filePath that does not match the current selection appear in the
+  // Problems panel but stay off the editor surface.
+  const editorInstanceRef = useRef<
+    import("monaco-editor").editor.IStandaloneCodeEditor | null
+  >(null);
+  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration({
+    id: "generated-java-editor",
+    filePath: selectedFilePath ?? null,
+  });
+  const javaMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
+    const diagnostics = [
+      ...(state.generated?.diagnostics ?? []),
+      ...(state.buildTest?.diagnostics ?? []),
+    ];
+    const monaco = getMonacoSync();
+    if (!monaco) return [];
+    const buckets = partitionByOwner(diagnostics);
+    const model = editorInstanceRef.current?.getModel() ?? null;
+    const groups: EditorMarkerGroup[] = [];
+    for (const owner of ["c2c-generated-java", "c2c-build", "c2c-test"] as const) {
+      const bucketDiagnostics = buckets[owner];
+      const matchingFile = bucketDiagnostics.filter((d) => {
+        if (!d.filePath) return true;
+        if (!selectedFilePath) return false;
+        return (
+          d.filePath === selectedFilePath ||
+          d.filePath.endsWith(selectedFilePath) ||
+          selectedFilePath.endsWith(d.filePath)
+        );
+      });
+      const { markers } = diagnosticsToMarkers(matchingFile, {
+        monaco,
+        model,
+        limit: DEFAULT_MARKER_LIMIT,
+      });
+      groups.push({ owner, markers });
+    }
+    return groups;
+  }, [state.generated, state.buildTest, selectedFilePath]);
+
   // Debounced onChange — schedules a single bufferModel update per
   // JAVA_BUFFER_DEBOUNCE_MS window. The handler captures the current
   // `selectedFilePath` at scheduling time so a mid-flight switch routes the
@@ -241,6 +292,8 @@ export function GeneratedJavaEditorPane() {
 
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
+      editorInstanceRef.current = editor;
+      registerMarkerEditor(editor);
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         // Make sure the last in-flight edit lands in the buffer model
         // before the persistence layer reads it.
@@ -251,7 +304,7 @@ export function GeneratedJavaEditorPane() {
         }
       });
     },
-    [],
+    [registerMarkerEditor],
   );
 
   // Run-mode badge (file level). Per #245 spec:
@@ -562,6 +615,7 @@ export function GeneratedJavaEditorPane() {
             onMount={isJavaEditable ? handleEditorMount : undefined}
             modelUri={modelUri}
             ariaLabel={`Generated Java source for ${selectedFilePath}`}
+            markerGroups={javaMarkerGroups}
             className="h-full"
           />
         )}

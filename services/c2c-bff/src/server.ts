@@ -50,6 +50,10 @@ import {
   sanitizeUpstreamMessage,
   type W02UiErrorCode,
 } from "./error-codes";
+// Studio-IDE-5 (#244): typed Diagnostic surface. The shape and the
+// normalization rules live in `./diagnostics.ts` so the BFF handlers
+// and the dedicated unit tests share a single source of truth.
+import { normalizeDiagnostics, type Diagnostic } from "./diagnostics";
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -892,46 +896,6 @@ function normalizeRunArtifact(raw: unknown): Record<string, unknown> | null {
   return artifact;
 }
 
-interface Diagnostic {
-  severity: string;
-  code: string;
-  message: string;
-  line?: number;
-  column?: number;
-  endLine?: number;
-  endColumn?: number;
-  filePath?: string;
-  sourceKind?: string;
-  originStep?: string;
-}
-
-function normalizeDiagnostics(raw: unknown): Diagnostic[] {
-  if (!Array.isArray(raw)) return [];
-  const out: Diagnostic[] = [];
-  for (const entry of raw) {
-    const record = asRecord(entry);
-    if (!record) continue;
-    const diagnostic: Diagnostic = {
-      severity: asString(record.severity) || asString(record.level),
-      code: asString(record.code),
-      message: asString(record.message),
-    };
-    for (const key of ["line", "column", "endLine", "endColumn"] as const) {
-      const value = asNumber(record[key]);
-      if (value !== undefined && Number.isInteger(value) && value > 0) {
-        diagnostic[key] = value;
-      }
-    }
-    const filePath = asString(record.filePath) || asString(record.source);
-    if (filePath.length > 0) diagnostic.filePath = filePath;
-    for (const key of ["sourceKind", "originStep"] as const) {
-      const value = asString(record[key]);
-      if (value.length > 0) diagnostic[key] = value;
-    }
-    out.push(diagnostic);
-  }
-  return out;
-}
 
 type GeneratedStatus = "generated" | "unsupported" | "skipped" | "incomplete";
 

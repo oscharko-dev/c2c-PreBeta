@@ -215,6 +215,8 @@ function isDiagnostic(payload: unknown): payload is Diagnostic {
   }
 
   return (
+    // schemaVersion is optional on the wire (ADR 0006 Decision 1).
+    (payload.schemaVersion === undefined || payload.schemaVersion === "v0") &&
     isString(payload.severity) &&
     isString(payload.code) &&
     isString(payload.message) &&
@@ -224,7 +226,12 @@ function isDiagnostic(payload: unknown): payload is Diagnostic {
     (payload.endColumn === undefined || isPositiveInteger(payload.endColumn)) &&
     (payload.filePath === undefined || isString(payload.filePath)) &&
     (payload.sourceKind === undefined || isString(payload.sourceKind)) &&
-    (payload.originStep === undefined || isString(payload.originStep))
+    (payload.originStep === undefined || isString(payload.originStep)) &&
+    // artifactRef is forward-looking; null is the explicit absence
+    // signal per ADR 0006 Decision 4.
+    (payload.artifactRef === undefined ||
+      payload.artifactRef === null ||
+      isOutputRef(payload.artifactRef))
   );
 }
 

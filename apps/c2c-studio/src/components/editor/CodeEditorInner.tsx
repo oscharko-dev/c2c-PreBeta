@@ -20,6 +20,7 @@ import {
   type DiffCodeEditorProps,
   type EditorDecoration,
   type EditorMarker,
+  type EditorMarkerGroup,
   type StandaloneCodeEditorProps,
 } from "./codeEditorTypes";
 
@@ -82,6 +83,7 @@ function StandaloneEditorView({
   value,
   onChange,
   markers,
+  markerGroups,
   actions,
   decorations,
   sanitizationProfile,
@@ -104,6 +106,11 @@ function StandaloneEditorView({
   // be ignored on every subsequent model swap.
   const markersRef = useRef<EditorMarker[] | undefined>(markers);
   markersRef.current = markers;
+  const markerGroupsRef = useRef<EditorMarkerGroup[] | undefined>(markerGroups);
+  markerGroupsRef.current = markerGroups;
+  // Tracks the owner labels that wrote markers in the last render so
+  // an owner that disappears between renders is cleared (set to []).
+  const previousOwnersRef = useRef<Set<string>>(new Set());
   const decorationsPropRef = useRef<EditorDecoration[] | undefined>(
     decorations,
   );
@@ -134,9 +141,10 @@ function StandaloneEditorView({
   const sanitizedValueRef = useRef(sanitizedValue);
   sanitizedValueRef.current = sanitizedValue;
 
-  // Re-apply markers whenever the markers prop changes. The handler reads
-  // `editor.getModel()` at call time, so it always targets the current
-  // (post-swap) model.
+  // Re-apply markers whenever the markers/markerGroups props change. The
+  // handler reads `editor.getModel()` at call time so it targets the
+  // current (post-swap) model. The owner-tracking guarantees that a
+  // marker group that disappears between renders gets its owner cleared.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) {
@@ -146,8 +154,8 @@ function StandaloneEditorView({
     if (!model) {
       return;
     }
-    monaco.editor.setModelMarkers(model, "c2c-studio", markers ?? []);
-  }, [monaco, markers]);
+    applyMarkers(monaco, model, markers, markerGroups, previousOwnersRef.current);
+  }, [monaco, markers, markerGroups]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -237,7 +245,7 @@ function StandaloneEditorView({
           }
           const model = editor.getModel();
           if (model) {
-            applyMarkers(monacoInstance, model, markers);
+            applyMarkers(monacoInstance, model, markers, markerGroups, previousOwnersRef.current);
           }
           if (decorations && decorations.length > 0) {
             decorationsRef.current =
@@ -259,7 +267,7 @@ function StandaloneEditorView({
             if (!newModel) {
               return;
             }
-            applyMarkers(monacoInstance, newModel, markersRef.current);
+            applyMarkers(monacoInstance, newModel, markersRef.current, markerGroupsRef.current, previousOwnersRef.current);
             restoreViewState(editor, resolvedUriRef.current);
             if (decorationsRef.current) {
               decorationsRef.current.clear();
@@ -314,6 +322,7 @@ function DiffEditorView({
   original,
   onChange,
   markers,
+  markerGroups,
   actions,
   decorations,
   sanitizationProfile,
@@ -342,6 +351,9 @@ function DiffEditorView({
   // after mount must still apply on every subsequent swap.
   const markersRef = useRef<EditorMarker[] | undefined>(markers);
   markersRef.current = markers;
+  const markerGroupsRef = useRef<EditorMarkerGroup[] | undefined>(markerGroups);
+  markerGroupsRef.current = markerGroups;
+  const previousOwnersRef = useRef<Set<string>>(new Set());
   const decorationsPropRef = useRef<EditorDecoration[] | undefined>(
     decorations,
   );
@@ -389,9 +401,9 @@ function DiffEditorView({
     }
     const modifiedModel = diffEditor.getModifiedEditor().getModel();
     if (modifiedModel) {
-      monaco.editor.setModelMarkers(modifiedModel, "c2c-studio", markers ?? []);
+      applyMarkers(monaco, modifiedModel, markers, markerGroups, previousOwnersRef.current);
     }
-  }, [monaco, markers]);
+  }, [monaco, markers, markerGroups]);
 
   useEffect(() => {
     const diffEditor = diffEditorRef.current;
@@ -494,7 +506,7 @@ function DiffEditorView({
             if (!currentModel) {
               return;
             }
-            applyMarkers(monacoInstance, currentModel, markersRef.current);
+            applyMarkers(monacoInstance, currentModel, markersRef.current, markerGroupsRef.current, previousOwnersRef.current);
             // The new URI may already have saved view state; restore it now
             // since the onMount-time restore only fires on initial mount.
             restoreDiffViewState(diffEditor, resolvedUriRef.current);
@@ -554,10 +566,39 @@ function DiffEditorView({
   );
 }
 
+// Studio-IDE-5 (#244): per-owner marker application. The legacy
+// `markers` prop continues to write into the "c2c-studio" owner so
+// existing callers keep working; new callers should pass
+// `markerGroups` to scope markers per sourceKind. Owners that wrote
+// markers in a previous render but are absent in the next render get
+// cleared explicitly so disappearing diagnostics never leave stale
+// markers on the editor.
 function applyMarkers(
   monaco: typeof MonacoNs,
   model: MonacoNs.editor.ITextModel,
   markers: EditorMarker[] | undefined,
+  markerGroups: EditorMarkerGroup[] | undefined,
+  previousOwners: Set<string>,
 ): void {
-  monaco.editor.setModelMarkers(model, "c2c-studio", markers ?? []);
+  const nextOwners = new Set<string>();
+  // Legacy single-owner channel.
+  if (markers !== undefined) {
+    monaco.editor.setModelMarkers(model, "c2c-studio", markers);
+    nextOwners.add("c2c-studio");
+  } else if (previousOwners.has("c2c-studio")) {
+    monaco.editor.setModelMarkers(model, "c2c-studio", []);
+  }
+  for (const group of markerGroups ?? []) {
+    monaco.editor.setModelMarkers(model, group.owner, group.markers);
+    nextOwners.add(group.owner);
+  }
+  for (const owner of previousOwners) {
+    if (!nextOwners.has(owner)) {
+      monaco.editor.setModelMarkers(model, owner, []);
+    }
+  }
+  previousOwners.clear();
+  for (const owner of nextOwners) {
+    previousOwners.add(owner);
+  }
 }

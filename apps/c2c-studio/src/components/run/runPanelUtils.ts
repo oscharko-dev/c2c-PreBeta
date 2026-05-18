@@ -1,6 +1,5 @@
 import {
   BuildTestView,
-  Diagnostic,
   OutputRef,
   RunProgressStep,
   RunProgressView,
@@ -29,59 +28,6 @@ export interface ArtifactAlignment {
 export interface RunProblem {
   type: string;
   message: string;
-}
-
-function capitalize(value: string): string {
-  if (value.length === 0) {
-    return value;
-  }
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function formatDiagnosticMessage(diagnostic: Diagnostic): string {
-  const locationParts: string[] = [];
-
-  if (diagnostic.sourceKind) {
-    locationParts.push(diagnostic.sourceKind);
-  }
-
-  if (diagnostic.filePath) {
-    let fileLocation = diagnostic.filePath;
-    if (diagnostic.line !== undefined) {
-      fileLocation += `:${diagnostic.line}`;
-      if (diagnostic.column !== undefined) {
-        fileLocation += `:${diagnostic.column}`;
-      }
-    }
-    locationParts.push(fileLocation);
-  } else if (diagnostic.line !== undefined) {
-    let lineLocation = `line ${diagnostic.line}`;
-    if (diagnostic.column !== undefined) {
-      lineLocation += `:${diagnostic.column}`;
-    }
-    locationParts.push(lineLocation);
-  }
-
-  if (diagnostic.originStep) {
-    locationParts.push(`step ${diagnostic.originStep}`);
-  }
-
-  const detail = [diagnostic.code, ...locationParts].filter(Boolean).join(' · ');
-  return detail ? `${detail} — ${diagnostic.message}` : diagnostic.message;
-}
-
-function pushDiagnostics(
-  problems: RunProblem[],
-  scope: string,
-  diagnostics?: Diagnostic[]
-): void {
-  diagnostics?.forEach((diagnostic) => {
-    const severity = diagnostic.severity.trim();
-    problems.push({
-      type: severity ? `${scope} ${capitalize(severity)}` : `${scope} Diagnostic`,
-      message: formatDiagnosticMessage(diagnostic),
-    });
-  });
 }
 
 export function splitOutputLines(value?: string): string[] {
@@ -281,7 +227,6 @@ export function deriveRunProblems(state: TransformationRunState): RunProblem[] {
   state.generated?.missingArtifacts?.forEach((artifact) => {
     problems.push({ type: 'Missing Artifact (Generated)', message: artifact });
   });
-  pushDiagnostics(problems, 'Generated', state.generated?.diagnostics);
 
   state.generatedFiles?.missingArtifacts?.forEach((artifact) => {
     problems.push({ type: 'Missing Artifact (Generated Files)', message: artifact });
@@ -298,7 +243,6 @@ export function deriveRunProblems(state: TransformationRunState): RunProblem[] {
   if (state.buildTest?.status && state.buildTest.status !== 'ok') {
     problems.push({ type: 'Build/Test Failure', message: state.buildTest.note ?? state.buildTest.status });
   }
-  pushDiagnostics(problems, 'Build/Test', state.buildTest?.diagnostics);
 
   switch (state.buildTest?.classification) {
     case 'divergence-known-w0-coverage-gap':

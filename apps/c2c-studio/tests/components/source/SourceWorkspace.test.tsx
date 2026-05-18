@@ -102,6 +102,7 @@ vi.mock("@/components/editor/CodeEditor", async () => {
 // jsdom Monaco never resolves, so we stub the loader to a no-op promise.
 vi.mock("@/lib/editor/lazyMonaco", () => ({
   getMonaco: () => new Promise(() => {}),
+  getMonacoSync: () => null,
   __resetMonacoForTests: () => undefined,
 }));
 

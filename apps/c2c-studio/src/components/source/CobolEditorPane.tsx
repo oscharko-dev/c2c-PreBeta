@@ -26,7 +26,7 @@ import {
   FixedFormatRuler,
   FixedFormatRulerToggle,
 } from "../editor/FixedFormatRuler";
-import { getMonaco } from "../../lib/editor/lazyMonaco";
+import { getMonaco, getMonacoSync } from "../../lib/editor/lazyMonaco";
 import {
   COBOL_LANGUAGE_ID,
   FIXED_FORMAT_RULER_COLUMNS,
@@ -36,6 +36,13 @@ import {
   ConflictResolverDialog,
   type ConflictPanel,
 } from "./ConflictResolverDialog";
+import {
+  DEFAULT_MARKER_LIMIT,
+  diagnosticsToMarkers,
+  partitionByOwner,
+} from "../../lib/editor/diagnosticMarkers";
+import { useEditorMarkerRegistration } from "../../lib/editor/markerNavigation";
+import type { EditorMarkerGroup } from "../editor/codeEditorTypes";
 
 // View-state preservation in Monaco is keyed by model URI. Re-using the same
 // URI per source name keeps cursor / scroll / selection stable when the user
@@ -93,6 +100,45 @@ export function CobolEditorPane() {
   const lineEnding = deriveDisplayedLineEnding(sourceText);
   const modelUri = useMemo(() => deriveModelUri(sourceName), [sourceName]);
 
+  // Studio-IDE-5 (#244): collect typed diagnostics that target the
+  // COBOL source — `sourceKind: "cobol"` and the IR step (which still
+  // points at COBOL line numbers via `sourceLine`). The build/test and
+  // generated-Java diagnostics are routed to the Java pane.
+  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration({
+    id: "cobol-editor",
+    filePath: sourceName ?? DEFAULT_SOURCE_NAME,
+  });
+  const cobolMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
+    const diagnostics = [
+      ...(runState.generated?.diagnostics ?? []),
+      ...(runState.buildTest?.diagnostics ?? []),
+    ];
+    const buckets = partitionByOwner(diagnostics);
+    const cobolGroup = buckets["c2c-cobol"];
+    const irGroup = buckets["c2c-ir"];
+    const monaco = getMonacoSync();
+    if (!monaco) return [];
+    // We do not have a stable handle to the live Monaco model here so
+    // the marker mapper receives null; that degrades the whole-line
+    // fallback to a single-character marker which the editor renders
+    // safely. The CodeEditor re-applies markers after each model swap
+    // so the next render with a model attached refines the geometry.
+    const cobolMarkers = diagnosticsToMarkers(cobolGroup, {
+      monaco,
+      model: editorRef.current?.getModel() ?? null,
+      limit: DEFAULT_MARKER_LIMIT,
+    });
+    const irMarkers = diagnosticsToMarkers(irGroup, {
+      monaco,
+      model: editorRef.current?.getModel() ?? null,
+      limit: DEFAULT_MARKER_LIMIT,
+    });
+    return [
+      { owner: "c2c-cobol", markers: cobolMarkers.markers },
+      { owner: "c2c-ir", markers: irMarkers.markers },
+    ];
+  }, [runState.generated, runState.buildTest]);
+
   // Toast-equivalent visibility window for the "Saved locally" notice.
   useEffect(() => {
     if (saveNoticeAt === null) {
@@ -149,6 +195,7 @@ export function CobolEditorPane() {
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
       editorRef.current = editor;
+      registerMarkerEditor(editor);
       // Late-registration fallback in case the early effect lost the race
       // against CodeEditorInner's monaco resolution. registerCobolLanguage
       // is idempotent.
@@ -172,7 +219,7 @@ export function CobolEditorPane() {
         void saveDraftNow();
       });
     },
-    [rulerEnabled, saveDraftNow],
+    [rulerEnabled, saveDraftNow, registerMarkerEditor],
   );
 
   const conflictPanels: ConflictPanel[] = useMemo(() => {
@@ -389,6 +436,7 @@ export function CobolEditorPane() {
           modelUri={modelUri}
           ariaLabel={`${sourceName || DEFAULT_SOURCE_NAME} COBOL source editor`}
           onMount={handleEditorMount}
+          markerGroups={cobolMarkerGroups}
           className="flex-1 min-h-0"
         />
       </div>
