@@ -373,6 +373,15 @@ describe('Run Panels', () => {
           generated: {
             unsupportedFeatures: ['GOTO', 'ALTER'],
             missingArtifacts: ['GenMiss'],
+            diagnostics: [
+              {
+                severity: 'warning',
+                code: 'gen-open-assumption',
+                message: 'fallback path used',
+                line: 4,
+                originStep: 'generate-java'
+              }
+            ],
             artifactRef: {
               sha256: 'aaa',
               path: 'artifacts/generated.json'
@@ -384,6 +393,17 @@ describe('Run Panels', () => {
           buildTest: {
             status: 'compile-failed',
             classification: 'compile-error',
+            diagnostics: [
+              {
+                severity: 'error',
+                code: 'javac-syntax',
+                message: 'missing semicolon',
+                line: 12,
+                column: 7,
+                filePath: 'src/main/java/P1.java',
+                sourceKind: 'generated_java'
+              }
+            ],
             generatedArtifactRef: {
               sha256: 'bbb',
               path: 'artifacts/build-test.json'
@@ -405,6 +425,10 @@ describe('Run Panels', () => {
       expect(screen.getByText('GenMiss')).toBeDefined();
       expect(screen.getByText('FilesMiss')).toBeDefined();
       expect(screen.getByText('compile-failed')).toBeDefined();
+      expect(screen.getByText(/gen-open-assumption/)).toBeDefined();
+      expect(screen.getByText(/line 4/)).toBeDefined();
+      expect(screen.getByText(/javac-syntax/)).toBeDefined();
+      expect(screen.getByText(/src\/main\/java\/P1\.java:12:7/)).toBeDefined();
       expect(screen.getByText('The evidence pack is missing required artifacts')).toBeDefined();
       expect(screen.getByText('artifact endpoint failed')).toBeDefined();
       expect(screen.getByText('Generated Java, build/test, and evidence do not reference the same artifact hash')).toBeDefined();

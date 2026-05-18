@@ -19,6 +19,7 @@ import {
   RunEvent,
   RunArtifactMetadata,
   GeneratedFileContent,
+  Diagnostic,
   RunWorkflowView,
   RepairAttemptSummary,
   RepairBudget,
@@ -204,6 +205,29 @@ function isGeneratedFileRef(payload: unknown): payload is GeneratedFileRef {
   );
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return isNonNegativeInteger(value) && value > 0;
+}
+
+function isDiagnostic(payload: unknown): payload is Diagnostic {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return (
+    isString(payload.severity) &&
+    isString(payload.code) &&
+    isString(payload.message) &&
+    (payload.line === undefined || isPositiveInteger(payload.line)) &&
+    (payload.column === undefined || isPositiveInteger(payload.column)) &&
+    (payload.endLine === undefined || isPositiveInteger(payload.endLine)) &&
+    (payload.endColumn === undefined || isPositiveInteger(payload.endColumn)) &&
+    (payload.filePath === undefined || isString(payload.filePath)) &&
+    (payload.sourceKind === undefined || isString(payload.sourceKind)) &&
+    (payload.originStep === undefined || isString(payload.originStep))
+  );
+}
+
 function isGeneratedViewStatus(
   value: unknown,
 ): value is GeneratedView["status"] {
@@ -341,6 +365,9 @@ function isGeneratedViewPayload(payload: unknown): payload is GeneratedView {
       payload.generationResponseRef === null ||
       isOutputRef(payload.generationResponseRef)) &&
     (payload.artifactRef === null || isOutputRef(payload.artifactRef)) &&
+    (payload.diagnostics === undefined ||
+      (Array.isArray(payload.diagnostics) &&
+        payload.diagnostics.every(isDiagnostic))) &&
     (payload.note === undefined || isString(payload.note))
   );
 }
@@ -420,6 +447,9 @@ function isBuildTestViewPayload(payload: unknown): payload is BuildTestView {
       isOutputRef(payload.actualOutputRef)) &&
     (payload.generatedArtifactRef === null ||
       isOutputRef(payload.generatedArtifactRef)) &&
+    (payload.diagnostics === undefined ||
+      (Array.isArray(payload.diagnostics) &&
+        payload.diagnostics.every(isDiagnostic))) &&
     (payload.note === undefined || isString(payload.note))
   );
 }

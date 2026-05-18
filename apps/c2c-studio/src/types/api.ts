@@ -152,6 +152,19 @@ export interface OutputRef {
   createdAt?: string;
 }
 
+export interface Diagnostic {
+  severity: string;
+  code: string;
+  message: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+  filePath?: string;
+  sourceKind?: string;
+  originStep?: string;
+}
+
 export interface RunArtifactMetadata {
   sha256: string;
   byteSize?: number;
@@ -180,6 +193,7 @@ export interface GeneratedView {
   generationResponseRef?: OutputRef | null;
   artifactRef: OutputRef | null;
   traceability?: GeneratedTraceability;
+  diagnostics?: Diagnostic[];
   note?: string;
 }
 
@@ -227,6 +241,7 @@ export interface BuildTestView {
   expectedOutputRef?: OutputRef | null;
   actualOutputRef?: OutputRef | null;
   generatedArtifactRef: OutputRef | null;
+  diagnostics?: Diagnostic[];
   note?: string;
 }
 

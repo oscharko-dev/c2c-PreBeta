@@ -1423,7 +1423,13 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
         openAssumptions: ["IO limited to stdout"],
         generationResponse: {
           diagnostics: [
-            { level: "info", code: "gen.start", message: "generation started" },
+            {
+              level: "info",
+              code: "gen.start",
+              line: 8,
+              originStep: "parse-cobol",
+              message: "generation started",
+            },
             {
               level: "info",
               code: "gen.complete",
@@ -1460,14 +1466,22 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
     const body = generated.body as {
       status: string;
       outputRef: { sha256: string; byteSize?: number } | null;
-      diagnostics: Array<{ code?: string }>;
+      diagnostics: Array<{
+        severity?: string;
+        code?: string;
+        line?: number;
+        originStep?: string;
+      }>;
       files: Record<string, string>;
     };
     assert.equal(body.status, "generated");
     assert.ok(body.outputRef, "outputRef must be present for successful runs");
     assert.equal(body.outputRef?.sha256, "a".repeat(64));
     assert.equal(body.diagnostics.length, 2);
+    assert.equal(body.diagnostics[0]?.severity, "info");
     assert.equal(body.diagnostics[0]?.code, "gen.start");
+    assert.equal(body.diagnostics[0]?.line, 8);
+    assert.equal(body.diagnostics[0]?.originStep, "parse-cobol");
     assert.deepEqual(body.files, {});
   } finally {
     await server.close();
@@ -1666,7 +1680,15 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
       },
     },
     diagnostics: [
-      { level: "info", code: "compile.ok", message: "compile succeeded" },
+      {
+        severity: "warning",
+        code: "javac-deprecation",
+        line: 12,
+        column: 7,
+        source: "src/main/java/c2c/CASE01.java",
+        sourceKind: "generated_java",
+        message: "uses a deprecated API",
+      },
       { level: "info", code: "execution.ok", message: "execution succeeded" },
     ],
     outputRef: {
@@ -1724,7 +1746,14 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
       outputRef: { sha256: string } | null;
       expectedOutputRef: { sha256: string; kind: string } | null;
       actualOutputRef: { sha256: string; kind: string } | null;
-      diagnostics: Array<{ code?: string }>;
+      diagnostics: Array<{
+        severity?: string;
+        code?: string;
+        line?: number;
+        column?: number;
+        filePath?: string;
+        sourceKind?: string;
+      }>;
     };
     assert.equal(body.status, "ok");
     assert.equal(body.classification, "match");
@@ -1738,7 +1767,12 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     assert.equal(body.actualOutputRef?.sha256, "a".repeat(64));
     assert.equal(body.actualOutputRef?.kind, "java-stdout");
     assert.equal(body.diagnostics.length, 2);
-    assert.equal(body.diagnostics[0]?.code, "compile.ok");
+    assert.equal(body.diagnostics[0]?.severity, "warning");
+    assert.equal(body.diagnostics[0]?.code, "javac-deprecation");
+    assert.equal(body.diagnostics[0]?.line, 12);
+    assert.equal(body.diagnostics[0]?.column, 7);
+    assert.equal(body.diagnostics[0]?.filePath, "src/main/java/c2c/CASE01.java");
+    assert.equal(body.diagnostics[0]?.sourceKind, "generated_java");
   } finally {
     await server.close();
   }

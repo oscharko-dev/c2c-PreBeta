@@ -239,6 +239,17 @@ describe("apiClient", () => {
             sha256: "b".repeat(64),
             byteSize: 256,
           },
+          diagnostics: [
+            {
+              severity: "warning",
+              code: "javac-deprecation",
+              message: "uses a deprecated API",
+              line: 12,
+              column: 7,
+              filePath: "src/main/java/P1.java",
+              sourceKind: "generated_java",
+            },
+          ],
           generatedArtifactRef: {
             sha256: "a".repeat(64),
             byteSize: 128,
@@ -261,6 +272,17 @@ describe("apiClient", () => {
           sha256: "b".repeat(64),
           byteSize: 256,
         },
+        diagnostics: [
+          {
+            severity: "warning",
+            code: "javac-deprecation",
+            message: "uses a deprecated API",
+            line: 12,
+            column: 7,
+            filePath: "src/main/java/P1.java",
+            sourceKind: "generated_java",
+          },
+        ],
         generatedArtifactRef: {
           sha256: "a".repeat(64),
           byteSize: 128,
@@ -281,6 +303,15 @@ describe("apiClient", () => {
             productMode: "live",
             status: "generated",
             entryClass: "P1",
+            diagnostics: [
+              {
+                severity: "warning",
+                code: "gen-open-assumption",
+                message: "fallback path used",
+                line: 4,
+                originStep: "generate-java",
+              },
+            ],
             artifactRef: {
               sha256: "a".repeat(64),
               byteSize: 128,
@@ -333,6 +364,15 @@ describe("apiClient", () => {
       data: {
         status: "generated",
         artifactRef: { sha256: "a".repeat(64) },
+        diagnostics: [
+          {
+            severity: "warning",
+            code: "gen-open-assumption",
+            message: "fallback path used",
+            line: 4,
+            originStep: "generate-java",
+          },
+        ],
       },
     });
     expect(generatedFiles).toMatchObject({

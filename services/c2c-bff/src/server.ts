@@ -893,9 +893,16 @@ function normalizeRunArtifact(raw: unknown): Record<string, unknown> | null {
 }
 
 interface Diagnostic {
-  level: string;
+  severity: string;
   code: string;
   message: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+  filePath?: string;
+  sourceKind?: string;
+  originStep?: string;
 }
 
 function normalizeDiagnostics(raw: unknown): Diagnostic[] {
@@ -904,11 +911,24 @@ function normalizeDiagnostics(raw: unknown): Diagnostic[] {
   for (const entry of raw) {
     const record = asRecord(entry);
     if (!record) continue;
-    out.push({
-      level: asString(record.level),
+    const diagnostic: Diagnostic = {
+      severity: asString(record.severity) || asString(record.level),
       code: asString(record.code),
       message: asString(record.message),
-    });
+    };
+    for (const key of ["line", "column", "endLine", "endColumn"] as const) {
+      const value = asNumber(record[key]);
+      if (value !== undefined && Number.isInteger(value) && value > 0) {
+        diagnostic[key] = value;
+      }
+    }
+    const filePath = asString(record.filePath) || asString(record.source);
+    if (filePath.length > 0) diagnostic.filePath = filePath;
+    for (const key of ["sourceKind", "originStep"] as const) {
+      const value = asString(record[key]);
+      if (value.length > 0) diagnostic[key] = value;
+    }
+    out.push(diagnostic);
   }
   return out;
 }

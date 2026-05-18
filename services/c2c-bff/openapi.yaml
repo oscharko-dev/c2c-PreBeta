@@ -1234,6 +1234,9 @@ components:
             requirement.
         traceability:
           $ref: "#/components/schemas/GeneratedTraceability"
+        diagnostics:
+          type: array
+          items: { $ref: "#/components/schemas/Diagnostic" }
         note: { type: string }
 
     GeneratedFileRef:
@@ -1267,6 +1270,21 @@ components:
         mimeType: { type: string }
         createdBy: { type: string }
         createdAt: { type: string }
+
+    Diagnostic:
+      type: object
+      required: [severity, code, message]
+      properties:
+        severity: { type: string }
+        code: { type: string }
+        message: { type: string }
+        line: { type: integer, minimum: 1 }
+        column: { type: integer, minimum: 1 }
+        endLine: { type: integer, minimum: 1 }
+        endColumn: { type: integer, minimum: 1 }
+        filePath: { type: string }
+        sourceKind: { type: string }
+        originStep: { type: string }
 
     GeneratedFilesIndex:
       type: object
@@ -1366,6 +1384,9 @@ components:
             Issue #97 consistency anchor — sha256 of the generated-project
             manifest that the runner compiled. Equal to the same field on
             /generated and /evidence.
+        diagnostics:
+          type: array
+          items: { $ref: "#/components/schemas/Diagnostic" }
         note: { type: string }
 
     EvidenceView:
