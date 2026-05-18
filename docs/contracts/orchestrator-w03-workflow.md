@@ -148,10 +148,12 @@ returned by `GET /v0/runs/{runId}/workflow`.
 Editor-assist calls write a ledger entry of `kind=editor_assist` and use a
 dedicated `editorAssistRef` field; they do not reuse `modelInvocationRef`.
 Each entry carries the post-consume `budgetSnapshot`, the
-`redactedFields[]` produced by the Model Gateway redactor, the
-`requestRegion` (`sourceKind`, line range, and a SHA-256 `byteHash` of the
-selected region), and an optional informational `runIdRef` when a run
-happens to be open at the time of the call.
+`redactedFields[]` produced by the union of Studio-side and Model Gateway
+redactors, the `requestRegion` (`sourceKind`, line range, and the SHA-256
+`byteHash` of the bytes actually sent to the model — i.e. post-Studio
+redaction per [ADR 0005](../adr/0005-studio-local-persistence-security-boundary.md)
+§4), and an optional informational `runIdRef` when a run happens to be
+open at the time of the call.
 
 The Orchestrator exposes no editor-assist surface; the state machine is
 unchanged. An editor-assist call does not produce an `assistDecision` and

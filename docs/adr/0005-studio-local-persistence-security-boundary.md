@@ -57,14 +57,23 @@ start and never persisted.
 Key derivation procedure:
 
 - **Input keying material (IKM)**: a **dedicated draft-key wrapping
-  secret** issued by the BFF in the body of `POST /api/v0/session/bootstrap`
-  at session start. It is **distinct from the authentication cookie**
-  so the cookie remains `HttpOnly` per the security checklist. Studio
-  holds the wrapping secret in memory only — it is never written to
-  storage, never logged, and never transmitted back to the server. On
-  logout or tab close it is dropped; on the next sign-in the BFF issues
-  a fresh value, which is why drafts encrypted under the previous value
-  become unreadable.
+  secret** issued by the BFF in the body of `POST /api/v0/session/bootstrap`.
+  It is **distinct from the authentication cookie** so the cookie
+  remains `HttpOnly` per the security checklist. Studio holds the
+  wrapping secret in memory only — it is never written to storage,
+  never logged, and never transmitted back to the server.
+  - **Lifetime contract**: the BFF generates the secret **once per
+    auth session** at sign-in and stores it server-side keyed by
+    `sessionId`. Every subsequent `POST /api/v0/session/bootstrap`
+    within the same auth session returns the **same** value, so a
+    page reload re-fetches the existing secret and can decrypt
+    drafts written earlier in the session. The Studio runtime
+    therefore drops the in-memory copy freely on tab close — a
+    reload simply re-fetches.
+  - **Rotation**: the secret rotates only at the next sign-in. On
+    logout the BFF deletes its stored copy; from that point no
+    re-fetch can recover the prior value, and drafts encrypted
+    under it become permanently unreadable.
 - **Salt**: `SHA-256(u32be(len(tenantId)) || tenantId || u32be(len(userId)) || userId)`,
   where `u32be(n)` is the 32-bit big-endian byte representation of the
   UTF-8 byte length of the following field. Length-prefix domain
@@ -80,10 +89,14 @@ Encryption record shape:
 ```ts
 type EncryptedDraft = {
   iv: Uint8Array; // 96-bit random per record
-  ciphertext: Uint8Array; // includes AES-GCM AEAD tag
+  ciphertext: Uint8Array; // AES-GCM ciphertext including the AEAD tag
   savedAt: string; // ISO-8601
   ttlExpiresAt: string; // ISO-8601
   schemaVersion: 1;
+  // NOTE: AAD is not stored. Both encrypt and decrypt MUST compute
+  // AAD = canonical(schemaVersion, SourceKey) as specified below
+  // and pass it to crypto.subtle.encrypt / decrypt. A row that
+  // decrypts without AAD verification is treated as CorruptDraft.
 };
 ```
 
@@ -315,13 +328,20 @@ report-uri /api/v0/csp-report;
 - **No `unsafe-eval`.** Monaco does not require it post-AMD removal.
 - **`script-src 'nonce-{NONCE}' 'strict-dynamic'`**: required in V1.
   Next.js App Router emits inline bootstrap and React Server
-  Components hydration scripts that a bare `script-src 'self'` would
-  block. Studio middleware mints a per-request nonce and injects it
-  into the CSP header and every framework-emitted `<script>`; the
-  `'strict-dynamic'` keyword lets scripts loaded by trusted nonces
-  load further scripts without each requiring its own nonce. Nonce
-  delivery is an implementation prerequisite Studio-IDE-3 must wire
-  up alongside the persistence module.
+  Components hydration scripts (e.g. `__next_f` Flight payloads, the
+  hydration script that mounts `WorkbenchShell`) that a bare
+  `script-src 'self'` would block — leaving the Studio shell
+  unhydrated. Studio middleware mints a per-request nonce and injects
+  it into the CSP header **and** every framework-emitted `<script>`;
+  the `'strict-dynamic'` keyword then lets scripts loaded by trusted
+  nonces load further scripts without each requiring its own nonce.
+  - **Order-of-landing rule**: the production CSP described in this
+    section must NOT be applied until the nonce middleware is in
+    place. Studio-IDE-3 ships the nonce plumbing and the CSP in the
+    same change; the persistence module behind a CSP that breaks
+    hydration is not a viable intermediate state. Until then,
+    deployments either ship no CSP or ship the CSP with `script-src`
+    omitted, never `script-src 'self'` without a nonce.
 - **`style-src 'unsafe-inline'`** is accepted for V1 because Monaco
   injects theming styles at runtime. Removing it requires nonce-based
   style CSP — named follow-up. (The script `'unsafe-inline'` is **not**
