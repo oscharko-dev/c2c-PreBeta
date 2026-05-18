@@ -304,9 +304,17 @@ a fenced block so document link-checkers do not try to follow them):
 
 ### 6. CSP Compatibility
 
-CSP is set in `apps/c2c-studio/next.config.mjs` via `headers()` so
-the policy ships with every response and is reviewable in version
-control alongside the rest of the Next.js config.
+CSP is set in a Next.js **middleware** (`apps/c2c-studio/middleware.ts`)
+that mints a per-request nonce and writes the `Content-Security-Policy`
+response header for every navigation. The middleware is the only
+correct place because (a) `next.config.mjs headers()` is evaluated
+without per-request context and cannot generate the `{NONCE}` value
+that must also appear in the framework-emitted `<script>` tags, and
+(b) the same nonce must be propagated to the App Router via a
+request header (e.g. `x-nonce`) that pages read and pass to
+`next/script` and `<script nonce={…}>` boundaries. `next.config.mjs`
+may still own **static** security headers that do not depend on
+per-request data; the CSP is not among them.
 
 **Production CSP** (additive over today's empty baseline):
 
@@ -366,7 +374,7 @@ report-uri /api/v0/csp-report;
 **Dev mode**: Next.js dev server requires `'unsafe-eval'` for HMR.
 The production CSP is applied only in `process.env.NODE_ENV === 'production'`
 builds; dev builds add `'unsafe-eval'` to `script-src` via the same
-`headers()` branch.
+middleware branch.
 
 **Future end state** (not committed in this ADR): nonce-based
 `style-src`, plus `require-trusted-types-for 'script'`.
@@ -384,9 +392,10 @@ builds; dev builds add `'unsafe-eval'` to `script-src` via the same
 - **Effect**: synchronously removes all drafts (including
   expired-but-not-yet-purged rows) for the current `(tenantId, userId)`
   scope. The shown count must match what is actually purged.
-- **Audit**: emits a telemetry event `editor.drafts.cleared` carrying
-  `{ tenantId, userId, purgedCount, timestamp }`. No draft contents
-  are logged.
+- **Audit**: emits a telemetry event carrying the canonical audit
+  shape required by the [security review checklist](../governance/security-review-checklist.md):
+  `{ action: "editor.drafts.cleared", tenantId, userId, count, timestamp }`.
+  No draft contents are logged.
 
 ## `editorPersistence` Module Pseudo-API
 
@@ -416,7 +425,10 @@ interface EditorPersistence {
 
   touch(key: SourceKey): Promise<{ ttlExpiresAt: string }>;
 
-  purgeExpired(): Promise<{ purgedCount: number }>;
+  purgeExpired(scope: {
+    tenantId: string;
+    userId: string;
+  }): Promise<{ purgedCount: number }>;
 
   clearAll(scope: {
     tenantId: string;
@@ -449,6 +461,11 @@ interface EditorPersistence {
   seeing its contents.
 - `touch` updates `ttlExpiresAt` to `now + 14d` (or tenant override,
   capped at 90d).
+- `purgeExpired` takes the scope explicitly. It scans and deletes
+  expired rows only for the supplied `(tenantId, userId)`. On a
+  shared browser profile or after the user switches identities, the
+  caller's identity is the only one swept, and the count surfaced to
+  the UI does not reveal that other identities have local drafts.
 - `clearAll` takes the scope **explicitly** — the module does not
   read session state directly. Zero ambient authority.
 
@@ -530,8 +547,8 @@ collapsing them into a single generic error.
   single `redactedFields[]` view per call.
 - Hover content from any source — diagnostics, lineage, BFF-proxied
   LLM output — is bounded by one sanitizer.
-- CSP is reviewable in `next.config.mjs` and reportable via
-  `report-uri`.
+- CSP is reviewable in `apps/c2c-studio/middleware.ts` and reportable
+  via `report-uri`.
 - A future Studio PR has a checklist to walk through.
 
 ### Becomes harder
