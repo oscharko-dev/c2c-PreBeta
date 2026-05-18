@@ -1,37 +1,41 @@
-'use client';
+"use client";
 
-import { useRef, type ChangeEvent } from 'react';
-import { useWorkbench } from '../../stores/workbench';
-import { useSourceWorkspace } from '../../stores/sourceWorkspace';
-import { TreeRow } from '../ui/TreeRow';
-import { HarnessTimeline } from '../observability/HarnessTimeline';
-import { ModelGatewayPanel } from '../observability/ModelGatewayPanel';
-import { ExperienceLearningPanel } from '../observability/ExperienceLearningPanel';
-import { FileCode2, FolderOpen } from 'lucide-react';
+import { useRef, type ChangeEvent } from "react";
+import { useWorkbench } from "../../stores/workbench";
+import { useSourceWorkspace } from "../../stores/sourceWorkspace";
+import { TreeRow } from "../ui/TreeRow";
+import { HarnessTimeline } from "../observability/HarnessTimeline";
+import { ModelGatewayPanel } from "../observability/ModelGatewayPanel";
+import { ExperienceLearningPanel } from "../observability/ExperienceLearningPanel";
+import { CobolDataDictionary } from "../observability/CobolDataDictionary";
+import { FileCode2, FolderOpen } from "lucide-react";
 
 function readTextFile(file: File): Promise<string> {
-  if (typeof file.text === 'function') {
+  if (typeof file.text === "function") {
     return file.text();
   }
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => reject(reader.error ?? new Error('Unable to read COBOL file.'));
+    reader.onload = () =>
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Unable to read COBOL file."));
     reader.readAsText(file);
   });
 }
 
 export function SecondaryStripe() {
   const { isSecondaryStripeOpen, activeActivityTab } = useWorkbench();
-  const { sourceName, sourceText, setSourceFile, clearWorkspace } = useSourceWorkspace();
+  const { sourceName, sourceText, setSourceFile, clearWorkspace } =
+    useSourceWorkspace();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isSecondaryStripeOpen) return null;
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = '';
+    event.currentTarget.value = "";
     if (!file) return;
 
     const text = await readTextFile(file);
@@ -45,13 +49,18 @@ export function SecondaryStripe() {
       aria-label="Secondary Stripe"
     >
       <div className="flex items-center px-4 h-10 border-b border-line-2 font-medium text-xs uppercase tracking-wider text-text-dim">
-        {activeActivityTab === 'harness' ? 'Harness' : 
-         activeActivityTab === 'model-gateway' ? 'Model Gateway' : 
-         activeActivityTab === 'experience' ? 'Experience Learning' : 
-         'COBOL Explorer'}
+        {activeActivityTab === "harness"
+          ? "Harness"
+          : activeActivityTab === "model-gateway"
+            ? "Model Gateway"
+            : activeActivityTab === "experience"
+              ? "Experience Learning"
+              : activeActivityTab === "data-dictionary"
+                ? "Data Dictionary"
+                : "COBOL Explorer"}
       </div>
       <div className="flex flex-1 flex-col overflow-auto">
-        {activeActivityTab === 'explorer' && (
+        {activeActivityTab === "explorer" && (
           <div className="flex flex-1 flex-col gap-4 p-4">
             <input
               ref={fileInputRef}
@@ -73,9 +82,19 @@ export function SecondaryStripe() {
             <div className="min-h-0 flex-1 overflow-auto">
               <div role="tree" aria-label="COBOL source files">
                 {sourceName && sourceText.length > 0 ? (
-                  <TreeRow label={sourceName} type="file" active statusVariant="success" />
+                  <TreeRow
+                    label={sourceName}
+                    type="file"
+                    active
+                    statusVariant="success"
+                  />
                 ) : (
-                  <TreeRow label="No COBOL file loaded" type="folder" isOpen={false} disabled />
+                  <TreeRow
+                    label="No COBOL file loaded"
+                    type="folder"
+                    isOpen={false}
+                    disabled
+                  />
                 )}
               </div>
             </div>
@@ -85,7 +104,9 @@ export function SecondaryStripe() {
                 <FileCode2 className="h-4 w-4 text-accent" />
                 <span className="font-medium">Own COBOL source only</span>
               </div>
-              <p>Open a local COBOL file or paste code directly in the editor.</p>
+              <p>
+                Open a local COBOL file or paste code directly in the editor.
+              </p>
               {sourceName && (
                 <button
                   type="button"
@@ -98,9 +119,10 @@ export function SecondaryStripe() {
             </div>
           </div>
         )}
-        {activeActivityTab === 'harness' && <HarnessTimeline />}
-        {activeActivityTab === 'model-gateway' && <ModelGatewayPanel />}
-        {activeActivityTab === 'experience' && <ExperienceLearningPanel />}
+        {activeActivityTab === "harness" && <HarnessTimeline />}
+        {activeActivityTab === "model-gateway" && <ModelGatewayPanel />}
+        {activeActivityTab === "experience" && <ExperienceLearningPanel />}
+        {activeActivityTab === "data-dictionary" && <CobolDataDictionary />}
       </div>
     </aside>
   );
