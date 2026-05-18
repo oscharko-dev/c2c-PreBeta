@@ -128,6 +128,11 @@ function StandaloneEditorView({
     () => applySanitization(value, sanitizationProfile),
     [value, sanitizationProfile],
   );
+  // Latest "expected" value, used to detect prop-driven changes that
+  // @monaco-editor/react applies via `executeEdits` (which emits non-flush
+  // content events that the `event.isFlush` guard alone would let through).
+  const sanitizedValueRef = useRef(sanitizedValue);
+  sanitizedValueRef.current = sanitizedValue;
 
   // Re-apply markers whenever the markers prop changes. The handler reads
   // `editor.getModel()` at call time, so it always targets the current
@@ -276,9 +281,17 @@ function StandaloneEditorView({
             return;
           }
           // Suppress whole-model replacements (isFlush) — those are emitted
-          // when `@monaco-editor/react` applies a new `value` prop, not when
-          // the user edits.
+          // when `@monaco-editor/react` applies a new `value` prop via
+          // `setValue`, not when the user edits.
           if (event?.isFlush) {
+            return;
+          }
+          // Newer @monaco-editor/react versions apply value-prop refreshes
+          // via `executeEdits` instead of `setValue`, which emits non-flush
+          // content events. Compare against the latest sanitized prop and
+          // skip when they match — that change just brought the model in
+          // line with the prop we already gave it.
+          if (next === sanitizedValueRef.current) {
             return;
           }
           if (next !== undefined) {
@@ -358,6 +371,13 @@ function DiffEditorView({
     () => applySanitization(original, sanitizationProfile),
     [original, sanitizationProfile],
   );
+  // Latest "expected" model contents. The content-change listener compares
+  // the post-change model value against this; when they match, the change
+  // is just @monaco-editor/react replaying the `modified` prop (which 4.7
+  // does via `executeEdits` → `isFlush === false`, slipping past the
+  // earlier `event.isFlush` guard).
+  const sanitizedModifiedRef = useRef(sanitizedModified);
+  sanitizedModifiedRef.current = sanitizedModified;
 
   // Re-apply markers when the markers prop changes. The handler reads
   // `diffEditor.getModifiedEditor().getModel()` at call time so it always
@@ -493,12 +513,22 @@ function DiffEditorView({
             contentChangeDisposableRef.current =
               currentModel.onDidChangeContent((event) => {
                 // Suppress whole-model replacements — those are emitted when
-                // @monaco-editor/react flushes a new `modified` prop, not
-                // when the user edits.
+                // @monaco-editor/react flushes a new `modified` prop via
+                // `setValue`.
                 if (event.isFlush) {
                   return;
                 }
-                onChangeRef.current?.(currentModel.getValue());
+                // @monaco-editor/react 4.7 applies updates to the writable
+                // diff side via `executeEdits` instead of `setValue`, which
+                // emits non-flush content events. Compare the post-change
+                // model value against the latest `modified` prop and skip
+                // when they match — that is, when the change just brought
+                // the model in line with the prop we already gave Monaco.
+                const next = currentModel.getValue();
+                if (next === sanitizedModifiedRef.current) {
+                  return;
+                }
+                onChangeRef.current?.(next);
               });
           };
 

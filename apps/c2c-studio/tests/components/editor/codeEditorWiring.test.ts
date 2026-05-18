@@ -148,6 +148,21 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
     );
   });
 
+  it("suppresses onChange for executeEdits-driven prop refreshes via value-equality (Codex round-5)", () => {
+    // @monaco-editor/react 4.7 applies new `value` / `modified` props via
+    // `executeEdits` instead of `setValue`. Those emit content events with
+    // `isFlush === false`, so the earlier guard alone is insufficient.
+    // Both editor variants must additionally compare the post-change model
+    // value against the latest sanitized prop and skip when they match.
+    expect(innerSource).toMatch(/sanitizedValueRef/);
+    expect(innerSource).toMatch(/sanitizedModifiedRef/);
+    // Standalone: `next === sanitizedValueRef.current` short-circuits.
+    expect(innerSource).toMatch(/next\s*===\s*sanitizedValueRef\.current/);
+    // Diff: `currentModel.getValue() === sanitizedModifiedRef.current`
+    // is the same idea phrased against the model.
+    expect(innerSource).toMatch(/sanitizedModifiedRef\.current/);
+  });
+
   it("re-applies decorations to the new model on swap (Codex round-4)", () => {
     // The previous decorations collection was bound to the old model. When
     // the model swaps, recreate from `decorationsPropRef` (the latest prop)
