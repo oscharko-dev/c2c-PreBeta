@@ -8,8 +8,8 @@
 // one sort; with the 2000-marker cap from `diagnosticMarkers.ts` it is
 // safe to call eagerly.
 
-import type { Diagnostic } from "../types/api";
-import type { TransformationRunState } from "../types/run";
+import type { Diagnostic } from "@/types/api";
+import type { TransformationRunState } from "@/types/run";
 
 // "scope" describes the upstream step the diagnostic flowed from, used
 // for the panel's secondary chip and for grouping when sorted by source.

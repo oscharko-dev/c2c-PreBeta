@@ -13,7 +13,7 @@ import {
 } from "@/lib/editor/modelLifecycle";
 import { applyStudioTheme, STUDIO_DARK_THEME } from "@/lib/editor/monacoTheme";
 
-import { EditorSkeleton } from "./EditorSkeleton";
+import { EditorSkeleton } from "@/components/editor/EditorSkeleton";
 import {
   applySanitization,
   type CodeEditorProps,
@@ -22,7 +22,7 @@ import {
   type EditorMarker,
   type EditorMarkerGroup,
   type StandaloneCodeEditorProps,
-} from "./codeEditorTypes";
+} from "@/components/editor/codeEditorTypes";
 
 export default function CodeEditorInner(props: CodeEditorProps) {
   const [monaco, setMonaco] = useState<Monaco | null>(null);

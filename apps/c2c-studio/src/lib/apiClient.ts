@@ -35,8 +35,8 @@ import {
   AssistDecisionReasonCode,
   AssistDecisionAgentRole,
   AssistDecisionArtifactRef,
-} from "../types/api";
-import { TransformRequest } from "../types/transform-request";
+} from "@/types/api";
+import { TransformRequest } from "@/types/transform-request";
 
 const LOCAL_OVERRIDE_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -1191,7 +1191,7 @@ import {
   ModelGatewayHealth,
   ModelGatewayModels,
   HarnessReady,
-} from "../types/observability";
+} from "@/types/observability";
 
 function isRunExperienceViewPayload(
   payload: unknown,

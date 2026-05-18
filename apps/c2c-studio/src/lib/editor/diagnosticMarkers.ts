@@ -19,7 +19,7 @@
 
 import type * as MonacoNs from "monaco-editor";
 
-import type { Diagnostic } from "../../types/api";
+import type { Diagnostic } from "@/types/api";
 
 export type Monaco = typeof MonacoNs;
 

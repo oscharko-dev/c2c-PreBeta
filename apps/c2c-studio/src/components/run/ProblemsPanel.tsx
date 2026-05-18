@@ -19,9 +19,9 @@
 
 import { useMemo, useState } from "react";
 
-import { useTransformationRun } from "../../stores/transformationRun";
-import { useMarkerNavigation } from "../../lib/editor/markerNavigation";
-import { StatusChip } from "../ui/StatusChip";
+import { useTransformationRun } from "@/stores/transformationRun";
+import { useMarkerNavigation } from "@/lib/editor/markerNavigation";
+import { StatusChip } from "@/components/ui/StatusChip";
 import {
   DEFAULT_SORT,
   type DiagnosticSortKey,
@@ -29,10 +29,10 @@ import {
   collectDiagnostics,
   sortDiagnostics,
   summarize,
-} from "../../lib/runDiagnostics";
-import { deriveRunProblems } from "./runPanelUtils";
-import { DEFAULT_MARKER_LIMIT } from "../../lib/editor/diagnosticMarkers";
-import type { Diagnostic } from "../../types/api";
+} from "@/lib/runDiagnostics";
+import { deriveRunProblems } from "@/components/run/runPanelUtils";
+import { DEFAULT_MARKER_LIMIT } from "@/lib/editor/diagnosticMarkers";
+import type { Diagnostic } from "@/types/api";
 
 interface SeverityBadgeProps {
   severity: Diagnostic["severity"];

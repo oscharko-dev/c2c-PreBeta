@@ -9,31 +9,31 @@ import React, {
 } from "react";
 import { Loader2 } from "lucide-react";
 
-import { useGeneratedArtifacts } from "../../hooks/useGeneratedArtifacts";
-import { UnsupportedConstructsPanel } from "../state/UnsupportedConstructsPanel";
-import { MissingArtifactsPanel } from "../state/MissingArtifactsPanel";
-import { BlockedState } from "../state/BlockedState";
-import { ErrorNotice } from "../state/ErrorNotice";
-import { Badge } from "../ui/Badge";
-import { useTransformationRun } from "../../stores/transformationRun";
-import { CodeEditor } from "../editor/CodeEditor";
-import type { StandaloneEditorMountArgs } from "../editor/CodeEditor";
+import { useGeneratedArtifacts } from "@/hooks/useGeneratedArtifacts";
+import { UnsupportedConstructsPanel } from "@/components/state/UnsupportedConstructsPanel";
+import { MissingArtifactsPanel } from "@/components/state/MissingArtifactsPanel";
+import { BlockedState } from "@/components/state/BlockedState";
+import { ErrorNotice } from "@/components/state/ErrorNotice";
+import { Badge } from "@/components/ui/Badge";
+import { useTransformationRun } from "@/stores/transformationRun";
+import { CodeEditor } from "@/components/editor/CodeEditor";
+import type { StandaloneEditorMountArgs } from "@/components/editor/CodeEditor";
 import {
   detectLanguageFromPath,
   isEditableLanguage,
-} from "../../lib/editor/languageDetection";
+} from "@/lib/editor/languageDetection";
 import {
   ConflictResolverDialog,
   type ConflictPanel,
-} from "../source/ConflictResolverDialog";
+} from "@/components/source/ConflictResolverDialog";
 import {
   DEFAULT_MARKER_LIMIT,
   diagnosticsToMarkers,
   partitionByOwner,
-} from "../../lib/editor/diagnosticMarkers";
-import { useEditorMarkerRegistration } from "../../lib/editor/markerNavigation";
-import { getMonacoSync } from "../../lib/editor/lazyMonaco";
-import type { EditorMarkerGroup } from "../editor/codeEditorTypes";
+} from "@/lib/editor/diagnosticMarkers";
+import { useEditorMarkerRegistration } from "@/lib/editor/markerNavigation";
+import { getMonacoSync } from "@/lib/editor/lazyMonaco";
+import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
 // Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. 500 ms matches

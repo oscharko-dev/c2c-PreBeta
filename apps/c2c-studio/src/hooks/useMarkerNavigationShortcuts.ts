@@ -2,8 +2,8 @@
 
 import { useEffect } from "react";
 
-import { useMarkerNavigation } from "../lib/editor/markerNavigation";
-import { useWorkbench } from "../stores/workbench";
+import { useMarkerNavigation } from "@/lib/editor/markerNavigation";
+import { useWorkbench } from "@/stores/workbench";
 
 // Studio-IDE-5 (#244): wire F8 / Shift+F8 to next/previous marker on
 // the active editor. The hook lives at the workbench level so the

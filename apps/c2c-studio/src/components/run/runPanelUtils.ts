@@ -3,9 +3,9 @@ import {
   OutputRef,
   RunProgressStep,
   RunProgressView,
-} from '../../types/api';
-import { TransformationRunState } from '../../types/run';
-import { StatusVariant, mapBuildTestClassificationToVariant } from '../../types/design';
+} from '@/types/api';
+import { TransformationRunState } from '@/types/run';
+import { StatusVariant, mapBuildTestClassificationToVariant } from '@/types/design';
 
 export interface PipelineStageState {
   label: string;

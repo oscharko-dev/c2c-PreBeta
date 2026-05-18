@@ -10,39 +10,39 @@ import React, {
 import type * as MonacoNs from "monaco-editor";
 import { Play } from "lucide-react";
 
-import { useSourceWorkspace } from "../../stores/sourceWorkspace";
+import { useSourceWorkspace } from "@/stores/sourceWorkspace";
 import {
   DEFAULT_SOURCE_NAME,
   deriveDetectedProgramId,
   deriveDisplayedLineEnding,
-} from "../../lib/sourceAnalysis";
-import { useC2cApi } from "../../hooks/useC2cApi";
-import { useTransformationRun } from "../../stores/transformationRun";
-import { UnsupportedConstructsPanel } from "../state/UnsupportedConstructsPanel";
-import { getWorkbenchReadiness } from "../workbench/workbenchReadiness";
-import { CodeEditor } from "../editor/CodeEditor";
-import type { StandaloneEditorMountArgs } from "../editor/CodeEditor";
+} from "@/lib/sourceAnalysis";
+import { useC2cApi } from "@/hooks/useC2cApi";
+import { useTransformationRun } from "@/stores/transformationRun";
+import { UnsupportedConstructsPanel } from "@/components/state/UnsupportedConstructsPanel";
+import { getWorkbenchReadiness } from "@/components/workbench/workbenchReadiness";
+import { CodeEditor } from "@/components/editor/CodeEditor";
+import type { StandaloneEditorMountArgs } from "@/components/editor/CodeEditor";
 import {
   FixedFormatRuler,
   FixedFormatRulerToggle,
-} from "../editor/FixedFormatRuler";
-import { getMonaco, getMonacoSync } from "../../lib/editor/lazyMonaco";
+} from "@/components/editor/FixedFormatRuler";
+import { getMonaco, getMonacoSync } from "@/lib/editor/lazyMonaco";
 import {
   COBOL_LANGUAGE_ID,
   FIXED_FORMAT_RULER_COLUMNS,
   registerCobolLanguage,
-} from "../../lib/editor/cobolMonarch";
+} from "@/lib/editor/cobolMonarch";
 import {
   ConflictResolverDialog,
   type ConflictPanel,
-} from "./ConflictResolverDialog";
+} from "@/components/source/ConflictResolverDialog";
 import {
   DEFAULT_MARKER_LIMIT,
   diagnosticsToMarkers,
   partitionByOwner,
-} from "../../lib/editor/diagnosticMarkers";
-import { useEditorMarkerRegistration } from "../../lib/editor/markerNavigation";
-import type { EditorMarkerGroup } from "../editor/codeEditorTypes";
+} from "@/lib/editor/diagnosticMarkers";
+import { useEditorMarkerRegistration } from "@/lib/editor/markerNavigation";
+import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 
 // View-state preservation in Monaco is keyed by model URI. Re-using the same
 // URI per source name keeps cursor / scroll / selection stable when the user

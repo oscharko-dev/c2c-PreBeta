@@ -23,8 +23,8 @@ import {
   ReactNode,
 } from "react";
 
-import type { Diagnostic } from "../../types/api";
-import { sourceKindToOwner } from "./diagnosticMarkers";
+import type { Diagnostic } from "@/types/api";
+import { sourceKindToOwner } from "@/lib/editor/diagnosticMarkers";
 
 export interface NavigationTarget {
   filePath: string;

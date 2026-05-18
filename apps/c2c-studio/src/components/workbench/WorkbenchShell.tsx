@@ -1,23 +1,23 @@
 "use client";
 
 import { useEffect } from "react";
-import { WorkbenchProvider } from "../../stores/workbench";
-import { SourceWorkspaceProvider } from "../../stores/sourceWorkspace";
-import { TransformationRunProvider } from "../../stores/transformationRun";
-import { useC2cApi } from "../../hooks/useC2cApi";
-import { GeneratedArtifactsProvider } from "../../hooks/useGeneratedArtifacts";
-import { AppTopBar } from "./AppTopBar";
-import { ActivityBar } from "./ActivityBar";
-import { SecondaryStripe } from "./SecondaryStripe";
-import { SplitEditorArea } from "./SplitEditorArea";
-import { TargetJavaInspector } from "../generated/TargetJavaInspector";
-import { BottomWorkbench } from "./BottomWorkbench";
-import { StatusBar } from "./StatusBar";
-import { RightObservabilityStripe } from "../observability/RightObservabilityStripe";
-import { editorPersistence } from "../../lib/editor/editorPersistence";
-import { OriginOverlayProvider } from "../../lib/editor/originOverlay";
-import { MarkerNavigationProvider } from "../../lib/editor/markerNavigation";
-import { useMarkerNavigationShortcuts } from "../../hooks/useMarkerNavigationShortcuts";
+import { WorkbenchProvider } from "@/stores/workbench";
+import { SourceWorkspaceProvider } from "@/stores/sourceWorkspace";
+import { TransformationRunProvider } from "@/stores/transformationRun";
+import { useC2cApi } from "@/hooks/useC2cApi";
+import { GeneratedArtifactsProvider } from "@/hooks/useGeneratedArtifacts";
+import { AppTopBar } from "@/components/workbench/AppTopBar";
+import { ActivityBar } from "@/components/workbench/ActivityBar";
+import { SecondaryStripe } from "@/components/workbench/SecondaryStripe";
+import { SplitEditorArea } from "@/components/workbench/SplitEditorArea";
+import { TargetJavaInspector } from "@/components/generated/TargetJavaInspector";
+import { BottomWorkbench } from "@/components/workbench/BottomWorkbench";
+import { StatusBar } from "@/components/workbench/StatusBar";
+import { RightObservabilityStripe } from "@/components/observability/RightObservabilityStripe";
+import { editorPersistence } from "@/lib/editor/editorPersistence";
+import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
+import { MarkerNavigationProvider } from "@/lib/editor/markerNavigation";
+import { useMarkerNavigationShortcuts } from "@/hooks/useMarkerNavigationShortcuts";
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
