@@ -3693,7 +3693,11 @@ class W0WorkflowRunner:
         contract.set_active_step(W02_STEP_ASSIST_DECISION)
         affected_refs: tuple[JsonObject, ...] = ()
         if baseline_artifact_ref is not None:
-            affected_refs = (dict(baseline_artifact_ref),)
+            baseline_ref = _data_reference_from_mapping(baseline_artifact_ref)
+            if baseline_ref is not None:
+                affected_refs = (
+                    _as_reference_payload(baseline_ref),
+                )
 
         detected_reason, detected_markers = self._detect_deterministic_uncertainty(
             ir_document=ir_document,
