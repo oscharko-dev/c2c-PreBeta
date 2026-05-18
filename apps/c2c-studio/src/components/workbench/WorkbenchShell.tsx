@@ -20,6 +20,8 @@ import { MarkerNavigationProvider } from "@/lib/editor/markerNavigation";
 import { JavaEditorActionsProvider } from "@/stores/javaEditorActions";
 import { LineageCoverageProvider } from "@/stores/lineageCoverage";
 import { useMarkerNavigationShortcuts } from "@/hooks/useMarkerNavigationShortcuts";
+import { EditorAssistProvider, useEditorAssist } from "@/stores/editorAssist";
+import { EditorAssistSidePanel } from "@/components/observability/EditorAssistSidePanel";
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
@@ -43,7 +45,14 @@ export function WorkbenchShell() {
               <LineageCoverageProvider>
                 <MarkerNavigationProvider>
                   <JavaEditorActionsProvider>
-                    <WorkbenchShellBody apiState={apiState} />
+                    {/* Studio-IDE-10 (#249): the Editor-Assist store is
+                        scoped at the WorkbenchShell level so both editor
+                        panes (COBOL + Java) and the side panel host
+                        share a single `(request, result, budget)`
+                        slot. */}
+                    <EditorAssistProvider>
+                      <WorkbenchShellBody apiState={apiState} />
+                    </EditorAssistProvider>
                   </JavaEditorActionsProvider>
                 </MarkerNavigationProvider>
               </LineageCoverageProvider>
@@ -52,6 +61,25 @@ export function WorkbenchShell() {
         </SourceWorkspaceProvider>
       </TransformationRunProvider>
     </WorkbenchProvider>
+  );
+}
+
+// Studio-IDE-10 (#249): the side-panel host bridges the editorAssist
+// store to the `EditorAssistSidePanel` component. Hoisting this into a
+// small wrapper lets us read the context inside the WorkbenchShell tree
+// without prop drilling.
+function EditorAssistPanelHost() {
+  const { panelOpen, request, result, closePanel, retry } = useEditorAssist();
+  return (
+    <EditorAssistSidePanel
+      open={panelOpen}
+      request={request}
+      result={result}
+      onClose={closePanel}
+      onRetry={() => {
+        void retry();
+      }}
+    />
   );
 }
 
@@ -87,6 +115,7 @@ function WorkbenchShellBody({
           <BottomWorkbench />
         </div>
         <TargetJavaInspector />
+        <EditorAssistPanelHost />
         <RightObservabilityStripe />
       </div>
       <StatusBar apiState={apiState} />

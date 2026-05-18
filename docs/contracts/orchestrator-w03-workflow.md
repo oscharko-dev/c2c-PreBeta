@@ -204,6 +204,59 @@ The Orchestrator exposes no editor-assist surface; the state machine is
 unchanged. An editor-assist call does not produce an `assistDecision` and
 does not advance any run state.
 
+#### Error-Code Closed Set and HTTP Status Mapping
+
+The BFF returns one of the following error codes for failed editor-assist
+calls. The set is closed: consumers MUST treat any other value as a
+forward-compatibility violation. Upstream error text is never echoed into
+`message`; the BFF emits a fixed user-facing string for each code.
+
+| `errorCode`           | HTTP status | When                                                                                                                                     |
+| --------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_region`      | 400         | Malformed payload, region out of bounds, `redactedBytes` empty or above the BFF size cap, or `byteHash` recompute mismatch.              |
+| `policy_denied`       | 403         | Model Gateway returned 403 (policy guardrail rejected the region or context).                                                            |
+| `budget_exhausted`    | 429         | Per-session `editorAssistBudget` exhausted, or per-`(tenantId, day)` ceiling reached.                                                    |
+| `gateway_unavailable` | 503         | Model Gateway disabled (`modelGateway.enabled === false`), 5xx from the gateway, transport failure, or 2xx without a usable explanation. |
+| `timeout`             | 504         | Model Gateway returned 504, or the BFF-side timeout elapsed before a response arrived.                                                   |
+
+Error response body shape:
+
+```json
+{
+  "schemaVersion": "v0",
+  "errorCode": "budget_exhausted",
+  "message": "Editor-assist budget exhausted for this session. Try again later or request more from your administrator.",
+  "budgetSnapshot": { "limit": 3, "used": 3, "remaining": 0 }
+}
+```
+
+`budgetSnapshot` is `null` for errors raised before the per-session budget
+was consulted (e.g. `invalid_region`, or `gateway_unavailable` from the
+disabled-gateway fast-path); it is the post-decision snapshot otherwise.
+
+#### Trust model and known gaps
+
+The editor-assist channel currently operates under a reduced-trust posture.
+The gaps below are pre-existing and consistent with `/api/v0/transform`; none
+are blocking for this slice.
+
+- **No server-side authentication.** The BFF does not validate session tokens.
+  CORS is gated to `localhost` and identity is client-asserted. A valid Studio
+  session is presumed; actual token verification is deferred to the
+  `POST /api/v0/session/bootstrap` prerequisite described in ADR-0005 §3.
+- **Per-tenant-per-day caps are best-effort.** The in-process budget store
+  enforces a daily ceiling, but an unauthenticated caller can supply arbitrary
+  `tenantId` values and effectively mint new tenant identities, bypassing the
+  cap on any single `tenantId`.
+- **No per-IP rate limiting.** Connection-level throttling is not implemented;
+  a local client can issue requests at line rate subject only to the per-session
+  and per-tenant-per-day budget counters.
+- **Remediation requires `POST /api/v0/session/bootstrap`.** Once that endpoint
+  is implemented (ADR-0005 §3 prerequisite), the BFF can validate the session
+  token server-side, bind `tenantId`/`userId` to the authenticated principal,
+  and add connection-level rate limiting. Until then, the BFF MUST NOT bind to
+  a non-loopback interface.
+
 ## Evidence Requirements
 
 Successful W0.3 evidence includes references for:

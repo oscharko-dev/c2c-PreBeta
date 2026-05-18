@@ -45,6 +45,14 @@ import {
 import { useEditorMarkerRegistration } from "@/lib/editor/markerNavigation";
 import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 import { resolveCobolToJava } from "@/lib/editor/lineageNavigation";
+import { useEditorAssist } from "@/stores/editorAssist";
+import { getOrCreateEditorAssistSessionId } from "@/lib/editor/editorAssistSession";
+import { computeSha256Hex, redactRegion } from "@/lib/editor/preRedaction";
+import { getCurrentDraftScope } from "@/lib/editor/editorPersistence";
+import {
+  EDITOR_ASSIST_SCHEMA_VERSION,
+  type EditorAssistRequest,
+} from "@/types/editor-assist";
 
 // Studio-IDE-6 (#248): match the event name emitted by the Java pane on
 // Alt+J. Keeping the constant local avoids a cross-component import cycle —
@@ -106,6 +114,10 @@ export function CobolEditorPane() {
 
   const apiState = useC2cApi();
   const { productState, state: runState } = useTransformationRun();
+  // Studio-IDE-10 (#249): Editor-Assist controller — fire Explain-on-region
+  // from the Monaco action below. The store handles the BFF call, panel
+  // state, and budget snapshot tracking.
+  const editorAssist = useEditorAssist();
   const readiness = getWorkbenchReadiness(apiState);
   const modelGatewayReady = runState.modelGatewayHealth?.status === "ok";
   const modelGatewayMessage =
@@ -265,6 +277,15 @@ export function CobolEditorPane() {
     cobolFileRef.current = activeCobolFile;
   }, [activeCobolFile]);
 
+  // Studio-IDE-10 (#249): ref-based capture of `runExplain` so the Monaco
+  // action (registered once on editor mount) always invokes the latest
+  // store callback without forcing a re-mount of the editor on every
+  // provider re-render.
+  const runExplainRef = useRef(editorAssist.runExplain);
+  useEffect(() => {
+    runExplainRef.current = editorAssist.runExplain;
+  }, [editorAssist.runExplain]);
+
   // Studio-IDE-6 (#248): listen for `c2c:reveal-cobol` events emitted by
   // the Java pane (Alt+J). When an event arrives, reveal and focus the
   // mapped COBOL line. We only react when the file name matches the
@@ -377,6 +398,68 @@ export function CobolEditorPane() {
               },
             ]);
           }
+        },
+      });
+      // Studio-IDE-10 (#249): Ctrl/Cmd+Shift+E — "Explain this region".
+      // The action stays registered regardless of budget state so the
+      // command palette entry remains discoverable; on exhaustion the
+      // BFF returns `budget_exhausted` and the side panel renders the
+      // dedicated branch. There is no visible primary "Explain" button
+      // surface in the workbench today, so the AC "hide the primary
+      // button when budget is exhausted" is trivially satisfied — if
+      // such a surface is added later, gate it on
+      // `useEditorAssist().budgetSnapshot?.remaining === 0`.
+      editor.addAction({
+        id: "c2c.editorAssist.explain",
+        label: "C2C: Explain this region",
+        keybindings: [
+          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE,
+        ],
+        contextMenuGroupId: "1_modification",
+        contextMenuOrder: 1.6,
+        run: async (ed) => {
+          const model = ed.getModel();
+          if (!model) return;
+          const selection = ed.getSelection();
+          const cursorLine = ed.getPosition()?.lineNumber ?? 1;
+          const isEmptySelection = selection === null || selection.isEmpty();
+          const startLine = isEmptySelection
+            ? cursorLine
+            : selection.startLineNumber;
+          const endLine = isEmptySelection
+            ? cursorLine
+            : selection.endLineNumber;
+          const rawText = isEmptySelection
+            ? model.getLineContent(cursorLine)
+            : model.getValueInRange(selection);
+          const redaction = redactRegion(rawText);
+          const [sourceHash, byteHash] = await Promise.all([
+            computeSha256Hex(rawText),
+            computeSha256Hex(redaction.redactedText),
+          ]);
+          const scope = getCurrentDraftScope();
+          const runId = stateRunIdRef.current;
+          const payload: EditorAssistRequest = {
+            schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
+            sessionId: getOrCreateEditorAssistSessionId(),
+            tenantId: scope.tenantId,
+            userId: scope.userId,
+            runId: runId ?? null,
+            sourceHash,
+            region: {
+              filePath: cobolFileRef.current,
+              sourceKind: "cobol",
+              startLine,
+              endLine,
+            },
+            redactedBytes: redaction.redactedText,
+            byteHash,
+            studioRedactionMetadata: {
+              studioRedactionProfileVersion: redaction.profileVersion,
+              matchedPatternIds: redaction.matchedPatternIds,
+            },
+          };
+          await runExplainRef.current(payload);
         },
       });
     },
