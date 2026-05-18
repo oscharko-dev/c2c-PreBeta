@@ -44,18 +44,24 @@ test.describe("@a11y workbench shell", () => {
     );
     if (severe.length > 0) {
       const detail = severe
-        .map(
-          (v) =>
-            `* [${v.impact}] ${v.id} — ${v.help} (${v.nodes.length} node(s))`,
-        )
+        .map((v) => {
+          const nodeDetails = v.nodes
+            .map((node, i) => {
+              const target =
+                Array.isArray(node.target) && node.target.length > 0
+                  ? String(node.target[0])
+                  : "?";
+              const summary = (node.failureSummary ?? "").replace(/\n/g, " ");
+              return `    [${i + 1}] target=${target} :: ${summary}`;
+            })
+            .join("\n");
+          return `* [${v.impact}] ${v.id} — ${v.help} (${v.nodes.length} node(s))\n${nodeDetails}`;
+        })
         .join("\n");
       throw new Error(
         `axe-core reported ${severe.length} serious/critical violation(s):\n${detail}`,
       );
     }
-    // Asserting on the full violations array (not just severe) makes
-    // the failure message verbose enough to drive a fix — the
-    // throw above is the actual gate.
     expect(severe).toHaveLength(0);
   });
 });
