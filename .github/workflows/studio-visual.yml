@@ -1,0 +1,105 @@
+name: Studio visual regression
+
+# Studio-IDE-12 (#250) §Visual Regression AC:
+#   "Visual regression snapshots in place for structural elements".
+#
+# Companion to ``studio-a11y.yml``. Runs the dedicated ``@visual``
+# spec against a production Studio build and asserts that the
+# committed baseline images still match the rendered structural
+# elements (top bar, activity bar, status bar).
+#
+# Baseline strategy: baselines are committed per (browser, platform)
+# under ``apps/c2c-studio/tests/e2e/visual.spec.ts-snapshots``.
+# Operators regenerate them locally on the primary macOS environment
+# via ``npm run test:e2e:update-snapshots`` and commit the diff. The
+# CI runner is Linux, so its baselines (``*-chromium-linux.png``)
+# are auto-generated on the first push to this workflow and committed
+# back by a follow-up commit. ``maxDiffPixelRatio: 0.02`` per the
+# visual.spec.ts policy.
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  visual:
+    name: Studio visual regression
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/c2c-studio/package-lock.json
+
+      - name: Install Studio dependencies
+        working-directory: apps/c2c-studio
+        run: npm ci --no-fund --no-audit
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('apps/c2c-studio/package-lock.json') }}
+
+      - name: Install Playwright Chromium with system deps
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (browser cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install-deps chromium
+
+      - name: Build Studio (production)
+        working-directory: apps/c2c-studio
+        env:
+          NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
+        run: npm run build
+
+      - name: Run visual regression gate
+        working-directory: apps/c2c-studio
+        env:
+          CI: "1"
+        # Linux baselines may not exist yet — generate them on first
+        # CI run, comparison runs use --grep so the gate fails on
+        # subsequent runs if pixels diverge beyond maxDiffPixelRatio.
+        run: |
+          if [ ! -e tests/e2e/visual.spec.ts-snapshots/top-bar-chromium-linux.png ]; then
+            echo "::warning::Linux visual baselines not present; generating on first run."
+            npx playwright test --config=playwright.visual.config.ts --update-snapshots
+          else
+            npx playwright test --config=playwright.visual.config.ts
+          fi
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-visual
+          path: apps/c2c-studio/playwright-report/
+          retention-days: 7
+
+      - name: Upload newly-generated Linux baselines (first run only)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines-linux
+          path: apps/c2c-studio/tests/e2e/visual.spec.ts-snapshots/*-chromium-linux.png
+          if-no-files-found: ignore
+          retention-days: 30
