@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import React, { type ReactNode } from "react";
 
@@ -131,33 +131,35 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
       result.current.javaStatusFlags("src/App.java").manualEditsPresent,
     ).toBe(false);
 
-    // User edits the Java buffer locally — the chip fires.
-    await act(async () => {
+    // User edits the Java buffer locally. setJavaBufferContent schedules
+    // an async crypto.subtle.digest to recompute the buffer hash; on a
+    // slow CI runner two microtask flushes are not always enough.
+    // waitFor polls until the chip derivation reflects the new hash.
+    act(() => {
       result.current.setJavaBufferContent(
         "src/App.java",
         "public class App { /* user edit */ }",
       );
-      // Wait one microtask cycle so the async hash recompute lands.
-      await Promise.resolve();
-      await Promise.resolve();
     });
-    expect(
-      result.current.javaStatusFlags("src/App.java").manualEditsPresent,
-    ).toBe(true);
+    await waitFor(() => {
+      expect(
+        result.current.javaStatusFlags("src/App.java").manualEditsPresent,
+      ).toBe(true);
+    });
 
     // Revert to the exact baseline → the chip clears even though isDirty
     // tracked the round-trip.
-    await act(async () => {
+    act(() => {
       result.current.setJavaBufferContent(
         "src/App.java",
         "public class App {}",
       );
-      await Promise.resolve();
-      await Promise.resolve();
     });
-    expect(
-      result.current.javaStatusFlags("src/App.java").manualEditsPresent,
-    ).toBe(false);
+    await waitFor(() => {
+      expect(
+        result.current.javaStatusFlags("src/App.java").manualEditsPresent,
+      ).toBe(false);
+    });
   });
 
   it("javaStatusFlags returns false for all flags when the file path has no entry", () => {
