@@ -1,0 +1,128 @@
+/*
+ * Studio-IDE-6 (#248): trust-pillar gutter decorations for the generated
+ * Java editor.
+ *
+ * Colour sourcing — every fill below resolves to a Tailwind token via the
+ * `--<token>` / `--<token>-soft` CSS variable defined in
+ * `src/app/globals.css`. The class names are referenced verbatim from
+ * `src/lib/editor/trustPillars.ts::TRUST_PILLAR_VISUALS` — keep both files
+ * in sync.
+ *
+ * Striped patterns use a 45-degree gradient between the two tokens so the
+ * visual is distinguishable in grayscale (relevant for accessibility
+ * audits under WCAG 2.2 AA non-text-contrast 1.4.11).
+ */
+
+.c2c-trust-margin {
+  width: 3px !important;
+  margin-left: 2px;
+}
+
+.c2c-trust-margin--deterministic-passed {
+  background-color: var(--success);
+}
+
+.c2c-trust-margin--deterministic-warn {
+  background-color: var(--warn);
+}
+
+.c2c-trust-margin--agent-passed {
+  background-color: var(--accent);
+}
+
+.c2c-trust-margin--agent-warn {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--accent) 0px,
+    var(--accent) 4px,
+    var(--warn) 4px,
+    var(--warn) 8px
+  );
+}
+
+.c2c-trust-margin--repair {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--accent) 0px,
+    var(--accent) 4px,
+    var(--warn) 4px,
+    var(--warn) 8px
+  );
+}
+
+.c2c-trust-margin--manual-modified {
+  background-color: var(--violet);
+  opacity: 0.7;
+}
+
+.c2c-trust-margin--manual-edit {
+  background-color: var(--orange);
+}
+
+/*
+ * Glyph cells: Monaco renders the class on a 22x22 cell in the glyph
+ * margin. We paint a small rounded chip with the high-contrast text
+ * variant of the same token so the glyph stays legible on the dark
+ * theme.
+ */
+.c2c-trust-glyph {
+  position: relative;
+  width: 22px !important;
+  height: 22px !important;
+}
+
+.c2c-trust-glyph::after {
+  position: absolute;
+  inset: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text-bright);
+}
+
+.c2c-trust-glyph--deterministic-passed::after {
+  content: "D";
+  background-color: var(--success-soft);
+  border: 1px solid var(--success);
+}
+
+.c2c-trust-glyph--deterministic-warn::after {
+  content: "D!";
+  background-color: var(--warn-soft);
+  border: 1px solid var(--warn);
+}
+
+.c2c-trust-glyph--agent-passed::after {
+  content: "A";
+  background-color: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+
+.c2c-trust-glyph--agent-warn::after {
+  content: "A!";
+  background-color: var(--warn-soft);
+  border: 1px solid var(--accent);
+}
+
+.c2c-trust-glyph--repair::after {
+  content: "R";
+  background-color: var(--warn-soft);
+  border: 1px solid var(--accent);
+}
+
+.c2c-trust-glyph--manual-modified::after {
+  content: "M*";
+  background-color: var(--violet-soft);
+  border: 1px solid var(--violet);
+}
+
+.c2c-trust-glyph--manual-edit::after {
+  content: "M+";
+  background-color: var(--orange-soft);
+  border: 1px solid var(--orange);
+}

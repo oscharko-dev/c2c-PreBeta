@@ -44,6 +44,22 @@ import {
 } from "@/lib/editor/diagnosticMarkers";
 import { useEditorMarkerRegistration } from "@/lib/editor/markerNavigation";
 import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
+import { resolveCobolToJava } from "@/lib/editor/lineageNavigation";
+
+// Studio-IDE-6 (#248): match the event name emitted by the Java pane on
+// Alt+J. Keeping the constant local avoids a cross-component import cycle —
+// the contract is the event name string, not a shared module.
+const REVEAL_COBOL_EVENT = "c2c:reveal-cobol" as const;
+const REVEAL_JAVA_EVENT = "c2c:reveal-java" as const;
+const LINEAGE_FEEDBACK_OWNER = "c2c-lineage-feedback" as const;
+interface RevealCobolDetail {
+  cobolFile: string;
+  cobolLine: number;
+}
+interface RevealJavaDetail {
+  javaFile: string;
+  javaLine: number;
+}
 
 // View-state preservation in Monaco is keyed by model URI. Re-using the same
 // URI per source name keeps cursor / scroll / selection stable when the user
@@ -236,6 +252,54 @@ export function CobolEditorPane() {
     });
   }, [rulerEnabled]);
 
+  // Studio-IDE-6 (#248): ref-based capture of runId + active COBOL file
+  // path so the Alt+C action registered once on editor mount always sees
+  // the latest value without re-mounting the command on every render.
+  const stateRunIdRef = useRef<string | null>(runState.runId ?? null);
+  useEffect(() => {
+    stateRunIdRef.current = runState.runId ?? null;
+  }, [runState.runId]);
+  const activeCobolFile = sourceName ?? DEFAULT_SOURCE_NAME;
+  const cobolFileRef = useRef<string>(activeCobolFile);
+  useEffect(() => {
+    cobolFileRef.current = activeCobolFile;
+  }, [activeCobolFile]);
+
+  // Studio-IDE-6 (#248): listen for `c2c:reveal-cobol` events emitted by
+  // the Java pane (Alt+J). When an event arrives, reveal and focus the
+  // mapped COBOL line. We only react when the file name matches the
+  // active source (or when the event omits a file, which we treat as a
+  // wildcard for runs that don't track COBOL file paths explicitly).
+  useEffect(() => {
+    function onReveal(ev: Event) {
+      const detail = (ev as CustomEvent<RevealCobolDetail>).detail;
+      if (!detail) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      // File-name guard. The orchestrator falls back to `<programId>.cbl`
+      // when the source ref doesn't expose a path; we accept both that
+      // and the in-Studio source name to avoid false-negative drops.
+      const active = cobolFileRef.current;
+      if (
+        detail.cobolFile &&
+        active &&
+        detail.cobolFile !== active &&
+        !active.endsWith(detail.cobolFile) &&
+        !detail.cobolFile.endsWith(active)
+      ) {
+        return;
+      }
+      const targetLine = Math.max(1, Math.floor(detail.cobolLine));
+      editor.revealLineInCenter(targetLine);
+      editor.setPosition({ lineNumber: targetLine, column: 1 });
+      editor.focus();
+    }
+    window.addEventListener(REVEAL_COBOL_EVENT, onReveal);
+    return () => {
+      window.removeEventListener(REVEAL_COBOL_EVENT, onReveal);
+    };
+  }, []);
+
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
       editorRef.current = editor;
@@ -263,6 +327,57 @@ export function CobolEditorPane() {
       // shortcut hook ignores keydowns).
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         void saveDraftNow();
+      });
+      // Studio-IDE-6 (#248): Alt+C — "Reveal in Java target". Resolves the
+      // current COBOL line to the first mapped Java region via the BFF
+      // traceability envelope; on success dispatches a window event that
+      // the Java pane can react to. On failure surfaces an info marker on
+      // the current line with a tooltip explaining the reason.
+      editor.addAction({
+        id: "c2c.lineage.cobolToJava",
+        label: "Reveal in Java target",
+        keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyC],
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 1.5,
+        run: async (ed) => {
+          const runId = stateRunIdRef.current;
+          const cobolFile = cobolFileRef.current;
+          const model = ed.getModel();
+          if (!runId || !model) {
+            return;
+          }
+          const position = ed.getPosition();
+          if (!position) return;
+          const result = await resolveCobolToJava(
+            runId,
+            cobolFile,
+            position.lineNumber,
+          );
+          if (result.ok && result.target.length > 0) {
+            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
+            const first = result.target[0];
+            window.dispatchEvent(
+              new CustomEvent<RevealJavaDetail>(REVEAL_JAVA_EVENT, {
+                detail: {
+                  javaFile: first.javaFile,
+                  javaLine: first.javaStartLine,
+                },
+              }),
+            );
+          } else {
+            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, [
+              {
+                severity: monaco.MarkerSeverity.Info,
+                message: "No Java target mapped for this COBOL line",
+                startLineNumber: position.lineNumber,
+                endLineNumber: position.lineNumber,
+                startColumn: 1,
+                endColumn: model.getLineMaxColumn(position.lineNumber),
+                source: "c2c-lineage",
+              },
+            ]);
+          }
+        },
       });
     },
     [rulerEnabled, saveDraftNow, registerMarkerEditor],

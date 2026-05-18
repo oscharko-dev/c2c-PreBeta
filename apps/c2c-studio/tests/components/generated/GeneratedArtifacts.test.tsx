@@ -6,6 +6,22 @@ import { TargetJavaInspector } from "@/components/generated/TargetJavaInspector"
 import { GeneratedArtifactsProvider } from "@/hooks/useGeneratedArtifacts";
 import { apiClient } from "@/lib/apiClient";
 import { ApiResult, GeneratedFileContent } from "@/types/api";
+// Studio-IDE-6 (#248): the Java pane now consumes the OriginOverlay and
+// LineageCoverage contexts. We wrap every render with both providers via
+// the `TestProviders` shell so the pane can publish trust-pillar overlays
+// and lineage-coverage percentages without provider-missing crashes.
+import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
+import { LineageCoverageProvider } from "@/stores/lineageCoverage";
+
+function TestProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <OriginOverlayProvider>
+      <LineageCoverageProvider>
+        <GeneratedArtifactsProvider>{children}</GeneratedArtifactsProvider>
+      </LineageCoverageProvider>
+    </OriginOverlayProvider>
+  );
+}
 
 vi.mock("@/lib/apiClient", () => ({
   apiClient: {
@@ -136,10 +152,10 @@ describe("Generated Artifacts UI", () => {
 
   function renderArtifactsUi() {
     return render(
-      <GeneratedArtifactsProvider>
+      <TestProviders>
         <TargetJavaInspector />
         <GeneratedJavaEditorPane />
-      </GeneratedArtifactsProvider>,
+      </TestProviders>,
     );
   }
 
@@ -155,9 +171,9 @@ describe("Generated Artifacts UI", () => {
     });
 
     render(
-      <GeneratedArtifactsProvider>
+      <TestProviders>
         <GeneratedJavaEditorPane />
-      </GeneratedArtifactsProvider>,
+      </TestProviders>,
     );
     expect(screen.getByTestId("generated-pane-progress").textContent).toMatch(
       /Submitting transformation request/i,
@@ -173,9 +189,9 @@ describe("Generated Artifacts UI", () => {
     });
 
     render(
-      <GeneratedArtifactsProvider>
+      <TestProviders>
         <GeneratedJavaEditorPane />
-      </GeneratedArtifactsProvider>,
+      </TestProviders>,
     );
     expect(screen.getByTestId("generated-pane-progress").textContent).toMatch(
       /Generating Java artifacts/i,
@@ -194,9 +210,9 @@ describe("Generated Artifacts UI", () => {
     });
 
     const { rerender } = render(
-      <GeneratedArtifactsProvider>
+      <TestProviders>
         <GeneratedJavaEditorPane />
-      </GeneratedArtifactsProvider>,
+      </TestProviders>,
     );
     expect(screen.getByText(/Unsupported Features/i)).toBeInTheDocument();
     expect(screen.getByText("COPY REPLACING")).toBeInTheDocument();
@@ -209,9 +225,9 @@ describe("Generated Artifacts UI", () => {
     });
 
     rerender(
-      <GeneratedArtifactsProvider>
+      <TestProviders>
         <GeneratedJavaEditorPane />
-      </GeneratedArtifactsProvider>,
+      </TestProviders>,
     );
     expect(screen.getByText(/Incomplete Generation/i)).toBeInTheDocument();
     expect(screen.getByText("artifact-1")).toBeInTheDocument();
@@ -356,9 +372,9 @@ describe("Generated Artifacts UI", () => {
     });
 
     render(
-      <GeneratedArtifactsProvider>
+      <TestProviders>
         <TargetJavaInspector />
-      </GeneratedArtifactsProvider>,
+      </TestProviders>,
     );
 
     expect(screen.getByText("Java Project Explorer")).toBeInTheDocument();
@@ -524,10 +540,10 @@ describe("Generated Artifacts UI", () => {
     });
 
     rerender(
-      <GeneratedArtifactsProvider>
+      <TestProviders>
         <TargetJavaInspector />
         <GeneratedJavaEditorPane />
-      </GeneratedArtifactsProvider>,
+      </TestProviders>,
     );
 
     await waitFor(() => {

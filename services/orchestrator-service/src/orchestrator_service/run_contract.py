@@ -834,6 +834,15 @@ class W02RunContract:
     # read as ``False`` / ``0`` respectively.
     manual_edits_carried_over: bool = False
     manual_drift_region_count: int = 0
+    # Studio-IDE-6 (#248): per-file trust-pillar overlay for the generated
+    # Java surface. Keyed by Java file path (relative to the generated
+    # project root); each value is a list of ``JavaRegionClassification``
+    # records. ``None`` (the default) means the orchestrator has not
+    # computed an overlay for this run — consumers must treat ``None`` as
+    # "not yet available" rather than as "empty overlay". Additive over
+    # the pre-IDE-6 contract per ADR 0006 §1 (``schemaVersion: v0``
+    # semantics — absent = legacy v0 reader).
+    java_region_classification: dict[str, list[JsonObject]] | None = None
     created_at: str = field(default_factory=_iso_now)
     updated_at: str = field(default_factory=_iso_now)
 
@@ -956,6 +965,27 @@ class W02RunContract:
         self.evidence_pack_ref = dict(ref) if ref else None
         self.touch()
 
+    def set_java_region_classification(
+        self,
+        classification: Mapping[str, list[JsonObject]] | None,
+    ) -> None:
+        """Record the Studio-IDE-6 per-file trust-pillar overlay.
+
+        Issue #248: passing ``None`` clears any previous overlay (the
+        orchestrator may compute the overlay only once the run reaches
+        ``STATE_JAVA_CANDIDATE_PERSISTED``). The orchestrator validates
+        the contents through :mod:`region_classification`; this setter
+        only enforces the container shape.
+        """
+        if classification is None:
+            self.java_region_classification = None
+        else:
+            self.java_region_classification = {
+                str(path): [dict(region) for region in regions]
+                for path, regions in classification.items()
+            }
+        self.touch()
+
     def set_manual_edit_summary(
         self,
         *,
@@ -1039,6 +1069,18 @@ class W02RunContract:
             "assistDecision": self.assist_decision.to_dict() if self.assist_decision else None,
             "manualEditsCarriedOver": self.manual_edits_carried_over,
             "manualDriftRegionCount": self.manual_drift_region_count,
+            # Studio-IDE-6 (#248): per-file trust-pillar overlay. Always
+            # present on the snapshot so downstream readers see a stable
+            # shape; the value is ``None`` when the orchestrator has not
+            # produced an overlay yet.
+            "javaRegionClassification": (
+                {
+                    path: [dict(region) for region in regions]
+                    for path, regions in self.java_region_classification.items()
+                }
+                if self.java_region_classification is not None
+                else None
+            ),
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         }

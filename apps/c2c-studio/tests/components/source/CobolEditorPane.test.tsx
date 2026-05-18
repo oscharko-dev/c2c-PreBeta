@@ -23,6 +23,10 @@ type EditorMockProps = {
     editor: {
       updateOptions: (options: unknown) => void;
       addCommand: (keybinding: number, callback: () => void) => void;
+      // Studio-IDE-6 (#248): the COBOL pane now registers an Alt+C action
+      // via `addAction`; the test mock satisfies the type so the keybinding
+      // path executes without crashing the render.
+      addAction: (descriptor: unknown) => void;
     };
     monaco: unknown;
   }) => void;
@@ -53,10 +57,14 @@ vi.mock("@/components/editor/CodeEditor", async () => {
             updateOptionsCalls.push(options as Record<string, unknown>);
           },
           addCommand: () => undefined,
+          // Studio-IDE-6 (#248): no-op so the Alt+C action registration
+          // path runs without throwing under the jsdom mock harness. The
+          // action behaviour itself is covered by lineageNavigation.test.ts.
+          addAction: () => undefined,
         },
         monaco: {
-          KeyMod: { CtrlCmd: 1 << 11 },
-          KeyCode: { KeyS: 49 },
+          KeyMod: { CtrlCmd: 1 << 11, Alt: 1 << 9 },
+          KeyCode: { KeyS: 49, KeyC: 33 },
         },
       });
       // Effect intentionally runs only on mount — matching Monaco's real

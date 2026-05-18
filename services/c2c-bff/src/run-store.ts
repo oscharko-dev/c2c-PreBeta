@@ -72,6 +72,9 @@ export interface StoredRun {
   finalClassification?: RunFinalClassification;
   failureCode?: W02UiErrorCode;
   failureMessage?: string;
+  // Studio-IDE-6 (#248): per-file Java region classification surfaced from
+  // the orchestrator's traceability payload and cached on the run.
+  javaRegionClassification?: Record<string, unknown[]> | null;
 }
 
 export interface RunStore {

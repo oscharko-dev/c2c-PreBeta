@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/java-region-classification-v0.json",
+  "title": "Java Region Classification v0",
+  "description": "Studio-IDE-6 (#248): per-region trust-pillar classification for a generated Java file. Schema is a map keyed by Java file path (relative to the generated project root) whose values are arrays of region records. Each record captures the line range, origin class (deterministic vs assist/repair/manual), verification outcome (oracle pass/fail/none), and the IR mapping class (direct, aggregated, synthesized, agent_originated). The closed enums are governed by ADR 0007 and ADR 0006 (treat unknown values as opaque).",
+  "type": "object",
+  "additionalProperties": {
+    "type": "array",
+    "items": { "$ref": "#/$defs/JavaRegionClassification" }
+  },
+  "$defs": {
+    "JavaRegionClassification": {
+      "type": "object",
+      "required": [
+        "lineRange",
+        "originClass",
+        "verificationOutcome",
+        "mappingClass",
+        "schemaVersion"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "lineRange": {
+          "type": "object",
+          "required": ["startLine", "endLine"],
+          "additionalProperties": false,
+          "properties": {
+            "startLine": { "type": "integer", "minimum": 1 },
+            "endLine": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "originClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "agent_proposed",
+            "repair_attempted",
+            "manual_modified",
+            "manual_edit"
+          ]
+        },
+        "verificationOutcome": {
+          "type": "string",
+          "enum": ["oracle_passed", "oracle_failed", "no_oracle"]
+        },
+        "mappingClass": {
+          "type": "string",
+          "enum": ["direct", "aggregated", "synthesized", "agent_originated"]
+        },
+        "schemaVersion": {
+          "type": "string",
+          "const": "v0"
+        }
+      }
+    }
+  }
+}

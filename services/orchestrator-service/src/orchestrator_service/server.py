@@ -25,6 +25,7 @@ from .config import OrchestratorConfig, load_config
 from .client import HttpClientError
 from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import HarnessFailure, HarnessGateway
+from . import region_classification
 from .workflow import W0RunContext, W0WorkflowRunner
 
 
@@ -273,6 +274,8 @@ class OrchestratorService:
             return 200, self._learning_view(run_id, envelope_base)
         if action == "workflow":
             return 200, self._workflow_contract_view(run_id, envelope_base)
+        if action == "traceability":
+            return 200, self._traceability_view(run_id, envelope_base)
         return 404, {"error": "not found"}
 
     def _artifact_payload(
@@ -586,6 +589,81 @@ class OrchestratorService:
             "endpoint": endpoint,
             "source": "live" if live_summary is not None else ("cached" if cached is not None else "unavailable"),
         }
+
+    def _traceability_view(self, run_id: str, envelope: JsonObject) -> JsonObject:
+        """Studio-IDE-6 (#248): per-run trust-pillar traceability payload.
+
+        Combines the deterministic generator's ``c2c-trace.json`` (passed
+        through verbatim), the semantic IR's symbol map (so consumers can
+        resolve an IR node to its COBOL file + line), and the per-file
+        Java region classification computed by the orchestrator at run
+        finalisation. Missing components surface as ``null`` / empty
+        objects rather than as a 5xx so a run that hasn't reached
+        ``STATE_JAVA_CANDIDATE_PERSISTED`` still serves a well-formed
+        response.
+        """
+        # Prefer the live in-memory contract (covers runs that haven't
+        # been flushed to disk yet) and fall back to the persisted
+        # snapshot so old runs still serve a value.
+        live_contract = self.runner.workflow_contract_payload(run_id)
+        cached_contract = self.artifact_store.read_json(run_id, "w02-run-contract.json")
+        contract = live_contract if live_contract is not None else (
+            cached_contract if isinstance(cached_contract, dict) else None
+        )
+
+        classification_raw: JsonObject | None = None
+        if isinstance(contract, dict):
+            value = contract.get("javaRegionClassification")
+            if isinstance(value, dict):
+                classification_raw = value
+
+        program_id = str(envelope.get("programId") or "")
+        if not program_id and isinstance(contract, dict):
+            source_ref = contract.get("sourceRef")
+            if isinstance(source_ref, dict):
+                program_id = str(source_ref.get("programId") or program_id)
+
+        # Resolve the COBOL source filename. Prefer an explicit hint on
+        # the source ref so cross-platform paths round-trip; fall back to
+        # the program-id convention otherwise (documented in the helper).
+        source_filename_hint: str | None = None
+        if isinstance(contract, dict):
+            source_ref = contract.get("sourceRef")
+            if isinstance(source_ref, dict):
+                raw_hint = source_ref.get("cobolSourcePath")
+                if isinstance(raw_hint, str) and raw_hint:
+                    # Use just the basename so the path doesn't leak the
+                    # orchestrator's filesystem layout.
+                    source_filename_hint = PurePosixPath(raw_hint.replace("\\", "/")).name
+
+        trace = self.artifact_store.read_json(
+            run_id, "generated-project/src/main/resources/c2c-trace.json"
+        )
+        ir = self.artifact_store.read_json(run_id, "semantic-ir.json")
+
+        # Build the per-region classification view by passing the
+        # already-validated contract value through; the orchestrator does
+        # not recompute it here so the route is idempotent and reflects
+        # exactly what the contract holds.
+        classification: dict[str, list[JsonObject]] | None
+        if classification_raw is None:
+            classification = None
+        else:
+            classification = {
+                str(path): [dict(region) for region in regions]
+                for path, regions in classification_raw.items()
+                if isinstance(regions, list)
+            }
+
+        view = region_classification.build_traceability_view(
+            run_id=run_id,
+            program_id=program_id,
+            trace=trace,
+            ir=ir,
+            classification=classification,
+            source_filename_hint=source_filename_hint,
+        )
+        return view
 
     def _workflow_contract_view(self, run_id: str, envelope: JsonObject) -> JsonObject:
         """Issue #166: expose the W0.2 run contract for BFF/UI/agent consumers.

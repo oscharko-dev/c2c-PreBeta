@@ -218,6 +218,9 @@ export interface OrchestratorClient {
   getLearning(runId: string): Promise<UpstreamResponse | undefined>;
   // Issue #172: W0.2 run contract (state machine, repair budget, failure code).
   getWorkflow(runId: string): Promise<UpstreamResponse | undefined>;
+  // Studio-IDE-6 (#248): per-run trust-pillar traceability payload —
+  // c2c-trace.json + IR symbol map + per-file Java region classification.
+  getTraceability(runId: string): Promise<UpstreamResponse | undefined>;
 }
 
 export interface EvidenceClient {
@@ -281,6 +284,9 @@ export function createOrchestratorClient(
         return undefined;
       },
       async getWorkflow() {
+        return undefined;
+      },
+      async getTraceability() {
         return undefined;
       },
     };
@@ -440,6 +446,9 @@ export function createOrchestratorClient(
     },
     async getWorkflow(runId: string) {
       return getRunScopedArtifact(runId, "workflow");
+    },
+    async getTraceability(runId: string) {
+      return getRunScopedArtifact(runId, "traceability");
     },
   };
 }

@@ -36,12 +36,14 @@ from .artifacts import (
     KIND_SOURCE_REF,
     KIND_TRAJECTORY_LEDGER,
     KIND_W02_RUN_CONTRACT,
+    MIME_JAVA,
     ArtifactMetadata,
     JsonObject,
     JsonValue,
     NullArtifactStore,
     RunArtifactStore,
 )
+from . import region_classification
 from .config import OrchestratorConfig
 from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import DataReference, HarnessFailure, HarnessGateway
@@ -1183,6 +1185,23 @@ class W0WorkflowRunner:
         failure_code: str | None = None,
         failure_message: str | None = None,
     ) -> None:
+        # Studio-IDE-6 (#248): stamp the per-file trust-pillar overlay on
+        # the contract *before* finalisation so the persisted contract,
+        # the workflow view, and the traceability route all read the
+        # same snapshot. Failure here must not block the run from
+        # finalising — the overlay is additive metadata.
+        try:
+            self._stamp_java_region_classification(
+                context=context,
+                contract=contract,
+                final_classification=classification,
+                failure_code=failure_code,
+            )
+        except Exception:  # pragma: no cover - overlay is best-effort
+            self.logger.warning(
+                "java region classification stamping failed for run=%s",
+                context.run_id,
+            )
         try:
             contract.finalize(
                 classification,
@@ -1205,6 +1224,76 @@ class W0WorkflowRunner:
             message=failure_message or f"run finalised as {classification}",
             failure_code=failure_code,
         )
+
+    # ------------------------------------------------------------------
+    # Studio-IDE-6 (#248): Java region classification stamping
+    # ------------------------------------------------------------------
+
+    def _stamp_java_region_classification(
+        self,
+        *,
+        context: W0RunContext,
+        contract: W02RunContract,
+        final_classification: str,
+        failure_code: str | None,
+    ) -> None:
+        """Compute and attach the per-file trust-pillar overlay.
+
+        Loads the generated Java files from the artifact store, runs the
+        pure derivation in :mod:`region_classification`, and stamps the
+        result on the run contract via
+        :meth:`W02RunContract.set_java_region_classification`. ``None``
+        is stamped when the run has no generated Java surface yet (e.g.
+        a run blocked before ``STATE_JAVA_CANDIDATE_PERSISTED``).
+
+        The IDE-13 manual-overlay hook is intentionally absent until
+        Studio writes ``ManualEditOverlay`` artifacts; the function is
+        called with ``manual_overlay=None`` so manual classes never
+        appear on orchestrator-derived output.
+        """
+        java_files = self._load_generated_java_files(context.run_id)
+        if not java_files:
+            contract.set_java_region_classification(None)
+            return
+        classification = region_classification.compute_java_region_classification(
+            java_files=java_files,
+            assist_decision=contract.assist_decision,
+            repair_attempts=contract.repair_attempts,
+            final_classification=final_classification,
+            failure_code=failure_code,
+            manual_overlay=None,
+        )
+        contract.set_java_region_classification(classification)
+
+    def _load_generated_java_files(self, run_id: str) -> dict[str, str]:
+        """Read the generated Java files for ``run_id`` from the artifact store.
+
+        Keys are paths relative to the generated project root (matching
+        the keys used in ``c2c-trace.json``). Returns an empty mapping
+        when no generated-project artifacts have been persisted yet.
+        """
+        prefix = f"{GENERATED_PROJECT_DIR}/"
+        result: dict[str, str] = {}
+        for entry in self.artifact_store.find_by_kind(
+            run_id, KIND_GENERATED_PROJECT_FILE
+        ):
+            relpath = str(entry.get("path") or "")
+            if not relpath.startswith(prefix):
+                continue
+            mime_type = str(entry.get("mimeType") or "")
+            if mime_type and not (mime_type.startswith("text/") or mime_type == MIME_JAVA):
+                continue
+            content_bytes = self.artifact_store.read_bytes(run_id, relpath)
+            if content_bytes is None:
+                continue
+            try:
+                content_text = content_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            short = relpath[len(prefix):]
+            if short.endswith(".java"):
+                result[short] = content_text
+        return result
 
     @staticmethod
     def _failure_code_for_step_name(
