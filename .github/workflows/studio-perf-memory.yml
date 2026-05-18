@@ -1,0 +1,152 @@
+name: Studio perf + memory (advisory)
+
+# Studio-IDE-12 (#250) §Performance + §Memory ACs.
+#
+# The spec explicitly allows perf and memory to ship as non-blocking
+# initially:
+#
+#   "perf and memory may be marked as non-blocking initially with a
+#    TODO to flip"
+#
+# This workflow runs the ``@perf`` and ``@memory`` specs against a
+# production Studio build on every PR. ``continue-on-error: true``
+# on the run steps keeps the workflow green when the harness reports
+# a regression so the gate is advisory; flipping each step to
+# required is a one-line change once the hardware-class baselines
+# stabilise.
+#
+# Perf SLAs (per Issue #250):
+#   * 5k-line mount: ≤ 800 ms
+#   * 10k-line mount: ≤ 1500 ms
+#   * Search to first match (5k buffer): ≤ 200 ms
+#   The Playwright harness uses a 5× cushion against the reference
+#   SLAs so transient CI hardware variance does not cause noise; the
+#   actual numbers are emitted to stdout for tracking.
+#
+# Memory SLA (per Issue #250):
+#   * ≤ 10% JS heap growth after 50 run-switch cycles.
+#   The harness skips gracefully when
+#   ``performance.measureUserAgentSpecificMemory()`` is unavailable
+#   in the CI Chromium (COOP/COEP not enabled on the static hosting).
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  perf:
+    name: Studio performance harness (advisory)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/c2c-studio/package-lock.json
+
+      - name: Install Studio dependencies
+        working-directory: apps/c2c-studio
+        run: npm ci --no-fund --no-audit
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('apps/c2c-studio/package-lock.json') }}
+
+      - name: Install Playwright Chromium with system deps
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (browser cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install-deps chromium
+
+      - name: Build Studio (production)
+        working-directory: apps/c2c-studio
+        env:
+          NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
+        run: npm run build
+
+      - name: Run @perf harness (advisory — does not block PR)
+        working-directory: apps/c2c-studio
+        env:
+          CI: "1"
+        # Perf tests log the actual numbers to stdout. The
+        # ``continue-on-error: true`` keeps the workflow green so the
+        # harness output is captured for trend-tracking without
+        # blocking merges on hardware-class variance.
+        continue-on-error: true
+        run: npx playwright test --config=playwright.studio-only.config.ts --grep @perf --reporter=line
+
+  memory:
+    name: Studio memory harness (advisory)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/c2c-studio/package-lock.json
+
+      - name: Install Studio dependencies
+        working-directory: apps/c2c-studio
+        run: npm ci --no-fund --no-audit
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('apps/c2c-studio/package-lock.json') }}
+
+      - name: Install Playwright Chromium with system deps
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (browser cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install-deps chromium
+
+      - name: Build Studio (production)
+        working-directory: apps/c2c-studio
+        env:
+          NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
+        run: npm run build
+
+      - name: Run @memory harness (advisory — does not block PR)
+        working-directory: apps/c2c-studio
+        env:
+          CI: "1"
+        # The memory harness gracefully skips when
+        # ``performance.measureUserAgentSpecificMemory()`` is
+        # unavailable. ``continue-on-error: true`` keeps the
+        # workflow green when the harness reports a regression so
+        # the gate stays advisory.
+        continue-on-error: true
+        run: npx playwright test --config=playwright.studio-only.config.ts --grep @memory --reporter=line
