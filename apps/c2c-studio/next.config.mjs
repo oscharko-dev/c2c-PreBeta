@@ -75,11 +75,14 @@ function buildScriptSrc() {
     // production keeps ``'unsafe-eval'`` out of the policy.
     return "script-src 'self' 'unsafe-eval' 'unsafe-inline'";
   }
-  // Production: Next.js App Router emits inline hydration scripts.
-  // Allow ``'unsafe-inline'`` until the nonce-middleware follow-up
-  // lands. ``'unsafe-eval'`` stays off — that is the load-bearing
-  // protection against runtime code injection.
-  return "script-src 'self' 'unsafe-inline'";
+  // Production: ``src/middleware.ts`` overrides this header on every
+  // HTML response with a per-request nonced policy
+  // (``script-src 'self' 'nonce-<NONCE>' 'strict-dynamic'``). The
+  // policy below is the fallback used for routes the middleware
+  // skips (static asset paths). Those routes ship no inline
+  // scripts, so the strict ``'self'`` directive is correct and
+  // ``'unsafe-inline'`` is no longer needed.
+  return "script-src 'self'";
 }
 
 function buildCspHeader() {
