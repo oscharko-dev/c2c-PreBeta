@@ -99,6 +99,40 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
       /inmemory:\/\/model\/\$\{language\}-diff\/\$\{fallbackUriId\}/,
     );
   });
+
+  it("only disposes the diff onDidChangeModel + content listeners on unmount, not on URI change (Codex round-3)", () => {
+    // The cleanup effect that disposes long-lived listeners must depend on
+    // `[]` (mount/unmount only), not on `[resolvedUri]`. Tying it to the URI
+    // would tear down the listener infrastructure on every URI swap and
+    // leave subsequent model swaps unwired.
+    expect(innerSource).toMatch(
+      /\/\/ Dispose long-lived editor resources only on actual unmount[\s\S]*?\}, \[\]\);/,
+    );
+    expect(innerSource).toMatch(
+      /\/\/ Dispose long-lived listeners only on actual unmount[\s\S]*?\}, \[\]\);/,
+    );
+  });
+
+  it("re-applies markers to the current model on model swap via markersRef (Codex round-3)", () => {
+    // Both editor variants must read the latest markers via a ref so the
+    // onDidChangeModel handler does not capture stale markers from onMount.
+    expect(innerSource).toMatch(/markersRef\s*=\s*useRef/);
+    expect(innerSource).toMatch(/markersRef\.current\s*=\s*markers/);
+    expect(innerSource).toMatch(/applyMarkers\([^)]*markersRef\.current\)/);
+  });
+
+  it("standalone editor refreshes markers when the model is swapped (Codex round-3)", () => {
+    // The standalone editor must wire `onDidChangeModel` to re-apply markers
+    // to whatever model @monaco-editor/react swapped in. Previously the
+    // marker effect only re-ran on markers changes, so a path change with
+    // unchanged markers left the new model unmarked.
+    const standaloneSection = innerSource.slice(
+      innerSource.indexOf("function StandaloneEditorView"),
+      innerSource.indexOf("function DiffEditorView"),
+    );
+    expect(standaloneSection).toMatch(/editor\.onDidChangeModel/);
+    expect(standaloneSection).toMatch(/modelChangeDisposableRef/);
+  });
 });
 
 describe("DiffCodeEditorProps surface (#258)", () => {
