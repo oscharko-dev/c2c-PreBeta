@@ -2,7 +2,7 @@
 
 import { Editor, DiffEditor, loader } from "@monaco-editor/react";
 import type * as MonacoNs from "monaco-editor";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { getMonaco, type Monaco } from "@/lib/editor/lazyMonaco";
 import {
@@ -18,6 +18,7 @@ import {
   applySanitization,
   type CodeEditorProps,
   type DiffCodeEditorProps,
+  type EditorDecoration,
   type EditorMarker,
   type StandaloneCodeEditorProps,
 } from "./codeEditorTypes";
@@ -93,15 +94,49 @@ function StandaloneEditorView({
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
   const decorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
-  const resolvedUri = useMemo(
-    () => modelUri ?? `inmemory://model/${language}`,
-    [modelUri, language],
+  // Disposable for the standalone editor's `onDidChangeModel` subscription.
+  // We re-apply markers (read from `markersRef` to avoid stale closures) when
+  // @monaco-editor/react swaps in a new model because `path` changed.
+  const modelChangeDisposableRef = useRef<MonacoNs.IDisposable | null>(null);
+  // Latest markers / decorations — read from these refs inside the
+  // `onDidChangeModel` callback so it does not capture stale values from
+  // the onMount-time closure. Without this, prop changes after mount would
+  // be ignored on every subsequent model swap.
+  const markersRef = useRef<EditorMarker[] | undefined>(markers);
+  markersRef.current = markers;
+  const decorationsPropRef = useRef<EditorDecoration[] | undefined>(
+    decorations,
   );
+  decorationsPropRef.current = decorations;
+  // useId() gives each <CodeEditor> instance a stable, unique fallback URI
+  // so two editors with the same language but no explicit `modelUri` do not
+  // accidentally share a Monaco model (which would cause one editor's edits
+  // / undo history to bleed into the other when @monaco-editor/react
+  // resolves the same `path` to the same model). Callers that *want* model
+  // sharing must pass an explicit `modelUri`.
+  const fallbackUriId = useId();
+  const resolvedUri = useMemo(
+    () => modelUri ?? `inmemory://model/${language}/${fallbackUriId}`,
+    [modelUri, language, fallbackUriId],
+  );
+  // The onMount-time `onDidChangeModel` handler must restore view state for
+  // the *current* URI (not the URI captured when the handler was registered),
+  // so the lookup goes through this ref.
+  const resolvedUriRef = useRef(resolvedUri);
+  resolvedUriRef.current = resolvedUri;
   const sanitizedValue = useMemo(
     () => applySanitization(value, sanitizationProfile),
     [value, sanitizationProfile],
   );
+  // Latest "expected" value, used to detect prop-driven changes that
+  // @monaco-editor/react applies via `executeEdits` (which emits non-flush
+  // content events that the `event.isFlush` guard alone would let through).
+  const sanitizedValueRef = useRef(sanitizedValue);
+  sanitizedValueRef.current = sanitizedValue;
 
+  // Re-apply markers whenever the markers prop changes. The handler reads
+  // `editor.getModel()` at call time, so it always targets the current
+  // (post-swap) model.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) {
@@ -129,6 +164,8 @@ function StandaloneEditorView({
     }
   }, [decorations]);
 
+  // Persist view state per-URI whenever `resolvedUri` is about to change
+  // (cleanup captures the old value via closure) and on unmount.
   useEffect(() => {
     return () => {
       const editor = editorRef.current;
@@ -140,12 +177,25 @@ function StandaloneEditorView({
       if (viewStateRef) {
         viewStateRef.current = state;
       }
+    };
+  }, [resolvedUri, viewStateRef]);
+
+  // Dispose long-lived editor resources only on actual unmount. The previous
+  // single-effect approach disposed listeners every time `resolvedUri`
+  // changed, which would silently break model-swap re-wiring while the
+  // editor was still mounted.
+  useEffect(() => {
+    return () => {
+      if (modelChangeDisposableRef.current) {
+        modelChangeDisposableRef.current.dispose();
+        modelChangeDisposableRef.current = null;
+      }
       if (decorationsRef.current) {
         decorationsRef.current.clear();
         decorationsRef.current = null;
       }
     };
-  }, [resolvedUri, viewStateRef]);
+  }, []);
 
   return (
     <div
@@ -158,6 +208,11 @@ function StandaloneEditorView({
       <Editor
         value={sanitizedValue}
         language={language}
+        // Pass the resolved URI so @monaco-editor/react creates (and reuses)
+        // a model keyed by it. Without `path`, every mount creates an anonymous
+        // model and URI-scoped diagnostics, language-service state, undo
+        // history, etc. won't line up with the lifecycle helpers' `modelUri`.
+        path={resolvedUri}
         theme={STUDIO_DARK_THEME}
         loading={<EditorSkeleton />}
         options={{
@@ -193,9 +248,52 @@ function StandaloneEditorView({
               editor.addAction(action);
             }
           }
+          // When the path prop changes, @monaco-editor/react swaps the
+          // underlying Monaco model. The current markers / decorations
+          // were attached to the previous model and the saved view state
+          // for the new URI has never been applied — restore everything
+          // on every swap so a long-lived editor that hops between URIs
+          // stays consistent with its view-state map.
+          modelChangeDisposableRef.current = editor.onDidChangeModel(() => {
+            const newModel = editor.getModel();
+            if (!newModel) {
+              return;
+            }
+            applyMarkers(monacoInstance, newModel, markersRef.current);
+            restoreViewState(editor, resolvedUriRef.current);
+            if (decorationsRef.current) {
+              decorationsRef.current.clear();
+              decorationsRef.current = null;
+            }
+            const currentDecorations = decorationsPropRef.current;
+            if (currentDecorations && currentDecorations.length > 0) {
+              decorationsRef.current =
+                editor.createDecorationsCollection(currentDecorations);
+            }
+          });
           onMount?.({ editor, monaco: monacoInstance });
         }}
-        onChange={(next) => {
+        onChange={(next, event) => {
+          // Suppress all change events in readonly mode — the user cannot type,
+          // so every emission is from a programmatic `setValue` and would
+          // otherwise mark consumers' buffers dirty for refreshes.
+          if (mode === "readonly") {
+            return;
+          }
+          // Suppress whole-model replacements (isFlush) — those are emitted
+          // when `@monaco-editor/react` applies a new `value` prop via
+          // `setValue`, not when the user edits.
+          if (event?.isFlush) {
+            return;
+          }
+          // Newer @monaco-editor/react versions apply value-prop refreshes
+          // via `executeEdits` instead of `setValue`, which emits non-flush
+          // content events. Compare against the latest sanitized prop and
+          // skip when they match — that change just brought the model in
+          // line with the prop we already gave it.
+          if (next === sanitizedValueRef.current) {
+            return;
+          }
           if (next !== undefined) {
             onChange?.(next);
           }
@@ -222,6 +320,7 @@ function DiffEditorView({
   className,
   ariaLabel,
   modelUri,
+  originalModelUri,
   onMount,
 }: DiffEditorViewProps) {
   const diffEditorRef = useRef<MonacoNs.editor.IStandaloneDiffEditor | null>(
@@ -229,12 +328,41 @@ function DiffEditorView({
   );
   const decorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
+  const contentChangeDisposableRef = useRef<MonacoNs.IDisposable | null>(null);
+  // Disposable for the modified editor's `onDidChangeModel` subscription.
+  // When @monaco-editor/react swaps the modified model (e.g., because
+  // `modifiedModelPath` changed), we need to rewire the content listener
+  // to the new model — otherwise edits in the new pane would silently stop
+  // calling `onChange`.
+  const modelChangeDisposableRef = useRef<MonacoNs.IDisposable | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const resolvedUri = useMemo(
-    () => modelUri ?? `inmemory://model/${language}-diff`,
-    [modelUri, language],
+  // Latest markers / decorations — read inside the model-swap callback so
+  // we don't apply stale values captured at onMount time. Prop changes
+  // after mount must still apply on every subsequent swap.
+  const markersRef = useRef<EditorMarker[] | undefined>(markers);
+  markersRef.current = markers;
+  const decorationsPropRef = useRef<EditorDecoration[] | undefined>(
+    decorations,
   );
+  decorationsPropRef.current = decorations;
+  // Per-instance unique IDs for the fallback URIs so multiple diff editors
+  // with the same language but no explicit `modelUri` do not share Monaco
+  // models. Callers that *want* model sharing must pass `modelUri` (and
+  // optionally `originalModelUri`) explicitly.
+  const fallbackUriId = useId();
+  const resolvedUri = useMemo(
+    () => modelUri ?? `inmemory://model/${language}-diff/${fallbackUriId}`,
+    [modelUri, language, fallbackUriId],
+  );
+  const resolvedOriginalUri = useMemo(
+    () => originalModelUri ?? `${resolvedUri}~original`,
+    [originalModelUri, resolvedUri],
+  );
+  // The diff `onDidChangeModel` callback restores view state for the
+  // *current* URI; this ref carries that value across swaps.
+  const resolvedUriRef = useRef(resolvedUri);
+  resolvedUriRef.current = resolvedUri;
   const sanitizedModified = useMemo(
     () => applySanitization(value, sanitizationProfile),
     [value, sanitizationProfile],
@@ -243,7 +371,17 @@ function DiffEditorView({
     () => applySanitization(original, sanitizationProfile),
     [original, sanitizationProfile],
   );
+  // Latest "expected" model contents. The content-change listener compares
+  // the post-change model value against this; when they match, the change
+  // is just @monaco-editor/react replaying the `modified` prop (which 4.7
+  // does via `executeEdits` → `isFlush === false`, slipping past the
+  // earlier `event.isFlush` guard).
+  const sanitizedModifiedRef = useRef(sanitizedModified);
+  sanitizedModifiedRef.current = sanitizedModified;
 
+  // Re-apply markers when the markers prop changes. The handler reads
+  // `diffEditor.getModifiedEditor().getModel()` at call time so it always
+  // targets the current (post-swap) modified model.
   useEffect(() => {
     const diffEditor = diffEditorRef.current;
     if (!diffEditor) {
@@ -272,6 +410,8 @@ function DiffEditorView({
     }
   }, [decorations]);
 
+  // Persist diff view state per-URI on URI change (cleanup captures the old
+  // value via closure) and on unmount.
   useEffect(() => {
     return () => {
       const diffEditor = diffEditorRef.current;
@@ -280,12 +420,29 @@ function DiffEditorView({
       }
       const state = diffEditor.saveViewState();
       saveDiffViewState(resolvedUri, state);
+    };
+  }, [resolvedUri]);
+
+  // Dispose long-lived listeners only on actual unmount. Tying this to
+  // `resolvedUri` (as the original effect did) would tear down the
+  // content-listener wiring and the onDidChangeModel hook every time the
+  // URI changed, leaving subsequent model swaps unwired.
+  useEffect(() => {
+    return () => {
+      if (modelChangeDisposableRef.current) {
+        modelChangeDisposableRef.current.dispose();
+        modelChangeDisposableRef.current = null;
+      }
+      if (contentChangeDisposableRef.current) {
+        contentChangeDisposableRef.current.dispose();
+        contentChangeDisposableRef.current = null;
+      }
       if (decorationsRef.current) {
         decorationsRef.current.clear();
         decorationsRef.current = null;
       }
     };
-  }, [resolvedUri]);
+  }, []);
 
   return (
     <div
@@ -299,6 +456,12 @@ function DiffEditorView({
         original={sanitizedOriginal}
         modified={sanitizedModified}
         language={language}
+        // Pass URIs for both sides so the underlying Monaco models are scoped
+        // by URI, just like the standalone editor's `path`. Without these,
+        // Monaco creates anonymous models and any URI-scoped consumer state
+        // (e.g., diagnostics, language services) will not line up.
+        originalModelPath={resolvedOriginalUri}
+        modifiedModelPath={resolvedUri}
         theme={STUDIO_DARK_THEME}
         loading={<EditorSkeleton />}
         options={{
@@ -315,17 +478,67 @@ function DiffEditorView({
           diffEditorRef.current = diffEditor;
           restoreDiffViewState(diffEditor, resolvedUri);
           const modifiedEditor = diffEditor.getModifiedEditor();
-          const modifiedModel = modifiedEditor.getModel();
-          if (modifiedModel) {
-            applyMarkers(monacoInstance, modifiedModel, markers);
-            modifiedModel.onDidChangeContent(() => {
-              onChangeRef.current?.(modifiedModel.getValue());
-            });
-          }
-          if (decorations && decorations.length > 0) {
-            decorationsRef.current =
-              modifiedEditor.createDecorationsCollection(decorations);
-          }
+
+          // Wire (or re-wire) all model-scoped state to whatever model the
+          // modified editor currently holds. Called once at mount and again
+          // any time @monaco-editor/react swaps in a new model (e.g. when
+          // `modifiedModelPath` changes while the editor stays mounted).
+          // All prop-dependent values are read through refs so updates
+          // after mount are applied on every swap.
+          const rewireModifiedModel = (): void => {
+            if (contentChangeDisposableRef.current) {
+              contentChangeDisposableRef.current.dispose();
+              contentChangeDisposableRef.current = null;
+            }
+            const currentModel = modifiedEditor.getModel();
+            if (!currentModel) {
+              return;
+            }
+            applyMarkers(monacoInstance, currentModel, markersRef.current);
+            // The new URI may already have saved view state; restore it now
+            // since the onMount-time restore only fires on initial mount.
+            restoreDiffViewState(diffEditor, resolvedUriRef.current);
+            // The previous decorations collection was bound to the old
+            // model; recreate from the current prop on every swap so
+            // long-lived editors that switch URIs keep their highlights.
+            if (decorationsRef.current) {
+              decorationsRef.current.clear();
+              decorationsRef.current = null;
+            }
+            const currentDecorations = decorationsPropRef.current;
+            if (currentDecorations && currentDecorations.length > 0) {
+              decorationsRef.current =
+                modifiedEditor.createDecorationsCollection(currentDecorations);
+            }
+            contentChangeDisposableRef.current =
+              currentModel.onDidChangeContent((event) => {
+                // Suppress whole-model replacements — those are emitted when
+                // @monaco-editor/react flushes a new `modified` prop via
+                // `setValue`.
+                if (event.isFlush) {
+                  return;
+                }
+                // @monaco-editor/react 4.7 applies updates to the writable
+                // diff side via `executeEdits` instead of `setValue`, which
+                // emits non-flush content events. Compare the post-change
+                // model value against the latest `modified` prop and skip
+                // when they match — that is, when the change just brought
+                // the model in line with the prop we already gave Monaco.
+                const next = currentModel.getValue();
+                if (next === sanitizedModifiedRef.current) {
+                  return;
+                }
+                onChangeRef.current?.(next);
+              });
+          };
+
+          rewireModifiedModel();
+          // Re-run the wiring whenever the underlying model is swapped so a
+          // long-lived diff editor that changes URIs keeps emitting
+          // onChange for user edits in the new pane and stays in sync with
+          // its view state, markers, and decorations.
+          modelChangeDisposableRef.current =
+            modifiedEditor.onDidChangeModel(rewireModifiedModel);
           if (actions) {
             for (const action of actions) {
               modifiedEditor.addAction(action);

@@ -56,6 +56,14 @@ export interface DiffCodeEditorProps extends CodeEditorBaseProps {
   mode: "diff";
   value: string;
   original: string;
+  /**
+   * Stable identifier for the *original* (left-hand) model in a diff view.
+   * The `modelUri` prop is used for the modified (right-hand) model. When
+   * `originalModelUri` is omitted, it defaults to the effective `modelUri`
+   * with a `~original` suffix appended, so the two diff sides never share
+   * the same underlying Monaco model.
+   */
+  originalModelUri?: string;
   onChange?: (value: string) => void;
   onMount?: (args: DiffEditorMountArgs) => void;
 }
