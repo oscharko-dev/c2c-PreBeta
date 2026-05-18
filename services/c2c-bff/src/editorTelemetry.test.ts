@@ -227,7 +227,6 @@ test("statusForValidationErrorCode maps codes to HTTP status", () => {
   assert.equal(statusForValidationErrorCode("invalid_envelope"), 400);
   assert.equal(statusForValidationErrorCode("invalid_event"), 400);
   assert.equal(statusForValidationErrorCode("batch_too_large"), 413);
-  assert.equal(statusForValidationErrorCode("payload_too_large"), 413);
 });
 
 test("extractIdentity falls back to defaults when headers are missing", () => {

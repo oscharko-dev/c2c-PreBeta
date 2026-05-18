@@ -126,27 +126,50 @@ function matchPicture(line: string): TaggedMatch[] {
   );
 }
 
+// Packed-decimal USAGE forms map to the dedicated ``comp3`` telemetry
+// bucket; everything else (COMP, COMP-1, COMP-2, COMP-4, COMP-5,
+// BINARY, POINTER, INDEX, DISPLAY-as-USAGE) maps to the generic
+// ``usage`` bucket so the analyzer can distinguish packed-decimal data
+// layouts from other USAGE families.
+function usageKindFor(operand: string): "comp3" | "usage" {
+  const normalized = operand.toUpperCase();
+  if (normalized === "COMP-3" || normalized === "PACKED-DECIMAL") {
+    return "comp3";
+  }
+  return "usage";
+}
+
 function matchUsage(line: string): TaggedMatch[] {
-  return matchAll(
-    line,
-    /\b(?:USAGE\s+(?:IS\s+)?)?(COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|POINTER|INDEX|DISPLAY)\b/i,
-    "comp3",
-    (match) => {
-      // Filter out the `DISPLAY` *verb* — only match it when it is the
-      // operand of a USAGE clause. We approximate by requiring the
-      // preceding token to be USAGE or a comma / newline. The simplest
-      // safe form: only return a hover for DISPLAY when the keyword
-      // USAGE precedes it on the line.
-      if ((match[1] ?? "").toUpperCase() === "DISPLAY") {
-        // Only accept DISPLAY as a USAGE-clause keyword when the
-        // capturing match itself includes the `USAGE` prefix. A bare
-        // DISPLAY on a procedural line is the verb, not a usage
-        // qualifier, and must not surface a USAGE hover.
-        if (!/^USAGE\b/i.test(match[0])) return null;
-      }
-      return match[1] ? explainUsage(match[1]) : null;
-    },
-  );
+  const regex =
+    /\b(?:USAGE\s+(?:IS\s+)?)?(COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|POINTER|INDEX|DISPLAY)\b/i;
+  const flagged = regex.flags.includes("g")
+    ? regex
+    : new RegExp(regex.source, `${regex.flags}g`);
+  const matches: TaggedMatch[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = flagged.exec(line)) !== null) {
+    const operand = match[1] ?? "";
+    // Filter out the bare ``DISPLAY`` verb (operand not in a USAGE
+    // clause). Only accept DISPLAY when the captured match itself
+    // includes the ``USAGE`` prefix.
+    if (operand.toUpperCase() === "DISPLAY" && !/^USAGE\b/i.test(match[0])) {
+      if (match.index === flagged.lastIndex) flagged.lastIndex += 1;
+      continue;
+    }
+    const entry = operand ? explainUsage(operand) : null;
+    if (entry) {
+      const start = match.index + 1;
+      const end = start + match[0].length;
+      matches.push({
+        start,
+        end,
+        entry,
+        constructKind: usageKindFor(operand),
+      });
+    }
+    if (match.index === flagged.lastIndex) flagged.lastIndex += 1;
+  }
+  return matches;
 }
 
 function matchOccurs(line: string): TaggedMatch[] {

@@ -202,37 +202,13 @@ export function DiffWorkspace({
   cobolSnapshotsByRun,
   onClose,
 }: DiffWorkspaceProps) {
-  const hasPrevious = Boolean(javaHistory && javaHistory.previous !== null);
-  // Studio-IDE-11 (#251): diff.open carries only the two booleans the
-  // closed enum allows. Lineage availability is best-effort here — we
-  // don't block on the traceability fetch; the body component's
-  // useEffect resolves true lineage state and the telemetry signal
-  // suffices as a "user opened the diff" heartbeat.
-  useEffect(() => {
-    emitTelemetry({
-      eventType: "diff.open",
-      payload: {
-        hasPrevious,
-        // The Diff body owns the precise lineage resolution; this is a
-        // conservative best-effort signal — "we opened a workspace
-        // anchored to this run + filePath".
-        lineageAvailable: false,
-      },
-    });
-    // Re-emit on file/run change because the user has effectively
-    // opened a different diff at that point.
-  }, [filePath, runId, hasPrevious]);
-
   // ----- Empty state: no previous run for this file ---------------------
   if (!javaHistory || javaHistory.previous === null) {
-    return (
-      <EmptyShell
-        filePath={filePath}
-        message="No previous run for this file to compare."
-        hint="Start a new transformation to build up comparison history."
-        onClose={onClose}
-      />
-    );
+    // Studio-IDE-11 (#251): emit the empty-shell case once with the
+    // load-bearing booleans. The body owns the populated case so
+    // ``lineageAvailable`` reports the real resolved state instead of a
+    // constant ``false``.
+    return <DiffWorkspaceEmpty filePath={filePath} onClose={onClose} />;
   }
 
   return (
@@ -242,6 +218,28 @@ export function DiffWorkspace({
       runId={runId}
       javaHistory={javaHistory}
       cobolSnapshotsByRun={cobolSnapshotsByRun}
+      onClose={onClose}
+    />
+  );
+}
+
+interface DiffWorkspaceEmptyProps {
+  filePath: string;
+  onClose: () => void;
+}
+
+function DiffWorkspaceEmpty({ filePath, onClose }: DiffWorkspaceEmptyProps) {
+  useEffect(() => {
+    emitTelemetry({
+      eventType: "diff.open",
+      payload: { hasPrevious: false, lineageAvailable: false },
+    });
+  }, [filePath]);
+  return (
+    <EmptyShell
+      filePath={filePath}
+      message="No previous run for this file to compare."
+      hint="Start a new transformation to build up comparison history."
       onClose={onClose}
     />
   );
@@ -328,6 +326,20 @@ function DiffWorkspaceBody({
       setLinkedScroll(false);
     }
   }, [lineageReady, lineageAvailable, cobolPresent]);
+
+  // Studio-IDE-11 (#251): emit diff.open once per (runId, filePath)
+  // when the traceability fetch resolves so ``lineageAvailable`` is
+  // the real resolved value (true/false), not a placeholder. The
+  // body component is only mounted when ``hasPrevious`` is true (the
+  // outer ``DiffWorkspace`` early-returns the empty case), so the
+  // payload field is a constant ``true`` here.
+  useEffect(() => {
+    if (!lineageReady) return;
+    emitTelemetry({
+      eventType: "diff.open",
+      payload: { hasPrevious: true, lineageAvailable },
+    });
+  }, [lineageReady, lineageAvailable, runId, filePath]);
 
   const couplingDisabled = !lineageAvailable || !cobolPresent;
 

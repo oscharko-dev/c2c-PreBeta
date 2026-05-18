@@ -119,10 +119,11 @@ describe("Issue #251 AC8 — each instrumented slice emits at least one event", 
       { tenantId: "default", userId: "local" },
       { kind: "cobol", programId: "BRNCH01", sourceName: "branch.cbl" },
       {
+        schemaVersion: "v0",
         kind: "cobol",
         content: "IDENTIFICATION DIVISION.\nPROGRAM-ID. BRNCH01.\n",
-        sourceHash: "0".repeat(64),
-        editorRevision: 1,
+        bufferHash: "abc123",
+        savedAt: "2026-05-18T12:00:00Z",
       },
     );
     await triggerFlush();
@@ -271,11 +272,11 @@ describe("Issue #251 AC8 — each instrumented slice emits at least one event", 
         javaFilePath: "P.java",
       },
       {
+        schemaVersion: "v0",
         kind: "java",
         content: "class P {}",
-        javaFilePath: "P.java",
-        sourceHash: "0".repeat(64),
-        editorRevision: 1,
+        bufferHash: "def456",
+        savedAt: "2026-05-18T12:00:00Z",
       },
     );
     await triggerFlush();

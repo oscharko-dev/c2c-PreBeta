@@ -83,6 +83,11 @@ const MAPPING_CLASSES = [
 const HOVER_CONSTRUCT_KINDS = [
   "pic",
   "comp3",
+  // ``usage`` is the bucket for non-COMP-3 USAGE families (COMP-1,
+  // COMP-2, COMP-4, COMP-5, BINARY, POINTER, INDEX, DISPLAY-as-USAGE).
+  // Keeping ``comp3`` distinct so the analyzer can still single out
+  // packed-decimal data layouts.
+  "usage",
   "occurs",
   "redefines",
   "value",
@@ -201,8 +206,7 @@ export interface EditorTelemetryBatch {
 export type EditorTelemetryValidationErrorCode =
   | "invalid_envelope"
   | "invalid_event"
-  | "batch_too_large"
-  | "payload_too_large";
+  | "batch_too_large";
 
 export interface EditorTelemetryValidationOk {
   ok: true;
@@ -861,7 +865,6 @@ export function statusForValidationErrorCode(
 ): number {
   switch (code) {
     case "batch_too_large":
-    case "payload_too_large":
       return 413;
     case "invalid_envelope":
     case "invalid_event":

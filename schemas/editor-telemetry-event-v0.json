@@ -143,6 +143,7 @@
           "enum": [
             "pic",
             "comp3",
+            "usage",
             "occurs",
             "redefines",
             "value",

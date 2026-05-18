@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -142,7 +143,7 @@ func validateEditorTelemetryPayload(eventType string, raw json.RawMessage) error
 			nil,
 			func(p map[string]any) error {
 				return requireEnum(p, "constructKind",
-					"pic", "comp3", "occurs", "redefines", "value",
+					"pic", "comp3", "usage", "occurs", "redefines", "value",
 					"section", "paragraph", "fixed-format-zone")
 			})
 	case "lineage.navigate":
@@ -527,6 +528,7 @@ func (s *JSONLEditorTelemetryStore) restoreFromDisk() error {
 	}
 	scanner := bufio.NewScanner(s.file)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxEditorTelemetryLen)
+	skipped := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -536,10 +538,30 @@ func (s *JSONLEditorTelemetryStore) restoreFromDisk() error {
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			return fmt.Errorf("invalid editor telemetry line: %w", err)
 		}
+		// Re-enforce the closed-enum contract on the read path: a log
+		// hand-edited or produced by an older binary must not deliver
+		// invalid events into ``BySession`` / ``List`` results that
+		// would themselves be rejected if re-submitted. Skipping plus
+		// logging keeps the service available without silently
+		// trusting disk state.
+		if err := event.Validate(); err != nil {
+			log.Printf(
+				"editor telemetry restore: skipping invalid line: %v",
+				err,
+			)
+			skipped++
+			continue
+		}
 		s.events = append(s.events, event)
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("read editor telemetry log failed: %w", err)
+	}
+	if skipped > 0 {
+		log.Printf(
+			"editor telemetry restore: skipped %d invalid line(s)",
+			skipped,
+		)
 	}
 	if _, err := s.file.Seek(0, 2); err != nil {
 		return err

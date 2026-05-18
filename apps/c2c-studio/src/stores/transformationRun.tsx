@@ -431,15 +431,19 @@ export function TransformationRunProvider({
       }));
       return result;
     }
+    // ``result.data.status`` is the closed enum
+    // ``"starting" | "updating" | "completed" | "failed"`` (see
+    // ``TransformResponse`` in ``types/api.ts``). The generator-run is
+    // already complete by the time the response reaches this code, so
+    // only ``completed`` and ``failed`` are load-bearing. The
+    // ``cancelled`` and ``merge_required`` outcomes from the
+    // editor-telemetry contract are surfaced from other code paths —
+    // ``cancelled`` is emitted above when the request id stale-races,
+    // and ``merge_required`` is owned by the 3-Way Merge workflow.
     emitTelemetry({
       eventType: "generate.result",
       payload: {
-        outcome:
-          result.data.status === "failed"
-            ? "failed"
-            : result.data.status === "completed"
-              ? "success"
-              : "success",
+        outcome: result.data.status === "failed" ? "failed" : "success",
         latencyBucket,
       },
     });

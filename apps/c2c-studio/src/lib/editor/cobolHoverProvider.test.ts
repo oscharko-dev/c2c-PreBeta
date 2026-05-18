@@ -116,6 +116,61 @@ describe("computeHoverFor — USAGE clauses", () => {
     });
     expect(computed!.entry.title).toBe("USAGE DISPLAY");
   });
+
+  // Studio-IDE-11 (#251): COMP-3 and PACKED-DECIMAL feed the dedicated
+  // ``comp3`` telemetry bucket. Every other USAGE family (COMP, COMP-1,
+  // COMP-2, COMP-4, COMP-5, BINARY, POINTER, INDEX, DISPLAY-as-USAGE)
+  // feeds the generic ``usage`` bucket so the analyzer can single out
+  // packed-decimal layouts without misattributing them.
+  it("tags USAGE COMP-3 as constructKind=comp3 for telemetry", () => {
+    const line = "       01 WS-AMOUNT         USAGE COMP-3.";
+    const compStart = line.indexOf("COMP-3");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: compStart + 2,
+    });
+    expect(computed!.constructKind).toBe("comp3");
+  });
+
+  it("tags USAGE PACKED-DECIMAL as constructKind=comp3 for telemetry", () => {
+    const line = "       01 WS-AMOUNT         USAGE PACKED-DECIMAL.";
+    const pdStart = line.indexOf("PACKED-DECIMAL");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: pdStart + 2,
+    });
+    expect(computed!.constructKind).toBe("comp3");
+  });
+
+  it("tags USAGE COMP-1 as constructKind=usage (not comp3)", () => {
+    const line = "       01 WS-FLOAT          USAGE COMP-1.";
+    const compStart = line.indexOf("COMP-1");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: compStart + 2,
+    });
+    expect(computed!.constructKind).toBe("usage");
+  });
+
+  it("tags USAGE BINARY as constructKind=usage", () => {
+    const line = "       01 WS-COUNTER        USAGE BINARY.";
+    const binStart = line.indexOf("BINARY");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: binStart + 2,
+    });
+    expect(computed!.constructKind).toBe("usage");
+  });
+
+  it("tags USAGE DISPLAY (as a USAGE qualifier) as constructKind=usage", () => {
+    const line = "       01 WS-FIELD          USAGE DISPLAY.";
+    const displayStart = line.indexOf("DISPLAY");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: displayStart + 2,
+    });
+    expect(computed!.constructKind).toBe("usage");
+  });
 });
 
 describe("computeHoverFor — OCCURS clauses", () => {

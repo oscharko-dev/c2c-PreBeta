@@ -35,6 +35,11 @@ export interface MarkerNavigatePayload {
 export type HoverConstructKind =
   | "pic"
   | "comp3"
+  // ``usage`` covers the non-packed-decimal USAGE families (COMP-1,
+  // COMP-2, COMP-4, COMP-5, BINARY, POINTER, INDEX, DISPLAY when used
+  // as a USAGE qualifier). The packed-decimal forms (COMP-3 and
+  // PACKED-DECIMAL) keep the dedicated ``comp3`` tag.
+  | "usage"
   | "occurs"
   | "redefines"
   | "value"
