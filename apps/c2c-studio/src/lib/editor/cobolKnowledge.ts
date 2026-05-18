@@ -68,6 +68,18 @@ export function parsePicture(raw: string): PictureShape {
   const hasV = expanded.includes("V");
   const hasX = /X/.test(expanded);
   const hasA = /A/.test(expanded);
+  // Edit-mask characters: `B` blanks, `0` zeros, `/` slashes, `,` and
+  // `.` punctuation, `+` / `-` / `CR` / `DB` sign edits, `*` / `Z`
+  // zero-suppression, `$` currency. When any of these appear alongside
+  // numeric digits the storage shape stops being a pure numeric — it
+  // is an editing picture used for DISPLAY-only output, and the
+  // generated Java cannot infer a clean numeric type from it.
+  const hasEditMask = /[B0/,.*Z$]/.test(expanded);
+  // `P` is a scaling-position character (decimal-point hint with no
+  // physical digit). Pictures that mix P with V are valid numeric but
+  // the digit-count semantics differ enough that we treat them as
+  // unknown so the hover never reports a misleading integer width.
+  const hasScalingP = /P/.test(expanded);
   const numericChars = expanded.replace(/[^9V]/g, "");
   const totalDigits = (numericChars.match(/9/g) ?? []).length;
   const decimalDigits = hasV
@@ -75,14 +87,24 @@ export function parsePicture(raw: string): PictureShape {
     : 0;
   const integerDigits = totalDigits - decimalDigits;
   let kind: PictureShape["kind"] = "unknown";
-  if (totalDigits > 0 && !hasX && !hasA) {
-    kind = "numeric";
-  } else if (hasX && !hasA && totalDigits === 0) {
-    kind = "alphanumeric";
-  } else if (hasA && !hasX && totalDigits === 0) {
-    kind = "alphabetic";
-  } else if ((hasX || hasA) && totalDigits > 0) {
+  if (hasScalingP) {
+    // P-scaling pictures need a dedicated explanation; defer that to a
+    // follow-up and surface a deterministic "unknown" rather than a
+    // wrong digit count.
+    kind = "unknown";
+  } else if (totalDigits > 0 && (hasX || hasA)) {
     kind = "mixed";
+  } else if (totalDigits > 0 && hasEditMask) {
+    // Numeric digits combined with edit-mask characters → DISPLAY-only
+    // edited picture. Classified as "mixed" so the hover reports the
+    // safe `String` mapping instead of inferring a numeric Java type.
+    kind = "mixed";
+  } else if (totalDigits > 0) {
+    kind = "numeric";
+  } else if (hasX && !hasA) {
+    kind = "alphanumeric";
+  } else if (hasA && !hasX) {
+    kind = "alphabetic";
   }
   return {
     raw,
@@ -589,7 +611,7 @@ const PIC_CLAUSE = /\b(?:PIC|PICTURE)(?:\s+IS)?\s+([X9AVSPZ$+\-,/*B().0-9]+)/i;
 const USAGE_CLAUSE =
   /\b(?:USAGE\s+(?:IS\s+)?)?(COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|DISPLAY|POINTER|INDEX)\b/i;
 const VALUE_CLAUSE =
-  /\bVALUE(?:S)?(?:\s+IS)?\s+(['"][^'"]*['"]|[+-]?\d+(?:\.\d+)?|ZEROS?|ZEROES|SPACES?|HIGH-VALUES?|LOW-VALUES?|QUOTES?)/i;
+  /\bVALUES?(?:\s+IS)?\s+(['"][^'"]*['"]|[+-]?\d+(?:\.\d+)?|ZEROS?|ZEROES|SPACES?|HIGH-VALUES?|LOW-VALUES?|QUOTES?)/i;
 const OCCURS_CLAUSE =
   /\bOCCURS\s+\d+(?:\s+TO\s+\d+)?\s+TIMES?(?:\s+DEPENDING\s+ON\s+[A-Za-z][A-Za-z0-9-]*)?/i;
 const REDEFINES_CLAUSE = /\bREDEFINES\s+[A-Za-z][A-Za-z0-9-]*/i;

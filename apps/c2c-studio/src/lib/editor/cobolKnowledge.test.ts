@@ -54,6 +54,17 @@ describe("parsePicture", () => {
     expect(shape.kind).toBe("numeric");
     expect(shape.integerDigits).toBeLessThanOrEqual(1000);
   });
+
+  it("classifies edit-mask pictures (B / , / . / Z / *) as mixed, not numeric", () => {
+    expect(parsePicture("99B99").kind).toBe("mixed");
+    expect(parsePicture("ZZ9.99").kind).toBe("mixed");
+    expect(parsePicture("***,**9.99").kind).toBe("mixed");
+  });
+
+  it("classifies P-scaling pictures as unknown to avoid misleading digit counts", () => {
+    expect(parsePicture("PPPV999").kind).toBe("unknown");
+    expect(parsePicture("9PPP").kind).toBe("unknown");
+  });
 });
 
 describe("explainPicture", () => {

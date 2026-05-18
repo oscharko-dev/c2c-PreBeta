@@ -150,7 +150,7 @@ function matchOccurs(line: string) {
 function matchValue(line: string) {
   return matchAll(
     line,
-    /\bVALUE(?:S)?(?:\s+IS)?\s+(?:['"][^'"]*['"]|[+-]?\d+(?:\.\d+)?|ZEROS?|ZEROES|SPACES?|HIGH-VALUES?|LOW-VALUES?|QUOTES?)/i,
+    /\bVALUES?(?:\s+IS)?\s+(?:['"][^'"]*['"]|[+-]?\d+(?:\.\d+)?|ZEROS?|ZEROES|SPACES?|HIGH-VALUES?|LOW-VALUES?|QUOTES?)/i,
     (match) => explainValue(match[0]),
   );
 }
@@ -195,8 +195,11 @@ function pickBestMatch(
   matches: Array<{ start: number; end: number; entry: HoverEntry }>,
   column: number,
 ): { start: number; end: number; entry: HoverEntry } | null {
+  // `end` is exclusive (start + match[0].length), so the strict `<`
+  // here matches Monaco's range convention and avoids returning a
+  // hover for the column immediately after the matched span.
   const overlapping = matches.filter(
-    (m) => column >= m.start && column <= m.end,
+    (m) => column >= m.start && column < m.end,
   );
   if (overlapping.length === 0) return null;
   overlapping.sort((a, b) => a.end - a.start - (b.end - b.start));
@@ -248,11 +251,13 @@ export function computeHoverFor(
 // needs Monaco's types.
 
 export function buildHoverResult(
-  monaco: typeof MonacoNs,
+  _monaco: typeof MonacoNs,
   computed: ComputedHover,
   lineNumber: number,
 ): MonacoNs.languages.Hover {
-  void monaco; // currently unused; reserved for future Monaco-specific shaping
+  // `_monaco` is currently unused but kept on the public signature so
+  // future Monaco-specific shaping (e.g. theme-aware code-fence
+  // language tags) can read from the instance without breaking callers.
   const markdown = hoverEntryToMarkdownString(computed.entry);
   const content = buildHoverMarkdown(markdown);
   return {

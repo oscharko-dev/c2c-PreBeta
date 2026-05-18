@@ -213,6 +213,41 @@ describe("computeHoverFor — fixed-format zones", () => {
     });
     expect(computed!.entry.title).toMatch(/^PIC/);
   });
+
+  it("does not surface a construct hover for a plain data-name token (fall-through to zone)", () => {
+    // Hovering on `WS-TOTAL` itself — no PIC/USAGE/OCCURS match
+    // overlaps the name span, so the column-based zone tooltip is what
+    // surfaces. Cursor in Area A.
+    const line = "       01 WS-TOTAL          PIC S9(5)V99.";
+    const nameStart = line.indexOf("WS-TOTAL");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: nameStart + 2,
+    });
+    // The zone tooltip wins because the regex matchers do not capture
+    // bare data names. We assert the title is NOT a construct hover.
+    if (computed) {
+      expect(computed.entry.title).not.toMatch(/^PIC /);
+      expect(computed.entry.title).not.toMatch(/^USAGE /);
+      expect(computed.entry.title).not.toMatch(/^OCCURS /);
+    }
+  });
+
+  it("does not return a hover for the column immediately past the matched span", () => {
+    // Boundary regression: `end` is exclusive (Monaco range
+    // convention). Hovering exactly at `end` must miss the match.
+    const line = "       01 WS-AMT            PIC 99 .";
+    const picStart = line.indexOf("PIC 99") + 1; // 1-based start of "PIC"
+    const picEnd = picStart + "PIC 99".length; // exclusive end column
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: picEnd,
+    });
+    // We may still get a zone tooltip (Area B), but never the PIC hover.
+    if (computed) {
+      expect(computed.entry.title).not.toMatch(/^PIC /);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

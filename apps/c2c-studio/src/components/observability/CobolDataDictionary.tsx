@@ -81,7 +81,13 @@ export function CobolDataDictionary({
 }
 
 function DataItemRow({ item }: { item: DataItem }) {
-  const summary = useMemo(() => summariseDataItem(item), [item]);
+  // `summariseDataItem` is a pure string operation over already-parsed
+  // fields; the parent memoises the items array so each `item` here is
+  // stable across renders. Computing inline keeps the data flow clear
+  // without a no-op `useMemo` (the reviewer correctly flagged the
+  // earlier wrapping as ineffective since `item` is recreated by the
+  // parent map call on every parent render).
+  const summary = summariseDataItem(item);
   return (
     <li
       className="rounded border border-line-2 bg-bg-2 p-3"
