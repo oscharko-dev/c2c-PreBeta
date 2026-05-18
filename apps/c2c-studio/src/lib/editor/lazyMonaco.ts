@@ -11,6 +11,15 @@ type MonacoEnvironmentLike = NonNullable<
 >;
 
 let monacoPromise: Promise<Monaco> | null = null;
+// Studio-IDE-5 (#244): cached Monaco instance for callers that only
+// run after the async loader has resolved. `getMonacoSync` returns
+// null until the promise resolves so callers can fall back to a
+// no-op marker render rather than blocking on async import.
+let monacoCache: Monaco | null = null;
+
+export function getMonacoSync(): Monaco | null {
+  return monacoCache;
+}
 
 export function getMonaco(): Promise<Monaco> {
   if (typeof window === "undefined") {
@@ -27,6 +36,7 @@ export function getMonaco(): Promise<Monaco> {
 // Exposed for tests; resets the cached promise so that the next call re-runs the loader.
 export function __resetMonacoForTests(): void {
   monacoPromise = null;
+  monacoCache = null;
   if (typeof self !== "undefined") {
     delete (self as { MonacoEnvironment?: MonacoEnvironmentLike })
       .MonacoEnvironment;
@@ -42,6 +52,7 @@ async function loadMonaco(): Promise<Monaco> {
     import("monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution"),
     import("monaco-editor/esm/vs/language/json/monaco.contribution"),
   ]);
+  monacoCache = monaco;
   return monaco;
 }
 
@@ -72,4 +83,31 @@ function configureMonacoEnvironment(): void {
       );
     },
   };
+}
+
+// Studio-IDE-5 (#244 review): React hook that returns the Monaco
+// instance (or null) and triggers a re-render once it resolves. Use
+// this in panes that derive marker groups from the typed Diagnostic
+// state — without it, the initial render happens before Monaco has
+// loaded and the marker memo caches an empty result indefinitely.
+import { useEffect, useState } from "react";
+
+export function useMonacoReady(): Monaco | null {
+  const [monaco, setMonaco] = useState<Monaco | null>(() => monacoCache);
+  useEffect(() => {
+    if (monaco) return;
+    let cancelled = false;
+    getMonaco()
+      .then((instance) => {
+        if (!cancelled) setMonaco(instance);
+      })
+      .catch(() => {
+        // Editor surfaces load failures via its own error UI; this
+        // hook keeps `null` so the marker memo simply falls through.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [monaco]);
+  return monaco;
 }

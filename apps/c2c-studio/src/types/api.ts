@@ -183,9 +183,25 @@ export interface OutputRef {
 //   - ``artifactRef`` absent → no "jump to artifact" affordance
 // Unknown ``severity`` values render at ``"info"`` and surface the
 // raw upstream value in the marker tooltip (ADR 0006 Decision 3).
+
+// Studio-IDE-5 (#244): typed severity enum mirrors the BFF
+// `diagnostics.ts` module. Unknown upstream values are coerced to
+// "info" on the BFF side, so consumers can treat the union as
+// exhaustive.
+export type DiagnosticSeverity = "error" | "warning" | "info" | "hint";
+
+// Studio-IDE-5 (#244): typed source-kind enum mirrors the BFF
+// `diagnostics.ts` module. Unknown values are dropped on the BFF.
+export type DiagnosticSourceKind =
+  | "cobol"
+  | "ir"
+  | "generated_java"
+  | "build"
+  | "test";
+
 export interface Diagnostic {
   schemaVersion?: "v0";
-  severity: string;
+  severity: DiagnosticSeverity;
   code: string;
   message: string;
   line?: number;
@@ -193,7 +209,7 @@ export interface Diagnostic {
   endLine?: number;
   endColumn?: number;
   filePath?: string;
-  sourceKind?: string;
+  sourceKind?: DiagnosticSourceKind;
   originStep?: string;
   // Optional reference to the artifact this diagnostic attaches to
   // (semantic-IR node, generated-Java file, etc.). Populated by
