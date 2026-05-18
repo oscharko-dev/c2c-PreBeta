@@ -4,12 +4,14 @@ import type * as MonacoNs from "monaco-editor";
 import {
   buildTrustPillarDecorations,
   lineageCoveragePct,
+  mergeRegionsForTrustPillars,
   pillarFor,
   TRUST_PILLAR_VISUALS,
   type TrustPillarKey,
 } from "./trustPillars";
 import type {
   JavaOriginClass,
+  JavaOriginOverlay,
   JavaRegionClassification,
   JavaVerificationOutcome,
 } from "@/types/api";
@@ -262,5 +264,188 @@ describe("lineageCoveragePct", () => {
       region("deterministic", "oracle_passed", 50, 60),
     ];
     expect(lineageCoveragePct(10, regions)).toBe(0);
+  });
+});
+
+// Studio-IDE-13 (#255) AC8: ``mergeRegionsForTrustPillars`` unions the
+// IDE-6 traceability overlay with the IDE-13 manual-edit overlay so the
+// editor pane paints both kinds of regions in a single decoration pass.
+// Manual regions synthesise the verificationOutcome / mappingClass
+// fields they cannot carry — per ADR-0007 §6 their lineage is stale or
+// unavailable — so the painter accepts them through its type filter.
+describe("mergeRegionsForTrustPillars (IDE-13 AC8)", () => {
+  function overlay(
+    regions: JavaOriginOverlay["regions"],
+    runId = "run-1",
+  ): JavaOriginOverlay {
+    return {
+      schemaVersion: "v0",
+      runId,
+      javaFile: "App.java",
+      regions,
+    };
+  }
+
+  it("returns [] when both overlays are null", () => {
+    expect(
+      mergeRegionsForTrustPillars({
+        traceabilityOverlay: null,
+        manualOverlay: null,
+      }),
+    ).toEqual([]);
+  });
+
+  it("passes through traceability regions with verificationOutcome + mappingClass", () => {
+    const trace = overlay([
+      {
+        lineRange: { startLine: 1, endLine: 5 },
+        originClass: "deterministic",
+        verificationOutcome: "oracle_passed",
+        mappingClass: "direct",
+      },
+      {
+        lineRange: { startLine: 6, endLine: 10 },
+        originClass: "agent_proposed",
+        verificationOutcome: "no_oracle",
+        mappingClass: "aggregated",
+      },
+    ]);
+    const merged = mergeRegionsForTrustPillars({
+      traceabilityOverlay: trace,
+      manualOverlay: null,
+    });
+    expect(merged).toHaveLength(2);
+    expect(merged[0]?.originClass).toBe("deterministic");
+    expect(merged[1]?.originClass).toBe("agent_proposed");
+  });
+
+  it("drops traceability regions that lack verificationOutcome OR mappingClass", () => {
+    const trace = overlay([
+      // Missing both fields — must be dropped.
+      {
+        lineRange: { startLine: 1, endLine: 5 },
+        originClass: "deterministic",
+      },
+      // Missing only mappingClass — must also be dropped.
+      {
+        lineRange: { startLine: 6, endLine: 10 },
+        originClass: "agent_proposed",
+        verificationOutcome: "oracle_passed",
+      },
+    ]);
+    expect(
+      mergeRegionsForTrustPillars({
+        traceabilityOverlay: trace,
+        manualOverlay: null,
+      }),
+    ).toEqual([]);
+  });
+
+  it("paints manual_modified regions in the union with synthesised defaults", () => {
+    const manual = overlay([
+      {
+        lineRange: { startLine: 20, endLine: 22 },
+        originClass: "manual_modified",
+      },
+    ]);
+    const merged = mergeRegionsForTrustPillars({
+      traceabilityOverlay: null,
+      manualOverlay: manual,
+    });
+    expect(merged).toHaveLength(1);
+    const region = merged[0]!;
+    expect(region.originClass).toBe("manual_modified");
+    // Per ADR-0007 §6 manual lineage is stale; the painter sees
+    // ``no_oracle`` + ``synthesized`` so the purple trust pillar is
+    // applied (per AC8).
+    expect(region.verificationOutcome).toBe("no_oracle");
+    expect(region.mappingClass).toBe("synthesized");
+  });
+
+  it("paints manual_edit regions in the union with synthesised defaults", () => {
+    const manual = overlay([
+      {
+        lineRange: { startLine: 30, endLine: 35 },
+        originClass: "manual_edit",
+      },
+    ]);
+    const merged = mergeRegionsForTrustPillars({
+      traceabilityOverlay: null,
+      manualOverlay: manual,
+    });
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.originClass).toBe("manual_edit");
+    expect(merged[0]?.verificationOutcome).toBe("no_oracle");
+    expect(merged[0]?.mappingClass).toBe("synthesized");
+  });
+
+  it("preserves explicit verificationOutcome/mappingClass on manual regions when present", () => {
+    // Some persistence round-trips may carry the fields on manual
+    // regions — the helper must NOT clobber them with defaults.
+    const manual = overlay([
+      {
+        lineRange: { startLine: 40, endLine: 42 },
+        originClass: "manual_modified",
+        verificationOutcome: "oracle_failed",
+        mappingClass: "agent_originated",
+      },
+    ]);
+    const merged = mergeRegionsForTrustPillars({
+      traceabilityOverlay: null,
+      manualOverlay: manual,
+    });
+    expect(merged[0]?.verificationOutcome).toBe("oracle_failed");
+    expect(merged[0]?.mappingClass).toBe("agent_originated");
+  });
+
+  it("unions trace + manual regions in a single output (AC8 happy path)", () => {
+    const trace = overlay([
+      {
+        lineRange: { startLine: 1, endLine: 5 },
+        originClass: "deterministic",
+        verificationOutcome: "oracle_passed",
+        mappingClass: "direct",
+      },
+    ]);
+    const manual = overlay([
+      {
+        lineRange: { startLine: 7, endLine: 9 },
+        originClass: "manual_modified",
+      },
+      {
+        lineRange: { startLine: 11, endLine: 13 },
+        originClass: "manual_edit",
+      },
+    ]);
+    const merged = mergeRegionsForTrustPillars({
+      traceabilityOverlay: trace,
+      manualOverlay: manual,
+    });
+    // 1 trace + 2 manual = 3 regions total; trace first, manual after.
+    expect(merged).toHaveLength(3);
+    expect(merged.map((r) => r.originClass)).toEqual([
+      "deterministic",
+      "manual_modified",
+      "manual_edit",
+    ]);
+  });
+
+  it("ignores trace regions whose originClass is a manual class (defensive)", () => {
+    // A future overlay-merger bug could route a manual region into the
+    // trace slot. The helper filters by originClass first so this
+    // never produces ghost regions painted twice.
+    const trace = overlay([
+      {
+        lineRange: { startLine: 1, endLine: 3 },
+        originClass: "manual_edit",
+        verificationOutcome: "no_oracle",
+        mappingClass: "synthesized",
+      },
+    ]);
+    const merged = mergeRegionsForTrustPillars({
+      traceabilityOverlay: trace,
+      manualOverlay: null,
+    });
+    expect(merged).toEqual([]);
   });
 });

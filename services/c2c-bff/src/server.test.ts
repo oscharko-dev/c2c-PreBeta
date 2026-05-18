@@ -115,6 +115,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       expectedOutput?: string;
       oracleInput?: string;
       useTransformationAgent?: boolean;
+      generateOnly?: boolean;
     }>;
     getGenerated: number;
     getGeneratedFiles: number;
@@ -5480,6 +5481,46 @@ test("POST /api/v0/generate happy path returns 201 with runMode=generate", async
     const body = response.body as { runMode: string; runId: string };
     assert.equal(body.runMode, "generate");
     assert.ok(typeof body.runId === "string" && body.runId.length > 0);
+    // Studio-IDE-13 (#255) AC1: /api/v0/generate forwards generateOnly:
+    // true so the orchestrator short-circuits after generate-java and
+    // does NOT run build/test/oracle for this user-initiated generator-
+    // only action. Pinning this here protects against accidental
+    // regressions in the BFF→orchestrator payload mapping.
+    assert.equal(calls.startTransformRun[0]?.generateOnly, true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/transform does NOT forward generateOnly to the orchestrator", async () => {
+  // Companion to the /generate happy-path assertion above: the legacy
+  // composed Generate & Verify path must preserve its full pipeline by
+  // never setting the generateOnly flag. If a future refactor reuses
+  // /generate validation for /transform, this assertion fires.
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: "POST",
+      body: {
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        useTransformationAgent: false,
+      },
+    });
+    assert.equal(response.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    // The composed pipeline relies on the absence of generateOnly so
+    // build-test, repair, and evidence-write all run as today.
+    assert.equal(calls.startTransformRun[0]?.generateOnly, undefined);
   } finally {
     await server.close();
   }

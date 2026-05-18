@@ -32,7 +32,11 @@
 
 import type * as MonacoNs from "monaco-editor";
 
-import type { JavaRegionClassification } from "@/types/api";
+import type {
+  JavaOriginOverlay,
+  JavaOriginRegion,
+  JavaRegionClassification,
+} from "@/types/api";
 
 export type TrustPillarKey =
   | "deterministic-passed"
@@ -239,3 +243,66 @@ export function lineageCoveragePct(
   const pct = (covered.size / totalLines) * 100;
   return Math.max(0, Math.min(100, Math.round(pct)));
 }
+
+/**
+ * Studio-IDE-13 (#255) AC8: union the IDE-6 traceability overlay
+ * (``deterministic`` / ``agent_proposed`` / ``repair_attempted`` regions
+ * carrying real ``verificationOutcome`` + ``mappingClass`` fields) with
+ * the IDE-13 manual-edit overlay (``manual_modified`` / ``manual_edit``
+ * regions computed locally from the buffer-vs-baseline diff). Manual
+ * regions never carry a real verification outcome — ADR-0007 §6 states
+ * manual lineage is stale or unavailable — so the helper synthesises
+ * ``no_oracle`` and ``synthesized`` defaults so the trust-pillar painter
+ * type filter accepts them and paints the purple/orange decorations the
+ * AC8 spec calls for.
+ *
+ * Pure function: no side effects, no Monaco dependency.
+ */
+export function mergeRegionsForTrustPillars(input: {
+  traceabilityOverlay: JavaOriginOverlay | null;
+  manualOverlay: JavaOriginOverlay | null;
+}): JavaRegionClassification[] {
+  const { traceabilityOverlay, manualOverlay } = input;
+  const traceRegions = traceabilityOverlay
+    ? traceabilityOverlay.regions.filter(
+        (r) =>
+          r.originClass === "deterministic" ||
+          r.originClass === "agent_proposed" ||
+          r.originClass === "repair_attempted",
+      )
+    : [];
+  const manualRegions = manualOverlay
+    ? manualOverlay.regions.filter(
+        (r) =>
+          r.originClass === "manual_modified" ||
+          r.originClass === "manual_edit",
+      )
+    : [];
+  const combined: JavaRegionClassification[] = [];
+  for (const region of traceRegions) {
+    if (region.verificationOutcome === undefined) continue;
+    if (region.mappingClass === undefined) continue;
+    combined.push({
+      schemaVersion: "v0",
+      lineRange: region.lineRange,
+      originClass: region.originClass,
+      verificationOutcome: region.verificationOutcome,
+      mappingClass: region.mappingClass,
+    });
+  }
+  for (const region of manualRegions) {
+    combined.push({
+      schemaVersion: "v0",
+      lineRange: region.lineRange,
+      originClass: region.originClass,
+      verificationOutcome: region.verificationOutcome ?? "no_oracle",
+      mappingClass: region.mappingClass ?? "synthesized",
+    });
+  }
+  return combined;
+}
+
+// Re-export to satisfy the unused-import lint warning when callers only
+// import the helper type indirectly. The exported alias keeps the
+// type accessible without forcing a separate type-only import.
+export type { JavaOriginRegion };

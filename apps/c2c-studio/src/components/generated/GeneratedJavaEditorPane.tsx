@@ -48,11 +48,7 @@ import {
   useJavaEditorActions,
   useRegisterCompileCheckHandler,
 } from "@/stores/javaEditorActions";
-import type {
-  Diagnostic,
-  JavaOriginRegion,
-  JavaRegionClassification,
-} from "@/types/api";
+import type { Diagnostic, JavaOriginRegion } from "@/types/api";
 import { useOriginOverlayApi, useOverlay } from "@/lib/editor/originOverlay";
 import { useLineageCoverageApi } from "@/stores/lineageCoverage";
 import {
@@ -63,6 +59,7 @@ import { resolveJavaToCobol } from "@/lib/editor/lineageNavigation";
 import {
   buildTrustPillarDecorations,
   lineageCoveragePct,
+  mergeRegionsForTrustPillars,
 } from "@/lib/editor/trustPillars";
 // Studio-IDE-13 (#255): manual-edit overlay computation and 3-Way Merge
 // dialog wiring. The overlay is recomputed on every debounced buffer
@@ -736,50 +733,10 @@ export function GeneratedJavaEditorPane() {
     // requires both fields to be present); this is consistent with
     // ADR-0007 §6 which states manual lineage is stale or unavailable
     // and therefore cannot carry a real verification outcome.
-    const traceRegions: JavaOriginRegion[] = overlay?.regions
-      ? overlay.regions.filter(
-          (r) =>
-            r.originClass === "deterministic" ||
-            r.originClass === "agent_proposed" ||
-            r.originClass === "repair_attempted",
-        )
-      : [];
-    const manualOverlay = javaBufferEntry?.manualEditOverlay;
-    const manualRegions: JavaOriginRegion[] = manualOverlay
-      ? manualOverlay.regions.filter(
-          (r) =>
-            r.originClass === "manual_modified" ||
-            r.originClass === "manual_edit",
-        )
-      : [];
-    const combined: JavaRegionClassification[] = [
-      ...traceRegions
-        .filter(
-          (
-            r,
-          ): r is JavaOriginRegion & {
-            verificationOutcome: NonNullable<
-              JavaOriginRegion["verificationOutcome"]
-            >;
-            mappingClass: NonNullable<JavaOriginRegion["mappingClass"]>;
-          } =>
-            r.verificationOutcome !== undefined && r.mappingClass !== undefined,
-        )
-        .map<JavaRegionClassification>((r) => ({
-          schemaVersion: "v0",
-          lineRange: r.lineRange,
-          originClass: r.originClass,
-          verificationOutcome: r.verificationOutcome,
-          mappingClass: r.mappingClass,
-        })),
-      ...manualRegions.map<JavaRegionClassification>((r) => ({
-        schemaVersion: "v0",
-        lineRange: r.lineRange,
-        originClass: r.originClass,
-        verificationOutcome: r.verificationOutcome ?? "no_oracle",
-        mappingClass: r.mappingClass ?? "synthesized",
-      })),
-    ];
+    const combined = mergeRegionsForTrustPillars({
+      traceabilityOverlay: overlay ?? null,
+      manualOverlay: javaBufferEntry?.manualEditOverlay ?? null,
+    });
     if (monacoGlobal && combined.length > 0) {
       const repairCount =
         state.workflow?.repairAttempts?.filter(
