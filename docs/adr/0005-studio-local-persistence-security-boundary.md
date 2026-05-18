@@ -91,6 +91,25 @@ The IV is **96-bit random per record**. AES-GCM IV reuse with the
 same key catastrophically breaks confidentiality, so the module must
 never derive an IV from any deterministic input.
 
+**AEAD additional authenticated data (AAD)** binds the ciphertext to
+its key and identity scope so a record cannot be moved or replayed
+under a different `SourceKey` and still decrypt successfully. AAD is
+derived deterministically at both encrypt and decrypt time as:
+
+```
+aad = u8(schemaVersion)
+   || u32be(len(tenantId))   || tenantId
+   || u32be(len(userId))     || userId
+   || u32be(len(programId))  || programId
+   || u32be(len(sourceName)) || sourceName
+   || u32be(len(bufferKind)) || bufferKind
+   || u32be(len(bufferPath)) || bufferPath
+```
+
+A decryption failure on AAD mismatch is **`CorruptDraft`** (Decision
+"Behavioural contract" below); it is not silently treated as a
+missing record.
+
 **Session expiry mid-edit** is treated as a defined state, not a
 bug. On a save attempt with an expired session:
 
@@ -108,15 +127,24 @@ store.
 ### 3. `sourceKey` Composition
 
 ```ts
+type BufferKind = "cobol" | "java";
+
 type SourceKey = {
   tenantId: string;
   userId: string;
   programId: string;
   sourceName: string;
+  bufferKind: BufferKind;
+  bufferPath: string; // relative path within the program for `java`; "." for `cobol` single-buffer
 };
 ```
 
 Stored as the IndexedDB record key (plaintext — see Consequences).
+`bufferKind` and `bufferPath` distinguish the COBOL source buffer
+from per-file generated-Java buffers and from one Java file to the
+next within the same program. `bufferPath` for `bufferKind="cobol"`
+is the constant `"."` to keep the key total even though COBOL is a
+single buffer per program in V1.
 
 **`tenantId` and `userId` are opaque pseudonymous identifiers** —
 typically UUIDs or random opaque strings minted by the BFF at the
@@ -136,8 +164,9 @@ must inject at bootstrap (see _Named prerequisite_ below).
 
 1. Stable identifier emitted by the parser/IR for the loaded source.
 2. `sha256(u32be(len(sourceName)) || sourceName || u32be(len(normalizedPath)) || normalizedPath)`
-   truncated to 16 hex bytes. The length-prefix encoding prevents the
-   ambiguity whereby `(sourceName="ab", normalizedPath="c")` and
+   truncated to **the first 32 hexadecimal characters (16 bytes) of
+   the digest**. The length-prefix encoding prevents the ambiguity
+   whereby `(sourceName="ab", normalizedPath="c")` and
    `(sourceName="a", normalizedPath="bc")` would otherwise hash to
    the same value.
 3. _Never_ fall back to `sourceName` alone — different paths with
@@ -155,16 +184,44 @@ Editor-Assist response surfaces `redactedFields[]` per
 
 1. User selects region.
 2. Studio applies the configured redaction patterns to the region
-   bytes, producing redacted bytes.
+   bytes, producing redacted bytes and a `studioRedactionMetadata`
+   structure (see below).
 3. Studio computes `byteHash = sha256(redactedBytes)`.
-4. Studio submits redacted bytes + `byteHash` to the BFF. The ledger
-   entry records exactly what left the client.
+4. Studio submits `{ redactedBytes, byteHash, studioRedactionMetadata }`
+   to the BFF. The ledger entry records exactly what left the client.
+
+The `byteHash` field in this flow is the SHA-256 of the bytes that
+were actually sent to the model — i.e. the redacted bytes — and is
+the same field referenced by the Editor-Assist ledger entry in
+[ADR 0004](0004-studio-editor-assist-channel.md). ADR 0004's
+description of `byteHash` is tightened here: it is hashed over what
+leaves the client, not over the pre-redaction selection.
+
+**Studio redaction metadata** is forwarded so the Gateway and the
+ledger can report what Studio stripped:
+
+```json
+{
+  "studioRedactionProfileVersion": "v1.0.0",
+  "matchedPatternIds": ["ssn-us", "iban-eu", "field-name-class:account-number"]
+}
+```
+
+The Gateway returns the union of Studio and Gateway-side redaction
+results as `redactedFields[]` per ADR 0004; without this metadata
+the Gateway can only see post-Studio-redaction bytes and cannot
+attribute what Studio removed.
 
 **Redaction pattern source**:
 
 - A **hard-coded baseline** compiled into the Studio bundle: SSN, IBAN,
-  and BIC patterns plus lines beginning with `* PII:` (COBOL comment
-  convention). The baseline is part of the bundle on purpose — a
+  and BIC patterns; lines beginning with `* PII:` (COBOL comment
+  convention); **and a default field-name regex class** covering
+  common sensitive field-name fragments (e.g. `ACCT-NO`,
+  `ACCOUNT-NUMBER`, `CARD-NO`, `SOCIAL-SECURITY`, `NATIONAL-ID`,
+  `CUSTOMER-NAME`, `CUST-NM`, `EMAIL`, `PHONE`, `TAX-ID`,
+  `DOB`/`DATE-OF-BIRTH`). The exact list lives in the project
+  regex registry. The baseline is part of the bundle on purpose — a
   remotely mutable redaction list is itself an attack surface.
 - **Per-tenant additions** delivered by the BFF at session start and
   cached for the session. Additions **augment** the baseline; they
@@ -193,13 +250,17 @@ and passes through a two-stage sanitizer.
 
 **Allow-list**:
 
-| Element                                  | Notes                                    |
-| ---------------------------------------- | ---------------------------------------- |
-| `p`, `br`, `strong`, `em`, `code`, `pre` | Inline markdown emphasis and code blocks |
-| `a`                                      | href schema restricted (see below)       |
-| `ul`, `ol`, `li`                         | Lists                                    |
+| Element                                  | Allowed attributes      | Notes                                    |
+| ---------------------------------------- | ----------------------- | ---------------------------------------- |
+| `p`, `br`, `strong`, `em`, `code`, `pre` | _(none)_                | Inline markdown emphasis and code blocks |
+| `a`                                      | `href`, `target`, `rel` | `href` scheme restricted (see below)     |
+| `ul`, `ol`, `li`                         | _(none)_                | Lists                                    |
 
-**`href` schema allow-list**:
+All other elements and attributes — including `style`, `class`, `id`,
+`on*` event handlers, `srcdoc`, `srcset`, `data-*` — are stripped by
+DOMPurify.
+
+**`href` scheme allow-list**:
 
 - relative anchors (`#…`),
 - relative paths (`./…`, `../…`),
@@ -238,12 +299,13 @@ control alongside the rest of the Next.js config.
 
 ```
 default-src 'self';
-script-src 'self';
+script-src 'self' 'nonce-{NONCE}' 'strict-dynamic';
 style-src 'self' 'unsafe-inline';
-worker-src 'self' blob:;
+worker-src 'self';
 connect-src 'self' <bff-origin-from-config>;
 img-src 'self' data:;
 font-src 'self' data:;
+object-src 'none';
 frame-ancestors 'none';
 base-uri 'self';
 form-action 'self';
@@ -251,14 +313,31 @@ report-uri /api/v0/csp-report;
 ```
 
 - **No `unsafe-eval`.** Monaco does not require it post-AMD removal.
+- **`script-src 'nonce-{NONCE}' 'strict-dynamic'`**: required in V1.
+  Next.js App Router emits inline bootstrap and React Server
+  Components hydration scripts that a bare `script-src 'self'` would
+  block. Studio middleware mints a per-request nonce and injects it
+  into the CSP header and every framework-emitted `<script>`; the
+  `'strict-dynamic'` keyword lets scripts loaded by trusted nonces
+  load further scripts without each requiring its own nonce. Nonce
+  delivery is an implementation prerequisite Studio-IDE-3 must wire
+  up alongside the persistence module.
 - **`style-src 'unsafe-inline'`** is accepted for V1 because Monaco
-  injects theming styles. Removing it requires nonce-based CSP — named
-  follow-up.
-- **`worker-src 'self' blob:`** covers Monaco's worker bootstrap,
-  which loads worker chunks as `blob:` URLs through
-  `MonacoEnvironment.getWorker` returning `new Worker(new URL(...), { type: 'module' })`.
-  If a future bundler swap moves workers to same-origin scripts,
-  `blob:` may be dropped — keep CSP and bootstrap in lockstep.
+  injects theming styles at runtime. Removing it requires nonce-based
+  style CSP — named follow-up. (The script `'unsafe-inline'` is **not**
+  acceptable and is not used.)
+- **`worker-src 'self'`** matches Studio's actual loader
+  ([`apps/c2c-studio/src/lib/editor/lazyMonaco.ts`](../../apps/c2c-studio/src/lib/editor/lazyMonaco.ts)),
+  which constructs module workers via
+  `new Worker(new URL("monaco-editor/.../worker.js", import.meta.url), { type: "module" })`.
+  Webpack bundles those URLs as same-origin scripts, so `blob:` is
+  not required. If a future bundler swap or HMR path begins emitting
+  `blob:` workers, add `blob:` and re-justify here; keep CSP and
+  loader in lockstep.
+- **`object-src 'none'`**: legacy `<object>`, `<embed>`, and `<applet>`
+  surfaces are denied explicitly. `default-src 'self'` is not a
+  reliable fallback for `object-src` across all engines, so the
+  directive is stated.
 - **`connect-src`**: the BFF origin is a config value, not a literal,
   to support per-environment overrides.
 - **`report-uri`**: a BFF endpoint that logs violations server-side.
@@ -266,11 +345,11 @@ report-uri /api/v0/csp-report;
 
 **Dev mode**: Next.js dev server requires `'unsafe-eval'` for HMR.
 The production CSP is applied only in `process.env.NODE_ENV === 'production'`
-builds; dev builds omit `'unsafe-eval'` exclusion via the same
+builds; dev builds add `'unsafe-eval'` to `script-src` via the same
 `headers()` branch.
 
 **Future end state** (not committed in this ADR): nonce-based
-`script-src` and `style-src`, plus `require-trusted-types-for 'script'`.
+`style-src`, plus `require-trusted-types-for 'script'`.
 
 ### 7. "Clear Local Drafts" UI Action
 
@@ -291,17 +370,15 @@ builds; dev builds omit `'unsafe-eval'` exclusion via the same
 
 ## `editorPersistence` Module Pseudo-API
 
-```ts
-type SourceKey = {
-  tenantId: string;
-  userId: string;
-  programId: string;
-  sourceName: string;
-};
+The `SourceKey` type used by the module is exactly the type defined
+in Decision 3 above, including `bufferKind` and `bufferPath`. The
+shape is repeated here only as a reminder; it is the same type.
 
+```ts
 type PersistenceError =
   | "SessionExpiredDuringEdit"
   | "CryptoUnavailable"
+  | "StorageUnavailable"
   | "QuotaExceeded"
   | "CorruptDraft";
 
@@ -315,7 +392,7 @@ interface EditorPersistence {
 
   loadDraft(
     key: SourceKey,
-  ): Promise<{ content: string; isExpired: boolean; savedAt: string } | null>;
+  ): Promise<{ content: string; savedAt: string } | null>;
 
   touch(key: SourceKey): Promise<{ ttlExpiresAt: string }>;
 
@@ -330,21 +407,30 @@ interface EditorPersistence {
 
 **Behavioural contract**:
 
-- `isAvailable` returns `false` if Web Crypto is unavailable. The
-  UI shows a _"Drafts unavailable: your browser does not support
+- `isAvailable` returns `false` if **either** Web Crypto is missing
+  **or** IndexedDB cannot be opened for the current origin (e.g.
+  private-mode lock-out, quota disabled, schema migration failure).
+  The UI shows a _"Drafts unavailable: your browser does not support
   secure storage."_ banner and disables save.
-- `saveDraft` rejects with `CryptoUnavailable` if called when
-  `isAvailable` is false, `SessionExpiredDuringEdit` if the key
-  derivation cannot produce a current key, and `QuotaExceeded` on
-  `QuotaExceededError` from IndexedDB. Never silently drop a save.
-- `loadDraft` performs the silent purge for an expired record and
-  returns `null`. Expired records are not surfaced to callers.
+- `saveDraft` rejects with `CryptoUnavailable` when Web Crypto is
+  missing, `StorageUnavailable` when IndexedDB cannot be opened,
+  `SessionExpiredDuringEdit` when the key derivation cannot produce
+  a current key, and `QuotaExceeded` on `QuotaExceededError` from
+  IndexedDB. Never silently drop a save.
+- `loadDraft` returns `null` for a missing record and for an expired
+  record (silent purge happens on the first load attempt per session
+  per key). Expired records are not surfaced to callers, which is
+  why the return shape carries no `isExpired` flag.
+- `loadDraft` **rejects** with `CorruptDraft` when the record exists
+  but decryption fails (AAD mismatch, tampered ciphertext, or any
+  other AES-GCM authentication failure). Studio surfaces the
+  `CorruptDraft` UI state distinctly from the absent-record state so
+  the user can choose to discard the corrupt record without ever
+  seeing its contents.
 - `touch` updates `ttlExpiresAt` to `now + 14d` (or tenant override,
   capped at 90d).
 - `clearAll` takes the scope **explicitly** — the module does not
   read session state directly. Zero ambient authority.
-- `CorruptDraft` (decryption failure) is treated as missing: log
-  with no contents, return `null` from `loadDraft`.
 
 ## Security Review Checklist
 
