@@ -47,15 +47,20 @@ interface Token {
   readonly startColumn: number;
 }
 
+// `IMonarchLanguage` is open-ended — Monaco lets grammars attach arbitrary
+// helper arrays (here, `keywords` and `dataKeywords`) for use inside the
+// tokenizer state machine, but TypeScript's typings only expose the
+// well-known fields. Go through `unknown` to assert the shape we know is
+// present in our grammar definition (see `cobolMonarch.ts`).
 const KEYWORD_SET = new Set(
-  (COBOL_MONARCH_LANGUAGE as { keywords: string[] }).keywords.map((kw) =>
-    kw.toUpperCase(),
+  (COBOL_MONARCH_LANGUAGE as unknown as { keywords: string[] }).keywords.map(
+    (kw) => kw.toUpperCase(),
   ),
 );
 const DATA_KEYWORD_SET = new Set(
-  (COBOL_MONARCH_LANGUAGE as { dataKeywords: string[] }).dataKeywords.map(
-    (kw) => kw.toUpperCase(),
-  ),
+  (
+    COBOL_MONARCH_LANGUAGE as unknown as { dataKeywords: string[] }
+  ).dataKeywords.map((kw) => kw.toUpperCase()),
 );
 
 const TOKEN_POSTFIX = COBOL_MONARCH_LANGUAGE.tokenPostfix ?? "";
