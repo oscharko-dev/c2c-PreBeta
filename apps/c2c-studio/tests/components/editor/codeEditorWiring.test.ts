@@ -62,7 +62,7 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
     // returns an IDisposable that must be cleaned up on unmount.
     expect(innerSource).toMatch(/contentChangeDisposableRef/);
     expect(innerSource).toMatch(
-      /contentChangeDisposableRef\.current\s*=\s*modifiedModel\.onDidChangeContent/,
+      /contentChangeDisposableRef\.current\s*=\s*[\s\S]*?\.onDidChangeContent/,
     );
   });
 
@@ -72,6 +72,31 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
     );
     expect(innerSource).toMatch(
       /contentChangeDisposableRef\.current\s*=\s*null/,
+    );
+  });
+
+  it("re-attaches the diff content-change listener when the modified model is swapped (Codex round-2)", () => {
+    // When modelUri changes while the diff editor stays mounted,
+    // @monaco-editor/react swaps the modified model. Without re-wiring,
+    // edits in the new pane silently stop calling onChange.
+    expect(innerSource).toMatch(/modifiedEditor\.onDidChangeModel/);
+    expect(innerSource).toMatch(/modelChangeDisposableRef/);
+    expect(innerSource).toMatch(
+      /modelChangeDisposableRef\.current\.dispose\(\)/,
+    );
+  });
+
+  it("derives a per-instance fallback URI so independent editors do not share Monaco models (Codex round-2)", () => {
+    // Two CodeEditors with the same language and no explicit modelUri must
+    // not resolve to the same `path` — @monaco-editor/react would reuse one
+    // Monaco model for both, causing one to overwrite or mirror the other.
+    expect(innerSource).toMatch(/useId/);
+    expect(innerSource).toMatch(/fallbackUriId/);
+    expect(innerSource).toMatch(
+      /inmemory:\/\/model\/\$\{language\}\/\$\{fallbackUriId\}/,
+    );
+    expect(innerSource).toMatch(
+      /inmemory:\/\/model\/\$\{language\}-diff\/\$\{fallbackUriId\}/,
     );
   });
 });

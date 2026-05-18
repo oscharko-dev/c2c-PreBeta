@@ -32,11 +32,20 @@ if (!Array.isArray(stats)) {
 // bundled module would contain. Bare-substring matches on "monaco-editor"
 // would false-positive on incidental mentions (e.g., license headers,
 // source-map paths, or other packages that name-drop Monaco in comments).
+//
+// IMPORTANT: \b is a transition between \w and \W. The leading `@` in a
+// scoped package name is \W, so `\b@monaco-editor/...` never matches in
+// path-shaped strings like `/node_modules/@monaco-editor/react/...` (the
+// preceding `/` is also \W). For the @-prefixed patterns we anchor on a
+// preceding path separator / quote / line boundary instead. Plain
+// `monaco-editor` still uses `\b` so we don't false-positive on words
+// like `xmonaco-editor`.
 const monacoMarkers = [
   /\bmonaco-editor\/esm\//,
   /\bmonaco-editor\/min\//,
   /\bnode_modules\/monaco-editor\//,
-  /\b@monaco-editor\/react\//,
+  /(?:^|[\/"'\s])@monaco-editor\/react\//m,
+  /node_modules\/@monaco-editor\/react\//,
   /["']monaco-editor["']/,
   /["']@monaco-editor\/react["']/,
 ];

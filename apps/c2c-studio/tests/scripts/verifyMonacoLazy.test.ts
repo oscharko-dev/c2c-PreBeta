@@ -152,6 +152,44 @@ describe("verify-monaco-lazy regex tightening (#258 Copilot review)", () => {
     }
   });
 
+  it("DOES flag a first-load chunk that path-imports the scoped @monaco-editor/react package (Codex round-2)", () => {
+    // The original regex used `\b@monaco-editor/react/`, which never matches
+    // because `\b` requires a word/non-word transition and `@` is non-word.
+    // Path-shaped references in webpack chunks (preceded by `/`) would slip
+    // through. Both shapes below must now be flagged.
+    const firstLoadContent = `
+      "./node_modules/@monaco-editor/react/dist/index.mjs"
+    `;
+    const lazyContent = `
+      "./node_modules/monaco-editor/esm/vs/editor/editor.api.js"
+    `;
+    const fake = setupFakeBuild({ firstLoadContent, lazyContent });
+    try {
+      const result = runVerify(fake.studioRoot);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Monaco is statically reachable");
+    } finally {
+      fake.cleanup();
+    }
+  });
+
+  it("DOES flag a first-load chunk that string-imports @monaco-editor/react", () => {
+    const firstLoadContent = `
+      import { Editor } from "@monaco-editor/react";
+    `;
+    const lazyContent = `
+      "./node_modules/monaco-editor/esm/vs/editor/editor.api.js"
+    `;
+    const fake = setupFakeBuild({ firstLoadContent, lazyContent });
+    try {
+      const result = runVerify(fake.studioRoot);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Monaco is statically reachable");
+    } finally {
+      fake.cleanup();
+    }
+  });
+
   it("requires the build manifest to exist", () => {
     const root = mkdtempSync(join(tmpdir(), "verify-monaco-lazy-empty-"));
     try {
