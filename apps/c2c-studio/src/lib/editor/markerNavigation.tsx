@@ -236,15 +236,25 @@ export function useEditorMarkerRegistration(args: {
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
 
   // Keep the registration's filePath up-to-date as the pane changes
-  // files (the editor instance is long-lived; the file is not).
+  // files. We re-register with the same id (a no-op for ordering) so
+  // unregister-on-every-change does not bump `activeIdRef` to another
+  // pane mid-session. The unregister happens only when the pane fully
+  // unmounts.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
     registerEditor(id, { filePath, editor });
+  }, [id, filePath, registerEditor]);
+
+  // Separate unmount-only cleanup so changing filePath does not
+  // trigger an unregister cycle (which would let `activeIdRef`
+  // drift onto another pane).
+  useEffect(() => {
     return () => {
       unregisterEditor(id);
     };
-  }, [id, filePath, registerEditor, unregisterEditor]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const registerOnMount = useCallback(
     (editor: MonacoNs.editor.IStandaloneCodeEditor) => {

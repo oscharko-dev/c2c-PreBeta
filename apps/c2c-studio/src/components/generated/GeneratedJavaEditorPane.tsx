@@ -215,11 +215,20 @@ export function GeneratedJavaEditorPane() {
   // otherwise this effect would try to fetch a non-existent generated
   // file and leave the pane on a broken selection.
   const { target: navigationTarget } = useMarkerNavigation();
+  // Track the navigation token so a second effect can complete the
+  // focus jump AFTER the file becomes selected (the editor model has
+  // to be attached to the new file before revealLineInCenter is
+  // useful).
+  const pendingTokenRef = useRef<number | null>(null);
   useEffect(() => {
     if (!navigationTarget) return;
     const targetPath = navigationTarget.filePath;
     if (!targetPath) return;
-    if (targetPath === selectedFilePath) return;
+    if (targetPath === selectedFilePath) {
+      // Same file — let the navigation context's focusEditor handle
+      // the line jump on the registered editor.
+      return;
+    }
     const generatedPaths = state.generatedFiles?.files ?? [];
     // Path-segment suffix match against the list of generated files —
     // the BFF normalizes javac absolute paths but we match defensively
@@ -239,8 +248,29 @@ export function GeneratedJavaEditorPane() {
       return true;
     });
     if (!matched) return;
+    pendingTokenRef.current = navigationTarget.token;
     selectFile(matched.path);
   }, [navigationTarget, selectedFilePath, selectFile, state.generatedFiles?.files]);
+
+  // Studio-IDE-5 (#244 review): complete the jump once the editor has
+  // mounted with the freshly-selected file. We compare tokens so a
+  // stale target (from an earlier click) does not race ahead of the
+  // current selection.
+  useEffect(() => {
+    if (!navigationTarget) return;
+    if (pendingTokenRef.current !== navigationTarget.token) return;
+    if (navigationTarget.filePath !== selectedFilePath) return;
+    if (!editorInstanceRef.current) return;
+    const targetLine = Math.max(1, navigationTarget.line);
+    const targetColumn = Math.max(1, navigationTarget.column ?? 1);
+    editorInstanceRef.current.revealLineInCenterIfOutsideViewport(targetLine);
+    editorInstanceRef.current.setPosition({
+      lineNumber: targetLine,
+      column: targetColumn,
+    });
+    editorInstanceRef.current.focus();
+    pendingTokenRef.current = null;
+  }, [navigationTarget, selectedFilePath, editorMountToken]);
 
   const javaMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
     if (!monaco) return [];
