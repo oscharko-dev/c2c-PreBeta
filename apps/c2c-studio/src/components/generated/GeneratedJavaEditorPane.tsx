@@ -223,6 +223,14 @@ export function GeneratedJavaEditorPane() {
   // without disturbing the "previous" snapshot. We key by programId
   // because the BFF's traceability + run identity contract uses it as
   // the canonical sourceKey (ADR-0007 §3).
+  //
+  // Studio-IDE-7 review-finding (Codex P2, PR #282): ``deriveSourceHash``
+  // is async, so two rapid runs could resolve out of order. The
+  // ``cancelled`` guard captured in the effect closure ensures only the
+  // hash for the run/file currently in scope reaches
+  // ``recordJavaDiffSnapshot`` — a late callback from a superseded run
+  // can never shift the newer snapshot into ``previous`` and invert the
+  // displayed diff.
   useEffect(() => {
     if (
       !selectedFilePath ||
@@ -237,13 +245,18 @@ export function GeneratedJavaEditorPane() {
     const runId = state.runId;
     const filePath = selectedFilePath;
     const content = fileContent;
+    let cancelled = false;
     void deriveSourceHash(content).then((hash) => {
+      if (cancelled) return;
       recordJavaDiffSnapshot(programId, filePath, {
         content,
         sourceHash: hash,
         runId,
       });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [
     selectedFilePath,
     fileContent,

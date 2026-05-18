@@ -324,6 +324,17 @@ function DiffWorkspaceBody({
   linkedScrollRef.current = linkedScroll;
   const traceRef = useRef<ParsedTrace | null>(trace);
   traceRef.current = trace;
+  // Studio-IDE-7 review-finding (Codex P1, PR #282): the scroll listener
+  // is registered ONCE in handleJavaMount, before lineage has loaded
+  // (``couplingDisabled`` is true at that moment). Reading
+  // ``couplingDisabled`` from the closure would freeze the handler in
+  // the "coupling off" state forever — even after traceability resolves.
+  // Read through refs so the single registered listener always sees the
+  // latest coupling / file-path state.
+  const couplingDisabledRef = useRef(couplingDisabled);
+  couplingDisabledRef.current = couplingDisabled;
+  const filePathRef = useRef(filePath);
+  filePathRef.current = filePath;
 
   // ----- Scroll coupling -----------------------------------------------
   // The Java diff is the source-of-truth for coupling: when the user
@@ -336,7 +347,7 @@ function DiffWorkspaceBody({
   const pendingScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleJavaScroll = useCallback(() => {
     if (!linkedScrollRef.current) return;
-    if (couplingDisabled) return;
+    if (couplingDisabledRef.current) return;
     const java = javaDiffRef.current;
     const cobol = cobolDiffRef.current;
     if (!java || !cobol) return;
@@ -351,14 +362,14 @@ function DiffWorkspaceBody({
     const javaSource = javaModified.getModel()?.getValue() ?? "";
     const resolved = resolveJavaToCobolSync(
       parsed,
-      filePath,
+      filePathRef.current,
       focusedLine,
       javaSource,
     );
     if (!resolved) return;
     const cobolModified = cobol.getModifiedEditor();
     cobolModified.revealLineInCenter(resolved.cobolLine);
-  }, [couplingDisabled, filePath]);
+  }, []);
 
   // Throttle the scroll handler. We coalesce a trailing call so the
   // final scroll position is always honored.
