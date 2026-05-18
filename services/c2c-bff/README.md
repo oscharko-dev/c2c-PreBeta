@@ -1,7 +1,6 @@
 # c2c-bff
 
-W0 backend-for-frontend that brokers c2c-ui calls to the W0 capability mesh
-and serves the c2c-ui static bundle on the same origin.
+W0 backend-for-frontend that brokers Studio calls to the W0 capability mesh.
 
 ## Responsibility
 
@@ -14,8 +13,9 @@ and serves the c2c-ui static bundle on the same origin.
    not configured the BFF returns `503` from `POST /api/v0/runs` and
    `POST /api/v0/transform`. Product mode never fabricates a successful
    run from local fixtures.
-4. Serve the c2c-ui build output under `/` (defaults to
-   `../../apps/c2c-ui/dist`).
+4. Optionally serve a static bundle under `/` when `C2C_UI_DIST` is set;
+   when the directory does not exist the BFF simply skips the static
+   route (no error). This path is unused in the current Studio-only setup.
 
 The UI never talks to capability services directly; everything routes
 through this BFF, per Issue #15 acceptance criteria.
@@ -63,7 +63,7 @@ Every payload from a run-scoped endpoint includes two mode signals:
 | -------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `C2C_BFF_PORT`                   | `8090`                   | HTTP listen port.                                                                                                                                                                                                                               |
 | `C2C_REPO_ROOT`                  | walks up from package    | Repo root used to locate `corpus/` and `fixtures/`.                                                                                                                                                                                             |
-| `C2C_UI_DIST`                    | `../../apps/c2c-ui/dist` | Static root served under `/`.                                                                                                                                                                                                                   |
+| `C2C_UI_DIST`                    | `../../apps/c2c-ui/dist` | Optional static root served under `/`. Unused in the current Studio-only setup; the BFF silently skips static routing when the directory is missing.                                                                                            |
 | `C2C_ORCHESTRATOR_URL`           | empty                    | Base URL for `orchestrator-service`. Empty means product mode is not ready.                                                                                                                                                                     |
 | `C2C_ORCHESTRATOR_CONTROL_TOKEN` | empty                    | Bearer/control token for orchestrator live-mode calls. Required whenever `C2C_ORCHESTRATOR_URL` is set.                                                                                                                                         |
 | `C2C_EVIDENCE_URL`               | empty                    | Base URL for `evidence-service`. Empty means evidence-service is not reachable; product runs still proceed but artifact endpoints report `productMode: "unavailable"` until upstream payloads land.                                             |

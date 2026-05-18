@@ -22,7 +22,7 @@ services = {
     "python": root / "services" / "python" / "w0-service",
     "typescript": root / "services" / "typescript" / "w0-service",
     "typescript-bff": root / "services" / "c2c-bff",
-    "typescript-ui": root / "apps" / "c2c-ui",
+    "typescript-studio": root / "apps" / "c2c-studio",
     "java": root / "services" / "java" / "w0-service",
     "java-cobol-parser": root / "services" / "cobol-parser-service",
     "java-semantic-ir": root / "services" / "semantic-ir-service",
@@ -71,7 +71,7 @@ if go_sum.exists():
     licenses["go"] = f"module checksums captured in {go_sum.relative_to(root)}"
 
 # Node dependencies from npm lockfile (covers all TypeScript packages).
-for ts_key in ("typescript", "typescript-bff", "typescript-ui"):
+for ts_key in ("typescript", "typescript-bff", "typescript-studio"):
     ts_service = services.get(ts_key)
     if ts_service is None:
         continue

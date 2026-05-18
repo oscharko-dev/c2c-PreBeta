@@ -318,16 +318,6 @@ build_java_services() {
   done
 }
 
-build_ui_bundle() {
-  log "building apps/c2c-ui"
-  (
-    cd "$ROOT_DIR/apps/c2c-ui"
-    npm ci --no-fund --no-audit
-    npm run build
-  ) >"$LOG_DIR/c2c-ui.log" 2>&1 || fail "apps/c2c-ui build failed (see $LOG_DIR/c2c-ui.log)"
-  [[ -f "$ROOT_DIR/apps/c2c-ui/dist/index.html" ]] || fail "c2c-ui dist/index.html was not built"
-}
-
 build_bff() {
   log "building services/c2c-bff"
   (
@@ -608,7 +598,6 @@ start_bff() {
   fi
   start_bg c2c-bff "$LOG_DIR/c2c-bff.log" \
     C2C_REPO_ROOT="$ROOT_DIR" \
-    C2C_UI_DIST="$ROOT_DIR/apps/c2c-ui/dist" \
     C2C_BFF_PORT="$BFF_PORT" \
     C2C_ORCHESTRATOR_URL="$ORCHESTRATOR_URL" \
     C2C_ORCHESTRATOR_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
@@ -632,7 +621,6 @@ start_studio() {
 
 build_java_runtime
 build_java_services
-build_ui_bundle
 build_bff
 build_studio
 

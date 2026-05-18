@@ -92,7 +92,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             apps/c2c-studio/package-lock.json
-            apps/c2c-ui/package-lock.json
             services/c2c-bff/package-lock.json
 
       - name: Install GnuCOBOL for true Golden Master verification
