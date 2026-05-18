@@ -31,7 +31,10 @@ import {
   diagnosticsToMarkers,
   partitionByOwner,
 } from "@/lib/editor/diagnosticMarkers";
-import { useEditorMarkerRegistration, useMarkerNavigation } from "@/lib/editor/markerNavigation";
+import {
+  useEditorMarkerRegistration,
+  useMarkerNavigation,
+} from "@/lib/editor/markerNavigation";
 import { useMonacoReady } from "@/lib/editor/lazyMonaco";
 import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 
@@ -157,7 +160,12 @@ export function GeneratedJavaEditorPane() {
 
   const flags = selectedFilePath
     ? javaStatusFlags(selectedFilePath)
-    : { clean: false, pendingReRun: false, staleJava: false };
+    : {
+        clean: false,
+        pendingReRun: false,
+        staleJava: false,
+        manualEditsPresent: false,
+      };
   const javaBufferEntry = selectedFilePath
     ? javaBuffers[selectedFilePath]
     : undefined;
@@ -196,10 +204,12 @@ export function GeneratedJavaEditorPane() {
   // mounts so the marker memo recomputes with the live Monaco model
   // (resolving whole-line marker geometry).
   const [editorMountToken, setEditorMountToken] = useState(0);
-  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration({
-    id: "generated-java-editor",
-    filePath: selectedFilePath ?? null,
-  });
+  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration(
+    {
+      id: "generated-java-editor",
+      filePath: selectedFilePath ?? null,
+    },
+  );
   // Studio-IDE-5 (#244 review): the marker memo depends on Monaco
   // having resolved. `useMonacoReady` returns null until the async
   // loader completes, then re-renders so the memo recomputes with the
@@ -250,7 +260,12 @@ export function GeneratedJavaEditorPane() {
     if (!matched) return;
     pendingTokenRef.current = navigationTarget.token;
     selectFile(matched.path);
-  }, [navigationTarget, selectedFilePath, selectFile, state.generatedFiles?.files]);
+  }, [
+    navigationTarget,
+    selectedFilePath,
+    selectFile,
+    state.generatedFiles?.files,
+  ]);
 
   // Studio-IDE-5 (#244 review): complete the jump once the editor has
   // mounted with the freshly-selected file. We compare tokens so a
@@ -299,12 +314,19 @@ export function GeneratedJavaEditorPane() {
       }
       return true;
     };
-    for (const owner of ["c2c-generated-java", "c2c-build", "c2c-test"] as const) {
+    for (const owner of [
+      "c2c-generated-java",
+      "c2c-build",
+      "c2c-test",
+    ] as const) {
       const bucketDiagnostics = buckets[owner];
       const matchingFile = bucketDiagnostics.filter((d) => {
         if (!d.filePath) return false;
         if (!selectedFilePath) return false;
-        return d.filePath === selectedFilePath || segmentsMatch(d.filePath, selectedFilePath);
+        return (
+          d.filePath === selectedFilePath ||
+          segmentsMatch(d.filePath, selectedFilePath)
+        );
       });
       const { markers } = diagnosticsToMarkers(matchingFile, {
         monaco,
@@ -317,7 +339,13 @@ export function GeneratedJavaEditorPane() {
     return groups;
     // editorMountToken is intentional — see review #244 round 3.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monaco, state.generated, state.buildTest, selectedFilePath, editorMountToken]);
+  }, [
+    monaco,
+    state.generated,
+    state.buildTest,
+    selectedFilePath,
+    editorMountToken,
+  ]);
 
   // Debounced onChange — schedules a single bufferModel update per
   // JAVA_BUFFER_DEBOUNCE_MS window. The handler captures the current
@@ -568,6 +596,7 @@ export function GeneratedJavaEditorPane() {
             clean={flags.clean}
             pendingReRun={flags.pendingReRun}
             staleJava={flags.staleJava}
+            manualEditsPresent={flags.manualEditsPresent}
           />
         </div>
         <div className="flex gap-2 items-center">
@@ -735,12 +764,14 @@ function JavaStatusChips({
   clean,
   pendingReRun,
   staleJava,
+  manualEditsPresent,
 }: {
   clean: boolean;
   pendingReRun: boolean;
   staleJava: boolean;
+  manualEditsPresent: boolean;
 }) {
-  if (!clean && !pendingReRun && !staleJava) {
+  if (!clean && !pendingReRun && !staleJava && !manualEditsPresent) {
     return null;
   }
   return (
@@ -758,6 +789,15 @@ function JavaStatusChips({
       {staleJava ? (
         <span className="inline-flex items-center rounded bg-orange-soft px-2 py-0.5 text-[10px] font-medium text-orange border border-orange/20">
           stale java
+        </span>
+      ) : null}
+      {manualEditsPresent ? (
+        <span
+          data-testid="java-status-chip-manual-edits"
+          title="The Java buffer diverges from the Generator Baseline."
+          className="inline-flex items-center rounded bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent border border-accent/30"
+        >
+          manual edits present
         </span>
       ) : null}
     </span>
