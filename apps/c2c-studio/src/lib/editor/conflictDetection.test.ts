@@ -114,26 +114,24 @@ describe("detectConflicts", () => {
     expect(result[0]!.manualContent).toBe("appended-by-manual\n");
   });
 
-  it("classifies a multi-line manual replacement as manual_only", () => {
-    // A multi-line replacement may emit either one or two adjacent regions
-    // depending on how Myers diff orders its insert/delete ops. The key
-    // invariant: every emitted region is manual_only with a manual
-    // suggested resolution, and together they cover lines 2 onwards.
+  it("coalesces a multi-line manual replacement into a single manual_only region", () => {
+    // Studio-IDE-13 (#255) follow-up: Myers' edit-script ordering used to
+    // split this into two adjacent manual_only regions. The
+    // ``coalesceAdjacentRegions`` post-pass now merges them so the
+    // dialog shows one logical replacement.
     const baseline = "a\nb\nc\nd\n";
     const manual = "a\nB-MAN\nC-MAN\nd\n";
     const newGenerator = baseline;
     const result = detectConflicts({ baseline, manual, newGenerator });
-    expect(result.length).toBeGreaterThanOrEqual(1);
-    for (const region of result) {
-      expect(region.conflictKind).toBe("manual_only");
-      expect(region.suggestedResolution).toBe("manual");
-      expect(region.needsUserPick).toBe(false);
-    }
-    // The combined manual content of all regions contains the replacement
-    // lines the user typed.
-    const combined = result.map((r) => r.manualContent).join("");
-    expect(combined).toContain("B-MAN");
-    expect(combined).toContain("C-MAN");
+    expect(result).toHaveLength(1);
+    const region = result[0]!;
+    expect(region.conflictKind).toBe("manual_only");
+    expect(region.suggestedResolution).toBe("manual");
+    // Line range starts at 2 (first changed line). The end line follows
+    // the algorithm's baseline-coordinate-plus-trailing-insert convention.
+    expect(region.lineRange.startLine).toBe(2);
+    expect(region.manualContent).toContain("B-MAN");
+    expect(region.manualContent).toContain("C-MAN");
   });
 
   it("does not emit a region for pure equal regions even when other regions exist", () => {
@@ -143,6 +141,70 @@ describe("detectConflicts", () => {
     const result = detectConflicts({ baseline, manual, newGenerator });
     expect(result).toHaveLength(1);
     expect(result[0]!.lineRange).toEqual({ startLine: 3, endLine: 3 });
+  });
+});
+
+describe("detectConflicts: adjacent-region coalescing", () => {
+  it("keeps adjacent conflict regions separate (each needs an independent pick)", () => {
+    // Two conflicts at lines 2 and 4 (separated by an unchanged line so
+    // Myers' edit script is deterministic) must remain TWO regions —
+    // each one requires the user's own pick. The ``conflict`` kind is
+    // explicitly excluded from the coalesce post-pass.
+    const baseline = "a\nb\nc\nd\ne\n";
+    const manual = "a\nMAN-B\nc\nMAN-D\ne\n";
+    const newGenerator = "a\nGEN-B\nc\nGEN-D\ne\n";
+    const result = detectConflicts({ baseline, manual, newGenerator });
+    expect(result).toHaveLength(2);
+    expect(result.every((r) => r.conflictKind === "conflict")).toBe(true);
+    expect(result[0]!.lineRange).toEqual({ startLine: 2, endLine: 2 });
+    expect(result[1]!.lineRange).toEqual({ startLine: 4, endLine: 4 });
+  });
+
+  it("does not coalesce two TRULY adjacent conflict regions (each picks independently)", () => {
+    // When two conflicts ARE adjacent (back-to-back, no equal line
+    // between), the coalesce post-pass still keeps them separate
+    // because ``conflict`` regions need independent user picks.
+    // The exact region count depends on Myers' ordering but EVERY
+    // emitted region keeps ``conflictKind = "conflict"`` so the dialog
+    // continues to prompt the user per logical conflict.
+    const baseline = "a\nb\nc\nd\n";
+    const manual = "a\nMAN-B\nMAN-C\nd\n";
+    const newGenerator = "a\nGEN-B\nGEN-C\nd\n";
+    const result = detectConflicts({ baseline, manual, newGenerator });
+    const conflictRegions = result.filter((r) => r.conflictKind === "conflict");
+    expect(conflictRegions.length).toBeGreaterThanOrEqual(1);
+    // CRITICAL invariant: no conflict region ever gets coalesced with
+    // another conflict region. Each ``conflict`` region keeps its own
+    // line range so the user picks independently.
+    for (const region of conflictRegions) {
+      expect(region.needsUserPick).toBe(true);
+      expect(region.suggestedResolution).toBeNull();
+    }
+  });
+
+  it("does not coalesce non-adjacent same-kind regions", () => {
+    // manual_only at line 2, manual_only at line 4 — separated by an
+    // unchanged line 3. They must remain two regions.
+    const baseline = "a\nb\nc\nd\ne\n";
+    const manual = "a\nMAN-B\nc\nMAN-D\ne\n";
+    const newGenerator = baseline;
+    const result = detectConflicts({ baseline, manual, newGenerator });
+    expect(result).toHaveLength(2);
+    expect(result[0]!.lineRange).toEqual({ startLine: 2, endLine: 2 });
+    expect(result[1]!.lineRange).toEqual({ startLine: 4, endLine: 4 });
+  });
+
+  it("does not coalesce adjacent regions with different kinds", () => {
+    // manual_only at line 2, new_generator_only at line 3 — different
+    // suggested resolutions; keep them separate so the user sees the
+    // distinct origins.
+    const baseline = "a\nb\nc\nd\n";
+    const manual = "a\nMAN-B\nc\nd\n";
+    const newGenerator = "a\nb\nGEN-C\nd\n";
+    const result = detectConflicts({ baseline, manual, newGenerator });
+    expect(result).toHaveLength(2);
+    expect(result[0]!.conflictKind).toBe("manual_only");
+    expect(result[1]!.conflictKind).toBe("new_generator_only");
   });
 });
 
