@@ -163,6 +163,10 @@
         "budgetSummary": {
           "$ref": "#/$defs/budgetSummary",
           "description": "W0.3 (#217) — final consumption summary for the three bounded run budgets (assist, repair, model invocation). Required for every W0.2 pack so reviewers can audit budget pressure even on blocked runs."
+        },
+        "manualEditOverlay": {
+          "$ref": "#/$defs/manualEditOverlayRef",
+          "description": "ADR 0007 (#257) — reference to the per-region manual-edit overlay artifact for runs whose final Java buffer contains hand-edited regions. The overlay enumerates each region's originClass, line range, baseline reference, author identity, and edit count. Required for runs whose run-summary manualEditsCarriedOver=true; omitted entirely otherwise."
         }
       },
       "additionalProperties": true
@@ -431,6 +435,31 @@
         "repair": { "$ref": "#/$defs/budgetSnapshot" },
         "assist": { "$ref": "#/$defs/budgetSnapshot" },
         "modelInvocation": { "$ref": "#/$defs/budgetSnapshot" }
+      },
+      "additionalProperties": false
+    },
+    "manualEditOverlayRef": {
+      "type": "object",
+      "description": "ADR 0007 (#257) — Evidence-Pack reference to the manual-edit overlay artifact for one run. The artifact body is a content-addressed JSON document whose top-level shape is `{ schemaVersion: \"v0\", regions: ManualEditRegion[] }`. Each ManualEditRegion has required keys lineRange:{startLine,endLine}, originClass ∈ {\"manual_modified\",\"manual_edit\"}, generatorBaselineRunId, lastModifiedAt (ISO8601), lastModifiedBy:{userId,tenantId}, manualEditCount (integer); manual_modified entries additionally require generatorBaselineRegionHash (SHA-256 hex). Consumers MUST treat any originClass outside the closed set as opaque.",
+      "required": ["uri", "sha256", "byteSize"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "schemaVersion": {
+          "type": "string",
+          "const": "v0"
+        },
+        "regionCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of regions enumerated in the referenced overlay. Mirrors RunSummary.manualDriftRegionCount; required so consumers can audit completeness without dereferencing the artifact."
+        }
       },
       "additionalProperties": false
     },

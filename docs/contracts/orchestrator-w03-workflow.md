@@ -113,6 +113,51 @@ promote a run to success.
 
 Any non-`success` classification carries a failure code.
 
+Manual-edit provenance does not gate classification. A run whose final
+Java buffer contains hand-edited regions classifies exactly as today
+once deterministic build/test/oracle have run; the regional provenance
+is recorded for audit, not for proof. See
+[ADR 0007 — Studio Java Manual-Edit Provenance & Verification Model](../adr/0007-studio-java-manual-edit-provenance.md).
+
+## Manual-Edit Provenance
+
+[ADR 0007](../adr/0007-studio-java-manual-edit-provenance.md) extends
+the run summary with two additive fields the orchestrator stamps when
+the run finalises:
+
+- `manualEditsCarriedOver: boolean` — true iff the verified Java
+  contained at least one `manual_modified` or `manual_edit` region.
+- `manualDriftRegionCount: integer` — number of regions whose
+  `originClass` is `manual_modified` or `manual_edit`. Zero when
+  `manualEditsCarriedOver` is false.
+
+Both fields are optional on the wire. Consumers reading older
+persisted runs that pre-date ADR 0007 MUST treat absence as `false`
+and `0` respectively (per
+[ADR 0006 §4](../adr/0006-studio-bff-contract-versioning.md)).
+
+### Assist-Interaction Rule for Manual Regions
+
+A region whose `originClass` is `manual_modified` or `manual_edit`
+downgrades any subsequent assist activity that targets it:
+
+- The Verification/Repair Agent MUST NOT propose changes to the
+  region unless the assist decision for the run carries
+  `reasonCode = caller_explicit_opt_in`. Every other reason code in
+  the closed set above is a soft no-op for the region; the
+  orchestrator records a `no_change` repair attempt scoped to the
+  region.
+- The closed set of `assistDecision.reasonCode` values is unchanged.
+  ADR 0007 reuses `caller_explicit_opt_in`; no new reason code is
+  introduced.
+- Editor-assist (`POST /api/v0/editor/explain`) is unaffected — it
+  is a parallel-governed channel and produces no `assistDecision`.
+
+The five-class origin taxonomy, the per-region metadata schema, and
+the lineage semantics that go with manual regions live in ADR 0007;
+this contract document records only the run-summary shape and the
+agent-interaction rule that consumers of the workflow contract need.
+
 ## Parallel-Governed Channels
 
 Some Studio actions invoke the Model Gateway outside of a run. They are
@@ -191,6 +236,8 @@ W0.3 fields are additive over the W0.2 contract:
 - `assistDecision`
 - `assistBudget`
 - `modelInvocationBudget`
+- `manualEditsCarriedOver` (ADR 0007; defaults to `false` when absent)
+- `manualDriftRegionCount` (ADR 0007; defaults to `0` when absent)
 
 Consumers must tolerate `assistDecision=null` before the gate fires and missing
 W0.3 fields for older persisted runs.

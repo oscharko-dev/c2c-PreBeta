@@ -1480,3 +1480,101 @@ class DeterministicUncertaintyReasonCodesTests(unittest.TestCase):
                 decided_at="2026-05-17T00:00:00Z",
                 selected_agent_role=ASSIST_AGENT_ROLE_TRANSFORMATION,
             )
+
+
+class ManualEditProvenanceContractTests(unittest.TestCase):
+    """ADR 0007 (#257): Java manual-edit provenance fields on the run contract."""
+
+    def test_origin_classes_are_the_closed_five_class_taxonomy(self) -> None:
+        from orchestrator_service.run_contract import (
+            JAVA_REGION_ORIGIN_AGENT_PROPOSED,
+            JAVA_REGION_ORIGIN_CLASSES,
+            JAVA_REGION_ORIGIN_DETERMINISTIC,
+            JAVA_REGION_ORIGIN_MANUAL_CLASSES,
+            JAVA_REGION_ORIGIN_MANUAL_EDIT,
+            JAVA_REGION_ORIGIN_MANUAL_MODIFIED,
+            JAVA_REGION_ORIGIN_REPAIR_ATTEMPTED,
+        )
+
+        # Changing the order is a contract bump (ADR 0007 §2).
+        self.assertEqual(
+            JAVA_REGION_ORIGIN_CLASSES,
+            (
+                JAVA_REGION_ORIGIN_DETERMINISTIC,
+                JAVA_REGION_ORIGIN_AGENT_PROPOSED,
+                JAVA_REGION_ORIGIN_REPAIR_ATTEMPTED,
+                JAVA_REGION_ORIGIN_MANUAL_MODIFIED,
+                JAVA_REGION_ORIGIN_MANUAL_EDIT,
+            ),
+        )
+        # The manual-only subset is exactly the two classes that trigger
+        # the assist-interaction rule.
+        self.assertEqual(
+            JAVA_REGION_ORIGIN_MANUAL_CLASSES,
+            (
+                JAVA_REGION_ORIGIN_MANUAL_MODIFIED,
+                JAVA_REGION_ORIGIN_MANUAL_EDIT,
+            ),
+        )
+
+    def test_default_run_contract_has_no_manual_edit_drift(self) -> None:
+        from orchestrator_service.run_contract import new_run_contract
+
+        contract = new_run_contract(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            source_ref={"uri": "urn:src"},
+        )
+        payload = contract.to_dict()
+        self.assertFalse(payload["manualEditsCarriedOver"])
+        self.assertEqual(payload["manualDriftRegionCount"], 0)
+
+    def test_set_manual_edit_summary_records_drift(self) -> None:
+        from orchestrator_service.run_contract import new_run_contract
+
+        contract = new_run_contract(
+            run_id="run-2",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            source_ref={"uri": "urn:src"},
+        )
+        contract.set_manual_edit_summary(carried_over=True, drift_region_count=3)
+        payload = contract.to_dict()
+        self.assertTrue(payload["manualEditsCarriedOver"])
+        self.assertEqual(payload["manualDriftRegionCount"], 3)
+
+    def test_set_manual_edit_summary_rejects_inconsistent_flags(self) -> None:
+        from orchestrator_service.run_contract import new_run_contract
+
+        contract = new_run_contract(
+            run_id="run-3",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            source_ref={"uri": "urn:src"},
+        )
+        with self.assertRaises(ValueError):
+            contract.set_manual_edit_summary(carried_over=True, drift_region_count=0)
+        with self.assertRaises(ValueError):
+            contract.set_manual_edit_summary(carried_over=False, drift_region_count=2)
+        with self.assertRaises(ValueError):
+            contract.set_manual_edit_summary(carried_over=False, drift_region_count=-1)
+
+    def test_set_manual_edit_summary_idempotent_when_run_finalises_cleanly(self) -> None:
+        from orchestrator_service.run_contract import new_run_contract
+
+        contract = new_run_contract(
+            run_id="run-4",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            source_ref={"uri": "urn:src"},
+        )
+        contract.set_manual_edit_summary(carried_over=True, drift_region_count=2)
+        # Recording the same summary twice is a no-op; recording a smaller
+        # value lets the orchestrator correct itself if regions get folded
+        # back into deterministic during a later repair pass.
+        contract.set_manual_edit_summary(carried_over=True, drift_region_count=2)
+        contract.set_manual_edit_summary(carried_over=False, drift_region_count=0)
+        payload = contract.to_dict()
+        self.assertFalse(payload["manualEditsCarriedOver"])
+        self.assertEqual(payload["manualDriftRegionCount"], 0)
