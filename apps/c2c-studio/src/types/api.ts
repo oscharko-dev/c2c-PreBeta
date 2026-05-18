@@ -113,7 +113,17 @@ export interface TransformResponse extends W02RunContractFields {
   links: RunLinks;
 }
 
+// Issue #241 / ADR 0006: run summary envelope. ``schemaVersion`` is
+// optional on the wire; absence means ``"v0"``. Additive-only at
+// minor wave boundaries. Studio MUST NOT crash on unknown fields
+// from a future BFF; unknown fields are preserved through opaque
+// pass-through (ADR 0006 Decision 3).
+//
+// ``javaRegionClassification`` null-fallback per ADR 0006 Decision 4:
+// when absent, the generated-Java buffer renders without trust-pillar
+// decoration. Studio MUST NOT infer regions from filename or content.
 export interface RunSummary extends W02RunContractFields {
+  schemaVersion?: "v0";
   runId: string;
   programId: string;
   status: "starting" | "updating" | "completed" | "failed";
@@ -124,6 +134,7 @@ export interface RunSummary extends W02RunContractFields {
   policyDecision?: string;
   createdAt: string;
   updatedAt: string;
+  javaRegionClassification?: JavaOriginOverlay | null;
 }
 
 export interface GeneratedFileRef {
@@ -135,7 +146,13 @@ export interface GeneratedFileRef {
   name?: string;
 }
 
+// Issue #241 / ADR 0006: lineage triple emitted alongside generated
+// Java. ``schemaVersion`` is optional on the wire; absence means
+// ``"v0"``. Null-fallback rule per ADR 0006 Decision 4: when the
+// whole DTO is absent on ``GeneratedView``, the lineage UI renders
+// "Lineage unavailable" — Studio MUST NOT infer the value.
 export interface GeneratedTraceability {
+  schemaVersion?: "v0";
   programId: string;
   irId: string;
   sourceHash: string;
@@ -152,7 +169,22 @@ export interface OutputRef {
   createdAt?: string;
 }
 
+// Issue #241 / ADR 0006: BFF-shaped diagnostic record consumed by
+// the Studio Problems panel and editor markers. ``schemaVersion`` is
+// optional on the wire; absence means ``"v0"``. Null-fallback rules
+// per ADR 0006 Decision 4:
+//   - ``line`` absent     → marker at file level; no source jump
+//   - ``column`` absent   → marker spans the whole ``line``
+//   - ``endLine`` /
+//     ``endColumn`` absent → point marker at ``(line, column)``
+//   - ``filePath`` absent → run-level Problems entry; no editor tab
+//   - ``sourceKind`` absent → treat as ``"unknown"``; do not infer
+//   - ``originStep`` absent → suppress originated-step pill
+//   - ``artifactRef`` absent → no "jump to artifact" affordance
+// Unknown ``severity`` values render at ``"info"`` and surface the
+// raw upstream value in the marker tooltip (ADR 0006 Decision 3).
 export interface Diagnostic {
+  schemaVersion?: "v0";
   severity: string;
   code: string;
   message: string;
@@ -163,6 +195,11 @@ export interface Diagnostic {
   filePath?: string;
   sourceKind?: string;
   originStep?: string;
+  // Optional reference to the artifact this diagnostic attaches to
+  // (semantic-IR node, generated-Java file, etc.). Populated by
+  // Studio-IDE-5 (#244) and Studio-IDE-6 (#248); absent on
+  // diagnostics from older steps or replayed v0 fixtures.
+  artifactRef?: OutputRef | null;
 }
 
 export interface RunArtifactMetadata {

@@ -195,6 +195,34 @@ W0.3 fields are additive over the W0.2 contract:
 Consumers must tolerate `assistDecision=null` before the gate fires and missing
 W0.3 fields for older persisted runs.
 
+## Contract Versioning
+
+The Studio-BFF DTO contract follows the policy in
+[ADR 0006 — Studio-BFF Contract Versioning](../adr/0006-studio-bff-contract-versioning.md).
+The rules consumers depend on:
+
+- **Explicit `schemaVersion`** on the evolving DTOs (`Diagnostic`,
+  `GeneratedTraceability`, `RunSummary`, `JavaOriginOverlay`). Optional on the
+  wire; absence means `"v0"`.
+- **Additive-only at minor wave boundaries.** New optional fields may be added
+  without a `schemaVersion` bump. Removal of an existing field requires a
+  deprecation period of at least one minor wave (e.g. deprecate in W0.3,
+  remove in W1.1).
+- **Forward compatibility.** Studio MUST NOT crash on unknown DTO fields or
+  unknown enum values from a future BFF. Unknown fields are preserved through
+  opaque pass-through where they may be needed in trace artifacts.
+- **Null-field fallback rules** are enumerated per field in ADR 0006
+  Decision 4. The principal cases:
+  - `Diagnostic.line` absent → marker placed at file level, no source jump.
+  - `Diagnostic.column` absent → marker spans the whole line.
+  - `Diagnostic.artifactRef` absent → no "jump to artifact" affordance.
+  - `GeneratedTraceability` absent → lineage UI shows "Lineage unavailable".
+  - `RunSummary.javaRegionClassification` absent → no trust-pillar decoration;
+    Studio does not infer regions.
+- **Evidence-Pack replay** (W1 forward-look): the Studio that lands W0.3 work
+  must already today handle `v0` fixtures without crashes. The Studio test
+  suite pins this with a `v0` fixture regression.
+
 The BFF additionally exposes the editor-assist channel (per
 [ADR 0004](../adr/0004-studio-editor-assist-channel.md)):
 
