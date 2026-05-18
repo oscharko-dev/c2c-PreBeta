@@ -37,6 +37,10 @@ function makeDiagnostic(overrides: Partial<Diagnostic> = {}): Diagnostic {
     severity: "error",
     code: "X",
     message: "x",
+    // Default filePath so tests that exercise editor-surface
+    // rendering pass the ADR 0006 Decision 4 gate. Tests that
+    // exercise the "no filePath → no marker" rule override this.
+    filePath: "fixture.cbl",
     ...overrides,
   };
 }
@@ -312,5 +316,32 @@ describe("diagnosticsToMarkers — multi-line ranges (review #244)", () => {
     });
     expect(markers[0]?.startColumn).toBe(7);
     expect(markers[0]?.endColumn).toBe(8);
+  });
+});
+
+
+describe("diagnosticsToMarkers — filePath rule (review #244)", () => {
+  it("drops diagnostics without filePath (ADR 0006 Decision 4)", () => {
+    const diagnostics: Diagnostic[] = [
+      {
+        schemaVersion: "v0",
+        severity: "error",
+        code: "RUN",
+        message: "run-level diagnostic",
+        line: 12,
+      },
+      makeDiagnostic({
+        severity: "error",
+        line: 12,
+        message: "file-attached",
+      }),
+    ];
+    const { markers, fileLevelCount } = diagnosticsToMarkers(diagnostics, {
+      monaco: monacoStub,
+      model: makeModel([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40]),
+    });
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.message).toBe("file-attached");
+    expect(fileLevelCount).toBe(1);
   });
 });

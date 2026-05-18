@@ -22,12 +22,12 @@ export function useMarkerNavigationShortcuts(): void {
     function shouldSkip(event: KeyboardEvent): boolean {
       const target = event.target as HTMLElement | null;
       if (!target) return false;
-      if (target.isContentEditable) {
-        // Monaco editors are contenteditable. We DO want F8 to work
-        // there, but we want to skip plain <textarea> and <input>.
-        // Heuristic: Monaco wraps its editable area in `.monaco-editor`.
-        return !target.closest(".monaco-editor");
-      }
+      // Monaco's editable surface is a <textarea class="inputarea ...">
+      // INSIDE a `.monaco-editor`. We want F8 to work there. We skip
+      // F8 only when focus is in a plain text field that is NOT a
+      // descendant of a Monaco editor.
+      if (target.closest(".monaco-editor")) return false;
+      if (target.isContentEditable) return true;
       const tag = target.tagName;
       return tag === "INPUT" || tag === "TEXTAREA";
     }

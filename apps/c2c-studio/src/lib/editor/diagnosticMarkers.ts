@@ -7,10 +7,11 @@
 //
 //   * `line` absent          → no in-editor marker; entry still flows
 //                               into the Problems panel.
+//   * `filePath` absent      → no in-editor marker either; entry is
+//                               "run-level" per ADR 0006 Decision 4
+//                               and stays in the Problems panel only.
 //   * `column` absent        → marker spans the whole `line`.
 //   * `endLine`/`endColumn`  → defaults to point marker at start.
-//   * `filePath` absent      → run-level entry; do not render on any
-//                               editor tab (caller decides routing).
 //   * Unknown severity       → render at MarkerSeverity.Info per ADR
 //                               0006 Decision 3.
 //
@@ -118,7 +119,13 @@ function diagnosticToMarker(
   diagnostic: Diagnostic,
   options: DiagnosticsToMarkersOptions,
 ): MonacoNs.editor.IMarkerData | null {
+  // ADR 0006 Decision 4: diagnostics without `line` never render in
+  // the editor (Problems panel only). Diagnostics without `filePath`
+  // are "run-level" — the same contract applies, and the marker
+  // builder must drop them so they never get tagged onto whichever
+  // model the caller routed them to.
   if (diagnostic.line === undefined) return null;
+  if (diagnostic.filePath === undefined) return null;
   const { monaco, model } = options;
   const { line, lineLength } = clampToModel(model, diagnostic.line);
 
@@ -151,7 +158,10 @@ function diagnosticToMarker(
   // marker stays on one line; clamping multi-line ranges shifts the
   // highlight onto the wrong text.
   if (endLine === line && endColumn <= startColumn) {
-    endColumn = startColumn + 1;
+    // Add a 1-char span, but cap at the line's actual length + 1 so
+    // the marker never extends past the end of the line.
+    const ceiling = lineLength !== null ? lineLength + 1 : startColumn + 1;
+    endColumn = Math.min(startColumn + 1, ceiling);
   }
 
   const code = diagnostic.code.length > 0 ? diagnostic.code : undefined;

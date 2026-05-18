@@ -47,6 +47,8 @@ const SEVERITY_SYNONYMS: Record<string, DiagnosticSeverity> = {
   severe: "error",
   warning: "warning",
   warn: "warning",
+  mandatory_warning: "warning",
+  "mandatory-warning": "warning",
   info: "info",
   information: "info",
   notice: "info",
@@ -90,6 +92,16 @@ function asPositiveInteger(value: unknown): number | undefined {
   return value;
 }
 
+// Studio-IDE-5 (#244 review): the JSON Schema for `byteSize` allows
+// 0 (empty artifact). Marker positions still require strict-positive,
+// but byteSize is a content-length field. A separate helper keeps the
+// two validation rules independent.
+function asNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (!Number.isInteger(value) || value < 0) return undefined;
+  return value;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -117,7 +129,7 @@ function normalizeArtifactRef(raw: unknown): DiagnosticOutputRef | undefined {
   const sha256 = asString(record.sha256);
   if (sha256.length === 0) return undefined;
   const ref: DiagnosticOutputRef = { sha256 };
-  const byteSize = asPositiveInteger(record.byteSize);
+  const byteSize = asNonNegativeInteger(record.byteSize);
   if (byteSize !== undefined) ref.byteSize = byteSize;
   for (const key of [
     "kind",

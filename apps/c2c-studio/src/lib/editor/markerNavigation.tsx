@@ -26,6 +26,26 @@ import {
 import type { Diagnostic } from "@/types/api";
 import { sourceKindToOwner } from "@/lib/editor/diagnosticMarkers";
 
+// Path-segment matching for marker routing. The diagnostic's
+// `filePath` and an editor registration's `filePath` may be expressed
+// at different roots (e.g. "src/main/java/c2c/Foo.java" vs
+// "Foo.java"), but they must align on a contiguous suffix of full
+// path segments. Plain `endsWith` would attach a diagnostic for
+// "Foo.java" to an editor opened on "BarFoo.java" — wrong.
+function pathMatches(a: string, b: string): boolean {
+  const aParts = a.split(/[\\/]+/).filter(Boolean);
+  const bParts = b.split(/[\\/]+/).filter(Boolean);
+  if (aParts.length === 0 || bParts.length === 0) return false;
+  const short = aParts.length < bParts.length ? aParts : bParts;
+  const long = aParts.length < bParts.length ? bParts : aParts;
+  for (let i = 0; i < short.length; i += 1) {
+    if (short[short.length - 1 - i] !== long[long.length - 1 - i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export interface NavigationTarget {
   filePath: string;
   line: number;
@@ -113,37 +133,27 @@ export function MarkerNavigationProvider({ children }: { children: ReactNode }) 
   const navigateToDiagnostic = useCallback(
     (diagnostic: Diagnostic) => {
       if (diagnostic.line === undefined) return;
+      // Fix #244-review: run-level diagnostics (no filePath) do not
+      // jump any editor per ADR 0006 Decision 4. They remain visible
+      // in the Problems panel; navigation is a no-op.
+      if (diagnostic.filePath === undefined) return;
       tokenRef.current += 1;
-      // Find the registration whose filePath matches the diagnostic.
-      // When filePath is absent we route to the active editor (the
-      // problem belongs to the run, not a specific file).
+      // Path-segment matching avoids cross-file confusion when two
+      // editor registrations share a suffix.
       let chosen: EditorRegistration | undefined;
-      if (diagnostic.filePath) {
-        for (const reg of registrations.current.values()) {
-          if (reg.filePath && diagnostic.filePath.endsWith(reg.filePath)) {
-            chosen = reg;
-            break;
-          }
-          if (reg.filePath && reg.filePath.endsWith(diagnostic.filePath)) {
-            chosen = reg;
-            break;
-          }
+      for (const reg of registrations.current.values()) {
+        if (reg.filePath && pathMatches(diagnostic.filePath, reg.filePath)) {
+          chosen = reg;
+          break;
         }
-      } else if (activeIdRef.current !== null) {
-        chosen = registrations.current.get(activeIdRef.current);
       }
       focusEditor(chosen, diagnostic.line, diagnostic.column);
-      // Expose the target so panes whose `selectedFilePath` does not
-      // yet match the diagnostic can react by switching files.
-      const filePath = diagnostic.filePath ?? chosen?.filePath ?? null;
-      if (filePath !== null) {
-        setTarget({
-          filePath,
-          line: diagnostic.line,
-          column: diagnostic.column,
-          token: tokenRef.current,
-        });
-      }
+      setTarget({
+        filePath: diagnostic.filePath,
+        line: diagnostic.line,
+        column: diagnostic.column,
+        token: tokenRef.current,
+      });
     },
     [focusEditor],
   );

@@ -121,8 +121,28 @@ export function CobolEditorPane() {
       ...(runState.buildTest?.diagnostics ?? []),
     ];
     const buckets = partitionByOwner(diagnostics);
-    const cobolGroup = buckets["c2c-cobol"];
-    const irGroup = buckets["c2c-ir"];
+    const currentFile = sourceName ?? DEFAULT_SOURCE_NAME;
+    // Fix #244-review: only render diagnostics whose filePath
+    // resolves to the open COBOL source. Path-segment matching
+    // avoids cross-file misattribution (e.g. "Foo.cbl" matching
+    // "BarFoo.cbl"). Diagnostics without filePath are run-level per
+    // ADR 0006 Decision 4 and never become markers.
+    const filterForCurrentFile = (d: typeof diagnostics[number]) => {
+      if (!d.filePath) return false;
+      const aParts = d.filePath.split(/[\\/]+/).filter(Boolean);
+      const bParts = currentFile.split(/[\\/]+/).filter(Boolean);
+      if (aParts.length === 0 || bParts.length === 0) return false;
+      const short = aParts.length < bParts.length ? aParts : bParts;
+      const long = aParts.length < bParts.length ? bParts : aParts;
+      for (let i = 0; i < short.length; i += 1) {
+        if (short[short.length - 1 - i] !== long[long.length - 1 - i]) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const cobolGroup = buckets["c2c-cobol"].filter(filterForCurrentFile);
+    const irGroup = buckets["c2c-ir"].filter(filterForCurrentFile);
     // We do not have a stable handle to the live Monaco model here so
     // the marker mapper receives null; that degrades the whole-line
     // fallback to a single-character marker which the editor renders
@@ -142,7 +162,7 @@ export function CobolEditorPane() {
       { owner: "c2c-cobol", markers: cobolMarkers.markers },
       { owner: "c2c-ir", markers: irMarkers.markers },
     ];
-  }, [monaco, runState.generated, runState.buildTest]);
+  }, [monaco, runState.generated, runState.buildTest, sourceName]);
 
   // Toast-equivalent visibility window for the "Saved locally" notice.
   useEffect(() => {

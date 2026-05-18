@@ -349,3 +349,35 @@ test("normalizeDiagnostics keeps undefined sourceKind when no default is supplie
   ]);
   assert.equal(result[0]?.sourceKind, undefined);
 });
+
+test("normalizeDiagnostics maps javac MANDATORY_WARNING to warning severity (review #244)", () => {
+  const result = normalizeDiagnostics([
+    {
+      level: "mandatory_warning",
+      code: "deprecation",
+      message: "uses a deprecated API",
+    },
+    {
+      level: "MANDATORY-WARNING",
+      code: "removal",
+      message: "scheduled for removal",
+    },
+  ]);
+  assert.equal(result[0]?.severity, "warning");
+  assert.equal(result[1]?.severity, "warning");
+});
+
+test("normalizeDiagnostics preserves byteSize=0 on artifactRef (review #244)", () => {
+  const result = normalizeDiagnostics([
+    {
+      severity: "info",
+      code: "EMPTY",
+      message: "empty artifact",
+      artifactRef: {
+        sha256: "a".repeat(64),
+        byteSize: 0,
+      },
+    },
+  ]);
+  assert.equal(result[0]?.artifactRef?.byteSize, 0);
+});

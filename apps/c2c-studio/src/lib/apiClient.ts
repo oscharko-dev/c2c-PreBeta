@@ -209,6 +209,21 @@ function isPositiveInteger(value: unknown): value is number {
   return isNonNegativeInteger(value) && value > 0;
 }
 
+const DIAGNOSTIC_SEVERITIES: ReadonlySet<string> = new Set([
+  "error",
+  "warning",
+  "info",
+  "hint",
+]);
+
+const DIAGNOSTIC_SOURCE_KINDS: ReadonlySet<string> = new Set([
+  "cobol",
+  "ir",
+  "generated_java",
+  "build",
+  "test",
+]);
+
 function isDiagnostic(payload: unknown): payload is Diagnostic {
   if (!isRecord(payload)) {
     return false;
@@ -217,7 +232,12 @@ function isDiagnostic(payload: unknown): payload is Diagnostic {
   return (
     // schemaVersion is optional on the wire (ADR 0006 Decision 1).
     (payload.schemaVersion === undefined || payload.schemaVersion === "v0") &&
+    // Studio-IDE-5 (#244 review): enforce the closed severity enum at
+    // the boundary. The BFF normalizer guarantees this; the guard
+    // backstops it so older or malformed responses cannot smuggle in
+    // unexpected values.
     isString(payload.severity) &&
+    DIAGNOSTIC_SEVERITIES.has(payload.severity) &&
     isString(payload.code) &&
     isString(payload.message) &&
     (payload.line === undefined || isPositiveInteger(payload.line)) &&
@@ -225,7 +245,9 @@ function isDiagnostic(payload: unknown): payload is Diagnostic {
     (payload.endLine === undefined || isPositiveInteger(payload.endLine)) &&
     (payload.endColumn === undefined || isPositiveInteger(payload.endColumn)) &&
     (payload.filePath === undefined || isString(payload.filePath)) &&
-    (payload.sourceKind === undefined || isString(payload.sourceKind)) &&
+    (payload.sourceKind === undefined ||
+      (isString(payload.sourceKind) &&
+        DIAGNOSTIC_SOURCE_KINDS.has(payload.sourceKind))) &&
     (payload.originStep === undefined || isString(payload.originStep)) &&
     // artifactRef is forward-looking; null is the explicit absence
     // signal per ADR 0006 Decision 4.

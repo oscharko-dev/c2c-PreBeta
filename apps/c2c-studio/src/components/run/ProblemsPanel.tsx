@@ -31,7 +31,7 @@ import {
   summarize,
 } from "@/lib/runDiagnostics";
 import { deriveRunProblems } from "@/components/run/runPanelUtils";
-import { DEFAULT_MARKER_LIMIT } from "@/lib/editor/diagnosticMarkers";
+import { DEFAULT_MARKER_LIMIT, partitionByOwner } from "@/lib/editor/diagnosticMarkers";
 import type { Diagnostic } from "@/types/api";
 
 interface SeverityBadgeProps {
@@ -93,11 +93,28 @@ export function ProblemsPanel({
     [diagnostics, sortOrder],
   );
   const summary = useMemo(() => summarize(diagnostics), [diagnostics]);
+  // Studio-IDE-5 (#244 review): the editor surface caps markers
+  // per-owner. A 1500-COBOL + 1500-build run does not trigger the cap
+  // on any single owner, so the aggregation chip must compute the
+  // truncation count per owner and sum those. We compute it via
+  // `partitionByOwner` to mirror what the editors will do.
   const aggregatedOverflow = useMemo(() => {
-    const markersWithLine = diagnostics.filter(
-      (entry) => entry.diagnostic.line !== undefined,
+    const byOwner = partitionByOwner(
+      diagnostics.map((entry) => entry.diagnostic),
     );
-    return Math.max(0, markersWithLine.length - DEFAULT_MARKER_LIMIT);
+    let overflow = 0;
+    for (const owner of Object.keys(byOwner) as Array<
+      keyof typeof byOwner
+    >) {
+      const renderableInEditor = byOwner[owner].filter(
+        (d) => d.line !== undefined && d.filePath !== undefined,
+      );
+      overflow += Math.max(
+        0,
+        renderableInEditor.length - DEFAULT_MARKER_LIMIT,
+      );
+    }
+    return overflow;
   }, [diagnostics]);
 
   const legacyProblems = useMemo(() => deriveRunProblems(state), [state]);
@@ -226,7 +243,12 @@ export function ProblemsPanel({
               const fileLabel = diagnostic.filePath ?? "—";
               const lineLabel = diagnostic.line ?? "—";
               const codeLabel = diagnostic.code || "—";
-              const hasJump = diagnostic.line !== undefined;
+              // Run-level diagnostics (no filePath) stay in the
+              // Problems panel only — they have no editor target per
+              // ADR 0006 Decision 4.
+              const hasJump =
+                diagnostic.line !== undefined &&
+                diagnostic.filePath !== undefined;
               return (
                 <tr
                   key={`${scope}-${index}-${codeLabel}-${diagnostic.message}`}
