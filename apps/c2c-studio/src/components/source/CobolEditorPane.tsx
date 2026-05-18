@@ -125,6 +125,10 @@ export function CobolEditorPane() {
     "Model Gateway unavailable. AI-assisted transformation cannot start.";
 
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
+  // Studio-IDE-12 (#250): track Monaco addCommand / addAction
+  // disposables so the listener set is released on unmount and does
+  // not accumulate across pane remounts.
+  const editorActionDisposablesRef = useRef<MonacoNs.IDisposable[]>([]);
   // Studio-IDE-5 (#244 review): bump on editor mount so the marker
   // memo recomputes with the live Monaco model — whole-line markers
   // require model.getLineLength().
@@ -342,64 +346,82 @@ export function CobolEditorPane() {
         // until a dedicated language server lands.
         wordBasedSuggestions: "currentDocument",
       });
+      // Studio-IDE-12 (#250): capture every command / action disposable
+      // so the listener set is torn down on unmount. Without tracking,
+      // each remount stacks another set of keybindings on the model.
+      const trackDisposable = (
+        disposable: MonacoNs.IDisposable | string | null,
+      ) => {
+        if (
+          disposable &&
+          typeof disposable !== "string" &&
+          typeof disposable.dispose === "function"
+        ) {
+          editorActionDisposablesRef.current.push(disposable);
+        }
+      };
       // Bind Cmd/Ctrl+S inside the editor surface to local-draft save.
       // Monaco intercepts the keystroke before the browser does, so this
       // works even when the editor has focus (where the global keyboard
       // shortcut hook ignores keydowns).
-      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        void saveDraftNow();
-      });
+      trackDisposable(
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+          void saveDraftNow();
+        }),
+      );
       // Studio-IDE-6 (#248): Alt+C — "Reveal in Java target". Resolves the
       // current COBOL line to the first mapped Java region via the BFF
       // traceability envelope; on success dispatches a window event that
       // the Java pane can react to. On failure surfaces an info marker on
       // the current line with a tooltip explaining the reason.
-      editor.addAction({
-        id: "c2c.lineage.cobolToJava",
-        label: "Reveal in Java target",
-        keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyC],
-        contextMenuGroupId: "navigation",
-        contextMenuOrder: 1.5,
-        run: async (ed) => {
-          const runId = stateRunIdRef.current;
-          const cobolFile = cobolFileRef.current;
-          const model = ed.getModel();
-          if (!runId || !model) {
-            return;
-          }
-          const position = ed.getPosition();
-          if (!position) return;
-          const result = await resolveCobolToJava(
-            runId,
-            cobolFile,
-            position.lineNumber,
-          );
-          if (result.ok && result.target.length > 0) {
-            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
-            const first = result.target[0];
-            window.dispatchEvent(
-              new CustomEvent<RevealJavaDetail>(REVEAL_JAVA_EVENT, {
-                detail: {
-                  javaFile: first.javaFile,
-                  javaLine: first.javaStartLine,
-                },
-              }),
+      trackDisposable(
+        editor.addAction({
+          id: "c2c.lineage.cobolToJava",
+          label: "Reveal in Java target",
+          keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyC],
+          contextMenuGroupId: "navigation",
+          contextMenuOrder: 1.5,
+          run: async (ed) => {
+            const runId = stateRunIdRef.current;
+            const cobolFile = cobolFileRef.current;
+            const model = ed.getModel();
+            if (!runId || !model) {
+              return;
+            }
+            const position = ed.getPosition();
+            if (!position) return;
+            const result = await resolveCobolToJava(
+              runId,
+              cobolFile,
+              position.lineNumber,
             );
-          } else {
-            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, [
-              {
-                severity: monaco.MarkerSeverity.Info,
-                message: "No Java target mapped for this COBOL line",
-                startLineNumber: position.lineNumber,
-                endLineNumber: position.lineNumber,
-                startColumn: 1,
-                endColumn: model.getLineMaxColumn(position.lineNumber),
-                source: "c2c-lineage",
-              },
-            ]);
-          }
-        },
-      });
+            if (result.ok && result.target.length > 0) {
+              monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
+              const first = result.target[0];
+              window.dispatchEvent(
+                new CustomEvent<RevealJavaDetail>(REVEAL_JAVA_EVENT, {
+                  detail: {
+                    javaFile: first.javaFile,
+                    javaLine: first.javaStartLine,
+                  },
+                }),
+              );
+            } else {
+              monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, [
+                {
+                  severity: monaco.MarkerSeverity.Info,
+                  message: "No Java target mapped for this COBOL line",
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: 1,
+                  endColumn: model.getLineMaxColumn(position.lineNumber),
+                  source: "c2c-lineage",
+                },
+              ]);
+            }
+          },
+        }),
+      );
       // Studio-IDE-10 (#249): Ctrl/Cmd+Shift+E — "Explain this region".
       // The action stays registered regardless of budget state so the
       // command palette entry remains discoverable; on exhaustion the
@@ -409,62 +431,82 @@ export function CobolEditorPane() {
       // button when budget is exhausted" is trivially satisfied — if
       // such a surface is added later, gate it on
       // `useEditorAssist().budgetSnapshot?.remaining === 0`.
-      editor.addAction({
-        id: "c2c.editorAssist.explain",
-        label: "C2C: Explain this region",
-        keybindings: [
-          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE,
-        ],
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 1.6,
-        run: async (ed) => {
-          const model = ed.getModel();
-          if (!model) return;
-          const selection = ed.getSelection();
-          const cursorLine = ed.getPosition()?.lineNumber ?? 1;
-          const isEmptySelection = selection === null || selection.isEmpty();
-          const startLine = isEmptySelection
-            ? cursorLine
-            : selection.startLineNumber;
-          const endLine = isEmptySelection
-            ? cursorLine
-            : selection.endLineNumber;
-          const rawText = isEmptySelection
-            ? model.getLineContent(cursorLine)
-            : model.getValueInRange(selection);
-          const redaction = redactRegion(rawText);
-          const [sourceHash, byteHash] = await Promise.all([
-            computeSha256Hex(rawText),
-            computeSha256Hex(redaction.redactedText),
-          ]);
-          const scope = getCurrentDraftScope();
-          const runId = stateRunIdRef.current;
-          const payload: EditorAssistRequest = {
-            schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
-            sessionId: getOrCreateEditorAssistSessionId(),
-            tenantId: scope.tenantId,
-            userId: scope.userId,
-            runId: runId ?? null,
-            sourceHash,
-            region: {
-              filePath: cobolFileRef.current,
-              sourceKind: "cobol",
-              startLine,
-              endLine,
-            },
-            redactedBytes: redaction.redactedText,
-            byteHash,
-            studioRedactionMetadata: {
-              studioRedactionProfileVersion: redaction.profileVersion,
-              matchedPatternIds: redaction.matchedPatternIds,
-            },
-          };
-          await runExplainRef.current(payload);
-        },
-      });
+      trackDisposable(
+        editor.addAction({
+          id: "c2c.editorAssist.explain",
+          label: "C2C: Explain this region",
+          keybindings: [
+            monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE,
+          ],
+          contextMenuGroupId: "1_modification",
+          contextMenuOrder: 1.6,
+          run: async (ed) => {
+            const model = ed.getModel();
+            if (!model) return;
+            const selection = ed.getSelection();
+            const cursorLine = ed.getPosition()?.lineNumber ?? 1;
+            const isEmptySelection = selection === null || selection.isEmpty();
+            const startLine = isEmptySelection
+              ? cursorLine
+              : selection.startLineNumber;
+            const endLine = isEmptySelection
+              ? cursorLine
+              : selection.endLineNumber;
+            const rawText = isEmptySelection
+              ? model.getLineContent(cursorLine)
+              : model.getValueInRange(selection);
+            const redaction = redactRegion(rawText);
+            const [sourceHash, byteHash] = await Promise.all([
+              computeSha256Hex(rawText),
+              computeSha256Hex(redaction.redactedText),
+            ]);
+            const scope = getCurrentDraftScope();
+            const runId = stateRunIdRef.current;
+            const payload: EditorAssistRequest = {
+              schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
+              sessionId: getOrCreateEditorAssistSessionId(),
+              tenantId: scope.tenantId,
+              userId: scope.userId,
+              runId: runId ?? null,
+              sourceHash,
+              region: {
+                filePath: cobolFileRef.current,
+                sourceKind: "cobol",
+                startLine,
+                endLine,
+              },
+              redactedBytes: redaction.redactedText,
+              byteHash,
+              studioRedactionMetadata: {
+                studioRedactionProfileVersion: redaction.profileVersion,
+                matchedPatternIds: redaction.matchedPatternIds,
+              },
+            };
+            await runExplainRef.current(payload);
+          },
+        }),
+      );
     },
     [rulerEnabled, saveDraftNow, registerMarkerEditor],
   );
+
+  // Studio-IDE-12 (#250): dispose every tracked Monaco command /
+  // action registration when the pane unmounts. Without this, repeated
+  // navigation through the workbench accumulates keybinding handlers
+  // that hold onto stale closures.
+  useEffect(() => {
+    return () => {
+      for (const disposable of editorActionDisposablesRef.current) {
+        try {
+          disposable.dispose();
+        } catch {
+          // Idempotent cleanup — swallow if Monaco already tore the
+          // editor down before us.
+        }
+      }
+      editorActionDisposablesRef.current = [];
+    };
+  }, []);
 
   const conflictPanels: ConflictPanel[] = useMemo(() => {
     if (!conflict) {

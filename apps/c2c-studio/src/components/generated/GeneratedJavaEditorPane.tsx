@@ -467,6 +467,14 @@ export function GeneratedJavaEditorPane() {
   const editorInstanceRef = useRef<
     import("monaco-editor").editor.IStandaloneCodeEditor | null
   >(null);
+  // Studio-IDE-12 (#250): track every Monaco disposable registered
+  // through ``editor.addCommand`` / ``editor.addAction`` so the
+  // listeners are released when the pane unmounts. Without this the
+  // command handlers stack across mounts (e.g. each navigation back to
+  // the workbench) and leak closures referencing stale refs.
+  const editorActionDisposablesRef = useRef<
+    Array<import("monaco-editor").IDisposable>
+  >([]);
   // Studio-IDE-5 (#244 review): bump this counter when the editor
   // mounts so the marker memo recomputes with the live Monaco model
   // (resolving whole-line marker geometry).
@@ -1077,92 +1085,116 @@ export function GeneratedJavaEditorPane() {
       // live model — without this, whole-line markers stay narrowed
       // to a single character.
       setEditorMountToken((value) => value + 1);
-      // Cmd/Ctrl+S — local save, with opt-in format-on-save.
-      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        flushPendingEditRef.current();
-        const filePath = selectedFilePathRef.current;
-        if (!filePath) return;
-        if (formatOnSaveRef.current) {
-          void performFormatRef.current().then(() => {
-            void saveJavaDraftRef.current(filePath);
-          });
-        } else {
-          void saveJavaDraftRef.current(filePath);
+      // Studio-IDE-12 (#250): every addCommand / addAction call below
+      // returns a disposable that is captured here and released in the
+      // pane's unmount effect. Without tracking, repeated navigation
+      // into and out of the workbench leaks one closure per registered
+      // command per remount.
+      const trackDisposable = (
+        disposable: import("monaco-editor").IDisposable | string | null,
+      ) => {
+        if (
+          disposable &&
+          typeof disposable !== "string" &&
+          typeof disposable.dispose === "function"
+        ) {
+          editorActionDisposablesRef.current.push(disposable);
         }
-      });
+      };
+      // Cmd/Ctrl+S — local save, with opt-in format-on-save.
+      trackDisposable(
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+          flushPendingEditRef.current();
+          const filePath = selectedFilePathRef.current;
+          if (!filePath) return;
+          if (formatOnSaveRef.current) {
+            void performFormatRef.current().then(() => {
+              void saveJavaDraftRef.current(filePath);
+            });
+          } else {
+            void saveJavaDraftRef.current(filePath);
+          }
+        }),
+      );
       // Cmd/Ctrl+Shift+F — Studio-IDE-14 format action.
-      editor.addAction({
-        id: "c2c.format-java",
-        label: "Format Document (Java)",
-        keybindings: [
-          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
-        ],
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 1,
-        run: () => {
-          void performFormatRef.current();
-        },
-      });
+      trackDisposable(
+        editor.addAction({
+          id: "c2c.format-java",
+          label: "Format Document (Java)",
+          keybindings: [
+            monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+          ],
+          contextMenuGroupId: "1_modification",
+          contextMenuOrder: 1,
+          run: () => {
+            void performFormatRef.current();
+          },
+        }),
+      );
       // F5 — Studio-IDE-14 Compile Check (Studio-IDE-13 endpoint).
-      editor.addCommand(monaco.KeyCode.F5, () => {
-        void performCompileCheckRef.current();
-      });
+      trackDisposable(
+        editor.addCommand(monaco.KeyCode.F5, () => {
+          void performCompileCheckRef.current();
+        }),
+      );
       // Studio-IDE-6 (#248): Alt+J — "Reveal in COBOL source". Resolves the
       // Java→COBOL lineage for the cursor line and dispatches a window event
       // the COBOL pane listens to. Failures surface as info markers on the
       // line so the user knows *why* the jump was not possible.
-      editor.addAction({
-        id: "c2c.lineage.javaToCobol",
-        label: "Reveal in COBOL source",
-        keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyJ],
-        contextMenuGroupId: "navigation",
-        contextMenuOrder: 1.5,
-        run: async (ed) => {
-          const runId = stateRunIdRef.current;
-          const javaFile = selectedFilePathRef.current;
-          const model = ed.getModel();
-          if (!runId || !javaFile || !model) return;
-          const position = ed.getPosition();
-          if (!position) return;
-          const result = await resolveJavaToCobol(
-            runId,
-            javaFile,
-            position.lineNumber,
-            model.getValue(),
-          );
-          if (result.ok) {
-            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
-            window.dispatchEvent(
-              new CustomEvent<RevealCobolDetail>(REVEAL_COBOL_EVENT, {
-                detail: {
-                  cobolFile: result.target.cobolFile,
-                  cobolLine: result.target.cobolLine,
-                },
-              }),
+      trackDisposable(
+        editor.addAction({
+          id: "c2c.lineage.javaToCobol",
+          label: "Reveal in COBOL source",
+          keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyJ],
+          contextMenuGroupId: "navigation",
+          contextMenuOrder: 1.5,
+          run: async (ed) => {
+            const runId = stateRunIdRef.current;
+            const javaFile = selectedFilePathRef.current;
+            const model = ed.getModel();
+            if (!runId || !javaFile || !model) return;
+            const position = ed.getPosition();
+            if (!position) return;
+            const result = await resolveJavaToCobol(
+              runId,
+              javaFile,
+              position.lineNumber,
+              model.getValue(),
             );
-          } else {
-            // Studio-IDE-6 (#248 AC6/AC7/AC9): tooltip strings are part of
-            // the acceptance contract and must match the issue spec verbatim.
-            const message =
-              result.reason === "stale_manual_edit"
-                ? "Lineage stale due to manual edit"
-                : result.reason === "manual_only"
-                  ? "Region did not exist in Generator Baseline; no COBOL lineage"
-                  : "No source mapping available for this line";
-            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, [
-              {
-                severity: monaco.MarkerSeverity.Info,
-                message,
-                startLineNumber: position.lineNumber,
-                endLineNumber: position.lineNumber,
-                startColumn: 1,
-                endColumn: model.getLineMaxColumn(position.lineNumber),
-                source: "c2c-lineage",
-              },
-            ]);
-          }
-        },
-      });
+            if (result.ok) {
+              monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
+              window.dispatchEvent(
+                new CustomEvent<RevealCobolDetail>(REVEAL_COBOL_EVENT, {
+                  detail: {
+                    cobolFile: result.target.cobolFile,
+                    cobolLine: result.target.cobolLine,
+                  },
+                }),
+              );
+            } else {
+              // Studio-IDE-6 (#248 AC6/AC7/AC9): tooltip strings are part of
+              // the acceptance contract and must match the issue spec verbatim.
+              const message =
+                result.reason === "stale_manual_edit"
+                  ? "Lineage stale due to manual edit"
+                  : result.reason === "manual_only"
+                    ? "Region did not exist in Generator Baseline; no COBOL lineage"
+                    : "No source mapping available for this line";
+              monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, [
+                {
+                  severity: monaco.MarkerSeverity.Info,
+                  message,
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: 1,
+                  endColumn: model.getLineMaxColumn(position.lineNumber),
+                  source: "c2c-lineage",
+                },
+              ]);
+            }
+          },
+        }),
+      );
       // Studio-IDE-10 (#249): Ctrl/Cmd+Shift+E — "Explain this region".
       // The action stays registered regardless of budget state so the
       // command palette entry remains discoverable; on exhaustion the
@@ -1172,64 +1204,87 @@ export function GeneratedJavaEditorPane() {
       // button when budget is exhausted" is trivially satisfied — if
       // such a surface is added later, gate it on
       // `useEditorAssist().budgetSnapshot?.remaining === 0`.
-      editor.addAction({
-        id: "c2c.editorAssist.explain",
-        label: "C2C: Explain this region",
-        keybindings: [
-          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE,
-        ],
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 1.6,
-        run: async (ed) => {
-          const model = ed.getModel();
-          if (!model) return;
-          const filePath = selectedFilePathRef.current;
-          if (filePath === null) return;
-          const selection = ed.getSelection();
-          const cursorLine = ed.getPosition()?.lineNumber ?? 1;
-          const isEmptySelection = selection === null || selection.isEmpty();
-          const startLine = isEmptySelection
-            ? cursorLine
-            : selection.startLineNumber;
-          const endLine = isEmptySelection
-            ? cursorLine
-            : selection.endLineNumber;
-          const rawText = isEmptySelection
-            ? model.getLineContent(cursorLine)
-            : model.getValueInRange(selection);
-          const redaction = redactRegion(rawText);
-          const [sourceHash, byteHash] = await Promise.all([
-            computeSha256Hex(rawText),
-            computeSha256Hex(redaction.redactedText),
-          ]);
-          const scope = getCurrentDraftScope();
-          const runId = stateRunIdRef.current;
-          const payload: EditorAssistRequest = {
-            schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
-            sessionId: getOrCreateEditorAssistSessionId(),
-            tenantId: scope.tenantId,
-            userId: scope.userId,
-            runId: runId ?? null,
-            sourceHash,
-            region: {
-              filePath,
-              sourceKind: "java",
-              startLine,
-              endLine,
-            },
-            redactedBytes: redaction.redactedText,
-            byteHash,
-            studioRedactionMetadata: {
-              studioRedactionProfileVersion: redaction.profileVersion,
-              matchedPatternIds: redaction.matchedPatternIds,
-            },
-          };
-          await runExplainRef.current(payload);
-        },
-      });
+      trackDisposable(
+        editor.addAction({
+          id: "c2c.editorAssist.explain",
+          label: "C2C: Explain this region",
+          keybindings: [
+            monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE,
+          ],
+          contextMenuGroupId: "1_modification",
+          contextMenuOrder: 1.6,
+          run: async (ed) => {
+            const model = ed.getModel();
+            if (!model) return;
+            const filePath = selectedFilePathRef.current;
+            if (filePath === null) return;
+            const selection = ed.getSelection();
+            const cursorLine = ed.getPosition()?.lineNumber ?? 1;
+            const isEmptySelection = selection === null || selection.isEmpty();
+            const startLine = isEmptySelection
+              ? cursorLine
+              : selection.startLineNumber;
+            const endLine = isEmptySelection
+              ? cursorLine
+              : selection.endLineNumber;
+            const rawText = isEmptySelection
+              ? model.getLineContent(cursorLine)
+              : model.getValueInRange(selection);
+            const redaction = redactRegion(rawText);
+            const [sourceHash, byteHash] = await Promise.all([
+              computeSha256Hex(rawText),
+              computeSha256Hex(redaction.redactedText),
+            ]);
+            const scope = getCurrentDraftScope();
+            const runId = stateRunIdRef.current;
+            const payload: EditorAssistRequest = {
+              schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
+              sessionId: getOrCreateEditorAssistSessionId(),
+              tenantId: scope.tenantId,
+              userId: scope.userId,
+              runId: runId ?? null,
+              sourceHash,
+              region: {
+                filePath,
+                sourceKind: "java",
+                startLine,
+                endLine,
+              },
+              redactedBytes: redaction.redactedText,
+              byteHash,
+              studioRedactionMetadata: {
+                studioRedactionProfileVersion: redaction.profileVersion,
+                matchedPatternIds: redaction.matchedPatternIds,
+              },
+            };
+            await runExplainRef.current(payload);
+          },
+        }),
+      );
     },
     [registerMarkerEditor],
   );
+
+  // Studio-IDE-12 (#250): dispose all tracked Monaco command/action
+  // registrations on unmount. Without this each remount of the Java
+  // pane leaks one closure per registered command, accumulating
+  // listeners that reference stale ``selectedFilePath`` /
+  // ``stateRunId`` refs and keep their captured ``runExplainRef`` alive
+  // long after the consumer state has been recycled.
+  useEffect(() => {
+    return () => {
+      for (const disposable of editorActionDisposablesRef.current) {
+        try {
+          disposable.dispose();
+        } catch {
+          // Defensive: a disposable may already be disposed if Monaco
+          // tore down the editor first. Swallow so the cleanup is
+          // idempotent.
+        }
+      }
+      editorActionDisposablesRef.current = [];
+    };
+  }, []);
 
   // Run-mode badge (file level). Per #245 spec:
   //   Stale         — displayedArtifactSourceHash ≠ lastRunInputHash
