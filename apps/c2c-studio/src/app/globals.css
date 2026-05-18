@@ -34,7 +34,13 @@
     --text-faint: #909bb0;
     --text-bright: #eef0f4;
     --accent: #4eba87;
-    --accent-dim: #3f9e73;
+    /* Studio-IDE-12 (#250) §Accessibility: accent-dim is used as the
+       background on workbench top-bar / status-bar chips that carry
+       ``text-bright`` (#eef0f4) labels. The previous #3f9e73 gave a
+       2.89:1 contrast — 7 nodes flagged by axe-core. Darkening to
+       #2a7a55 lifts the contrast to ≥ 4.5:1 (~4.64:1) while keeping
+       the visual identity ("dim green chip"). */
+    --accent-dim: #2a7a55;
     --accent-soft: rgba(78, 186, 135, 0.18);
     --success: #4eba87;
     --success-soft: rgba(78, 166, 116, 0.16);
