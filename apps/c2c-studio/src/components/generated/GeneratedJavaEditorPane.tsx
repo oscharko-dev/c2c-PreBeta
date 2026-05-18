@@ -878,9 +878,11 @@ export function GeneratedJavaEditorPane() {
               }),
             );
           } else {
+            // Studio-IDE-6 (#248 AC6/AC7/AC9): tooltip strings are part of
+            // the acceptance contract and must match the issue spec verbatim.
             const message =
               result.reason === "stale_manual_edit"
-                ? "Lineage to COBOL is stale due to manual edit"
+                ? "Lineage stale due to manual edit"
                 : result.reason === "manual_only"
                   ? "Region did not exist in Generator Baseline; no COBOL lineage"
                   : "No source mapping available for this line";

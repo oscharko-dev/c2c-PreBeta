@@ -364,11 +364,14 @@ class BuildIrSymbolMapTests(unittest.TestCase):
 
 
 class ComputeJavaRegionClassificationTests(unittest.TestCase):
-    def test_produces_all_five_origin_classes_via_overlay_hook(self) -> None:
-        # Synthetic fixture: one file with three IR-anchored regions and a
-        # synthesized header/footer. The manual_overlay hook is the only
-        # path that can produce manual_modified / manual_edit in the
-        # orchestrator-derived output until IDE-13 ships.
+    def test_overlay_produces_manual_classes_alongside_repair_attempted(self) -> None:
+        # Multi-class smoke test: one file with three IR-anchored regions and
+        # a synthesized header/footer, exercised under assist+repair so the
+        # non-overlay regions resolve to ``repair_attempted``. The manual
+        # overlay hook stamps two of the three IR regions with the manual
+        # classes. This proves the overlay hook composes correctly with the
+        # repair path — the all-five round-trip is proven separately by
+        # :meth:`test_all_five_origin_classes_are_producible` below.
         java_text = "\n".join(
             [
                 "package com.example;",  # 1
@@ -397,12 +400,20 @@ class ComputeJavaRegionClassificationTests(unittest.TestCase):
         )
         regions = classification["src/main/java/com/example/F.java"]
         origin_classes = [r["originClass"] for r in regions]
-        # Header synthesized + repair_attempted (assist+repair won) + s2 region
-        # ends up repair_attempted (no manual) + s3 manual_edit + footer
-        # synthesized.
-        self.assertIn("deterministic" if False else "manual_modified", origin_classes)
-        self.assertIn("manual_edit", origin_classes)
+        # Header / footer + s2 (no overlay) → repair_attempted; s1 →
+        # manual_modified; s3 → manual_edit. ``synthesized`` is a
+        # ``mappingClass`` value (no IR anchor + non-agent origin), not an
+        # ``originClass`` — so we assert it on the mapping-class dimension
+        # instead, where the header/footer regions surface it.
         self.assertIn("repair_attempted", origin_classes)
+        self.assertIn("manual_modified", origin_classes)
+        self.assertIn("manual_edit", origin_classes)
+        # Mapping-class distinction: the header (no IR anchor) is mapped as
+        # ``agent_originated`` here because the run is assist+repair (so any
+        # non-IR region attributes to the agent path). ``synthesized`` would
+        # require a deterministic baseline — covered by other tests.
+        mapping_classes = {r["mappingClass"] for r in regions}
+        self.assertIn("agent_originated", mapping_classes)
         # Every region must carry the four required keys + schemaVersion v0.
         for region in regions:
             self.assertEqual(region["schemaVersion"], "v0")
@@ -416,6 +427,92 @@ class ComputeJavaRegionClassificationTests(unittest.TestCase):
                     "schemaVersion",
                 },
             )
+
+    def test_all_five_origin_classes_are_producible(self) -> None:
+        # Acceptance criterion (issue #248 AC2): the helper must be able to
+        # produce every member of the closed ``originClass`` set. We run the
+        # helper four times against minimal fixtures and union the observed
+        # classes; the assertion is "every value in the contract appears
+        # somewhere in the round-trip output". A single run cannot produce
+        # all five at once because the deterministic / agent_proposed /
+        # repair_attempted dimension is run-level, not region-level.
+        observed: set[str] = set()
+
+        # 1. Deterministic — no assist, no repair.
+        det_text = "// display [s1 line 1] D 'A'\nSystem.out.println(\"A\");"
+        det_out = rc.compute_java_region_classification(
+            java_files={"F.java": det_text},
+            assist_decision=None,
+            repair_attempts=[],
+            final_classification="success",
+            failure_code=None,
+            manual_overlay=None,
+        )
+        observed.update(r["originClass"] for r in det_out["F.java"])
+
+        # 2. agent_proposed — assist required, no propose_candidate repair.
+        ap_out = rc.compute_java_region_classification(
+            java_files={"F.java": det_text},
+            assist_decision=_assist_required(),
+            repair_attempts=[],
+            final_classification="success",
+            failure_code=None,
+            manual_overlay=None,
+        )
+        observed.update(r["originClass"] for r in ap_out["F.java"])
+
+        # 3. repair_attempted — assist required + propose_candidate.
+        ra_out = rc.compute_java_region_classification(
+            java_files={"F.java": det_text},
+            assist_decision=_assist_required(),
+            repair_attempts=[
+                {"attemptNumber": 1, "repairDecision": "propose_candidate"},
+            ],
+            final_classification="success",
+            failure_code=None,
+            manual_overlay=None,
+        )
+        observed.update(r["originClass"] for r in ra_out["F.java"])
+
+        # 4. manual_modified + manual_edit — via overlay on a deterministic
+        # baseline run so the non-overlay regions stay deterministic.
+        manual_text = "\n".join(
+            [
+                "// display [s1 line 1] D 'A'",  # 1
+                "System.out.println(\"A\");",  # 2
+                "// move [s2 line 2] MOVE A TO B",  # 3
+                "b.moveFrom(a);",  # 4
+            ]
+        )
+        manual_out = rc.compute_java_region_classification(
+            java_files={"F.java": manual_text},
+            assist_decision=None,
+            repair_attempts=[],
+            final_classification="success",
+            failure_code=None,
+            manual_overlay={
+                "F.java": {(1, 2): "manual_modified", (3, 4): "manual_edit"}
+            },
+        )
+        observed.update(r["originClass"] for r in manual_out["F.java"])
+
+        self.assertEqual(
+            observed
+            & {
+                "deterministic",
+                "agent_proposed",
+                "repair_attempted",
+                "manual_modified",
+                "manual_edit",
+            },
+            {
+                "deterministic",
+                "agent_proposed",
+                "repair_attempted",
+                "manual_modified",
+                "manual_edit",
+            },
+        )
 
     def test_no_manual_classes_when_overlay_absent(self) -> None:
         # Acceptance criterion: until IDE-13 lands, the orchestrator-derived

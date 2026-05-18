@@ -600,5 +600,9 @@ export interface TraceabilityEnvelope {
   programId: string;
   trace: Record<string, unknown> | null;
   irSymbolMap: Record<string, IrSymbolAnchor>;
-  javaRegionClassification: Record<string, JavaRegionClassification[]>;
+  // Nullable to match the BFF wire contract (the diagnostic-fixture stub and
+  // the orchestrator-upstream-error fallback both return ``null`` here per
+  // ADR-0006 §4). Consumers MUST treat ``null`` as "no classification
+  // available" and fall back to the unclassified rendering path.
+  javaRegionClassification: Record<string, JavaRegionClassification[]> | null;
 }
