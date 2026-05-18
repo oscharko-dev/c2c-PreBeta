@@ -80,23 +80,26 @@ jobs:
         working-directory: apps/c2c-studio
         run: npx playwright install-deps chromium
 
-      - name: Build Studio (production)
+      - name: Build Studio (production with perf harness bridge)
         working-directory: apps/c2c-studio
         env:
           NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
+          # Studio-IDE-12 (#250): enables the ``PerfHarnessBridge``
+          # window-event listener + ``__c2cMonacoEditor`` global so
+          # the harness can drive the COBOL editor without Studio
+          # internals. Production / dev builds never set this so
+          # end users never carry the bridge.
+          NEXT_PUBLIC_C2C_PERF_HARNESS: "1"
         run: npm run build
 
       - name: Run @perf harness
         working-directory: apps/c2c-studio
         env:
           CI: "1"
-        # The rewritten harness measures cold-start latency using
-        # navigation-timing primitives — no Studio runtime hooks
-        # required. SLAs are 5 s for DOMContentLoaded and 10 s for
-        # the full load event; a wider cushion than the 800 ms
-        # reference number from the issue because CI's modest runner
-        # is not the M2 reference profile. A real regression past
-        # those bounds is worth blocking on.
+        # The harness measures editor mount + cold-start latency.
+        # The 5× SLA cushion (``MOUNT_SLA_*_MS * 5``) absorbs CI
+        # hardware variance; a regression past the cushion is a
+        # real signal worth blocking on.
         run: npx playwright test --config=playwright.studio-only.config.ts --grep @perf --reporter=line
 
   memory:

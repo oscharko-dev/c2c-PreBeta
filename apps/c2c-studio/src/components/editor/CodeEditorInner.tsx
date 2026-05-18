@@ -154,7 +154,13 @@ function StandaloneEditorView({
     if (!model) {
       return;
     }
-    applyMarkers(monaco, model, markers, markerGroups, previousOwnersRef.current);
+    applyMarkers(
+      monaco,
+      model,
+      markers,
+      markerGroups,
+      previousOwnersRef.current,
+    );
   }, [monaco, markers, markerGroups]);
 
   useEffect(() => {
@@ -239,13 +245,36 @@ function StandaloneEditorView({
         }}
         onMount={(editor, monacoInstance) => {
           editorRef.current = editor;
+          // Studio-IDE-12 (#250) §Performance test seam: expose the
+          // most-recently-mounted Monaco editor as a global so the
+          // perf harness can call ``editor.trigger(...)`` /
+          // ``editor.focus()`` without needing a Studio-internal
+          // ref. Gated on
+          // ``NEXT_PUBLIC_C2C_PERF_HARNESS === "1"`` so production
+          // bundles never expose the global.
+          if (
+            typeof window !== "undefined" &&
+            process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1"
+          ) {
+            (
+              window as unknown as {
+                __c2cMonacoEditor?: import("monaco-editor").editor.IStandaloneCodeEditor;
+              }
+            ).__c2cMonacoEditor = editor;
+          }
           const restored = restoreViewState(editor, resolvedUri);
           if (!restored && viewStateRef?.current) {
             editor.restoreViewState(viewStateRef.current);
           }
           const model = editor.getModel();
           if (model) {
-            applyMarkers(monacoInstance, model, markers, markerGroups, previousOwnersRef.current);
+            applyMarkers(
+              monacoInstance,
+              model,
+              markers,
+              markerGroups,
+              previousOwnersRef.current,
+            );
           }
           if (decorations && decorations.length > 0) {
             decorationsRef.current =
@@ -267,7 +296,13 @@ function StandaloneEditorView({
             if (!newModel) {
               return;
             }
-            applyMarkers(monacoInstance, newModel, markersRef.current, markerGroupsRef.current, previousOwnersRef.current);
+            applyMarkers(
+              monacoInstance,
+              newModel,
+              markersRef.current,
+              markerGroupsRef.current,
+              previousOwnersRef.current,
+            );
             restoreViewState(editor, resolvedUriRef.current);
             if (decorationsRef.current) {
               decorationsRef.current.clear();
@@ -401,7 +436,13 @@ function DiffEditorView({
     }
     const modifiedModel = diffEditor.getModifiedEditor().getModel();
     if (modifiedModel) {
-      applyMarkers(monaco, modifiedModel, markers, markerGroups, previousOwnersRef.current);
+      applyMarkers(
+        monaco,
+        modifiedModel,
+        markers,
+        markerGroups,
+        previousOwnersRef.current,
+      );
     }
   }, [monaco, markers, markerGroups]);
 
@@ -506,7 +547,13 @@ function DiffEditorView({
             if (!currentModel) {
               return;
             }
-            applyMarkers(monacoInstance, currentModel, markersRef.current, markerGroupsRef.current, previousOwnersRef.current);
+            applyMarkers(
+              monacoInstance,
+              currentModel,
+              markersRef.current,
+              markerGroupsRef.current,
+              previousOwnersRef.current,
+            );
             // The new URI may already have saved view state; restore it now
             // since the onMount-time restore only fires on initial mount.
             restoreDiffViewState(diffEditor, resolvedUriRef.current);

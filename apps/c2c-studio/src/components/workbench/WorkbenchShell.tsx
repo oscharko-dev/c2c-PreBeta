@@ -22,6 +22,7 @@ import { LineageCoverageProvider } from "@/stores/lineageCoverage";
 import { useMarkerNavigationShortcuts } from "@/hooks/useMarkerNavigationShortcuts";
 import { EditorAssistProvider, useEditorAssist } from "@/stores/editorAssist";
 import { EditorAssistSidePanel } from "@/components/observability/EditorAssistSidePanel";
+import { PerfHarnessBridge } from "@/components/workbench/PerfHarnessBridge";
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
@@ -105,6 +106,7 @@ function WorkbenchShellBody({
         Skip to transformation workbench
       </a>
       <AppTopBar apiState={apiState} />
+      <PerfHarnessBridge />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <ActivityBar />
         <SecondaryStripe />
