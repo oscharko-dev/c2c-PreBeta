@@ -15,6 +15,16 @@ export type EditorDecoration = MonacoNs.editor.IModelDeltaDecoration;
 
 export type EditorAction = MonacoNs.editor.IActionDescriptor;
 
+// Studio-IDE-5 (#244): named marker group for per-sourceKind isolation.
+// Each owner is a separate Monaco marker namespace so clearing parser
+// markers leaves build markers in place. The default `markers` prop
+// continues to write into the legacy "c2c-studio" owner for callers
+// that have not migrated yet.
+export interface EditorMarkerGroup {
+  owner: string;
+  markers: EditorMarker[];
+}
+
 export interface CodeEditorViewStateRef {
   current: MonacoNs.editor.ICodeEditorViewState | null;
 }
@@ -32,6 +42,11 @@ export interface StandaloneEditorMountArgs {
 interface CodeEditorBaseProps {
   language: string;
   markers?: EditorMarker[];
+  // Studio-IDE-5 (#244): when present, the editor applies markers via
+  // `monaco.editor.setModelMarkers(model, group.owner, group.markers)`
+  // for each entry. Owners that disappear between renders are cleared
+  // automatically so the live set always matches the prop.
+  markerGroups?: EditorMarkerGroup[];
   actions?: EditorAction[];
   decorations?: EditorDecoration[];
   sanitizationProfile?: SanitizationProfile;

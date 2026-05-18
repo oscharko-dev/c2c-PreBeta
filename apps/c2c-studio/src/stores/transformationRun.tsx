@@ -56,6 +56,11 @@ export interface JavaStatusFlags {
   clean: boolean;
   pendingReRun: boolean;
   staleJava: boolean;
+  // V2 scope expansion (#247): true iff the user's Java buffer diverges
+  // from the Generator Baseline content. Independent from the other
+  // flags — a buffer can be both `manualEditsPresent` and `pendingReRun`
+  // (user edited locally and has not yet re-run the transformation).
+  manualEditsPresent: boolean;
 }
 
 export interface TransformationRunContextValue {
@@ -414,11 +419,17 @@ export function TransformationRunProvider({
     (filePath: string): JavaStatusFlags => {
       const entry = javaBuffers[filePath];
       if (!entry) {
-        return { clean: false, pendingReRun: false, staleJava: false };
+        return {
+          clean: false,
+          pendingReRun: false,
+          staleJava: false,
+          manualEditsPresent: false,
+        };
       }
       const buffer = entry.bufferHash;
       const lastInput = entry.lastRunInputHash;
       const displayed = entry.displayedArtifactSourceHash;
+      const baseline = entry.generatorBaselineHash;
       const clean =
         lastInput !== null &&
         displayed !== null &&
@@ -427,7 +438,14 @@ export function TransformationRunProvider({
       const pendingReRun = lastInput !== null && buffer !== lastInput;
       const staleJava =
         lastInput !== null && displayed !== null && displayed !== lastInput;
-      return { clean, pendingReRun, staleJava };
+      // The Generator Baseline is always populated for an entry that
+      // exists (ensureJavaBaseline seeds it on first content delivery).
+      // The chip fires when the live buffer hash differs from the
+      // baseline hash — this is the V2 #247 "manual edits present"
+      // surface. It is *not* the same as `isDirty`: a user who edits and
+      // then reverts to the exact baseline content gets the chip cleared.
+      const manualEditsPresent = baseline.length > 0 && buffer !== baseline;
+      return { clean, pendingReRun, staleJava, manualEditsPresent };
     },
     [javaBuffers],
   );

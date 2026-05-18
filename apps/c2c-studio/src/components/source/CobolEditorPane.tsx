@@ -10,32 +10,39 @@ import React, {
 import type * as MonacoNs from "monaco-editor";
 import { Play } from "lucide-react";
 
-import { useSourceWorkspace } from "../../stores/sourceWorkspace";
+import { useSourceWorkspace } from "@/stores/sourceWorkspace";
 import {
   DEFAULT_SOURCE_NAME,
   deriveDetectedProgramId,
   deriveDisplayedLineEnding,
-} from "../../lib/sourceAnalysis";
-import { useC2cApi } from "../../hooks/useC2cApi";
-import { useTransformationRun } from "../../stores/transformationRun";
-import { UnsupportedConstructsPanel } from "../state/UnsupportedConstructsPanel";
-import { getWorkbenchReadiness } from "../workbench/workbenchReadiness";
-import { CodeEditor } from "../editor/CodeEditor";
-import type { StandaloneEditorMountArgs } from "../editor/CodeEditor";
+} from "@/lib/sourceAnalysis";
+import { useC2cApi } from "@/hooks/useC2cApi";
+import { useTransformationRun } from "@/stores/transformationRun";
+import { UnsupportedConstructsPanel } from "@/components/state/UnsupportedConstructsPanel";
+import { getWorkbenchReadiness } from "@/components/workbench/workbenchReadiness";
+import { CodeEditor } from "@/components/editor/CodeEditor";
+import type { StandaloneEditorMountArgs } from "@/components/editor/CodeEditor";
 import {
   FixedFormatRuler,
   FixedFormatRulerToggle,
-} from "../editor/FixedFormatRuler";
-import { getMonaco } from "../../lib/editor/lazyMonaco";
+} from "@/components/editor/FixedFormatRuler";
+import { getMonaco, useMonacoReady } from "@/lib/editor/lazyMonaco";
 import {
   COBOL_LANGUAGE_ID,
   FIXED_FORMAT_RULER_COLUMNS,
   registerCobolLanguage,
-} from "../../lib/editor/cobolMonarch";
+} from "@/lib/editor/cobolMonarch";
 import {
   ConflictResolverDialog,
   type ConflictPanel,
-} from "./ConflictResolverDialog";
+} from "@/components/source/ConflictResolverDialog";
+import {
+  DEFAULT_MARKER_LIMIT,
+  diagnosticsToMarkers,
+  partitionByOwner,
+} from "@/lib/editor/diagnosticMarkers";
+import { useEditorMarkerRegistration } from "@/lib/editor/markerNavigation";
+import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 
 // View-state preservation in Monaco is keyed by model URI. Re-using the same
 // URI per source name keeps cursor / scroll / selection stable when the user
@@ -89,9 +96,79 @@ export function CobolEditorPane() {
     "Model Gateway unavailable. AI-assisted transformation cannot start.";
 
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
+  // Studio-IDE-5 (#244 review): bump on editor mount so the marker
+  // memo recomputes with the live Monaco model — whole-line markers
+  // require model.getLineLength().
+  const [cobolEditorMountToken, setCobolEditorMountToken] = useState(0);
   const detectedProgramId = deriveDetectedProgramId(sourceText);
   const lineEnding = deriveDisplayedLineEnding(sourceText);
   const modelUri = useMemo(() => deriveModelUri(sourceName), [sourceName]);
+
+  // Studio-IDE-5 (#244): collect typed diagnostics that target the
+  // COBOL source — `sourceKind: "cobol"` and the IR step (which still
+  // points at COBOL line numbers via `sourceLine`). The build/test and
+  // generated-Java diagnostics are routed to the Java pane.
+  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration({
+    id: "cobol-editor",
+    filePath: sourceName ?? DEFAULT_SOURCE_NAME,
+  });
+  // Studio-IDE-5 (#244 review): the marker memo depends on Monaco
+  // having resolved. `useMonacoReady` returns null until the async
+  // loader completes, then re-renders so the memo recomputes with the
+  // real instance. Without this, a cold mount with diagnostics already
+  // in state would cache an empty marker group permanently.
+  const monaco = useMonacoReady();
+  const cobolMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
+    if (!monaco) return [];
+    const diagnostics = [
+      ...(runState.generated?.diagnostics ?? []),
+      ...(runState.buildTest?.diagnostics ?? []),
+    ];
+    const buckets = partitionByOwner(diagnostics);
+    const currentFile = sourceName ?? DEFAULT_SOURCE_NAME;
+    // Fix #244-review: only render diagnostics whose filePath
+    // resolves to the open COBOL source. Path-segment matching
+    // avoids cross-file misattribution (e.g. "Foo.cbl" matching
+    // "BarFoo.cbl"). Diagnostics without filePath are run-level per
+    // ADR 0006 Decision 4 and never become markers.
+    const filterForCurrentFile = (d: typeof diagnostics[number]) => {
+      if (!d.filePath) return false;
+      const aParts = d.filePath.split(/[\\/]+/).filter(Boolean);
+      const bParts = currentFile.split(/[\\/]+/).filter(Boolean);
+      if (aParts.length === 0 || bParts.length === 0) return false;
+      const short = aParts.length < bParts.length ? aParts : bParts;
+      const long = aParts.length < bParts.length ? bParts : aParts;
+      for (let i = 0; i < short.length; i += 1) {
+        if (short[short.length - 1 - i] !== long[long.length - 1 - i]) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const cobolGroup = buckets["c2c-cobol"].filter(filterForCurrentFile);
+    const irGroup = buckets["c2c-ir"].filter(filterForCurrentFile);
+    // We do not have a stable handle to the live Monaco model here so
+    // the marker mapper receives null; that degrades the whole-line
+    // fallback to a single-character marker which the editor renders
+    // safely. The CodeEditor re-applies markers after each model swap
+    // so the next render with a model attached refines the geometry.
+    const cobolMarkers = diagnosticsToMarkers(cobolGroup, {
+      monaco,
+      model: editorRef.current?.getModel() ?? null,
+      limit: DEFAULT_MARKER_LIMIT,
+    });
+    const irMarkers = diagnosticsToMarkers(irGroup, {
+      monaco,
+      model: editorRef.current?.getModel() ?? null,
+      limit: DEFAULT_MARKER_LIMIT,
+    });
+    return [
+      { owner: "c2c-cobol", markers: cobolMarkers.markers },
+      { owner: "c2c-ir", markers: irMarkers.markers },
+    ];
+    // cobolEditorMountToken is intentional — see review #244 round 3.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monaco, runState.generated, runState.buildTest, sourceName, cobolEditorMountToken]);
 
   // Toast-equivalent visibility window for the "Saved locally" notice.
   useEffect(() => {
@@ -149,6 +226,8 @@ export function CobolEditorPane() {
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
       editorRef.current = editor;
+      registerMarkerEditor(editor);
+      setCobolEditorMountToken((value) => value + 1);
       // Late-registration fallback in case the early effect lost the race
       // against CodeEditorInner's monaco resolution. registerCobolLanguage
       // is idempotent.
@@ -172,7 +251,7 @@ export function CobolEditorPane() {
         void saveDraftNow();
       });
     },
-    [rulerEnabled, saveDraftNow],
+    [rulerEnabled, saveDraftNow, registerMarkerEditor],
   );
 
   const conflictPanels: ConflictPanel[] = useMemo(() => {
@@ -389,6 +468,7 @@ export function CobolEditorPane() {
           modelUri={modelUri}
           ariaLabel={`${sourceName || DEFAULT_SOURCE_NAME} COBOL source editor`}
           onMount={handleEditorMount}
+          markerGroups={cobolMarkerGroups}
           className="flex-1 min-h-0"
         />
       </div>

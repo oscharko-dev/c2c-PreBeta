@@ -116,9 +116,12 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
   it("re-applies markers to the current model on model swap via markersRef (Codex round-3)", () => {
     // Both editor variants must read the latest markers via a ref so the
     // onDidChangeModel handler does not capture stale markers from onMount.
+    // Studio-IDE-5 (#244): `applyMarkers` now also threads `markerGroupsRef`
+    // and a `previousOwnersRef` so the per-owner marker isolation survives
+    // model swaps; the markersRef.current pattern must remain.
     expect(innerSource).toMatch(/markersRef\s*=\s*useRef/);
     expect(innerSource).toMatch(/markersRef\.current\s*=\s*markers/);
-    expect(innerSource).toMatch(/applyMarkers\([^)]*markersRef\.current\)/);
+    expect(innerSource).toMatch(/applyMarkers\([^)]*markersRef\.current/);
   });
 
   it("standalone editor refreshes markers when the model is swapped (Codex round-3)", () => {

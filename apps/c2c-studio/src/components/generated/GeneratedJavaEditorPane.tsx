@@ -9,23 +9,34 @@ import React, {
 } from "react";
 import { Loader2 } from "lucide-react";
 
-import { useGeneratedArtifacts } from "../../hooks/useGeneratedArtifacts";
-import { UnsupportedConstructsPanel } from "../state/UnsupportedConstructsPanel";
-import { MissingArtifactsPanel } from "../state/MissingArtifactsPanel";
-import { BlockedState } from "../state/BlockedState";
-import { ErrorNotice } from "../state/ErrorNotice";
-import { Badge } from "../ui/Badge";
-import { useTransformationRun } from "../../stores/transformationRun";
-import { CodeEditor } from "../editor/CodeEditor";
-import type { StandaloneEditorMountArgs } from "../editor/CodeEditor";
+import { useGeneratedArtifacts } from "@/hooks/useGeneratedArtifacts";
+import { UnsupportedConstructsPanel } from "@/components/state/UnsupportedConstructsPanel";
+import { MissingArtifactsPanel } from "@/components/state/MissingArtifactsPanel";
+import { BlockedState } from "@/components/state/BlockedState";
+import { ErrorNotice } from "@/components/state/ErrorNotice";
+import { Badge } from "@/components/ui/Badge";
+import { useTransformationRun } from "@/stores/transformationRun";
+import { CodeEditor } from "@/components/editor/CodeEditor";
+import type { StandaloneEditorMountArgs } from "@/components/editor/CodeEditor";
 import {
   detectLanguageFromPath,
   isEditableLanguage,
-} from "../../lib/editor/languageDetection";
+} from "@/lib/editor/languageDetection";
 import {
   ConflictResolverDialog,
   type ConflictPanel,
-} from "../source/ConflictResolverDialog";
+} from "@/components/source/ConflictResolverDialog";
+import {
+  DEFAULT_MARKER_LIMIT,
+  diagnosticsToMarkers,
+  partitionByOwner,
+} from "@/lib/editor/diagnosticMarkers";
+import {
+  useEditorMarkerRegistration,
+  useMarkerNavigation,
+} from "@/lib/editor/markerNavigation";
+import { useMonacoReady } from "@/lib/editor/lazyMonaco";
+import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
 // Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. 500 ms matches
@@ -59,6 +70,7 @@ export function GeneratedJavaEditorPane() {
     fileFetchError,
     artifactDetails,
     unavailableFiles,
+    selectFile,
   } = useGeneratedArtifacts();
 
   const {
@@ -148,7 +160,12 @@ export function GeneratedJavaEditorPane() {
 
   const flags = selectedFilePath
     ? javaStatusFlags(selectedFilePath)
-    : { clean: false, pendingReRun: false, staleJava: false };
+    : {
+        clean: false,
+        pendingReRun: false,
+        staleJava: false,
+        manualEditsPresent: false,
+      };
   const javaBufferEntry = selectedFilePath
     ? javaBuffers[selectedFilePath]
     : undefined;
@@ -174,6 +191,161 @@ export function GeneratedJavaEditorPane() {
     }
     return `inmemory://c2c-studio/generated/${state.runId}/${selectedFilePath}`;
   }, [state.runId, selectedFilePath]);
+
+  // Studio-IDE-5 (#244): typed diagnostics that target the generated
+  // Java pane (`sourceKind: generated_java | build | test`).
+  // Diagnostics without a filePath route to the active file; ones with
+  // a filePath that does not match the current selection appear in the
+  // Problems panel but stay off the editor surface.
+  const editorInstanceRef = useRef<
+    import("monaco-editor").editor.IStandaloneCodeEditor | null
+  >(null);
+  // Studio-IDE-5 (#244 review): bump this counter when the editor
+  // mounts so the marker memo recomputes with the live Monaco model
+  // (resolving whole-line marker geometry).
+  const [editorMountToken, setEditorMountToken] = useState(0);
+  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration(
+    {
+      id: "generated-java-editor",
+      filePath: selectedFilePath ?? null,
+    },
+  );
+  // Studio-IDE-5 (#244 review): the marker memo depends on Monaco
+  // having resolved. `useMonacoReady` returns null until the async
+  // loader completes, then re-renders so the memo recomputes with the
+  // real instance. Without this, a cold mount with diagnostics already
+  // in state would cache an empty marker group permanently.
+  const monaco = useMonacoReady();
+
+  // Studio-IDE-5 (#244 review): when Problems-panel clicks point at a
+  // generated file that is not currently selected, switch panes. The
+  // `target` token bumps on every dispatch, so we react to it even
+  // when the same filePath arrives twice. We MUST guard against
+  // non-generated targets (e.g. a click on a COBOL diagnostic) —
+  // otherwise this effect would try to fetch a non-existent generated
+  // file and leave the pane on a broken selection.
+  const { target: navigationTarget } = useMarkerNavigation();
+  // Track the navigation token so a second effect can complete the
+  // focus jump AFTER the file becomes selected (the editor model has
+  // to be attached to the new file before revealLineInCenter is
+  // useful).
+  const pendingTokenRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!navigationTarget) return;
+    const targetPath = navigationTarget.filePath;
+    if (!targetPath) return;
+    if (targetPath === selectedFilePath) {
+      // Same file — let the navigation context's focusEditor handle
+      // the line jump on the registered editor.
+      return;
+    }
+    const generatedPaths = state.generatedFiles?.files ?? [];
+    // Path-segment suffix match against the list of generated files —
+    // the BFF normalizes javac absolute paths but we match defensively
+    // against both forms.
+    const matched = generatedPaths.find((file) => {
+      if (file.path === targetPath) return true;
+      const a = file.path.split(/[\\/]+/).filter(Boolean);
+      const b = targetPath.split(/[\\/]+/).filter(Boolean);
+      if (a.length === 0 || b.length === 0) return false;
+      const short = a.length < b.length ? a : b;
+      const long = a.length < b.length ? b : a;
+      for (let i = 0; i < short.length; i += 1) {
+        if (short[short.length - 1 - i] !== long[long.length - 1 - i]) {
+          return false;
+        }
+      }
+      return true;
+    });
+    if (!matched) return;
+    pendingTokenRef.current = navigationTarget.token;
+    selectFile(matched.path);
+  }, [
+    navigationTarget,
+    selectedFilePath,
+    selectFile,
+    state.generatedFiles?.files,
+  ]);
+
+  // Studio-IDE-5 (#244 review): complete the jump once the editor has
+  // mounted with the freshly-selected file. We compare tokens so a
+  // stale target (from an earlier click) does not race ahead of the
+  // current selection.
+  useEffect(() => {
+    if (!navigationTarget) return;
+    if (pendingTokenRef.current !== navigationTarget.token) return;
+    if (navigationTarget.filePath !== selectedFilePath) return;
+    if (!editorInstanceRef.current) return;
+    const targetLine = Math.max(1, navigationTarget.line);
+    const targetColumn = Math.max(1, navigationTarget.column ?? 1);
+    editorInstanceRef.current.revealLineInCenterIfOutsideViewport(targetLine);
+    editorInstanceRef.current.setPosition({
+      lineNumber: targetLine,
+      column: targetColumn,
+    });
+    editorInstanceRef.current.focus();
+    pendingTokenRef.current = null;
+  }, [navigationTarget, selectedFilePath, editorMountToken]);
+
+  const javaMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
+    if (!monaco) return [];
+    const diagnostics = [
+      ...(state.generated?.diagnostics ?? []),
+      ...(state.buildTest?.diagnostics ?? []),
+    ];
+    const buckets = partitionByOwner(diagnostics);
+    const model = editorInstanceRef.current?.getModel() ?? null;
+    const groups: EditorMarkerGroup[] = [];
+    // Studio-IDE-5 (#244 review): share the marker cap across owners
+    // so the editor's total marker count never exceeds
+    // DEFAULT_MARKER_LIMIT. Without a shared budget, three owners
+    // could each emit 2000 markers — three times the advertised cap.
+    let remaining = DEFAULT_MARKER_LIMIT;
+    const segmentsMatch = (a: string, b: string): boolean => {
+      const aParts = a.split(/[\\/]+/).filter(Boolean);
+      const bParts = b.split(/[\\/]+/).filter(Boolean);
+      if (aParts.length === 0 || bParts.length === 0) return false;
+      const short = aParts.length < bParts.length ? aParts : bParts;
+      const long = aParts.length < bParts.length ? bParts : aParts;
+      for (let i = 0; i < short.length; i += 1) {
+        if (short[short.length - 1 - i] !== long[long.length - 1 - i]) {
+          return false;
+        }
+      }
+      return true;
+    };
+    for (const owner of [
+      "c2c-generated-java",
+      "c2c-build",
+      "c2c-test",
+    ] as const) {
+      const bucketDiagnostics = buckets[owner];
+      const matchingFile = bucketDiagnostics.filter((d) => {
+        if (!d.filePath) return false;
+        if (!selectedFilePath) return false;
+        return (
+          d.filePath === selectedFilePath ||
+          segmentsMatch(d.filePath, selectedFilePath)
+        );
+      });
+      const { markers } = diagnosticsToMarkers(matchingFile, {
+        monaco,
+        model,
+        limit: remaining,
+      });
+      remaining = Math.max(0, remaining - markers.length);
+      groups.push({ owner, markers });
+    }
+    return groups;
+    // editorMountToken is intentional — see review #244 round 3.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    monaco,
+    state.generated,
+    state.buildTest,
+    selectedFilePath,
+    editorMountToken,
+  ]);
 
   // Debounced onChange — schedules a single bufferModel update per
   // JAVA_BUFFER_DEBOUNCE_MS window. The handler captures the current
@@ -241,6 +413,12 @@ export function GeneratedJavaEditorPane() {
 
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
+      editorInstanceRef.current = editor;
+      registerMarkerEditor(editor);
+      // Bump the mount token so the marker memo recomputes with the
+      // live model — without this, whole-line markers stay narrowed
+      // to a single character.
+      setEditorMountToken((value) => value + 1);
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         // Make sure the last in-flight edit lands in the buffer model
         // before the persistence layer reads it.
@@ -251,7 +429,7 @@ export function GeneratedJavaEditorPane() {
         }
       });
     },
-    [],
+    [registerMarkerEditor],
   );
 
   // Run-mode badge (file level). Per #245 spec:
@@ -418,6 +596,7 @@ export function GeneratedJavaEditorPane() {
             clean={flags.clean}
             pendingReRun={flags.pendingReRun}
             staleJava={flags.staleJava}
+            manualEditsPresent={flags.manualEditsPresent}
           />
         </div>
         <div className="flex gap-2 items-center">
@@ -562,6 +741,7 @@ export function GeneratedJavaEditorPane() {
             onMount={isJavaEditable ? handleEditorMount : undefined}
             modelUri={modelUri}
             ariaLabel={`Generated Java source for ${selectedFilePath}`}
+            markerGroups={javaMarkerGroups}
             className="h-full"
           />
         )}
@@ -584,12 +764,14 @@ function JavaStatusChips({
   clean,
   pendingReRun,
   staleJava,
+  manualEditsPresent,
 }: {
   clean: boolean;
   pendingReRun: boolean;
   staleJava: boolean;
+  manualEditsPresent: boolean;
 }) {
-  if (!clean && !pendingReRun && !staleJava) {
+  if (!clean && !pendingReRun && !staleJava && !manualEditsPresent) {
     return null;
   }
   return (
@@ -607,6 +789,15 @@ function JavaStatusChips({
       {staleJava ? (
         <span className="inline-flex items-center rounded bg-orange-soft px-2 py-0.5 text-[10px] font-medium text-orange border border-orange/20">
           stale java
+        </span>
+      ) : null}
+      {manualEditsPresent ? (
+        <span
+          data-testid="java-status-chip-manual-edits"
+          title="The Java buffer diverges from the Generator Baseline."
+          className="inline-flex items-center rounded bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent border border-accent/30"
+        >
+          manual edits present
         </span>
       ) : null}
     </span>

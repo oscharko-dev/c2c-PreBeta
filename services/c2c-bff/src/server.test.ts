@@ -1429,6 +1429,12 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
               line: 8,
               originStep: "parse-cobol",
               message: "generation started",
+              artifactRef: {
+                sha256: "f".repeat(64),
+                byteSize: 64,
+                kind: "semantic-ir-node",
+                path: "ir/node/01.json",
+              },
             },
             {
               level: "info",
@@ -1467,6 +1473,7 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
       status: string;
       outputRef: { sha256: string; byteSize?: number } | null;
       diagnostics: Array<{
+        schemaVersion?: string;
         severity?: string;
         code?: string;
         line?: number;
@@ -1478,10 +1485,18 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
     assert.ok(body.outputRef, "outputRef must be present for successful runs");
     assert.equal(body.outputRef?.sha256, "a".repeat(64));
     assert.equal(body.diagnostics.length, 2);
+    assert.equal(body.diagnostics[0]?.schemaVersion, "v0");
     assert.equal(body.diagnostics[0]?.severity, "info");
     assert.equal(body.diagnostics[0]?.code, "gen.start");
     assert.equal(body.diagnostics[0]?.line, 8);
     assert.equal(body.diagnostics[0]?.originStep, "parse-cobol");
+    // Studio-IDE-5 (#244): artifactRef survives normalization with its
+    // sha256 and metadata intact so the Studio Problems panel can
+    // jump to the originating artifact.
+    assert.equal(
+      (body.diagnostics[0] as { artifactRef?: { sha256: string } })?.artifactRef?.sha256,
+      "f".repeat(64),
+    );
     assert.deepEqual(body.files, {});
   } finally {
     await server.close();
@@ -1747,6 +1762,7 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
       expectedOutputRef: { sha256: string; kind: string } | null;
       actualOutputRef: { sha256: string; kind: string } | null;
       diagnostics: Array<{
+        schemaVersion?: string;
         severity?: string;
         code?: string;
         line?: number;
@@ -1767,6 +1783,7 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     assert.equal(body.actualOutputRef?.sha256, "a".repeat(64));
     assert.equal(body.actualOutputRef?.kind, "java-stdout");
     assert.equal(body.diagnostics.length, 2);
+    assert.equal(body.diagnostics[0]?.schemaVersion, "v0");
     assert.equal(body.diagnostics[0]?.severity, "warning");
     assert.equal(body.diagnostics[0]?.code, "javac-deprecation");
     assert.equal(body.diagnostics[0]?.line, 12);

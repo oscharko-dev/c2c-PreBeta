@@ -425,10 +425,16 @@ describe('Run Panels', () => {
       expect(screen.getByText('GenMiss')).toBeDefined();
       expect(screen.getByText('FilesMiss')).toBeDefined();
       expect(screen.getByText('compile-failed')).toBeDefined();
-      expect(screen.getByText(/gen-open-assumption/)).toBeDefined();
-      expect(screen.getByText(/line 4/)).toBeDefined();
-      expect(screen.getByText(/javac-syntax/)).toBeDefined();
-      expect(screen.getByText(/src\/main\/java\/P1\.java:12:7/)).toBeDefined();
+      // Studio-IDE-5 (#244): typed diagnostics now render in a table.
+      // Severity/file/line/code/message appear in their own cells.
+      expect(screen.getByText('gen-open-assumption')).toBeDefined();
+      expect(screen.getByText('fallback path used')).toBeDefined();
+      expect(screen.getByText('javac-syntax')).toBeDefined();
+      expect(screen.getByText('missing semicolon')).toBeDefined();
+      expect(screen.getByText('src/main/java/P1.java')).toBeDefined();
+      // The line column shows the bare integer.
+      expect(screen.getAllByText('12').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('4').length).toBeGreaterThan(0);
       expect(screen.getByText('The evidence pack is missing required artifacts')).toBeDefined();
       expect(screen.getByText('artifact endpoint failed')).toBeDefined();
       expect(screen.getByText('Generated Java, build/test, and evidence do not reference the same artifact hash')).toBeDefined();

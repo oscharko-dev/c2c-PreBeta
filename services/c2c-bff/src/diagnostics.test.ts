@@ -26,7 +26,8 @@ test("normalizeDiagnostics preserves line, column, endLine, endColumn", () => {
     },
   ]);
   assert.equal(result.length, 1);
-  const [diagnostic] = result;
+  const diagnostic = result[0];
+  assert.ok(diagnostic, "expected one diagnostic");
   assert.equal(diagnostic.schemaVersion, DIAGNOSTIC_SCHEMA_VERSION);
   assert.equal(diagnostic.severity, "error");
   assert.equal(diagnostic.code, "PARSE-ERR");
@@ -230,7 +231,6 @@ test("normalizeDiagnostics normalizes artifactRef when sha256 is present", () =>
 });
 
 test("normalizeDiagnostics covers each upstream source: parser/IR/generator/build/test", () => {
-  // Parser-style diagnostic — severity, line, code, message.
   const parser = normalizeDiagnostics([
     {
       severity: "error",
@@ -245,7 +245,6 @@ test("normalizeDiagnostics covers each upstream source: parser/IR/generator/buil
   assert.equal(parser?.line, 12);
   assert.equal(parser?.severity, "error");
 
-  // IR-style diagnostic — uses sourceLine via the line field.
   const ir = normalizeDiagnostics([
     {
       severity: "warning",
@@ -259,7 +258,6 @@ test("normalizeDiagnostics covers each upstream source: parser/IR/generator/buil
   assert.equal(ir?.sourceKind, "ir");
   assert.equal(ir?.line, 18);
 
-  // Generator-style diagnostic — line + column in generated Java.
   const generator = normalizeDiagnostics([
     {
       severity: "info",
@@ -275,7 +273,6 @@ test("normalizeDiagnostics covers each upstream source: parser/IR/generator/buil
   assert.equal(generator?.column, 4);
   assert.equal(generator?.filePath, "src/main/java/c2c/BRNCH01.java");
 
-  // Build-style diagnostic — javac line + column on a generated file.
   const build = normalizeDiagnostics([
     {
       severity: "warning",
@@ -292,7 +289,6 @@ test("normalizeDiagnostics covers each upstream source: parser/IR/generator/buil
   assert.equal(build?.line, 12);
   assert.equal(build?.column, 7);
 
-  // Test-style diagnostic — surfaces at run time without a file path.
   const tst = normalizeDiagnostics([
     {
       severity: "error",
@@ -317,4 +313,124 @@ test("normalizeDiagnostics passes large batches without modification", () => {
   assert.equal(result.length, batch.length);
   assert.equal(result[0]?.line, 1);
   assert.equal(result[4999]?.line, 5000);
+});
+
+test("normalizeDiagnostics applies defaultSourceKind only when upstream did not supply one AND a filePath is present", () => {
+  const result = normalizeDiagnostics(
+    [
+      // No sourceKind + filePath set → default applies. This matches
+      // the javac case where the build-test runner emits source/file
+      // but no explicit sourceKind.
+      {
+        severity: "warning",
+        code: "javac",
+        message: "deprecated",
+        filePath: "src/main/java/c2c/Foo.java",
+      },
+      // Explicit sourceKind wins over the default even with filePath.
+      {
+        severity: "info",
+        code: "ir-note",
+        message: "ir-tagged",
+        sourceKind: "ir",
+        filePath: "src/main/java/c2c/Foo.java",
+      },
+      // Unknown sourceKind from upstream is dropped; default fills in
+      // when filePath is present.
+      {
+        severity: "info",
+        code: "future",
+        message: "tagged with unknown kind",
+        sourceKind: "future-thing",
+        filePath: "src/main/java/c2c/Foo.java",
+      },
+      // No sourceKind AND no filePath: per Codex review #244 round 3,
+      // the default does NOT apply. These are typically COBOL
+      // sourceLine references emitted by the IR validator and would
+      // be mis-routed if labelled "generated_java" or "build".
+      {
+        severity: "warning",
+        code: "skipped-group-item",
+        message: "GROUP item skipped at COBOL line 42",
+        line: 42,
+      },
+    ],
+    { defaultSourceKind: "build" },
+  );
+  assert.equal(result[0]?.sourceKind, "build");
+  assert.equal(result[1]?.sourceKind, "ir");
+  assert.equal(result[2]?.sourceKind, "build");
+  // Fileless diagnostic keeps undefined sourceKind — the Problems
+  // panel still lists it; it just does not get auto-routed to a pane.
+  assert.equal(result[3]?.sourceKind, undefined);
+});
+
+test("normalizeDiagnostics keeps undefined sourceKind when no default is supplied", () => {
+  const result = normalizeDiagnostics([
+    { severity: "info", code: "x", message: "untagged" },
+  ]);
+  assert.equal(result[0]?.sourceKind, undefined);
+});
+
+test("normalizeDiagnostics maps javac MANDATORY_WARNING to warning severity (review #244)", () => {
+  const result = normalizeDiagnostics([
+    {
+      level: "mandatory_warning",
+      code: "deprecation",
+      message: "uses a deprecated API",
+    },
+    {
+      level: "MANDATORY-WARNING",
+      code: "removal",
+      message: "scheduled for removal",
+    },
+  ]);
+  assert.equal(result[0]?.severity, "warning");
+  assert.equal(result[1]?.severity, "warning");
+});
+
+test("normalizeDiagnostics preserves byteSize=0 on artifactRef (review #244)", () => {
+  const result = normalizeDiagnostics([
+    {
+      severity: "info",
+      code: "EMPTY",
+      message: "empty artifact",
+      artifactRef: {
+        sha256: "a".repeat(64),
+        byteSize: 0,
+      },
+    },
+  ]);
+  assert.equal(result[0]?.artifactRef?.byteSize, 0);
+});
+
+
+test("normalizeDiagnostics rewrites absolute javac source paths to relative ones (review #244)", () => {
+  const result = normalizeDiagnostics([
+    {
+      severity: "error",
+      code: "javac-syntax",
+      message: "missing semicolon",
+      line: 12,
+      column: 7,
+      source:
+        "/var/lib/orchestrator/runs/run-42/src/main/java/c2c/Foo.java",
+    },
+    {
+      severity: "warning",
+      code: "javac-deprecation",
+      message: "deprecated",
+      line: 4,
+      filePath: "C:\\runs\\run-42\\src\\main\\java\\c2c\\Bar.java",
+    },
+    {
+      severity: "info",
+      code: "x",
+      message: "no path",
+    },
+  ]);
+  assert.equal(result[0]?.filePath, "src/main/java/c2c/Foo.java");
+  // Windows absolute paths normalize to the same anchor.
+  assert.equal(result[1]?.filePath, "src/main/java/c2c/Bar.java");
+  assert.equal(result[2]?.filePath, undefined);
 });
