@@ -1,4 +1,4 @@
-// Studio-IDE-7 (#252): per-file Java and per-program COBOL diff history.
+// Studio-IDE-7 (#252): per-file Java and per-(program, runId) COBOL diff history.
 //
 // Pure module. Holds no state of its own; callers (transformationRun.tsx)
 // pass the previous history entry and a new snapshot and receive the
@@ -7,21 +7,30 @@
 // resets on reload. IndexedDB persistence is a W1 candidate per the
 // issue body.
 //
-// Shape per the issue spec:
+// Java shape per the issue spec:
 //   { previous: { content, sourceHash, runId },
 //     current:  { content, sourceHash, runId } }
 //
+// COBOL is keyed by runId (NOT a previous/current slot pair). DiffWorkspace
+// selects ``cobolSnapshotsByRun[javaHistory.previous.runId]`` and
+// ``cobolSnapshotsByRun[javaHistory.current.runId]`` so the two panes
+// always reference the SAME run pair. Without this, a failed run between
+// two successes would shift the COBOL slot but not the Java slot, leaving
+// the displayed cause/effect pair mismatched (Copilot review #282).
+//
 // Semantics:
-//   - The first snapshot for a (sourceKey, filePath) becomes ``current``;
-//     ``previous`` is null. The "no previous run" empty state in
-//     DiffWorkspace renders against this.
-//   - A later snapshot with a *different* runId shifts the existing
+//   - The first Java snapshot for a (sourceKey, filePath) becomes
+//     ``current``; ``previous`` is null. The "no previous run" empty
+//     state in DiffWorkspace renders against this.
+//   - A later Java snapshot with a *different* runId shifts the existing
 //     ``current`` into ``previous`` and installs the new snapshot as
 //     ``current``.
-//   - A snapshot with the *same* runId as the existing ``current`` is a
-//     no-op — re-polling the same run for the same file must never
-//     destroy the "previous" entry. (Without this guard, opening the
-//     workspace twice in one run would silently break the diff.)
+//   - A Java snapshot with the *same* runId as the existing ``current``
+//     is a no-op — re-polling the same run for the same file must never
+//     destroy the "previous" entry.
+//   - A COBOL snapshot is inserted by (sourceKey, runId). Repeat writes
+//     for the same runId overwrite (same content for same run, so the
+//     operation is idempotent in practice).
 
 export interface JavaFileSnapshot {
   content: string;
@@ -40,11 +49,6 @@ export interface CobolSnapshot {
   runId: string;
 }
 
-export interface CobolHistoryEntry {
-  previous: CobolSnapshot | null;
-  current: CobolSnapshot;
-}
-
 export function appendJavaSnapshot(
   prev: JavaFileHistoryEntry | undefined,
   next: JavaFileSnapshot,
@@ -58,28 +62,29 @@ export function appendJavaSnapshot(
   return { previous: prev.current, current: next };
 }
 
-export function appendCobolSnapshot(
-  prev: CobolHistoryEntry | undefined,
-  next: CobolSnapshot,
-): CobolHistoryEntry {
-  if (!prev) {
-    return { previous: null, current: next };
+// Insert a COBOL snapshot into the per-(sourceKey) run-keyed map. The
+// pure helper exists so the store action stays trivial and so test code
+// can reason about the operation without instantiating React.
+export function recordCobolByRun(
+  prev: Record<string, CobolSnapshot> | undefined,
+  snapshot: CobolSnapshot,
+): Record<string, CobolSnapshot> {
+  const existing = prev?.[snapshot.runId];
+  if (
+    existing &&
+    existing.sourceHash === snapshot.sourceHash &&
+    existing.content === snapshot.content
+  ) {
+    // Idempotent: same run, same content. Preserve referential identity
+    // so memoized consumers do not re-render.
+    return prev as Record<string, CobolSnapshot>;
   }
-  if (prev.current.runId === next.runId) {
-    return prev;
-  }
-  return { previous: prev.current, current: next };
+  return { ...(prev ?? {}), [snapshot.runId]: snapshot };
 }
 
 // Convenience: does this entry have content for both sides of a diff?
 export function hasPreviousJava(
   entry: JavaFileHistoryEntry | undefined,
 ): entry is JavaFileHistoryEntry & { previous: JavaFileSnapshot } {
-  return entry !== undefined && entry.previous !== null;
-}
-
-export function hasPreviousCobol(
-  entry: CobolHistoryEntry | undefined,
-): entry is CobolHistoryEntry & { previous: CobolSnapshot } {
   return entry !== undefined && entry.previous !== null;
 }

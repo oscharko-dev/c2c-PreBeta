@@ -40,9 +40,8 @@ import {
   type ConflictRegionResolution,
 } from "../lib/editor/conflictDetection";
 import {
-  appendCobolSnapshot,
   appendJavaSnapshot,
-  type CobolHistoryEntry,
+  recordCobolByRun,
   type CobolSnapshot,
   type JavaFileHistoryEntry,
   type JavaFileSnapshot,
@@ -166,13 +165,15 @@ export interface TransformationRunContextValue {
   // ----- Studio-IDE-7 (#252) synchronized-diff history ------------------
   // In-memory, session-scoped accumulator. Keyed by ``sourceKey`` (the
   // active programId; same convention as the BFF / ADR-0007). Java
-  // history is per-(sourceKey, filePath); COBOL history is per-sourceKey.
-  // ``hydrateDiffHistory`` from useRunPolling does not reset these — only
-  // ``setState`` to a fresh ``idle`` phase from a new programId or a hard
-  // reload clears them, consistent with the issue body's session-only
-  // persistence model.
+  // history is a (previous, current) slot pair per (sourceKey, filePath);
+  // COBOL snapshots are keyed by runId — DiffWorkspace looks up the
+  // entries whose runIds match the Java history's previous and current
+  // so the panes never desynchronize when failed runs sit between
+  // successes (Copilot review #282).
+  // Session-only persistence: a fresh ``idle`` phase from a new programId
+  // or a hard reload clears these, consistent with the issue body.
   javaDiffHistory: Record<string, Record<string, JavaFileHistoryEntry>>;
-  cobolDiffHistory: Record<string, CobolHistoryEntry>;
+  cobolDiffHistory: Record<string, Record<string, CobolSnapshot>>;
   recordJavaDiffSnapshot: (
     sourceKey: string,
     filePath: string,
@@ -229,7 +230,7 @@ export function TransformationRunProvider({
     Record<string, Record<string, JavaFileHistoryEntry>>
   >({});
   const [cobolDiffHistory, setCobolDiffHistory] = useState<
-    Record<string, CobolHistoryEntry>
+    Record<string, Record<string, CobolSnapshot>>
   >({});
 
   const recordJavaDiffSnapshot = useCallback(
@@ -254,8 +255,11 @@ export function TransformationRunProvider({
   const recordCobolDiffSnapshot = useCallback(
     (sourceKey: string, snapshot: CobolSnapshot) => {
       setCobolDiffHistory((prev) => {
-        const next = appendCobolSnapshot(prev[sourceKey], snapshot);
-        if (next === prev[sourceKey]) {
+        const perSource = prev[sourceKey];
+        const next = recordCobolByRun(perSource, snapshot);
+        if (next === perSource) {
+          // Idempotent: same runId, same content. Preserve referential
+          // identity so memoized DiffWorkspace consumers do not re-render.
           return prev;
         }
         return { ...prev, [sourceKey]: next };
@@ -327,10 +331,12 @@ export function TransformationRunProvider({
     }));
 
     // Studio-IDE-7 (#252): snapshot the COBOL input this run consumed so
-    // the synchronized diff workflow has a previous→current pair to
-    // diff against on the next run. Recording at submit-time (rather
-    // than at completion) means a failed run still anchors history, so
-    // the next successful run can be diffed against the failed attempt.
+    // the synchronized diff workflow has a per-runId snapshot the
+    // workspace can pair against the Java history. Because COBOL is
+    // keyed by runId (not a sliding previous/current slot), an
+    // out-of-order hash resolution from an earlier submit is safe by
+    // construction — the late write lands at its own ``[oldRunId]``
+    // entry and cannot clobber the latest run's snapshot.
     const cobolRunId = result.data.runId;
     const cobolProgramId = result.data.programId;
     if (cobolProgramId) {
@@ -419,7 +425,8 @@ export function TransformationRunProvider({
 
     // Studio-IDE-7 (#252): mirror the COBOL snapshot recorded by
     // ``startTransform`` so a Generator-only run also feeds the
-    // synchronized-diff history.
+    // synchronized-diff history. Out-of-order hash resolution is safe
+    // here too — see the corresponding note in ``startTransform``.
     const cobolRunId = result.data.runId;
     const cobolProgramId = result.data.programId;
     if (cobolProgramId) {

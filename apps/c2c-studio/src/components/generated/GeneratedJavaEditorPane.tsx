@@ -1490,7 +1490,7 @@ export function GeneratedJavaEditorPane() {
           sourceKey={state.programId}
           runId={state.runId}
           javaHistory={javaDiffHistory[state.programId]?.[selectedFilePath]}
-          cobolHistory={cobolDiffHistory[state.programId]}
+          cobolSnapshotsByRun={cobolDiffHistory[state.programId]}
           onClose={() => setShowDiffWorkspace(false)}
         />
       ) : null}

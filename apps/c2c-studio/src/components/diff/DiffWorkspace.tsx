@@ -20,7 +20,7 @@ import { CodeEditor } from "@/components/editor/CodeEditor";
 import type { DiffEditorMountArgs } from "@/components/editor/CodeEditor";
 import { detectLanguageFromPath } from "@/lib/editor/languageDetection";
 import type {
-  CobolHistoryEntry,
+  CobolSnapshot,
   JavaFileHistoryEntry,
 } from "@/lib/editor/diffHistory";
 import {
@@ -41,7 +41,14 @@ export interface DiffWorkspaceProps {
   /** The active run that produced the "current" Java snapshot. */
   runId: string;
   javaHistory: JavaFileHistoryEntry | undefined;
-  cobolHistory: CobolHistoryEntry | undefined;
+  /**
+   * COBOL snapshots keyed by runId for this ``sourceKey``. DiffWorkspace
+   * resolves the previous/current COBOL pair by looking up the runIds
+   * present in ``javaHistory`` so the two diff panes always render the
+   * SAME run pair (Copilot review #282 — failed runs between successes
+   * must not desync the panes).
+   */
+  cobolSnapshotsByRun: Record<string, CobolSnapshot> | undefined;
   onClose: () => void;
 }
 
@@ -191,7 +198,7 @@ export function DiffWorkspace({
   sourceKey,
   runId,
   javaHistory,
-  cobolHistory,
+  cobolSnapshotsByRun,
   onClose,
 }: DiffWorkspaceProps) {
   // ----- Empty state: no previous run for this file ---------------------
@@ -212,7 +219,7 @@ export function DiffWorkspace({
       sourceKey={sourceKey}
       runId={runId}
       javaHistory={javaHistory}
-      cobolHistory={cobolHistory}
+      cobolSnapshotsByRun={cobolSnapshotsByRun}
       onClose={onClose}
     />
   );
@@ -228,7 +235,7 @@ interface DiffWorkspaceBodyProps {
   sourceKey: string;
   runId: string;
   javaHistory: JavaFileHistoryEntry;
-  cobolHistory: CobolHistoryEntry | undefined;
+  cobolSnapshotsByRun: Record<string, CobolSnapshot> | undefined;
   onClose: () => void;
 }
 
@@ -237,7 +244,7 @@ function DiffWorkspaceBody({
   sourceKey,
   runId,
   javaHistory,
-  cobolHistory,
+  cobolSnapshotsByRun,
   onClose,
 }: DiffWorkspaceBodyProps) {
   const language = useMemo(() => detectLanguageFromPath(filePath), [filePath]);
@@ -251,8 +258,13 @@ function DiffWorkspaceBody({
       "DiffWorkspaceBody invariant: previousJava must be populated",
     );
   }
-  const previousCobol = cobolHistory?.previous ?? null;
-  const currentCobol = cobolHistory?.current ?? null;
+  // Studio-IDE-7 review-finding (Copilot, PR #282): pair the COBOL
+  // snapshots by the Java runIds rather than maintaining a separate
+  // previous/current sliding window. If a failed run sits between the
+  // two displayed runs the lookup naturally skips it instead of
+  // shifting COBOL out of phase with Java.
+  const previousCobol = cobolSnapshotsByRun?.[previousJava.runId] ?? null;
+  const currentCobol = cobolSnapshotsByRun?.[currentJava.runId] ?? null;
   const cobolPresent = previousCobol !== null && currentCobol !== null;
 
   // ----- Traceability fetch (lineage availability) ----------------------
@@ -379,19 +391,21 @@ function DiffWorkspaceBody({
   const handleJavaMount = useCallback(
     ({ editor, monaco }: DiffEditorMountArgs) => {
       javaDiffRef.current = editor;
-      // F7 / Shift+F7 wired on both modified editors. Whichever side
-      // the user has focused captures the keystroke.
+      // Studio-IDE-7 review-finding (Copilot, PR #282): F7 / Shift+F7
+      // must work regardless of which side of the diff has focus. We
+      // register the same commands on BOTH underlying editors so a
+      // user-focused original (left) pane still cycles hunks.
       const modified = editor.getModifiedEditor();
       const original = editor.getOriginalEditor();
       const onFocus = () => setFocusSide("java");
       modified.onDidFocusEditorWidget(onFocus);
       original.onDidFocusEditorWidget(onFocus);
-      modified.addCommand(monaco.KeyCode.F7, () =>
-        jumpToHunk({ editor }, "next"),
-      );
-      modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, () =>
-        jumpToHunk({ editor }, "prev"),
-      );
+      const goNext = () => jumpToHunk({ editor }, "next");
+      const goPrev = () => jumpToHunk({ editor }, "prev");
+      modified.addCommand(monaco.KeyCode.F7, goNext);
+      modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
+      original.addCommand(monaco.KeyCode.F7, goNext);
+      original.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
       modified.onDidScrollChange(scheduleScrollSync);
     },
     [scheduleScrollSync],
@@ -405,12 +419,14 @@ function DiffWorkspaceBody({
       const onFocus = () => setFocusSide("cobol");
       modified.onDidFocusEditorWidget(onFocus);
       original.onDidFocusEditorWidget(onFocus);
-      modified.addCommand(monaco.KeyCode.F7, () =>
-        jumpToHunk({ editor }, "next"),
-      );
-      modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, () =>
-        jumpToHunk({ editor }, "prev"),
-      );
+      // Studio-IDE-7 review-finding (Copilot, PR #282): bind on both
+      // sides — see corresponding note in ``handleJavaMount``.
+      const goNext = () => jumpToHunk({ editor }, "next");
+      const goPrev = () => jumpToHunk({ editor }, "prev");
+      modified.addCommand(monaco.KeyCode.F7, goNext);
+      modified.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
+      original.addCommand(monaco.KeyCode.F7, goNext);
+      original.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F7, goPrev);
     },
     [],
   );
@@ -430,13 +446,14 @@ function DiffWorkspaceBody({
     [sourceKey, previousJava.runId, filePath],
   );
   const cobolModelUri = useMemo(
-    () => `inmemory://c2c-studio/diff/cobol/${sourceKey}/${runId}~modified`,
-    [sourceKey, runId],
+    () =>
+      `inmemory://c2c-studio/diff/cobol/${sourceKey}/${currentJava.runId}~modified`,
+    [sourceKey, currentJava.runId],
   );
   const cobolOriginalUri = useMemo(
     () =>
-      `inmemory://c2c-studio/diff/cobol/${sourceKey}/${previousCobol?.runId ?? "none"}~original`,
-    [sourceKey, previousCobol?.runId],
+      `inmemory://c2c-studio/diff/cobol/${sourceKey}/${previousJava.runId}~original`,
+    [sourceKey, previousJava.runId],
   );
 
   return (
