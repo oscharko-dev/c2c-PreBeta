@@ -18,6 +18,7 @@ import { editorPersistence } from "@/lib/editor/editorPersistence";
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
 import { MarkerNavigationProvider } from "@/lib/editor/markerNavigation";
 import { JavaEditorActionsProvider } from "@/stores/javaEditorActions";
+import { LineageCoverageProvider } from "@/stores/lineageCoverage";
 import { useMarkerNavigationShortcuts } from "@/hooks/useMarkerNavigationShortcuts";
 
 export function WorkbenchShell() {
@@ -39,11 +40,13 @@ export function WorkbenchShell() {
         <SourceWorkspaceProvider>
           <GeneratedArtifactsProvider>
             <OriginOverlayProvider>
-              <MarkerNavigationProvider>
-                <JavaEditorActionsProvider>
-                  <WorkbenchShellBody apiState={apiState} />
-                </JavaEditorActionsProvider>
-              </MarkerNavigationProvider>
+              <LineageCoverageProvider>
+                <MarkerNavigationProvider>
+                  <JavaEditorActionsProvider>
+                    <WorkbenchShellBody apiState={apiState} />
+                  </JavaEditorActionsProvider>
+                </MarkerNavigationProvider>
+              </LineageCoverageProvider>
             </OriginOverlayProvider>
           </GeneratedArtifactsProvider>
         </SourceWorkspaceProvider>

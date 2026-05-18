@@ -501,6 +501,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/runs/{runId}/traceability:
+    get:
+      summary: Per-run trust-pillar traceability envelope (Studio-IDE-6, #248)
+      description: |
+        Returns the deterministic generator's `c2c-trace.json` content, the
+        semantic IR's symbol map (irNodeId → cobolFile + cobolLine), and the
+        per-file Java region classification computed by the orchestrator.
+        Missing components surface as `null` / empty objects (200 OK) so a
+        run that has not reached `STATE_JAVA_CANDIDATE_PERSISTED` still
+        serves a well-formed response.
+      operationId: getRunTraceability
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Traceability envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TraceabilityEnvelope" }
+        "404":
+          description: Unknown run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/runs/{runId}/experience:
     get:
       summary: Return learning summary and policy for the run
@@ -1665,6 +1693,55 @@ components:
         missingArtifacts:
           type: array
           items: { type: string }
+        note: { type: string }
+
+    JavaRegionClassification:
+      type: object
+      required: [schemaVersion, lineRange, originClass, verificationOutcome, mappingClass]
+      properties:
+        schemaVersion: { type: string, enum: ["v0"] }
+        lineRange:
+          type: object
+          required: [startLine, endLine]
+          properties:
+            startLine: { type: integer, minimum: 1 }
+            endLine: { type: integer, minimum: 1 }
+        originClass:
+          type: string
+          enum: [deterministic, agent_proposed, repair_attempted, manual_modified, manual_edit]
+        verificationOutcome:
+          type: string
+          enum: [oracle_passed, oracle_failed, no_oracle]
+        mappingClass:
+          type: string
+          enum: [direct, aggregated, synthesized, agent_originated]
+    IrSymbolAnchor:
+      type: object
+      required: [cobolFile, cobolLine]
+      properties:
+        cobolFile: { type: string }
+        cobolLine: { type: integer, minimum: 0 }
+    TraceabilityEnvelope:
+      type: object
+      required: [schemaVersion, runId, programId, irSymbolMap]
+      properties:
+        schemaVersion: { type: string, enum: ["v0"] }
+        runId: { type: string }
+        programId: { type: string }
+        trace:
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: "null" }
+        irSymbolMap:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/IrSymbolAnchor" }
+        javaRegionClassification:
+          oneOf:
+            - type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/JavaRegionClassification" }
+            - { type: "null" }
         note: { type: string }
 
     ErrorResponse:

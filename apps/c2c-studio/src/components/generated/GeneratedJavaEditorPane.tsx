@@ -48,7 +48,37 @@ import {
   useJavaEditorActions,
   useRegisterCompileCheckHandler,
 } from "@/stores/javaEditorActions";
-import type { Diagnostic } from "@/types/api";
+import type {
+  Diagnostic,
+  JavaOriginRegion,
+  JavaRegionClassification,
+} from "@/types/api";
+import { useOriginOverlayApi, useOverlay } from "@/lib/editor/originOverlay";
+import { useLineageCoverageApi } from "@/stores/lineageCoverage";
+import {
+  fetchTraceability,
+  TraceabilityNotFoundError,
+} from "@/lib/editor/traceParser";
+import { resolveJavaToCobol } from "@/lib/editor/lineageNavigation";
+import {
+  buildTrustPillarDecorations,
+  lineageCoveragePct,
+} from "@/lib/editor/trustPillars";
+
+// Studio-IDE-6 (#248): synthetic Monaco marker owner for lineage-jump
+// feedback (e.g. "lineage stale due to manual edit"). Kept distinct from
+// the diagnostic owners so clearing it never wipes real diagnostics.
+const LINEAGE_FEEDBACK_OWNER = "c2c-lineage-feedback" as const;
+
+// Studio-IDE-6 (#248): a custom DOM event the Java pane dispatches when
+// the user invokes Alt+J on a region with valid lineage. The COBOL pane
+// listens for this and reveals the target line. Decoupling via window
+// events avoids prop-drilling and keeps the two panes loosely coupled.
+export interface RevealCobolDetail {
+  cobolFile: string;
+  cobolLine: number;
+}
+const REVEAL_COBOL_EVENT = "c2c:reveal-cobol";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
 const FORMAT_NOTICE_VISIBLE_MS = 4000;
@@ -104,6 +134,14 @@ export function GeneratedJavaEditorPane() {
     dismissJavaConflict,
     javaStatusFlags,
   } = useTransformationRun();
+
+  // Studio-IDE-6 (#248): origin-overlay + lineage-coverage wiring. The
+  // overlay context (shared with IDE-4/IDE-13) holds per-(runId, javaFile)
+  // region overlays; we publish trust-pillar overlays here. Coverage is a
+  // separate sibling store the StatusBar reads from.
+  const overlayApi = useOriginOverlayApi();
+  const lineageCoverageApi = useLineageCoverageApi();
+  const overlay = useOverlay(state.runId ?? null, selectedFilePath ?? null);
 
   const [showSaveNotice, setShowSaveNotice] = useState(false);
   // Studio-IDE-14 (#256): lint state, compile-check diagnostics, and the
@@ -493,6 +531,11 @@ export function GeneratedJavaEditorPane() {
   saveJavaDraftRef.current = saveJavaDraft;
   const selectedFilePathRef = useRef(selectedFilePath);
   selectedFilePathRef.current = selectedFilePath;
+  // Studio-IDE-6 (#248): ref-based capture of runId so the Alt+J action
+  // closure always sees the current runId without re-mounting the command
+  // on every state change.
+  const stateRunIdRef = useRef(state.runId);
+  stateRunIdRef.current = state.runId;
   const flushPendingEditRef = useRef(flushPendingEdit);
   flushPendingEditRef.current = flushPendingEdit;
   const formatOnSaveRef = useRef(formatOnSave);
@@ -526,6 +569,120 @@ export function GeneratedJavaEditorPane() {
       }
     };
   }, [selectedFilePath, displayedContent]);
+
+  // Studio-IDE-6 (#248): fetch the BFF traceability envelope when the
+  // active run or selected Java file changes, then publish the regions
+  // for the active file through OriginOverlayProvider so the decoration
+  // effect below can paint trust pillars. Failures are intentionally
+  // silent — the editor still works without the overlay; absence is
+  // surfaced through the StatusBar's "Lineage: —" state.
+  useEffect(() => {
+    const runId = state.runId;
+    const javaFile = selectedFilePath;
+    if (!runId || !javaFile) return;
+    let cancelled = false;
+    void fetchTraceability(runId).then(
+      (trace) => {
+        if (cancelled) return;
+        const regions = trace.javaRegionClassification.get(javaFile) ?? [];
+        overlayApi.setOverlay(runId, javaFile, {
+          schemaVersion: "v0",
+          runId,
+          javaFile,
+          regions: regions.map<JavaOriginRegion>((r) => ({
+            lineRange: r.lineRange,
+            originClass: r.originClass,
+            verificationOutcome: r.verificationOutcome,
+            mappingClass: r.mappingClass,
+          })),
+        });
+      },
+      (err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof TraceabilityNotFoundError) {
+          overlayApi.setOverlay(runId, javaFile, null);
+        }
+        // Other errors: leave any prior overlay in place (likely stale
+        // but better than wiping a working state for transient failures).
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [state.runId, selectedFilePath, overlayApi]);
+
+  // Studio-IDE-6 (#248): paint trust-pillar decorations and publish the
+  // file-level lineage-coverage percentage whenever the overlay or file
+  // changes. Manual regions count as non-covered per the issue spec.
+  const decorationCollectionRef = useRef<
+    import("monaco-editor").editor.IEditorDecorationsCollection | null
+  >(null);
+  useEffect(() => {
+    const editor = editorInstanceRef.current;
+    const monacoGlobal = (
+      window as unknown as { monaco?: typeof import("monaco-editor") }
+    ).monaco;
+    if (!editor) return;
+    const regions: readonly JavaRegionClassification[] = overlay?.regions
+      ? overlay.regions
+          .filter(
+            (
+              r,
+            ): r is JavaOriginRegion & {
+              verificationOutcome: NonNullable<
+                JavaOriginRegion["verificationOutcome"]
+              >;
+              mappingClass: NonNullable<JavaOriginRegion["mappingClass"]>;
+            } =>
+              r.verificationOutcome !== undefined &&
+              r.mappingClass !== undefined,
+          )
+          .map<JavaRegionClassification>((r) => ({
+            schemaVersion: "v0",
+            lineRange: r.lineRange,
+            originClass: r.originClass,
+            verificationOutcome: r.verificationOutcome,
+            mappingClass: r.mappingClass,
+          }))
+      : [];
+    if (monacoGlobal && regions.length > 0) {
+      const repairCount =
+        state.workflow?.repairAttempts?.filter(
+          (a) => a.repairDecision === "propose_candidate",
+        ).length ?? 0;
+      const decorations = buildTrustPillarDecorations({
+        monaco: monacoGlobal,
+        regions,
+        repairCount,
+      });
+      if (decorationCollectionRef.current) {
+        decorationCollectionRef.current.set(decorations);
+      } else {
+        decorationCollectionRef.current =
+          editor.createDecorationsCollection(decorations);
+      }
+    } else if (decorationCollectionRef.current) {
+      decorationCollectionRef.current.clear();
+    }
+    // Coverage: derive from the model line count (truthier than the
+    // raw fileContent because the user may be mid-edit).
+    const model = editor.getModel();
+    const totalLines = model?.getLineCount() ?? 0;
+    if (selectedFilePath && totalLines > 0) {
+      lineageCoverageApi.publish({
+        filePath: selectedFilePath,
+        pct: lineageCoveragePct(totalLines, regions),
+      });
+    } else {
+      lineageCoverageApi.publish(null);
+    }
+  }, [
+    overlay,
+    selectedFilePath,
+    state.workflow,
+    lineageCoverageApi,
+    editorMountToken,
+  ]);
 
   // Studio-IDE-14 (#256): replace the editor buffer with the supplied
   // content as a single atomic edit so the format is one undo step. The
@@ -686,6 +843,60 @@ export function GeneratedJavaEditorPane() {
       // F5 — Studio-IDE-14 Compile Check (Studio-IDE-13 endpoint).
       editor.addCommand(monaco.KeyCode.F5, () => {
         void performCompileCheckRef.current();
+      });
+      // Studio-IDE-6 (#248): Alt+J — "Reveal in COBOL source". Resolves the
+      // Java→COBOL lineage for the cursor line and dispatches a window event
+      // the COBOL pane listens to. Failures surface as info markers on the
+      // line so the user knows *why* the jump was not possible.
+      editor.addAction({
+        id: "c2c.lineage.javaToCobol",
+        label: "Reveal in COBOL source",
+        keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyJ],
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 1.5,
+        run: async (ed) => {
+          const runId = stateRunIdRef.current;
+          const javaFile = selectedFilePathRef.current;
+          const model = ed.getModel();
+          if (!runId || !javaFile || !model) return;
+          const position = ed.getPosition();
+          if (!position) return;
+          const result = await resolveJavaToCobol(
+            runId,
+            javaFile,
+            position.lineNumber,
+            model.getValue(),
+          );
+          if (result.ok) {
+            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
+            window.dispatchEvent(
+              new CustomEvent<RevealCobolDetail>(REVEAL_COBOL_EVENT, {
+                detail: {
+                  cobolFile: result.target.cobolFile,
+                  cobolLine: result.target.cobolLine,
+                },
+              }),
+            );
+          } else {
+            const message =
+              result.reason === "stale_manual_edit"
+                ? "Lineage to COBOL is stale due to manual edit"
+                : result.reason === "manual_only"
+                  ? "Region did not exist in Generator Baseline; no COBOL lineage"
+                  : "No source mapping available for this line";
+            monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, [
+              {
+                severity: monaco.MarkerSeverity.Info,
+                message,
+                startLineNumber: position.lineNumber,
+                endLineNumber: position.lineNumber,
+                startColumn: 1,
+                endColumn: model.getLineMaxColumn(position.lineNumber),
+                source: "c2c-lineage",
+              },
+            ]);
+          }
+        },
       });
     },
     [registerMarkerEditor],

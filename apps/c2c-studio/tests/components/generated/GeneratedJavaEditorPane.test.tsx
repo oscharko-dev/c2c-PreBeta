@@ -10,6 +10,13 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { GeneratedJavaEditorPane } from "@/components/generated/GeneratedJavaEditorPane";
 import { GeneratedArtifactsProvider } from "@/hooks/useGeneratedArtifacts";
+// Studio-IDE-6 (#248): the Java pane now consumes the OriginOverlay and
+// LineageCoverage providers (for trust-pillar overlays and the status-bar
+// coverage chip). Both providers are pure context wrappers — the test
+// renders them as no-op shells so the existing pane assertions continue
+// to exercise the same surface without provider-missing crashes.
+import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
+import { LineageCoverageProvider } from "@/stores/lineageCoverage";
 import { apiClient } from "@/lib/apiClient";
 import type { ApiResult, GeneratedFileContent } from "@/types/api";
 
@@ -145,9 +152,13 @@ function mockGeneratedFileContents(
 
 function renderPane() {
   return render(
-    <GeneratedArtifactsProvider>
-      <GeneratedJavaEditorPane />
-    </GeneratedArtifactsProvider>,
+    <OriginOverlayProvider>
+      <LineageCoverageProvider>
+        <GeneratedArtifactsProvider>
+          <GeneratedJavaEditorPane />
+        </GeneratedArtifactsProvider>
+      </LineageCoverageProvider>
+    </OriginOverlayProvider>,
   );
 }
 

@@ -93,6 +93,9 @@ function disabledOrchestrator(): OrchestratorClient {
     async getWorkflow() {
       return undefined;
     },
+    async getTraceability() {
+      return undefined;
+    },
   };
 }
 

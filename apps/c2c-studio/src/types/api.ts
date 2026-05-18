@@ -518,9 +518,42 @@ export type JavaOriginClass =
   | "manual_modified"
   | "manual_edit";
 
+// Studio-IDE-6 (#248): per-region verification outcome. ``no_oracle`` means
+// the region was generated but the run never reached an oracle comparison;
+// the Studio renders this as a "yellow" trust pillar so the user never sees
+// a green badge unless an oracle actually passed.
+export type JavaVerificationOutcome =
+  | "oracle_passed"
+  | "oracle_failed"
+  | "no_oracle";
+
+// Studio-IDE-6 (#248): how the region maps back to COBOL semantics.
+//
+//   * ``direct``           — 1:1 statement mapping (a single IR statement
+//                            became a single Java statement).
+//   * ``aggregated``       — many COBOL statements collapsed into one Java
+//                            region (e.g. paragraph fold-in).
+//   * ``synthesized``      — Java scaffolding the generator emitted without
+//                            a direct COBOL counterpart (e.g. main / try-
+//                            finally wrappers).
+//   * ``agent_originated`` — produced by an assist or repair agent rather
+//                            than the deterministic translator.
+export type JavaMappingClass =
+  | "direct"
+  | "aggregated"
+  | "synthesized"
+  | "agent_originated";
+
+// Studio-IDE-6 (#248): IDE-13 will extend this with richer overlay fields,
+// but the optional shape lands here so the IndexedDB envelope (IDE-3) can
+// carry the v1 overlay forward without a schema bump. ``verificationOutcome``
+// and ``mappingClass`` are optional so older fixtures and the IDE-4 baseline
+// overlay keep typechecking.
 export interface JavaOriginRegion {
   lineRange: { startLine: number; endLine: number };
   originClass: JavaOriginClass;
+  verificationOutcome?: JavaVerificationOutcome;
+  mappingClass?: JavaMappingClass;
 }
 
 export interface JavaOriginOverlay {
@@ -528,4 +561,44 @@ export interface JavaOriginOverlay {
   runId: string;
   javaFile: string;
   regions: JavaOriginRegion[];
+}
+
+// Studio-IDE-6 (#248): region-granular classification surfaced by the BFF
+// traceability envelope. The Java pane uses this to paint trust-pillar
+// decorations; the lineage layer uses it to gate Java→COBOL jumps.
+//
+// ``verificationOutcome`` and ``mappingClass`` are REQUIRED here (in
+// contrast to ``JavaOriginRegion``) because the traceability envelope is
+// the authoritative source for IDE-6 trust-pillar painting — missing
+// fields would force a fallback colour we explicitly do not want.
+export interface JavaRegionClassification {
+  schemaVersion: "v0";
+  lineRange: { startLine: number; endLine: number };
+  originClass: JavaOriginClass;
+  verificationOutcome: JavaVerificationOutcome;
+  mappingClass: JavaMappingClass;
+}
+
+// Studio-IDE-6 (#248): anchor an IR symbol back to its originating COBOL
+// source line. Used by the inline IR-comment → COBOL lineage resolver.
+export interface IrSymbolAnchor {
+  cobolFile: string;
+  cobolLine: number;
+}
+
+// Studio-IDE-6 (#248): the full traceability envelope returned by
+// ``GET /api/v0/runs/{runId}/traceability``. ``trace`` is opaque pass-
+// through (the IR graph is consumed elsewhere); the two maps are the
+// load-bearing surfaces for lineage navigation and trust pillars.
+//
+// Map keys: ``irSymbolMap`` keyed by IR node id (e.g. ``s-move-x``);
+//           ``javaRegionClassification`` keyed by generated Java file path
+//           (e.g. ``src/main/java/...``).
+export interface TraceabilityEnvelope {
+  schemaVersion: "v0";
+  runId: string;
+  programId: string;
+  trace: Record<string, unknown> | null;
+  irSymbolMap: Record<string, IrSymbolAnchor>;
+  javaRegionClassification: Record<string, JavaRegionClassification[]>;
 }

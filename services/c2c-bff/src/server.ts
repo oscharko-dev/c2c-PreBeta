@@ -364,6 +364,10 @@ function runSummary(stored: StoredRun): Record<string, unknown> {
     finalClassification: stored.finalClassification ?? null,
     failureCode: stored.failureCode ?? null,
     failureMessage: stored.failureMessage ?? null,
+    // Studio-IDE-6 (#248): per-file Java region classification cached from
+    // the orchestrator's traceability payload. Absent until first traceability
+    // fetch; null when unavailable.
+    javaRegionClassification: stored.javaRegionClassification ?? null,
   };
   return summary;
 }
@@ -380,6 +384,7 @@ function runLinks(runId: string): Record<string, string> {
     learning: `/api/v0/runs/${runId}/learning`,
     experience: `/api/v0/runs/${runId}/experience`,
     workflow: `/api/v0/runs/${runId}/workflow`,
+    traceability: `/api/v0/runs/${runId}/traceability`,
   };
 }
 
@@ -1417,6 +1422,127 @@ async function liveEvidenceView(
       manifestHash: "",
       validationStatus: "unknown",
       exportRef: null,
+    };
+  }
+}
+
+// Studio-IDE-6 (#248): trust-pillar traceability types.
+interface JavaRegionClassification {
+  schemaVersion: "v0";
+  lineRange: { startLine: number; endLine: number };
+  originClass: string;
+  verificationOutcome: string;
+  mappingClass: string;
+}
+
+async function liveTraceabilityView(
+  stored: StoredRun,
+  orchestrator: OrchestratorClient,
+): Promise<Record<string, unknown>> {
+  const stubEnvelope = {
+    schemaVersion: "v0" as const,
+    runId: stored.runId,
+    programId: stored.programId,
+    trace: null,
+    irSymbolMap: {},
+    javaRegionClassification: null,
+  };
+  const liveRunId = liveArtifactRunId(stored);
+  if (!liveRunId || !orchestrator.enabled) {
+    return {
+      ...stubEnvelope,
+      note: "Live run id is unavailable; traceability cannot be served.",
+    };
+  }
+  try {
+    const upstream = await orchestrator.getTraceability(liveRunId);
+    if (!upstream || upstream.status < 200 || upstream.status >= 300) {
+      return {
+        ...stubEnvelope,
+        note: "Live run id is unavailable; traceability cannot be served.",
+      };
+    }
+    const body = asRecord(upstream.body) ?? {};
+    const traceRaw = body.trace;
+    const trace =
+      traceRaw !== null &&
+      typeof traceRaw === "object" &&
+      !Array.isArray(traceRaw)
+        ? (traceRaw as Record<string, unknown>)
+        : null;
+    const irSymbolMapRaw = asRecord(body.irSymbolMap) ?? {};
+    const irSymbolMap: Record<
+      string,
+      { cobolFile: string; cobolLine: number }
+    > = {};
+    for (const [key, val] of Object.entries(irSymbolMapRaw)) {
+      const entry = asRecord(val);
+      if (!entry) continue;
+      const cobolFile = asString(entry.cobolFile);
+      const cobolLine = asNumber(entry.cobolLine);
+      if (cobolFile && cobolLine !== undefined && Number.isInteger(cobolLine)) {
+        irSymbolMap[key] = { cobolFile, cobolLine };
+      }
+    }
+    const jrcRaw = body.javaRegionClassification;
+    let javaRegionClassification: Record<
+      string,
+      JavaRegionClassification[]
+    > | null = null;
+    if (
+      jrcRaw !== null &&
+      typeof jrcRaw === "object" &&
+      !Array.isArray(jrcRaw)
+    ) {
+      const jrcRecord = asRecord(jrcRaw) ?? {};
+      const result: Record<string, JavaRegionClassification[]> = {};
+      for (const [file, arr] of Object.entries(jrcRecord)) {
+        if (!Array.isArray(arr)) continue;
+        const valid: JavaRegionClassification[] = [];
+        for (const entry of arr) {
+          const e = asRecord(entry);
+          if (!e) continue;
+          const lr = asRecord(e.lineRange);
+          if (!lr) continue;
+          const startLine = asNumber(lr.startLine);
+          const endLine = asNumber(lr.endLine);
+          const originClass = asString(e.originClass);
+          const verificationOutcome = asString(e.verificationOutcome);
+          const mappingClass = asString(e.mappingClass);
+          if (
+            startLine !== undefined &&
+            Number.isInteger(startLine) &&
+            endLine !== undefined &&
+            Number.isInteger(endLine) &&
+            originClass &&
+            verificationOutcome &&
+            mappingClass
+          ) {
+            valid.push({
+              schemaVersion: "v0",
+              lineRange: { startLine, endLine },
+              originClass,
+              verificationOutcome,
+              mappingClass,
+            });
+          }
+        }
+        result[file] = valid;
+      }
+      javaRegionClassification = result;
+    }
+    return {
+      schemaVersion: "v0" as const,
+      runId: stored.runId,
+      programId: stored.programId,
+      trace,
+      irSymbolMap,
+      javaRegionClassification,
+    };
+  } catch {
+    return {
+      ...stubEnvelope,
+      note: "Live run id is unavailable; traceability cannot be served.",
     };
   }
 }
@@ -3378,6 +3504,34 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         jsonResponse(res, 200, await liveEventsView(stored, orchestrator));
+        return;
+      }
+
+      const traceabilityMatch =
+        /^\/api\/v0\/runs\/([^\/]+)\/traceability$/.exec(pathname);
+      if (traceabilityMatch && method === "GET") {
+        const runId = decodeURIComponent(traceabilityMatch[1] ?? "");
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === "diagnostic-fixture") {
+          jsonResponse(res, 200, {
+            schemaVersion: "v0" as const,
+            runId: stored.runId,
+            programId: stored.programId,
+            trace: null,
+            irSymbolMap: {},
+            javaRegionClassification: null,
+          });
+          return;
+        }
+        jsonResponse(
+          res,
+          200,
+          await liveTraceabilityView(stored, orchestrator),
+        );
         return;
       }
 

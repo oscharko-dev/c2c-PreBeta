@@ -1,3 +1,8 @@
+/* Studio-IDE-6 (#248): trust-pillar gutter glyphs + margin bars.
+   `@import` MUST precede any other rules per the CSS spec — Next.js +
+   PostCSS rejects the file otherwise. */
+@import "../styles/trust-pillars.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -19,16 +24,16 @@
     --text-dim: #8a90a0;
     --text-faint: #747b8c;
     --text-bright: #eef0f4;
-    --accent: #4EBA87;
-    --accent-dim: #3F9E73;
+    --accent: #4eba87;
+    --accent-dim: #3f9e73;
     --accent-soft: rgba(78, 186, 135, 0.18);
-    --success: #4EBA87;
+    --success: #4eba87;
     --success-soft: rgba(78, 166, 116, 0.16);
     --warn: #d4a25b;
     --warn-soft: rgba(212, 162, 91, 0.16);
     --error: #d96168;
     --error-soft: rgba(217, 97, 104, 0.16);
-    --teal: #4EBA87;
+    --teal: #4eba87;
     --teal-soft: rgba(78, 186, 135, 0.14);
     --violet: #b58af0;
     --violet-soft: rgba(181, 138, 240, 0.14);
@@ -36,7 +41,8 @@
     --orange-soft: rgba(224, 142, 88, 0.14);
 
     --font-ui-fallback: -apple-system, "Helvetica Neue", Arial, sans-serif;
-    --font-mono-fallback: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --font-mono-fallback:
+      ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   }
 
   html,

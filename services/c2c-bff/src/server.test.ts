@@ -95,6 +95,8 @@ interface ArtifactStubResponses {
   progress?: UpstreamResponse;
   learning?: UpstreamResponse;
   workflow?: UpstreamResponse;
+  // Studio-IDE-6 (#248): per-run trust-pillar traceability payload.
+  traceability?: UpstreamResponse;
 }
 
 function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
@@ -123,6 +125,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getProgress: number;
     getLearning: number;
     getWorkflow: number;
+    getTraceability: number;
   };
 } {
   const calls = {
@@ -149,6 +152,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getProgress: 0,
     getLearning: 0,
     getWorkflow: 0,
+    getTraceability: 0,
   };
   const client: OrchestratorClient = {
     enabled: true,
@@ -247,6 +251,10 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       calls.getWorkflow += 1;
       return artifactResponses.workflow;
     },
+    async getTraceability() {
+      calls.getTraceability += 1;
+      return artifactResponses.traceability;
+    },
   };
   return { client, calls };
 }
@@ -291,6 +299,9 @@ function disabledOrchestrator(): OrchestratorClient {
       return undefined;
     },
     async getWorkflow() {
+      return undefined;
+    },
+    async getTraceability() {
       return undefined;
     },
   };
@@ -986,6 +997,9 @@ test("starting a run surfaces orchestrator failures instead of silently falling 
     async getWorkflow() {
       return undefined;
     },
+    async getTraceability() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
@@ -1050,6 +1064,9 @@ test("starting a run with orchestrator non-2xx response returns 502 and creates 
       return undefined;
     },
     async getWorkflow() {
+      return undefined;
+    },
+    async getTraceability() {
       return undefined;
     },
   };
@@ -2109,6 +2126,7 @@ test("transform derives program id, calls orchestrator, and returns the full tra
       learning: `/api/v0/runs/${body.runId}/learning`,
       experience: `/api/v0/runs/${body.runId}/experience`,
       workflow: `/api/v0/runs/${body.runId}/workflow`,
+      traceability: `/api/v0/runs/${body.runId}/traceability`,
     });
   } finally {
     await server.close();
@@ -2190,6 +2208,9 @@ test("transform does not create a run when the orchestrator returns a non-2xx st
     async getWorkflow() {
       return undefined;
     },
+    async getTraceability() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
@@ -2253,6 +2274,9 @@ test("transform does not create a run when the orchestrator throws", async () =>
       return undefined;
     },
     async getWorkflow() {
+      return undefined;
+    },
+    async getTraceability() {
       return undefined;
     },
   };
@@ -4748,6 +4772,9 @@ test("transform 502 response carries a UI-safe failureCode and never leaks orche
     async getWorkflow() {
       return undefined;
     },
+    async getTraceability() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
@@ -4868,6 +4895,9 @@ test("concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
         status: 200,
         body: { status: "complete", source: "live", contract },
       };
+    },
+    async getTraceability() {
+      return undefined;
     },
   };
   const handler = createApp({
@@ -5179,6 +5209,161 @@ test("GET /api/v0/runs/{runId} surfaces the W0.3-5 budgets on the run summary", 
       used: 1,
       remaining: 5,
     });
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Studio-IDE-6 (#248): GET /api/v0/runs/{runId}/traceability
+// ---------------------------------------------------------------------------
+
+test("GET /api/v0/runs/{runId}/traceability returns the traceability envelope on happy path", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const traceabilityBody = {
+    schemaVersion: "v0",
+    runId: "live-run-1",
+    programId: "CASE01",
+    trace: {
+      irId: "ir-CASE01",
+      files: { "src/main/java/Foo.java": ["s-move-1"] },
+    },
+    irSymbolMap: { "s-move-1": { cobolFile: "CASE01.cbl", cobolLine: 42 } },
+    javaRegionClassification: {
+      "src/main/java/Foo.java": [
+        {
+          schemaVersion: "v0",
+          lineRange: { startLine: 10, endLine: 15 },
+          originClass: "deterministic",
+          verificationOutcome: "oracle_passed",
+          mappingClass: "direct",
+        },
+      ],
+    },
+  };
+  const { client: orch, calls } = stubOrchestrator({
+    traceability: { status: 200, body: traceabilityBody },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+    );
+    assert.equal(result.status, 200);
+    const body = result.body as {
+      schemaVersion: string;
+      runId: string;
+      programId: string;
+      trace: Record<string, unknown> | null;
+      irSymbolMap: Record<string, { cobolFile: string; cobolLine: number }>;
+      javaRegionClassification: Record<
+        string,
+        Array<{
+          schemaVersion: string;
+          lineRange: { startLine: number; endLine: number };
+          originClass: string;
+          verificationOutcome: string;
+          mappingClass: string;
+        }>
+      > | null;
+    };
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(calls.getTraceability, 1);
+    assert.deepEqual(body.irSymbolMap["s-move-1"], {
+      cobolFile: "CASE01.cbl",
+      cobolLine: 42,
+    });
+    assert.ok(body.javaRegionClassification !== null);
+    const jrc = body.javaRegionClassification!["src/main/java/Foo.java"];
+    assert.ok(Array.isArray(jrc) && jrc.length === 1);
+    assert.equal(jrc[0]?.schemaVersion, "v0");
+    assert.deepEqual(jrc[0]?.lineRange, { startLine: 10, endLine: 15 });
+    assert.equal(jrc[0]?.originClass, "deterministic");
+    assert.equal(jrc[0]?.verificationOutcome, "oracle_passed");
+    assert.equal(jrc[0]?.mappingClass, "direct");
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId}/traceability returns 404 for unknown run", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/does-not-exist/traceability`,
+    );
+    assert.equal(result.status, 404);
+    const body = result.body as { error: string };
+    assert.ok(
+      body.error.includes("unknown runId"),
+      `expected "unknown runId" in error, got: ${body.error}`,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId}/traceability returns stub envelope for diagnostic-fixture run", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  // diagnostic-fixture mode requires a disabled orchestrator (no orchestratorUrl)
+  const handler = createApp({
+    config: { ...baseConfig, enableDiagnosticFixtures: true },
+    samples,
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string; mode: string };
+    assert.equal(startedBody.mode, "diagnostic-fixture");
+
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+    );
+    assert.equal(result.status, 200);
+    const body = result.body as {
+      schemaVersion: string;
+      trace: unknown;
+      irSymbolMap: Record<string, unknown>;
+      javaRegionClassification: unknown;
+    };
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(body.trace, null);
+    assert.deepEqual(body.irSymbolMap, {});
+    assert.equal(body.javaRegionClassification, null);
+    // diagnostic-fixture runs must not proxy to the orchestrator (getTraceability === 0
+    // is verified structurally: disabledOrchestrator has enabled:false so the route
+    // returns the stub envelope directly without calling getTraceability).
   } finally {
     await server.close();
   }
