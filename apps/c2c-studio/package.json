@@ -10,12 +10,15 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:ci": "playwright test --grep-invert @visual",
-    "test:e2e:update-snapshots": "playwright test --grep @visual --update-snapshots"
+    "test:e2e:update-snapshots": "playwright test --grep @visual --update-snapshots",
+    "verify:monaco-lazy": "node scripts/verify-monaco-lazy.mjs"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "autoprefixer": "^10.4.19",
     "clsx": "^2.1.1",
     "lucide-react": "^0.378.0",
+    "monaco-editor": "^0.55.1",
     "next": "^16.2.6",
     "postcss": "8.5.10",
     "react": "^18.3.1",
