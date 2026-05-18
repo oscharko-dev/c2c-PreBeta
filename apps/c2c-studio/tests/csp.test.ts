@@ -76,6 +76,17 @@ describe("Studio-IDE-12 (#250) Content Security Policy", () => {
     expect(csp).toMatch(/script-src 'self'/);
   });
 
+  // Studio-IDE-12 (#250) follow-up: production fallback CSP MUST NOT
+  // permit ``'unsafe-inline'``. The middleware overrides this header
+  // with a per-request nonce on every HTML response, so the only
+  // routes that fall through to this fallback are static assets
+  // that ship no inline scripts.
+  it("production fallback forbids 'unsafe-inline' on script-src", async () => {
+    const csp = await resolveCsp();
+    const scriptDirective = csp.match(/script-src[^;]*/)?.[0] ?? "";
+    expect(scriptDirective).not.toContain("'unsafe-inline'");
+  });
+
   it("allows worker-src 'self' blob: for Monaco web workers", async () => {
     const csp = await resolveCsp();
     expect(csp).toContain("worker-src 'self' blob:");
