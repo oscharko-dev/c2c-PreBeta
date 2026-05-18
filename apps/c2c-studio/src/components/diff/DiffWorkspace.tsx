@@ -23,6 +23,7 @@ import type {
   CobolSnapshot,
   JavaFileHistoryEntry,
 } from "@/lib/editor/diffHistory";
+import { emit as emitTelemetry } from "@/lib/editor/editorTelemetry";
 import {
   fetchTraceability,
   TraceabilityNotFoundError,
@@ -201,6 +202,27 @@ export function DiffWorkspace({
   cobolSnapshotsByRun,
   onClose,
 }: DiffWorkspaceProps) {
+  const hasPrevious = Boolean(javaHistory && javaHistory.previous !== null);
+  // Studio-IDE-11 (#251): diff.open carries only the two booleans the
+  // closed enum allows. Lineage availability is best-effort here — we
+  // don't block on the traceability fetch; the body component's
+  // useEffect resolves true lineage state and the telemetry signal
+  // suffices as a "user opened the diff" heartbeat.
+  useEffect(() => {
+    emitTelemetry({
+      eventType: "diff.open",
+      payload: {
+        hasPrevious,
+        // The Diff body owns the precise lineage resolution; this is a
+        // conservative best-effort signal — "we opened a workspace
+        // anchored to this run + filePath".
+        lineageAvailable: false,
+      },
+    });
+    // Re-emit on file/run change because the user has effectively
+    // opened a different diff at that point.
+  }, [filePath, runId, hasPrevious]);
+
   // ----- Empty state: no previous run for this file ---------------------
   if (!javaHistory || javaHistory.previous === null) {
     return (

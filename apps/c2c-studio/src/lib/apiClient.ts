@@ -40,8 +40,11 @@ import {
   VerifyResponse,
 } from "@/types/api";
 import { TransformRequest } from "@/types/transform-request";
+import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
 
-const LOCAL_OVERRIDE_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+// Re-exported so existing callers that imported `resolveApiBaseUrl`
+// from "@/lib/apiClient" keep working without a churn-y refactor.
+export { resolveApiBaseUrl };
 
 function createFailure<T>(
   message: string,
@@ -49,47 +52,6 @@ function createFailure<T>(
   status?: number,
 ): ApiResult<T> {
   return { ok: false, status, message, details } as ApiResult<T>;
-}
-
-export function resolveApiBaseUrl(
-  envValue = process.env.NEXT_PUBLIC_C2C_BFF_BASE_URL,
-): ApiResult<string> {
-  if (!envValue) {
-    return { ok: true, data: "" };
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(envValue);
-  } catch (cause) {
-    return createFailure(
-      "Runtime configuration error: NEXT_PUBLIC_C2C_BFF_BASE_URL must be an absolute URL.",
-      { kind: "config", cause },
-    );
-  }
-
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    return createFailure(
-      "Runtime configuration error: NEXT_PUBLIC_C2C_BFF_BASE_URL must use http or https.",
-      { kind: "config", cause: parsed.protocol },
-    );
-  }
-
-  if (!LOCAL_OVERRIDE_HOSTS.has(parsed.hostname)) {
-    return createFailure(
-      "Runtime configuration error: NEXT_PUBLIC_C2C_BFF_BASE_URL is limited to local split-server development.",
-      { kind: "config", cause: parsed.hostname },
-    );
-  }
-
-  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
-    return createFailure(
-      "Runtime configuration error: NEXT_PUBLIC_C2C_BFF_BASE_URL must not include a path, query, or hash.",
-      { kind: "config", cause: envValue },
-    );
-  }
-
-  return { ok: true, data: parsed.origin };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

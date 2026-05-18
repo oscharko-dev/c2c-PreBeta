@@ -1,0 +1,496 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/editor-telemetry-event-v0.json",
+  "title": "Editor Telemetry Event v0",
+  "description": "Closed-enum, tag-only Studio editor telemetry envelope (Issue #251 / Studio-IDE-11). No free-form string fields exist anywhere in the payload — every variable field is either a fixed enum, a numeric bucket label, or a non-negative integer count. Source content, field names, file paths, and identifiers from the source program MUST NOT appear.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "eventType",
+    "payload",
+    "occurredAt",
+    "sessionId",
+    "tenantId",
+    "userId"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "v0" },
+    "eventType": { "$ref": "#/$defs/eventType" },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp when the event was emitted by the Studio."
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._\\-]{1,128}$",
+      "description": "Per-tab editor session id. Derived from the same session token the BFF uses for Editor-Assist (AC6)."
+    },
+    "tenantId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._\\-]{1,128}$"
+    },
+    "userId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._\\-]{1,128}$"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Tag-only payload. Shape is constrained per eventType via the oneOf branches below."
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/markerNavigate" },
+    { "$ref": "#/$defs/hoverOpened" },
+    { "$ref": "#/$defs/hoverExpanded" },
+    { "$ref": "#/$defs/lineageNavigate" },
+    { "$ref": "#/$defs/stacktraceFrameClick" },
+    { "$ref": "#/$defs/diffOpen" },
+    { "$ref": "#/$defs/assistInvoked" },
+    { "$ref": "#/$defs/assistResult" },
+    { "$ref": "#/$defs/saveLocal" },
+    { "$ref": "#/$defs/conflictResolved" },
+    { "$ref": "#/$defs/generateInvoked" },
+    { "$ref": "#/$defs/generateResult" },
+    { "$ref": "#/$defs/compileCheckInvoked" },
+    { "$ref": "#/$defs/compileCheckResult" },
+    { "$ref": "#/$defs/verifyInvoked" },
+    { "$ref": "#/$defs/verifyResult" },
+    { "$ref": "#/$defs/threeWayMergeOpened" },
+    { "$ref": "#/$defs/threeWayMergeResolved" },
+    { "$ref": "#/$defs/manualEditRegionClassified" },
+    { "$ref": "#/$defs/formatInvoked" },
+    { "$ref": "#/$defs/formatResult" },
+    { "$ref": "#/$defs/lintMarkersChanged" }
+  ],
+  "$defs": {
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "marker.navigate",
+        "hover.opened",
+        "hover.expanded",
+        "lineage.navigate",
+        "stacktrace.frame_click",
+        "diff.open",
+        "assist.invoked",
+        "assist.result",
+        "save.local",
+        "conflict.resolved",
+        "generate.invoked",
+        "generate.result",
+        "compile_check.invoked",
+        "compile_check.result",
+        "verify.invoked",
+        "verify.result",
+        "three_way_merge.opened",
+        "three_way_merge.resolved",
+        "manual_edit.region_classified",
+        "format.invoked",
+        "format.result",
+        "lint.markers_changed"
+      ]
+    },
+    "sourceKind": { "type": "string", "enum": ["cobol", "java"] },
+    "severity": {
+      "type": "string",
+      "enum": ["error", "warning", "info", "hint"]
+    },
+    "mappingClass": {
+      "type": "string",
+      "enum": ["direct", "aggregated", "synthesized", "agent_originated"]
+    },
+    "nonNegativeInt": { "type": "integer", "minimum": 0 },
+    "markerNavigate": {
+      "properties": {
+        "eventType": { "const": "marker.navigate" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["direction", "sourceKind", "severity"],
+          "properties": {
+            "direction": { "type": "string", "enum": ["next", "prev"] },
+            "sourceKind": { "$ref": "#/$defs/sourceKind" },
+            "severity": { "$ref": "#/$defs/severity" },
+            "irCodeOrIRNodeKind": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            }
+          }
+        }
+      }
+    },
+    "hoverOpened": {
+      "properties": {
+        "eventType": { "const": "hover.opened" },
+        "payload": { "$ref": "#/$defs/hoverPayload" }
+      }
+    },
+    "hoverExpanded": {
+      "properties": {
+        "eventType": { "const": "hover.expanded" },
+        "payload": { "$ref": "#/$defs/hoverPayload" }
+      }
+    },
+    "hoverPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["constructKind"],
+      "properties": {
+        "constructKind": {
+          "type": "string",
+          "enum": [
+            "pic",
+            "comp3",
+            "occurs",
+            "redefines",
+            "value",
+            "section",
+            "paragraph",
+            "fixed-format-zone"
+          ]
+        }
+      }
+    },
+    "lineageNavigate": {
+      "properties": {
+        "eventType": { "const": "lineage.navigate" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["direction", "resolved"],
+          "properties": {
+            "direction": {
+              "type": "string",
+              "enum": ["java_to_cobol", "cobol_to_java"]
+            },
+            "resolved": { "type": "boolean" },
+            "mappingClass": { "$ref": "#/$defs/mappingClass" },
+            "unresolvedReason": {
+              "type": "string",
+              "enum": ["no_mapping", "stale_manual_edit", "manual_only"]
+            }
+          }
+        }
+      }
+    },
+    "stacktraceFrameClick": {
+      "properties": {
+        "eventType": { "const": "stacktrace.frame_click" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved"],
+          "properties": {
+            "resolved": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "diffOpen": {
+      "properties": {
+        "eventType": { "const": "diff.open" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hasPrevious", "lineageAvailable"],
+          "properties": {
+            "hasPrevious": { "type": "boolean" },
+            "lineageAvailable": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "assistInvoked": {
+      "properties": {
+        "eventType": { "const": "assist.invoked" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sourceKind", "regionLineCount", "redactionApplied"],
+          "properties": {
+            "sourceKind": { "$ref": "#/$defs/sourceKind" },
+            "regionLineCount": { "$ref": "#/$defs/nonNegativeInt" },
+            "redactionApplied": { "$ref": "#/$defs/nonNegativeInt" }
+          }
+        }
+      }
+    },
+    "assistResult": {
+      "properties": {
+        "eventType": { "const": "assist.result" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome"],
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "success",
+                "budget_exhausted",
+                "policy_denied",
+                "gateway_unavailable",
+                "timeout",
+                "invalid_region"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "saveLocal": {
+      "properties": {
+        "eventType": { "const": "save.local" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "encrypted"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["cobol", "java"] },
+            "encrypted": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "conflictResolved": {
+      "properties": {
+        "eventType": { "const": "conflict.resolved" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pick"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["cobol", "java"] },
+            "pick": {
+              "type": "string",
+              "enum": ["backend_sample", "local_draft", "last_run_input"]
+            }
+          }
+        }
+      }
+    },
+    "generateInvoked": {
+      "properties": {
+        "eventType": { "const": "generate.invoked" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trigger", "hadManualEdits"],
+          "properties": {
+            "trigger": {
+              "type": "string",
+              "enum": ["generate", "regenerate", "generate_and_verify"]
+            },
+            "hadManualEdits": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "generateResult": {
+      "properties": {
+        "eventType": { "const": "generate.result" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "latencyBucket"],
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": ["success", "merge_required", "failed", "cancelled"]
+            },
+            "latencyBucket": {
+              "type": "string",
+              "enum": ["lt_2s", "lt_10s", "lt_60s", "ge_60s"]
+            }
+          }
+        }
+      }
+    },
+    "compileCheckInvoked": {
+      "properties": {
+        "eventType": { "const": "compile_check.invoked" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trigger"],
+          "properties": {
+            "trigger": { "type": "string", "enum": ["toolbar", "shortcut"] }
+          }
+        }
+      }
+    },
+    "compileCheckResult": {
+      "properties": {
+        "eventType": { "const": "compile_check.result" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "diagnosticCountBucket", "latencyBucket"],
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": ["ok", "errors", "gateway_unavailable", "timeout"]
+            },
+            "diagnosticCountBucket": {
+              "type": "string",
+              "enum": ["zero", "lt_10", "lt_100", "ge_100"]
+            },
+            "latencyBucket": {
+              "type": "string",
+              "enum": ["lt_1s", "lt_5s", "ge_5s"]
+            }
+          }
+        }
+      }
+    },
+    "verifyInvoked": {
+      "properties": {
+        "eventType": { "const": "verify.invoked" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trigger", "hadManualEdits"],
+          "properties": {
+            "trigger": { "type": "string", "enum": ["toolbar", "shortcut"] },
+            "hadManualEdits": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "verifyResult": {
+      "properties": {
+        "eventType": { "const": "verify.result" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome"],
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "success",
+                "compile_failed",
+                "run_failed",
+                "output_divergence",
+                "blocked",
+                "cancelled",
+                "gateway_unavailable"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "threeWayMergeOpened": {
+      "properties": {
+        "eventType": { "const": "three_way_merge.opened" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["regionCountBucket"],
+          "properties": {
+            "regionCountBucket": {
+              "type": "string",
+              "enum": ["lt_5", "lt_20", "ge_20"]
+            }
+          }
+        }
+      }
+    },
+    "threeWayMergeResolved": {
+      "properties": {
+        "eventType": { "const": "three_way_merge.resolved" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["regionsPickedPerSource", "cancelled"],
+          "properties": {
+            "regionsPickedPerSource": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["manual", "new_generator", "baseline"],
+              "properties": {
+                "manual": { "$ref": "#/$defs/nonNegativeInt" },
+                "new_generator": { "$ref": "#/$defs/nonNegativeInt" },
+                "baseline": { "$ref": "#/$defs/nonNegativeInt" }
+              }
+            },
+            "cancelled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "manualEditRegionClassified": {
+      "properties": {
+        "eventType": { "const": "manual_edit.region_classified" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["originClass"],
+          "properties": {
+            "originClass": {
+              "type": "string",
+              "enum": ["manual_modified", "manual_edit"]
+            },
+            "mappingClass": { "$ref": "#/$defs/mappingClass" }
+          }
+        }
+      }
+    },
+    "formatInvoked": {
+      "properties": {
+        "eventType": { "const": "format.invoked" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trigger", "fileLineCountBucket"],
+          "properties": {
+            "trigger": { "type": "string", "enum": ["shortcut", "on_save"] },
+            "fileLineCountBucket": {
+              "type": "string",
+              "enum": ["lt_100", "lt_1000", "ge_1000"]
+            }
+          }
+        }
+      }
+    },
+    "formatResult": {
+      "properties": {
+        "eventType": { "const": "format.result" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "latencyBucket"],
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": ["success", "unavailable", "timeout", "noop"]
+            },
+            "latencyBucket": {
+              "type": "string",
+              "enum": ["lt_500ms", "lt_1500ms", "ge_1500ms"]
+            }
+          }
+        }
+      }
+    },
+    "lintMarkersChanged": {
+      "properties": {
+        "eventType": { "const": "lint.markers_changed" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["countBucket"],
+          "properties": {
+            "countBucket": {
+              "type": "string",
+              "enum": ["zero", "lt_10", "lt_50", "ge_50"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -21,6 +21,7 @@ func TestPatternAnalyzer_RepeatActionDetection(t *testing.T) {
 		harnessStore,
 		ledgerStore,
 		experienceStore,
+		NewInMemoryEditorTelemetryStore(),
 		policy,
 		now,
 	)
@@ -112,6 +113,7 @@ func TestPatternAnalyzer_RepeatedFailureDetection(t *testing.T) {
 		harnessStore,
 		ledgerStore,
 		experienceStore,
+		NewInMemoryEditorTelemetryStore(),
 		policy,
 		now,
 	)
@@ -195,6 +197,7 @@ func TestPatternAnalyzer_RetryDetectionIgnoresStatusInGrouping(t *testing.T) {
 		harnessStore,
 		ledgerStore,
 		experienceStore,
+		NewInMemoryEditorTelemetryStore(),
 		DefaultLearningPolicy(),
 		now,
 	)
@@ -249,6 +252,7 @@ func TestIngestHarnessEvents_AcceptsOutputDivergenceAndAnalyzesFailure(t *testin
 		NewInMemoryHarnessEventStore(),
 		NewInMemoryTrajectoryLedgerStore(),
 		NewInMemoryExperienceEventStore(),
+		NewInMemoryEditorTelemetryStore(),
 		DefaultLearningPolicy(),
 		func() time.Time { return cfgNow },
 	)
@@ -316,6 +320,7 @@ func TestPatternAnalyzer_W02LearningSignals(t *testing.T) {
 		NewInMemoryHarnessEventStore(),
 		NewInMemoryTrajectoryLedgerStore(),
 		NewInMemoryExperienceEventStore(),
+		NewInMemoryEditorTelemetryStore(),
 		DefaultLearningPolicy(),
 		func() time.Time { return cfgNow },
 	)
@@ -416,6 +421,7 @@ func TestPatternAnalyzer_W02LearningSignalsAvoidFalsePositives(t *testing.T) {
 		NewInMemoryHarnessEventStore(),
 		NewInMemoryTrajectoryLedgerStore(),
 		NewInMemoryExperienceEventStore(),
+		NewInMemoryEditorTelemetryStore(),
 		DefaultLearningPolicy(),
 		func() time.Time { return cfgNow },
 	)
@@ -478,6 +484,7 @@ func TestIngestHarnessEvents_MapsRawBuildTestFailureStatuses(t *testing.T) {
 				NewInMemoryHarnessEventStore(),
 				NewInMemoryTrajectoryLedgerStore(),
 				NewInMemoryExperienceEventStore(),
+				NewInMemoryEditorTelemetryStore(),
 				DefaultLearningPolicy(),
 				func() time.Time { return cfgNow },
 			)
@@ -533,6 +540,7 @@ func TestIngestHarnessEvents_AcceptsStartingAndPreservesRawStatus(t *testing.T) 
 		NewInMemoryHarnessEventStore(),
 		NewInMemoryTrajectoryLedgerStore(),
 		NewInMemoryExperienceEventStore(),
+		NewInMemoryEditorTelemetryStore(),
 		DefaultLearningPolicy(),
 		func() time.Time { return cfgNow },
 	)

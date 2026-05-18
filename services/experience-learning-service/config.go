@@ -7,33 +7,36 @@ import (
 )
 
 const (
-	defaultExperienceListenAddr   = ":8084"
-	defaultPolicyPath             = "policies/learning-policy-v0.yaml"
-	defaultHarnessEventLogPath    = "data/experience-service-harness-events-v0.jsonl"
-	defaultTrajectoryLedgerPath   = "data/agent-trajectory-ledger-v0.jsonl"
-	defaultExperienceEventLogPath = "data/experience-events-v0.jsonl"
-	defaultArtifactRegistryPath   = "data/learning-artifact-registry-v0.json"
+	defaultExperienceListenAddr      = ":8084"
+	defaultPolicyPath                = "policies/learning-policy-v0.yaml"
+	defaultHarnessEventLogPath       = "data/experience-service-harness-events-v0.jsonl"
+	defaultTrajectoryLedgerPath      = "data/agent-trajectory-ledger-v0.jsonl"
+	defaultExperienceEventLogPath    = "data/experience-events-v0.jsonl"
+	defaultArtifactRegistryPath      = "data/learning-artifact-registry-v0.json"
+	defaultEditorTelemetryEventsPath = "data/editor-telemetry-events-v0.jsonl"
 )
 
 type experienceLearningConfig struct {
-	listenAddr           string
-	policyPath           string
-	harnessEventPath     string
-	trajectoryPath       string
-	experienceEventPath  string
-	artifactRegistryPath string
-	autoAnalyzeOnIngest  bool
+	listenAddr               string
+	policyPath               string
+	harnessEventPath         string
+	trajectoryPath           string
+	experienceEventPath      string
+	artifactRegistryPath     string
+	editorTelemetryEventPath string
+	autoAnalyzeOnIngest      bool
 }
 
 func resolveExperienceConfig() (experienceLearningConfig, error) {
 	cfg := experienceLearningConfig{
-		listenAddr:           normalizeListenAddress(strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_LISTEN_ADDR"))),
-		policyPath:           strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_POLICY_PATH")),
-		harnessEventPath:     strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_HARNESS_EVENTS_PATH")),
-		trajectoryPath:       strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_TRAJECTORY_LEDGER_PATH")),
-		experienceEventPath:  strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_EVENTS_PATH")),
-		artifactRegistryPath: strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_ARTIFACT_REGISTRY_PATH")),
-		autoAnalyzeOnIngest:  true,
+		listenAddr:               normalizeListenAddress(strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_LISTEN_ADDR"))),
+		policyPath:               strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_POLICY_PATH")),
+		harnessEventPath:         strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_HARNESS_EVENTS_PATH")),
+		trajectoryPath:           strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_TRAJECTORY_LEDGER_PATH")),
+		experienceEventPath:      strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_EVENTS_PATH")),
+		artifactRegistryPath:     strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_ARTIFACT_REGISTRY_PATH")),
+		editorTelemetryEventPath: strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_EDITOR_TELEMETRY_EVENTS_PATH")),
+		autoAnalyzeOnIngest:      true,
 	}
 
 	if cfg.policyPath == "" {
@@ -50,6 +53,9 @@ func resolveExperienceConfig() (experienceLearningConfig, error) {
 	}
 	if cfg.artifactRegistryPath == "" {
 		cfg.artifactRegistryPath = defaultArtifactRegistryPath
+	}
+	if cfg.editorTelemetryEventPath == "" {
+		cfg.editorTelemetryEventPath = defaultEditorTelemetryEventsPath
 	}
 	if cfg.listenAddr == "" {
 		cfg.listenAddr = defaultExperienceListenAddr
@@ -75,6 +81,9 @@ func resolveExperienceConfig() (experienceLearningConfig, error) {
 	}
 	if strings.HasSuffix(cfg.experienceEventPath, ".json") {
 		return cfg, fmt.Errorf("experience event path must be jsonl")
+	}
+	if strings.HasSuffix(cfg.editorTelemetryEventPath, ".json") {
+		return cfg, fmt.Errorf("editor telemetry event path must be jsonl")
 	}
 
 	return cfg, nil

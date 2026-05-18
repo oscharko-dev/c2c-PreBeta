@@ -46,6 +46,10 @@ import {
   type JavaFileHistoryEntry,
   type JavaFileSnapshot,
 } from "../lib/editor/diffHistory";
+import {
+  bucketGenerateLatency,
+  emit as emitTelemetry,
+} from "../lib/editor/editorTelemetry";
 
 // Studio-IDE-3 (#247): Java buffer state model. One entry per generated
 // Java file the user has interacted with. IDE-4 (#245) will wire Monaco
@@ -370,6 +374,15 @@ export function TransformationRunProvider({
     request: TransformRequest,
   ): Promise<ApiResult<GenerateResponse>> => {
     const requestId = ++activeTransformRequestRef.current;
+    // Studio-IDE-11 (#251): closed-enum generate.invoked + result. The
+    // "hadManualEdits" flag is conservative — we cannot detect the
+    // manual-edit overlay state from this seam; the explicit Verify
+    // path (startVerify below) carries the real flag.
+    emitTelemetry({
+      eventType: "generate.invoked",
+      payload: { trigger: "generate", hadManualEdits: false },
+    });
+    const startedAt = Date.now();
 
     setState({
       phase: "starting",
@@ -393,12 +406,21 @@ export function TransformationRunProvider({
     });
 
     const result = await apiClient.generate(request);
+    const latencyBucket = bucketGenerateLatency(Date.now() - startedAt);
 
     if (requestId !== activeTransformRequestRef.current) {
+      emitTelemetry({
+        eventType: "generate.result",
+        payload: { outcome: "cancelled", latencyBucket },
+      });
       return result;
     }
 
     if (!result.ok) {
+      emitTelemetry({
+        eventType: "generate.result",
+        payload: { outcome: "failed", latencyBucket },
+      });
       setState((prev) => ({
         ...prev,
         phase: "failed",
@@ -409,6 +431,18 @@ export function TransformationRunProvider({
       }));
       return result;
     }
+    emitTelemetry({
+      eventType: "generate.result",
+      payload: {
+        outcome:
+          result.data.status === "failed"
+            ? "failed"
+            : result.data.status === "completed"
+              ? "success"
+              : "success",
+        latencyBucket,
+      },
+    });
 
     setState((prev) => ({
       ...prev,
@@ -457,10 +491,47 @@ export function TransformationRunProvider({
   const startVerify = async (
     request: VerifyRequest,
   ): Promise<ApiResult<VerifyResponse>> => {
+    // Studio-IDE-11 (#251): verify.invoked + verify.result with the
+    // closed-enum outcome derived from the response classification.
+    emitTelemetry({
+      eventType: "verify.invoked",
+      payload: {
+        trigger: "toolbar",
+        hadManualEdits: Boolean(request.manualEditOverlay),
+      },
+    });
     const result = await apiClient.verify(request);
-    if (result.ok) {
-      setLatestVerifyResult(result.data);
+    if (!result.ok) {
+      emitTelemetry({
+        eventType: "verify.result",
+        payload: { outcome: "gateway_unavailable" },
+      });
+      return result;
     }
+    const classification = result.data.classification;
+    let outcome:
+      | "success"
+      | "compile_failed"
+      | "run_failed"
+      | "output_divergence"
+      | "blocked"
+      | "cancelled"
+      | "gateway_unavailable" = "success";
+    if (classification === "compile-error") outcome = "compile_failed";
+    else if (classification === "run-error") outcome = "run_failed";
+    else if (
+      classification === "divergence-known-w0-coverage-gap" ||
+      classification === "divergence-unknown" ||
+      classification === "true-golden-master-mismatch" ||
+      classification === "true-golden-master-reproduction-error"
+    )
+      outcome = "output_divergence";
+    else if (classification === "skipped-no-execution") outcome = "blocked";
+    emitTelemetry({
+      eventType: "verify.result",
+      payload: { outcome },
+    });
+    setLatestVerifyResult(result.data);
     return result;
   };
 

@@ -31,6 +31,7 @@
 
 import { openDB, IDBPDatabase } from "idb";
 
+import { emit as emitTelemetry } from "@/lib/editor/editorTelemetry";
 import type { JavaOriginOverlay } from "../../types/api";
 
 // ----- Public types -------------------------------------------------------
@@ -560,6 +561,15 @@ function makePersistence(
       }
       throw cause;
     }
+    // Studio-IDE-11 (#251): tag-only persistence telemetry. The
+    // `encrypted` field is always `true` here because every draft this
+    // module writes goes through AES-GCM (ADR 0005 §2); the boolean is
+    // load-bearing for the learning signal that records the encrypted
+    // local-save flow, not a hypothetical plaintext fallback.
+    emitTelemetry({
+      eventType: "save.local",
+      payload: { kind: key.kind, encrypted: true },
+    });
     return {
       encryptedSize: ciphertext.byteLength,
       ttlExpiresAt: new Date(ttlExpiresAtMs).toISOString(),

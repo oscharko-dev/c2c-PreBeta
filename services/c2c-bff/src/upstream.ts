@@ -241,6 +241,15 @@ export interface ExperienceLearningClient {
   enabled: boolean;
   baseUrl: string;
   getRunSummary(runId: string): Promise<UpstreamResponse | undefined>;
+  // Studio-IDE-11 (#251): ingest a batched editor-telemetry payload.
+  // The body is opaque to the upstream client — the BFF intake layer
+  // owns the schema; this method just ships the bytes to the
+  // ``/v0/editor-telemetry`` endpoint on the experience-learning-service.
+  // Returns ``undefined`` when the client is disabled so the BFF can
+  // distinguish "no upstream configured" from "upstream errored".
+  submitEditorTelemetry(
+    payload: unknown,
+  ): Promise<UpstreamResponse | undefined>;
 }
 
 export function createOrchestratorClient(
@@ -474,6 +483,9 @@ export function createExperienceLearningClient(
       async getRunSummary() {
         return undefined;
       },
+      async submitEditorTelemetry() {
+        return undefined;
+      },
     };
   }
   const normalized = baseUrl.replace(/\/+$/, "");
@@ -484,6 +496,13 @@ export function createExperienceLearningClient(
       const safe = encodeURIComponent(runId);
       return http.request(`${normalized}/v0/runs/${safe}/summary`, {
         method: "GET",
+        timeoutMs,
+      });
+    },
+    async submitEditorTelemetry(payload: unknown) {
+      return http.request(`${normalized}/v0/editor-telemetry`, {
+        method: "POST",
+        body: payload,
         timeoutMs,
       });
     },

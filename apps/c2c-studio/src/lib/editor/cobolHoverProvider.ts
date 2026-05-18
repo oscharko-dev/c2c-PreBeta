@@ -16,6 +16,7 @@
 import type * as MonacoNs from "monaco-editor";
 
 import { COBOL_LANGUAGE_ID } from "./cobolMonarch";
+import { emit as emitTelemetry } from "./editorTelemetry";
 import {
   buildHoverMarkdown,
   escapeMarkdownContent,
@@ -32,6 +33,7 @@ import {
   hoverEntryToMarkdownString,
   type HoverEntry,
 } from "./cobolKnowledge";
+import type { HoverConstructKind } from "@/types/editor-telemetry";
 
 // ---------------------------------------------------------------------------
 // Pure hover computation
@@ -54,6 +56,10 @@ export interface ComputedHover {
   startColumn: number;
   // 1-based end column (exclusive) for the highlighted range.
   endColumn: number;
+  // Studio-IDE-11 (#251): closed-enum tag describing which COBOL
+  // construct produced this hover. Used to populate the
+  // `hover.opened` / `hover.expanded` editor-telemetry payloads.
+  constructKind: HoverConstructKind;
 }
 
 // Regex set, evaluated in priority order. Each entry matches a
@@ -61,19 +67,20 @@ export interface ComputedHover {
 // returned so the hover range highlights the relevant text and so the
 // position-under-cursor test can ignore matches that the cursor does
 // not actually land on.
-type LineMatcher = (
-  line: string,
-) => Array<{ start: number; end: number; entry: HoverEntry }>;
+interface TaggedMatch {
+  start: number;
+  end: number;
+  entry: HoverEntry;
+  constructKind: HoverConstructKind;
+}
+
+type LineMatcher = (line: string) => TaggedMatch[];
 
 function collectMatches(
   line: string,
   ...matchers: LineMatcher[]
-): Array<{
-  start: number;
-  end: number;
-  entry: HoverEntry;
-}> {
-  const results: Array<{ start: number; end: number; entry: HoverEntry }> = [];
+): TaggedMatch[] {
+  const results: TaggedMatch[] = [];
   for (const matcher of matchers) {
     for (const match of matcher(line)) {
       results.push(match);
@@ -85,19 +92,20 @@ function collectMatches(
 function matchAll(
   line: string,
   regex: RegExp,
+  constructKind: HoverConstructKind,
   toEntry: (match: RegExpExecArray) => HoverEntry | null,
-): Array<{ start: number; end: number; entry: HoverEntry }> {
+): TaggedMatch[] {
   const flagged = regex.flags.includes("g")
     ? regex
     : new RegExp(regex.source, `${regex.flags}g`);
-  const matches: Array<{ start: number; end: number; entry: HoverEntry }> = [];
+  const matches: TaggedMatch[] = [];
   let match: RegExpExecArray | null;
   while ((match = flagged.exec(line)) !== null) {
     const entry = toEntry(match);
     if (entry) {
       const start = match.index + 1;
       const end = start + match[0].length;
-      matches.push({ start, end, entry });
+      matches.push({ start, end, entry, constructKind });
     }
     if (match.index === flagged.lastIndex) {
       flagged.lastIndex += 1;
@@ -109,18 +117,20 @@ function matchAll(
 // Individual matchers, one per construct family. Each returns matches
 // in the order they appear on the line so the picker can use cursor
 // column to disambiguate.
-function matchPicture(line: string) {
+function matchPicture(line: string): TaggedMatch[] {
   return matchAll(
     line,
     /\b(?:PIC|PICTURE)(?:\s+IS)?\s+([X9AVSPZ$+\-,/*B().0-9]+)/i,
+    "pic",
     (match) => (match[1] ? explainPicture(match[1]) : null),
   );
 }
 
-function matchUsage(line: string) {
+function matchUsage(line: string): TaggedMatch[] {
   return matchAll(
     line,
     /\b(?:USAGE\s+(?:IS\s+)?)?(COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|POINTER|INDEX|DISPLAY)\b/i,
+    "comp3",
     (match) => {
       // Filter out the `DISPLAY` *verb* — only match it when it is the
       // operand of a USAGE clause. We approximate by requiring the
@@ -139,39 +149,44 @@ function matchUsage(line: string) {
   );
 }
 
-function matchOccurs(line: string) {
+function matchOccurs(line: string): TaggedMatch[] {
   return matchAll(
     line,
     /\bOCCURS\s+\d+(?:\s+TO\s+\d+)?\s+TIMES?(?:\s+DEPENDING\s+ON\s+[A-Za-z][A-Za-z0-9-]*)?/i,
+    "occurs",
     (match) => explainOccurs(match[0]),
   );
 }
 
-function matchValue(line: string) {
+function matchValue(line: string): TaggedMatch[] {
   return matchAll(
     line,
     /\bVALUES?(?:\s+IS)?\s+(?:['"][^'"]*['"]|[+-]?\d+(?:\.\d+)?|ZEROS?|ZEROES|SPACES?|HIGH-VALUES?|LOW-VALUES?|QUOTES?)/i,
+    "value",
     (match) => explainValue(match[0]),
   );
 }
 
-function matchRedefines(line: string) {
-  return matchAll(line, /\bREDEFINES\s+[A-Za-z][A-Za-z0-9-]*/i, (match) =>
-    explainRedefines(match[0]),
+function matchRedefines(line: string): TaggedMatch[] {
+  return matchAll(
+    line,
+    /\bREDEFINES\s+[A-Za-z][A-Za-z0-9-]*/i,
+    "redefines",
+    (match) => explainRedefines(match[0]),
   );
 }
 
-function matchSection(line: string) {
+function matchSection(line: string): TaggedMatch[] {
   const entry = explainSection(line);
   if (!entry) return [];
   const sectionMatch = /([A-Za-z][A-Za-z0-9-]*)\s+SECTION\s*\./i.exec(line);
   if (!sectionMatch) return [];
   const start = sectionMatch.index + 1;
   const end = start + sectionMatch[0].length;
-  return [{ start, end, entry }];
+  return [{ start, end, entry, constructKind: "section" }];
 }
 
-function matchParagraph(line: string) {
+function matchParagraph(line: string): TaggedMatch[] {
   const entry = explainParagraph(line);
   if (!entry) return [];
   const paragraphMatch = /^\s*([A-Za-z][A-Za-z0-9-]*)\s*\.\s*$/.exec(line);
@@ -183,6 +198,7 @@ function matchParagraph(line: string) {
       start: nameStart + 1,
       end: nameStart + 1 + paragraphMatch[1].length,
       entry,
+      constructKind: "paragraph",
     },
   ];
 }
@@ -192,9 +208,9 @@ function matchParagraph(line: string) {
 // OCCURS clause inside a PIC line doesn't lose its hover to a broader
 // keyword match.
 function pickBestMatch(
-  matches: Array<{ start: number; end: number; entry: HoverEntry }>,
+  matches: TaggedMatch[],
   column: number,
-): { start: number; end: number; entry: HoverEntry } | null {
+): TaggedMatch | null {
   // `end` is exclusive (start + match[0].length), so the strict `<`
   // here matches Monaco's range convention and avoids returning a
   // hover for the column immediately after the matched span.
@@ -226,6 +242,7 @@ export function computeHoverFor(
       entry: best.entry,
       startColumn: best.start,
       endColumn: best.end,
+      constructKind: best.constructKind,
     };
   }
   // No construct match — fall back to the fixed-format zone tooltip.
@@ -238,6 +255,7 @@ export function computeHoverFor(
     entry: zoneEntry,
     startColumn: position.column,
     endColumn: position.column + 1,
+    constructKind: "fixed-format-zone",
   };
 }
 
@@ -282,6 +300,13 @@ export function createCobolHoverProvider(
         column: position.column,
       });
       if (!computed) return null;
+      // Studio-IDE-11 (#251): emit closed-enum hover telemetry. The
+      // payload carries only the construct family — never the source
+      // text, column, or line content.
+      emitTelemetry({
+        eventType: "hover.opened",
+        payload: { constructKind: computed.constructKind },
+      });
       return buildHoverResult(monaco, computed, position.lineNumber);
     },
   };

@@ -2483,11 +2483,15 @@ function disabledLearning(): {
   enabled: boolean;
   baseUrl: string;
   getRunSummary: () => Promise<undefined>;
+  submitEditorTelemetry: () => Promise<undefined>;
 } {
   return {
     enabled: false,
     baseUrl: "",
     async getRunSummary() {
+      return undefined;
+    },
+    async submitEditorTelemetry() {
       return undefined;
     },
   };
@@ -3013,6 +3017,9 @@ test("learning route prefers live experience-learning client when configured", a
         },
       };
     },
+    async submitEditorTelemetry() {
+      return undefined;
+    },
   };
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
@@ -3089,6 +3096,9 @@ test("experience route maps live learning summaries into the Studio contract", a
           policyFingerprint: "fp-1",
         },
       };
+    },
+    async submitEditorTelemetry() {
+      return undefined;
     },
   };
   const handler = createApp({
@@ -6626,6 +6636,243 @@ test("POST /api/v0/editor/explain emits structured console.warn on gateway throw
     assert.doesNotMatch(body.message as string, /ECONNREFUSED/);
   } finally {
     console.warn = originalWarn;
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Studio-IDE-11 (#251): editor telemetry intake — route-level integration
+// tests. Cover the happy path (valid batch → 202 accepted), the
+// upstream-disabled fallback ("drop silently when no UL configured"),
+// upstream failure, and several boundary rejections.
+// ---------------------------------------------------------------------------
+
+function liveLearningTelemetryCapture(): {
+  calls: unknown[];
+  client: {
+    enabled: true;
+    baseUrl: string;
+    getRunSummary: () => Promise<undefined>;
+    submitEditorTelemetry: (payload: unknown) => Promise<UpstreamResponse>;
+  };
+} {
+  const calls: unknown[] = [];
+  return {
+    calls,
+    client: {
+      enabled: true,
+      baseUrl: "http://el.test",
+      async getRunSummary() {
+        return undefined;
+      },
+      async submitEditorTelemetry(payload: unknown) {
+        calls.push(payload);
+        return { status: 201, body: { accepted: 1, service: "el-test" } };
+      },
+    },
+  };
+}
+
+function brokenLearningTelemetry(): {
+  enabled: true;
+  baseUrl: string;
+  getRunSummary: () => Promise<undefined>;
+  submitEditorTelemetry: () => Promise<UpstreamResponse>;
+} {
+  return {
+    enabled: true,
+    baseUrl: "http://el.test",
+    async getRunSummary() {
+      return undefined;
+    },
+    async submitEditorTelemetry() {
+      throw new Error("ECONNREFUSED: experience-learning-service unreachable");
+    },
+  };
+}
+
+function telemetryBatch(events: unknown[]) {
+  return { schemaVersion: "v0", events };
+}
+
+function validHoverEvent() {
+  return {
+    schemaVersion: "v0",
+    eventType: "hover.opened",
+    occurredAt: "2026-05-18T12:00:00Z",
+    sessionId: "studio-test-session",
+    payload: { constructKind: "pic" },
+  };
+}
+
+test("editor telemetry route accepts a valid batch and forwards to experience-learning", async () => {
+  const { client, calls } = liveLearningTelemetryCapture();
+  const handler = createApp({
+    config: { ...baseConfig, experienceLearningUrl: "http://el.test" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: client,
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/telemetry`,
+      {
+        method: "POST",
+        body: telemetryBatch([validHoverEvent()]),
+      },
+    );
+    assert.equal(result.status, 202);
+    const body = result.body as Record<string, unknown>;
+    assert.equal(body.schemaVersion, "v0");
+    assert.equal(body.accepted, 1);
+    assert.equal(body.forwarded, true);
+    assert.equal(calls.length, 1);
+    const forwarded = calls[0] as { events: Array<Record<string, unknown>> };
+    assert.equal(forwarded.events.length, 1);
+    assert.equal(forwarded.events[0]?.tenantId, "default");
+    assert.equal(forwarded.events[0]?.userId, "local");
+    assert.equal(typeof forwarded.events[0]?.receivedAt, "string");
+  } finally {
+    await server.close();
+  }
+});
+
+test("editor telemetry route accepts 202 when upstream is disabled", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/telemetry`,
+      {
+        method: "POST",
+        body: telemetryBatch([validHoverEvent()]),
+      },
+    );
+    assert.equal(result.status, 202);
+    const body = result.body as Record<string, unknown>;
+    assert.equal(body.forwarded, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test("editor telemetry route returns 502 when upstream throws", async () => {
+  const handler = createApp({
+    config: { ...baseConfig, experienceLearningUrl: "http://el.test" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: brokenLearningTelemetry(),
+    runStore: createRunStore(),
+  });
+  const originalWarn = console.warn;
+  const warnings: unknown[] = [];
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args[0]);
+  };
+  const server = await startTestServer(handler);
+  try {
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/telemetry`,
+      {
+        method: "POST",
+        body: telemetryBatch([validHoverEvent()]),
+      },
+    );
+    assert.equal(result.status, 502);
+    const body = result.body as Record<string, unknown>;
+    assert.equal(typeof body.error, "string");
+    // Upstream raw error text must not be echoed.
+    assert.doesNotMatch(body.error as string, /ECONNREFUSED/);
+    assert.ok(
+      warnings.length >= 1,
+      "expected upstream failure to be logged via console.warn",
+    );
+  } finally {
+    console.warn = originalWarn;
+    await server.close();
+  }
+});
+
+test("editor telemetry route rejects bad JSON with 400", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/telemetry`,
+      {
+        method: "POST",
+        body: {
+          schemaVersion: "v0",
+          events: [{ ...validHoverEvent(), eventType: "not.real" }],
+        },
+      },
+    );
+    assert.equal(result.status, 400);
+    const body = result.body as Record<string, unknown>;
+    assert.equal(typeof body.error, "string");
+    assert.equal(body.errorCode, "invalid_event");
+  } finally {
+    await server.close();
+  }
+});
+
+test("editor telemetry route rejects non-JSON content-type with 415", async () => {
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    // Use a raw http.request so we can override the content-type. The
+    // fetchJson helper hardcodes JSON.
+    const target = new URL(`${server.baseUrl}/api/v0/editor/telemetry`);
+    const body = JSON.stringify(telemetryBatch([validHoverEvent()]));
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        {
+          method: "POST",
+          hostname: target.hostname,
+          port: target.port,
+          path: target.pathname,
+          headers: {
+            accept: "application/json",
+            "content-type": "text/plain",
+            "content-length": String(Buffer.byteLength(body)),
+          },
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve(res.statusCode ?? 0));
+        },
+      );
+      req.on("error", reject);
+      req.write(body);
+      req.end();
+    });
+    assert.equal(status, 415);
+  } finally {
     await server.close();
   }
 });

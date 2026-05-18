@@ -89,6 +89,19 @@ import {
   type EditorRegion,
   type SequenceCounter,
 } from "./editorExplain";
+// Studio-IDE-11 (#251): editor telemetry intake — closed-enum, tag-only
+// learning signals. Validation lives in `./editorTelemetry.ts`; the
+// route handler below augments accepted batches with tenant/user
+// context and forwards them through the existing
+// experience-learning client (`upstream.ts`).
+import {
+  EDITOR_TELEMETRY_MAX_BODY_BYTES,
+  EDITOR_TELEMETRY_SCHEMA_VERSION,
+  augmentBatch,
+  extractIdentity,
+  statusForValidationErrorCode,
+  validateTelemetryBatch,
+} from "./editorTelemetry";
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -2965,6 +2978,130 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           budget: snapshot,
         });
         return;
+      }
+
+      // Studio-IDE-11 (#251): editor telemetry intake. Validates a
+      // batched, closed-enum, tag-only payload against the contract
+      // declared in `editorTelemetry.ts` (mirrors
+      // `schemas/editor-telemetry-event-v0.json` and the Studio
+      // discriminated union) and forwards the augmented batch through
+      // the existing experience-learning client. Returns 202 Accepted
+      // when the upstream is offline so the Studio's "drop silently on
+      // offline" path stays UI-stable.
+      if (pathname === "/api/v0/editor/telemetry" && method === "POST") {
+        const contentType = req.headers["content-type"] ?? "";
+        if (!contentType.toLowerCase().startsWith("application/json")) {
+          jsonResponse(res, 415, {
+            error: "request must use Content-Type: application/json",
+          });
+          return;
+        }
+        let raw: unknown;
+        try {
+          raw = await readJsonBody(req, EDITOR_TELEMETRY_MAX_BODY_BYTES);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, { error: "telemetry batch too large" });
+            return;
+          }
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        const validation = validateTelemetryBatch(raw);
+        if (!validation.ok) {
+          jsonResponse(
+            res,
+            statusForValidationErrorCode(validation.errorCode),
+            { error: validation.message, errorCode: validation.errorCode },
+          );
+          return;
+        }
+        const identity = extractIdentity(req.headers);
+        let augmented;
+        try {
+          augmented = augmentBatch(validation.value, {
+            tenantId: identity.tenantId,
+            userId: identity.userId,
+            now: nowFn,
+          });
+        } catch (err) {
+          badRequest(
+            res,
+            err instanceof Error ? err.message : "augmentation failed",
+          );
+          return;
+        }
+        if (!experienceLearning.enabled) {
+          // No upstream configured — accept the batch so the Studio's
+          // optimistic emitter does not retry or surface an error to
+          // the user. The batch is dropped on the floor here, matching
+          // the AC ("dropped silently after at most one retry attempt;
+          // no UI degradation").
+          jsonResponse(res, 202, {
+            schemaVersion: EDITOR_TELEMETRY_SCHEMA_VERSION,
+            accepted: augmented.events.length,
+            forwarded: false,
+          });
+          return;
+        }
+        try {
+          const upstream = await experienceLearning.submitEditorTelemetry({
+            schemaVersion: augmented.schemaVersion,
+            events: augmented.events,
+          });
+          if (!upstream) {
+            jsonResponse(res, 202, {
+              schemaVersion: EDITOR_TELEMETRY_SCHEMA_VERSION,
+              accepted: augmented.events.length,
+              forwarded: false,
+            });
+            return;
+          }
+          if (upstream.status >= 200 && upstream.status < 300) {
+            jsonResponse(res, 202, {
+              schemaVersion: EDITOR_TELEMETRY_SCHEMA_VERSION,
+              accepted: augmented.events.length,
+              forwarded: true,
+            });
+            return;
+          }
+          // Upstream rejected the batch — log without echoing the
+          // upstream message body (which may not be sanitised) and
+          // return 502 so the Studio's bounded retry policy kicks in.
+          console.warn(
+            JSON.stringify({
+              route: "/api/v0/editor/telemetry",
+              event: "upstream_rejected",
+              status: upstream.status,
+            }),
+          );
+          jsonResponse(res, 502, {
+            error: "experience-learning-service rejected the batch",
+          });
+          return;
+        } catch (err) {
+          console.warn(
+            JSON.stringify({
+              route: "/api/v0/editor/telemetry",
+              event: "upstream_call_failed",
+              errorClass:
+                err != null &&
+                typeof (err as Record<string, unknown>).constructor ===
+                  "function"
+                  ? ((err as { constructor: { name: string } }).constructor
+                      .name ?? "Unknown")
+                  : "Unknown",
+              message: sanitizeUpstreamMessage(
+                err instanceof Error ? err.message : String(err),
+                "experience-learning-service unavailable",
+              ),
+            }),
+          );
+          jsonResponse(res, 502, {
+            error: "experience-learning-service unavailable",
+          });
+          return;
+        }
       }
 
       if (pathname === "/api/v0/transform" && method === "POST") {

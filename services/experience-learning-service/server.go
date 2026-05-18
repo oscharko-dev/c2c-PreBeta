@@ -19,12 +19,15 @@ type ExperienceLearningService struct {
 	harnessEvents    HarnessEventLog
 	ledgers          TrajectoryLedgerLog
 	experienceEvents LearningEventLog
-	analyzer         *PatternAnalyzer
-	summaries        map[string]RunLearningSummary
-	artifactRegistry map[string]LearningArtifactRecord
-	artifactPath     string
-	now              func() time.Time
-	mu               sync.RWMutex
+	// Studio-IDE-11 (#251): editor telemetry log — closed-enum, tag-only
+	// learning signals shipped from the Studio via the BFF intake.
+	editorTelemetryLog EditorTelemetryEventLog
+	analyzer           *PatternAnalyzer
+	summaries          map[string]RunLearningSummary
+	artifactRegistry   map[string]LearningArtifactRecord
+	artifactPath       string
+	now                func() time.Time
+	mu                 sync.RWMutex
 }
 
 type inProcessAnalyzeRequest struct {
@@ -36,23 +39,28 @@ func NewExperienceLearningService(
 	harnessEvents HarnessEventLog,
 	ledgers TrajectoryLedgerLog,
 	experienceEvents LearningEventLog,
+	editorTelemetry EditorTelemetryEventLog,
 	policy LearningPolicy,
 	now func() time.Time,
 ) *ExperienceLearningService {
 	if now == nil {
 		now = time.Now().UTC
 	}
+	if editorTelemetry == nil {
+		editorTelemetry = NewInMemoryEditorTelemetryStore()
+	}
 	service := &ExperienceLearningService{
-		cfg:              cfg,
-		policy:           policy,
-		harnessEvents:    harnessEvents,
-		ledgers:          ledgers,
-		experienceEvents: experienceEvents,
-		analyzer:         NewPatternAnalyzer(policy, now),
-		summaries:        map[string]RunLearningSummary{},
-		artifactRegistry: map[string]LearningArtifactRecord{},
-		artifactPath:     cfg.artifactRegistryPath,
-		now:              now,
+		cfg:                cfg,
+		policy:             policy,
+		harnessEvents:      harnessEvents,
+		ledgers:            ledgers,
+		experienceEvents:   experienceEvents,
+		editorTelemetryLog: editorTelemetry,
+		analyzer:           NewPatternAnalyzer(policy, now),
+		summaries:          map[string]RunLearningSummary{},
+		artifactRegistry:   map[string]LearningArtifactRecord{},
+		artifactPath:       cfg.artifactRegistryPath,
+		now:                now,
 	}
 	if err := service.loadExistingArtifactRegistry(); err != nil {
 		log.Printf("learning artifact registry init failed: %v", err)
@@ -73,6 +81,9 @@ func (s *ExperienceLearningService) Routes() *http.ServeMux {
 	mux.HandleFunc("/v0/policy", s.policyHandler)
 	mux.HandleFunc("/v0/artifacts", s.artifactCollectionHandler)
 	mux.HandleFunc("/v0/artifacts/", s.artifactItemHandler)
+	// Studio-IDE-11 (#251): editor telemetry intake — closed-enum,
+	// tag-only learning signals from the Studio editor via the BFF.
+	mux.HandleFunc("/v0/editor-telemetry", s.editorTelemetryHandler)
 	return mux
 }
 

@@ -278,7 +278,12 @@ describe("hover content security", () => {
     const monaco = fakeMonaco();
     const result = buildHoverResult(
       monaco,
-      { entry: { title: "x", explanation: "y" }, startColumn: 1, endColumn: 2 },
+      {
+        entry: { title: "x", explanation: "y" },
+        startColumn: 1,
+        endColumn: 2,
+        constructKind: "pic",
+      },
       1,
     );
     const content = (

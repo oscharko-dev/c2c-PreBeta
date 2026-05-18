@@ -16,6 +16,7 @@ func TestHarnessEventsHandler_PostAcceptsRawHarnessStatuses(t *testing.T) {
 		NewInMemoryHarnessEventStore(),
 		NewInMemoryTrajectoryLedgerStore(),
 		NewInMemoryExperienceEventStore(),
+		NewInMemoryEditorTelemetryStore(),
 		DefaultLearningPolicy(),
 		func() time.Time { return cfgNow },
 	)
