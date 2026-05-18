@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/format-java-response-v0.json",
+  "title": "Format Java Response v0",
+  "description": "Studio-IDE-14 (#256): response body for `POST /api/v0/format/java`. On success the BFF returns FormatJavaResponse; on failure it returns FormatJavaError with a stable `code` discriminator the Studio renders into either a transient \"Formatter unavailable\" toast or a \"Could not format\" notice. Governed by ADR 0006 (Studio-BFF Contract Versioning).",
+  "oneOf": [
+    { "$ref": "#/$defs/FormatJavaResponse" },
+    { "$ref": "#/$defs/FormatJavaError" }
+  ],
+  "$defs": {
+    "FormatJavaResponse": {
+      "type": "object",
+      "required": ["schemaVersion", "formattedContent"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "type": "string", "enum": ["v0"] },
+        "formattedContent": {
+          "type": "string",
+          "description": "Formatted Java source. Studio applies it as a single atomic edit so the format is one undo step."
+        }
+      }
+    },
+    "FormatJavaError": {
+      "type": "object",
+      "required": ["schemaVersion", "status", "code", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "type": "string", "enum": ["v0"] },
+        "status": { "type": "string", "enum": ["failed"] },
+        "code": {
+          "type": "string",
+          "enum": [
+            "format_unavailable",
+            "format_parse_error",
+            "format_input_too_large",
+            "format_input_invalid",
+            "format_upstream_error"
+          ],
+          "description": "Stable discriminator. `format_unavailable` and `format_upstream_error` map to a transient toast; `format_parse_error` surfaces a non-blocking notice; `format_input_invalid` and `format_input_too_large` are programmer-level guardrails."
+        },
+        "error": { "type": "string", "minLength": 1 },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed source line of a parse error, when google-java-format pinpoints it."
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed source column of a parse error, when google-java-format pinpoints it."
+        }
+      }
+    }
+  }
+}

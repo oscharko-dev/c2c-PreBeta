@@ -9,6 +9,7 @@ import {
   AlertCircle,
   MoreHorizontal,
   Trash2,
+  Hammer,
 } from "lucide-react";
 import { type StudioApiState } from "../../hooks/useC2cApi";
 import { getWorkbenchReadiness } from "./workbenchReadiness";
@@ -19,6 +20,7 @@ import {
   editorPersistence,
   getCurrentDraftScope,
 } from "../../lib/editor/editorPersistence";
+import { useJavaEditorActions } from "../../stores/javaEditorActions";
 
 interface AppTopBarProps {
   apiState: StudioApiState;
@@ -29,6 +31,12 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   const readiness = getWorkbenchReadiness(apiState);
   const { canSubmitTransform, submitTransform } = useSourceWorkspace();
   const canStart = readiness.startEnabled && !loading && canSubmitTransform;
+  // Studio-IDE-14 (#256): Compile Check is rendered as a sibling of the
+  // Start button. The Java editor pane registers an imperative handler
+  // through the JavaEditorActionsProvider; when no pane is mounted the
+  // button stays disabled.
+  const { canCompileCheck, compileCheckPending, triggerCompileCheck } =
+    useJavaEditorActions();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -106,6 +114,18 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           }}
         >
           <Play className="h-4 w-4 text-bg-0 fill-current" />
+        </button>
+        <button
+          type="button"
+          data-testid="topbar-compile-check-button"
+          disabled={!canCompileCheck || compileCheckPending}
+          className="flex items-center justify-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1 text-xs text-text-dim hover:text-text hover:bg-bg-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-1 focus-visible:ring-accent outline-none"
+          aria-label="Run Compile Check on the current Java buffer"
+          title="Compile Check (F5)"
+          onClick={() => triggerCompileCheck()}
+        >
+          <Hammer className="h-3.5 w-3.5" />
+          <span>{compileCheckPending ? "Compile…" : "Compile Check"}</span>
         </button>
       </div>
 

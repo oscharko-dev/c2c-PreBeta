@@ -33,6 +33,20 @@
       <version>2.18.7</version>
     </dependency>
     <dependency>
+      <!--
+        Studio-IDE-14 (#256): deterministic Java formatter exposed via
+        /v0/format-java. Used in-process within the build-test-runner-service
+        JVM. google-java-format needs additional add-exports flags for
+        jdk.compiler internals at both compile- and run-time; the
+        maven-surefire-plugin argLine and the Dockerfile ENTRYPOINT both
+        carry the same flag set so behaviour matches across local tests,
+        CI, and the deployed image.
+      -->
+      <groupId>com.google.googlejavaformat</groupId>
+      <artifactId>google-java-format</artifactId>
+      <version>1.19.2</version>
+    </dependency>
+    <dependency>
       <groupId>com.c2c</groupId>
       <artifactId>c2c-target-java-runtime</artifactId>
       <version>${c2c.runtime.version}</version>
@@ -62,6 +76,22 @@
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.2.5</version>
+        <configuration>
+          <!--
+            Studio-IDE-14 (#256): google-java-format reaches into jdk.compiler
+            internals. Without these exports, classloading fails at the first
+            call to Formatter.formatSource(). Keep this list in sync with the
+            Dockerfile ENTRYPOINT.
+          -->
+          <argLine>
+            --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED
+          </argLine>
+        </configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
