@@ -45,6 +45,10 @@ export function disposeModel(
   uri: string,
 ): boolean {
   const model = monaco.editor.getModel(monaco.Uri.parse(uri));
+  // Always clear the view-state entries for this URI so the lifecycle stays
+  // symmetric with createModel and the module-level Maps cannot grow without
+  // bound across long sessions that churn through dynamically-generated URIs.
+  clearViewState(uri);
   if (!model) {
     return false;
   }

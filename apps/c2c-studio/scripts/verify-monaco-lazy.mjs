@@ -28,11 +28,27 @@ if (!Array.isArray(stats)) {
   process.exit(1);
 }
 
+// Match the actual Monaco runtime — path-shaped references that only the
+// bundled module would contain. Bare-substring matches on "monaco-editor"
+// would false-positive on incidental mentions (e.g., license headers,
+// source-map paths, or other packages that name-drop Monaco in comments).
 const monacoMarkers = [
-  "monaco-editor",
-  "vs/editor/editor.api",
-  "vs/editor/editor.worker",
+  /\bmonaco-editor\/esm\//,
+  /\bmonaco-editor\/min\//,
+  /\bnode_modules\/monaco-editor\//,
+  /\b@monaco-editor\/react\//,
+  /["']monaco-editor["']/,
+  /["']@monaco-editor\/react["']/,
 ];
+
+function matchesAnyMarker(content) {
+  for (const marker of monacoMarkers) {
+    if (marker.test(content)) {
+      return marker.source;
+    }
+  }
+  return null;
+}
 
 const offenders = [];
 const inspected = new Set();
@@ -48,11 +64,9 @@ for (const route of stats) {
     }
     inspected.add(abs);
     const content = readFileSync(abs, "utf8");
-    for (const marker of monacoMarkers) {
-      if (content.includes(marker)) {
-        offenders.push({ route: route.route, chunk, marker });
-        break;
-      }
+    const matched = matchesAnyMarker(content);
+    if (matched) {
+      offenders.push({ route: route.route, chunk, marker: matched });
     }
   }
 }
@@ -93,10 +107,7 @@ function findMonacoLazyChunks(rootDir, firstLoadSet) {
       continue;
     }
     const content = readFileSync(entry, "utf8");
-    if (
-      content.includes("monaco-editor") ||
-      content.includes("vs/editor/editor.api")
-    ) {
+    if (matchesAnyMarker(content)) {
       lazyChunks.push(entry);
     }
   }

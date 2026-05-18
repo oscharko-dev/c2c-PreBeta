@@ -158,6 +158,11 @@ function StandaloneEditorView({
       <Editor
         value={sanitizedValue}
         language={language}
+        // Pass the resolved URI so @monaco-editor/react creates (and reuses)
+        // a model keyed by it. Without `path`, every mount creates an anonymous
+        // model and URI-scoped diagnostics, language-service state, undo
+        // history, etc. won't line up with the lifecycle helpers' `modelUri`.
+        path={resolvedUri}
         theme={STUDIO_DARK_THEME}
         loading={<EditorSkeleton />}
         options={{
@@ -195,7 +200,19 @@ function StandaloneEditorView({
           }
           onMount?.({ editor, monaco: monacoInstance });
         }}
-        onChange={(next) => {
+        onChange={(next, event) => {
+          // Suppress all change events in readonly mode — the user cannot type,
+          // so every emission is from a programmatic `setValue` and would
+          // otherwise mark consumers' buffers dirty for refreshes.
+          if (mode === "readonly") {
+            return;
+          }
+          // Suppress whole-model replacements (isFlush) — those are emitted
+          // when `@monaco-editor/react` applies a new `value` prop, not when
+          // the user edits.
+          if (event?.isFlush) {
+            return;
+          }
           if (next !== undefined) {
             onChange?.(next);
           }
@@ -222,6 +239,7 @@ function DiffEditorView({
   className,
   ariaLabel,
   modelUri,
+  originalModelUri,
   onMount,
 }: DiffEditorViewProps) {
   const diffEditorRef = useRef<MonacoNs.editor.IStandaloneDiffEditor | null>(
@@ -229,11 +247,16 @@ function DiffEditorView({
   );
   const decorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
+  const contentChangeDisposableRef = useRef<MonacoNs.IDisposable | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const resolvedUri = useMemo(
     () => modelUri ?? `inmemory://model/${language}-diff`,
     [modelUri, language],
+  );
+  const resolvedOriginalUri = useMemo(
+    () => originalModelUri ?? `${resolvedUri}~original`,
+    [originalModelUri, resolvedUri],
   );
   const sanitizedModified = useMemo(
     () => applySanitization(value, sanitizationProfile),
@@ -280,6 +303,10 @@ function DiffEditorView({
       }
       const state = diffEditor.saveViewState();
       saveDiffViewState(resolvedUri, state);
+      if (contentChangeDisposableRef.current) {
+        contentChangeDisposableRef.current.dispose();
+        contentChangeDisposableRef.current = null;
+      }
       if (decorationsRef.current) {
         decorationsRef.current.clear();
         decorationsRef.current = null;
@@ -299,6 +326,12 @@ function DiffEditorView({
         original={sanitizedOriginal}
         modified={sanitizedModified}
         language={language}
+        // Pass URIs for both sides so the underlying Monaco models are scoped
+        // by URI, just like the standalone editor's `path`. Without these,
+        // Monaco creates anonymous models and any URI-scoped consumer state
+        // (e.g., diagnostics, language services) will not line up.
+        originalModelPath={resolvedOriginalUri}
+        modifiedModelPath={resolvedUri}
         theme={STUDIO_DARK_THEME}
         loading={<EditorSkeleton />}
         options={{
@@ -318,9 +351,20 @@ function DiffEditorView({
           const modifiedModel = modifiedEditor.getModel();
           if (modifiedModel) {
             applyMarkers(monacoInstance, modifiedModel, markers);
-            modifiedModel.onDidChangeContent(() => {
-              onChangeRef.current?.(modifiedModel.getValue());
-            });
+            // Track the disposable so the listener is cleaned up on unmount.
+            // Otherwise a model that outlives the editor (e.g., when
+            // modelUri causes the model to be reused) accumulates listeners
+            // across mount/unmount cycles.
+            contentChangeDisposableRef.current =
+              modifiedModel.onDidChangeContent((event) => {
+                // Suppress whole-model replacements — those are emitted when
+                // @monaco-editor/react flushes a new `modified` prop, not
+                // when the user edits.
+                if (event.isFlush) {
+                  return;
+                }
+                onChangeRef.current?.(modifiedModel.getValue());
+              });
           }
           if (decorations && decorations.length > 0) {
             decorationsRef.current =
