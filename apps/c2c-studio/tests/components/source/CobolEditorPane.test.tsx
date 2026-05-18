@@ -101,6 +101,19 @@ vi.mock("@/lib/editor/lazyMonaco", () => ({
   __resetMonacoForTests: () => undefined,
 }));
 
+// Studio-IDE-9 (#254): the COBOL hover provider is registered alongside
+// the language. The unit tests for the provider live next to its
+// module; here we only need to confirm the editor pane wires the
+// registration into both the early effect path and the onMount
+// fallback, so we stub the export and capture the calls.
+const hoverRegistrationCalls: unknown[] = [];
+vi.mock("@/lib/editor/cobolHoverProvider", () => ({
+  registerCobolHoverProvider: (monaco: unknown) => {
+    hoverRegistrationCalls.push(monaco);
+    return { dispose: () => undefined };
+  },
+}));
+
 vi.mock("@/lib/apiClient", () => ({
   apiClient: {
     transform: vi.fn(),
@@ -144,6 +157,7 @@ describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
     mountCalls.length = 0;
     updateOptionsCalls.length = 0;
     registerCalls.length = 0;
+    hoverRegistrationCalls.length = 0;
   });
 
   it("renders the empty state until the user starts typing", () => {
@@ -171,6 +185,16 @@ describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
     // resolve effect path also runs via the mocked getMonaco; whichever
     // path wins, registration MUST have happened at least once.
     expect(registerCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("registers the COBOL hover provider alongside the language (Studio-IDE-9 #254)", () => {
+    renderPane();
+    fireEvent.click(screen.getByText("Start Typing"));
+    // Both the early effect path and the onMount fallback call
+    // registerCobolHoverProvider — module-level idempotency in the
+    // provider itself prevents double-attach against a real Monaco
+    // instance, so we only require at least one invocation here.
+    expect(hoverRegistrationCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   it("forwards the editor content to the source workspace on edit (dirty flag, character-accurate value)", () => {

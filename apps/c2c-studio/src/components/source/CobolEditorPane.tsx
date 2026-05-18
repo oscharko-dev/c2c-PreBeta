@@ -32,6 +32,7 @@ import {
   FIXED_FORMAT_RULER_COLUMNS,
   registerCobolLanguage,
 } from "@/lib/editor/cobolMonarch";
+import { registerCobolHoverProvider } from "@/lib/editor/cobolHoverProvider";
 import {
   ConflictResolverDialog,
   type ConflictPanel,
@@ -108,10 +109,12 @@ export function CobolEditorPane() {
   // COBOL source — `sourceKind: "cobol"` and the IR step (which still
   // points at COBOL line numbers via `sourceLine`). The build/test and
   // generated-Java diagnostics are routed to the Java pane.
-  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration({
-    id: "cobol-editor",
-    filePath: sourceName ?? DEFAULT_SOURCE_NAME,
-  });
+  const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration(
+    {
+      id: "cobol-editor",
+      filePath: sourceName ?? DEFAULT_SOURCE_NAME,
+    },
+  );
   // Studio-IDE-5 (#244 review): the marker memo depends on Monaco
   // having resolved. `useMonacoReady` returns null until the async
   // loader completes, then re-renders so the memo recomputes with the
@@ -131,7 +134,7 @@ export function CobolEditorPane() {
     // avoids cross-file misattribution (e.g. "Foo.cbl" matching
     // "BarFoo.cbl"). Diagnostics without filePath are run-level per
     // ADR 0006 Decision 4 and never become markers.
-    const filterForCurrentFile = (d: typeof diagnostics[number]) => {
+    const filterForCurrentFile = (d: (typeof diagnostics)[number]) => {
       if (!d.filePath) return false;
       const aParts = d.filePath.split(/[\\/]+/).filter(Boolean);
       const bParts = currentFile.split(/[\\/]+/).filter(Boolean);
@@ -168,7 +171,13 @@ export function CobolEditorPane() {
     ];
     // cobolEditorMountToken is intentional — see review #244 round 3.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monaco, runState.generated, runState.buildTest, sourceName, cobolEditorMountToken]);
+  }, [
+    monaco,
+    runState.generated,
+    runState.buildTest,
+    sourceName,
+    cobolEditorMountToken,
+  ]);
 
   // Toast-equivalent visibility window for the "Saved locally" notice.
   useEffect(() => {
@@ -197,6 +206,10 @@ export function CobolEditorPane() {
           return;
         }
         registerCobolLanguage(monaco);
+        // Studio-IDE-9 (#254): register the deterministic hover
+        // provider once the language is known. Registration is
+        // idempotent so the onMount fallback below can re-call safely.
+        registerCobolHoverProvider(monaco);
       })
       .catch(() => {
         // CodeEditor surfaces the load failure via its own error UI; nothing
@@ -229,9 +242,10 @@ export function CobolEditorPane() {
       registerMarkerEditor(editor);
       setCobolEditorMountToken((value) => value + 1);
       // Late-registration fallback in case the early effect lost the race
-      // against CodeEditorInner's monaco resolution. registerCobolLanguage
-      // is idempotent.
+      // against CodeEditorInner's monaco resolution. Both registrations
+      // are idempotent.
       registerCobolLanguage(monaco);
+      registerCobolHoverProvider(monaco);
       // Apply the initial ruler state. The dedicated effect above handles
       // subsequent toggles; this mount-time call covers the case where the
       // toggle is already on before the editor mounted (e.g., a future
