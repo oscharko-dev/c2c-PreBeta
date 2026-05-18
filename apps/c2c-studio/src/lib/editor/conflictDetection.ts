@@ -366,7 +366,60 @@ export function detectConflicts(input: DetectConflictsInput): ConflictRegion[] {
     emitInsertRegion(regions, mIns, gIns, anchor + 2);
   }
 
-  return regions.sort((a, b) => a.lineRange.startLine - b.lineRange.startLine);
+  const sorted = regions.sort(
+    (a, b) => a.lineRange.startLine - b.lineRange.startLine,
+  );
+  return coalesceAdjacentRegions(sorted);
+}
+
+// Studio-IDE-13 (#255) follow-up: Myers' edit-script ordering can split a
+// logical multi-line replacement into two adjacent regions with the same
+// conflictKind (e.g. ``delete delete insert insert`` → first
+// delete→insert promotes to ``changed`` while the trailing insert lands
+// as a pure insertion at the same anchor). Both regions carry the same
+// resolution semantics; collapsing them produces a cleaner merge UI
+// without changing the merged buffer. Adjacent ``conflict`` regions are
+// NOT coalesced — they require independent user picks.
+function coalesceAdjacentRegions(regions: ConflictRegion[]): ConflictRegion[] {
+  if (regions.length <= 1) return regions;
+  const result: ConflictRegion[] = [];
+  let pending: ConflictRegion | null = null;
+  for (const region of regions) {
+    if (pending === null) {
+      pending = region;
+      continue;
+    }
+    // Adjacent = pending.endLine + 1 === region.startLine (line-contiguous
+    // in the baseline coordinate space). ``conflict`` regions keep their
+    // independent picks; everything else can merge when the kind matches.
+    const adjacent =
+      pending.lineRange.endLine + 1 === region.lineRange.startLine;
+    const mergeable =
+      adjacent &&
+      pending.conflictKind === region.conflictKind &&
+      pending.conflictKind !== "conflict" &&
+      pending.suggestedResolution === region.suggestedResolution;
+    if (mergeable) {
+      pending = {
+        lineRange: {
+          startLine: pending.lineRange.startLine,
+          endLine: region.lineRange.endLine,
+        },
+        conflictKind: pending.conflictKind,
+        baselineContent: pending.baselineContent + region.baselineContent,
+        manualContent: pending.manualContent + region.manualContent,
+        newGeneratorContent:
+          pending.newGeneratorContent + region.newGeneratorContent,
+        suggestedResolution: pending.suggestedResolution,
+        needsUserPick: pending.needsUserPick && region.needsUserPick,
+      };
+    } else {
+      result.push(pending);
+      pending = region;
+    }
+  }
+  if (pending !== null) result.push(pending);
+  return result;
 }
 
 // --------------------------------------------------------------------------
