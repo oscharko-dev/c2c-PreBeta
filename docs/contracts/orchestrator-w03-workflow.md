@@ -15,6 +15,9 @@ and tests remain the executable truth.
 - Model Gateway is the only model boundary.
 - Harness records infrastructure signals; it does not choose workflow steps.
 - `success` requires deterministic verification and complete evidence.
+- Editor-assist invocations are a parallel-governed model channel. They go
+  through the Model Gateway boundary, write to the same ledger pipeline, and
+  are not part of any run's success determination or evidence pack.
 
 ## State Machine
 
@@ -110,6 +113,50 @@ promote a run to success.
 
 Any non-`success` classification carries a failure code.
 
+## Parallel-Governed Channels
+
+Some Studio actions invoke the Model Gateway outside of a run. They are
+non-productive: their output never enters a run's success determination,
+never produces a Java candidate, and never participates in deterministic
+verification. They are governed by their own budgets and write their own
+ledger entries.
+
+### Editor-Assist Channel
+
+Architecture decided in
+[ADR 0004 — Studio Editor-Assist-Channel](../adr/0004-studio-editor-assist-channel.md).
+The action `C2C: Explain this region` (Studio-IDE-10) submits a selected
+COBOL or Java region to the Model Gateway via the BFF.
+
+`editorAssistBudget` shape:
+
+```json
+{ "limit": 3, "used": 0, "remaining": 3 }
+```
+
+- Default: `3`.
+- Allowed range: `[1..10]`.
+- Scope: per `(tenantId, userId, sessionId)`, where `sessionId` is a
+  client-issued Studio editor session identifier. The BFF additionally
+  enforces a per-`(tenantId, day)` ceiling to prevent abuse via
+  session-ID minting.
+
+`editorAssistBudget` is independent of `repairBudget`, `assistBudget`, and
+`modelInvocationBudget`. It does not appear in the run-contract payload
+returned by `GET /v0/runs/{runId}/workflow`.
+
+Editor-assist calls write a ledger entry of `kind=editor_assist` and use a
+dedicated `editorAssistRef` field; they do not reuse `modelInvocationRef`.
+Each entry carries the post-consume `budgetSnapshot`, the
+`redactedFields[]` produced by the Model Gateway redactor, the
+`requestRegion` (`sourceKind`, line range, and a SHA-256 `byteHash` of the
+selected region), and an optional informational `runIdRef` when a run
+happens to be open at the time of the call.
+
+The Orchestrator exposes no editor-assist surface; the state machine is
+unchanged. An editor-assist call does not produce an `assistDecision` and
+does not advance any run state.
+
 ## Evidence Requirements
 
 Successful W0.3 evidence includes references for:
@@ -127,6 +174,11 @@ Successful W0.3 evidence includes references for:
 
 Evidence incompleteness blocks verified success.
 
+Editor-assist ledger entries (`kind=editor_assist`) are not included in a
+run's evidence pack, even when issued during the run's lifetime. They live
+in the trajectory ledger as a parallel-governed channel and are accessed
+through editor-assist audit queries, not run evidence.
+
 ## API Surface
 
 The Orchestrator exposes `GET /v0/runs/{runId}/workflow`. The BFF exposes the
@@ -140,3 +192,12 @@ W0.3 fields are additive over the W0.2 contract:
 
 Consumers must tolerate `assistDecision=null` before the gate fires and missing
 W0.3 fields for older persisted runs.
+
+The BFF additionally exposes the editor-assist channel (per
+[ADR 0004](../adr/0004-studio-editor-assist-channel.md)):
+
+- `POST /api/v0/editor/explain` — submit a region for explanation.
+- `GET /api/v0/editor/budget` — return the current `editorAssistBudget`
+  for the calling `(tenantId, userId, sessionId)`.
+
+The Orchestrator has no editor-assist surface.
