@@ -196,21 +196,16 @@ export function GeneratedJavaEditorPane() {
     }
   }, [setJavaBufferContent]);
 
-  // On file switch flush any pending edit immediately so it lands on the
-  // file the user actually typed in.
+  // Flush any pending edit when (a) the active file changes — routing it to
+  // the file the user actually typed in — and (b) the pane unmounts, so an
+  // in-flight edit is not lost when the workbench tab changes. Both cases
+  // are covered by this single cleanup: React runs it on every dep change
+  // *and* on unmount.
   useEffect(() => {
     return () => {
       flushPendingEdit();
     };
   }, [selectedFilePath, flushPendingEdit]);
-
-  // On unmount also flush so an in-flight edit is not lost when the
-  // workbench tab changes.
-  useEffect(() => {
-    return () => {
-      flushPendingEdit();
-    };
-  }, [flushPendingEdit]);
 
   const handleEditorChange = useCallback(
     (next: string) => {
