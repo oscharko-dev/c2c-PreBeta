@@ -33,7 +33,6 @@ jobs:
   a11y:
     name: Studio a11y (WCAG 2.2 AA)
     runs-on: ubuntu-24.04
-    if: hashFiles('apps/c2c-studio/package.json') != ''
     permissions:
       contents: read
     timeout-minutes: 15
