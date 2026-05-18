@@ -51,18 +51,26 @@ keystrokes, to avoid an IndexedDB write storm.
 ### 2. Encryption at Rest
 
 **Option B — AES-GCM via Web Crypto API.** Drafts are encrypted at
-rest in IndexedDB. The encryption key is derived from the user's
-session credentials and never persisted.
+rest in IndexedDB. The encryption key is derived in-memory at session
+start and never persisted.
 
 Key derivation procedure:
 
-- **Input keying material (IKM)**: the opaque session token secret
-  (not the JWT body). The Studio runtime never logs or persists this
-  value.
-- **Salt**: `SHA-256(tenantId || userId)`. Binds the key to the
-  identity scope so the same IKM with a different identity cannot
-  produce the same key, and a cross-tenant device with the same
-  session theory of operation cannot read drafts.
+- **Input keying material (IKM)**: a **dedicated draft-key wrapping
+  secret** issued by the BFF in the body of `POST /api/v0/session/bootstrap`
+  at session start. It is **distinct from the authentication cookie**
+  so the cookie remains `HttpOnly` per the security checklist. Studio
+  holds the wrapping secret in memory only — it is never written to
+  storage, never logged, and never transmitted back to the server. On
+  logout or tab close it is dropped; on the next sign-in the BFF issues
+  a fresh value, which is why drafts encrypted under the previous value
+  become unreadable.
+- **Salt**: `SHA-256(u32be(len(tenantId)) || tenantId || u32be(len(userId)) || userId)`,
+  where `u32be(n)` is the 32-bit big-endian byte representation of the
+  UTF-8 byte length of the following field. Length-prefix domain
+  separation prevents the variable-length-concatenation ambiguity
+  whereby `(tenantId="ab", userId="c")` and `(tenantId="a", userId="bc")`
+  would otherwise hash to the same value.
 - **Info**: the constant ASCII string `"c2c-studio-draft-v1"`. Versions
   the derivation so a future v2 procedure does not collide with v1.
 - **Algorithm**: HKDF-SHA-256 → 256-bit AES-GCM key.
@@ -89,9 +97,9 @@ bug. On a save attempt with an expired session:
 1. The persistence module raises `SessionExpiredDuringEdit`.
 2. Studio prompts re-authentication without discarding the in-memory
    buffer.
-3. After re-authentication the session token changes; HKDF derives a
-   new key; **drafts encrypted under the previous key become
-   unreadable** and age out via TTL.
+3. After re-authentication the BFF issues a fresh draft-key wrapping
+   secret; HKDF derives a new key; **drafts encrypted under the
+   previous key become unreadable** and age out via TTL.
 
 This is the intended behaviour: drafts are local working copies, not
 durable artifacts. Durable work belongs in the server-side artifact
@@ -109,14 +117,29 @@ type SourceKey = {
 ```
 
 Stored as the IndexedDB record key (plaintext — see Consequences).
-`tenantId` and `userId` are sourced from the Studio session context
-that the BFF must inject at bootstrap (see _Named prerequisite_
-below).
+
+**`tenantId` and `userId` are opaque pseudonymous identifiers** —
+typically UUIDs or random opaque strings minted by the BFF at the
+identity layer. They are **not** raw email addresses, employee IDs,
+or any other identifier that itself carries PII. The mapping from
+pseudonym to real identity lives server-side only. This requirement
+reconciles the necessarily plaintext IndexedDB index keys with the
+security checklist rule that no PII is stored unencrypted at rest.
+The Studio runtime must reject a bootstrap response in which either
+identifier contains an `@` character or whitespace, as a defensive
+check against accidental email leakage.
+
+Both identifiers come from the Studio session context that the BFF
+must inject at bootstrap (see _Named prerequisite_ below).
 
 **`programId` fallback chain** (first non-empty wins):
 
 1. Stable identifier emitted by the parser/IR for the loaded source.
-2. `sha256(sourceName || normalizedPath)` truncated to 16 hex bytes.
+2. `sha256(u32be(len(sourceName)) || sourceName || u32be(len(normalizedPath)) || normalizedPath)`
+   truncated to 16 hex bytes. The length-prefix encoding prevents the
+   ambiguity whereby `(sourceName="ab", normalizedPath="c")` and
+   `(sourceName="a", normalizedPath="bc")` would otherwise hash to
+   the same value.
 3. _Never_ fall back to `sourceName` alone — different paths with
    the same filename would collide across drafts.
 
@@ -194,13 +217,16 @@ handlers — DOMPurify is the load-bearing stage.
 including any future BFF-proxied LLM output.
 
 **E2E acceptance** (per Epic acceptance criteria): the following
-payloads render as text or are stripped, never executed:
+payloads render as text or are stripped, never executed (rendered in
+a fenced block so document link-checkers do not try to follow them):
 
-- `<script>alert(1)</script>`
-- `[x](javascript:alert(1))`
-- `[x](data:text/html,…)`
-- `<img src=x onerror=alert(1)>`
-- `[x](vbscript:…)`
+```text
+<script>alert(1)</script>
+[x](javascript:alert(1))
+[x](data:text/html,...)
+<img src=x onerror=alert(1)>
+[x](vbscript:...)
+```
 
 ### 6. CSP Compatibility
 
@@ -337,15 +363,29 @@ cadence to typing rate and produce an unnecessary IndexedDB write
 storm. Write-and-open keeps the touch contract aligned with user
 intent.
 
-**Why AES-GCM with HKDF over a session-derived key.** It satisfies
-the regulated-customer compliance posture (drafts unreadable post
-logout) without requiring a server-side key escrow service. AES-GCM
-provides both confidentiality and AEAD integrity in one step;
-HKDF-SHA-256 produces a uniformly distributed key from the session
-token without exposing the token to the cryptographic primitive
-directly. Web Crypto availability is now ubiquitous on modern
-browsers; the explicit `isAvailable` check covers degraded
+**Why AES-GCM with HKDF over a draft-key wrapping secret.** This
+posture satisfies the regulated-customer compliance need (drafts
+unreadable post logout) without requiring a server-side key escrow
+service. AES-GCM provides both confidentiality and AEAD integrity in
+one step; HKDF-SHA-256 produces a uniformly distributed key from the
+wrapping secret without exposing the secret to the cryptographic
+primitive directly. Web Crypto availability is now ubiquitous on
+modern browsers; the explicit `isAvailable` check covers degraded
 environments cleanly.
+
+**Why a dedicated draft-key wrapping secret rather than the auth
+token.** The security checklist requires authentication cookies to be
+`HttpOnly`, which means Studio JavaScript cannot read the auth
+material. Using the auth token as HKDF input would either make the
+persistence path unimplementable under the compliant cookie posture
+or force the bearer token into JS scope, where any editor XSS could
+exfiltrate it. A separate secret delivered in the bootstrap response
+body is held in memory only for the lifetime of the page, scoped to
+draft encryption, and rotated on every sign-in. It is **not** an
+authentication credential; if leaked it grants the attacker no API
+access, only the ability to decrypt local drafts on the user's
+device — which an attacker with disk access could pursue by other
+means anyway.
 
 **Why hard-coded redaction baseline.** A remotely mutable redaction
 list is itself an attack surface — compromise the config endpoint,
@@ -411,7 +451,11 @@ collapsing them into a single generic error.
   plaintext on disk; program identifiers leak to anyone with disk
   access. Buffer **contents** are protected. Full-key encryption
   would require an encrypted index we do not need; program identity
-  is also visible in the URL/route.
+  is also visible in the URL/route. **The PII concern is bounded by
+  Decision 3's requirement that `tenantId` and `userId` are opaque
+  pseudonymous identifiers**, not emails or employee IDs — so the
+  plaintext keys leak program names and pseudonyms, not direct
+  customer identifiers.
 - **Quota**: large COBOL files plus AES-GCM overhead (16-byte tag +
   12-byte IV per record) can pressure the per-origin quota.
   `QuotaExceeded` is surfaced to the UI; the module never silently
@@ -423,10 +467,13 @@ collapsing them into a single generic error.
 
 **Hard prerequisite for Studio-IDE-3** ([#247](https://github.com/oscharko-dev/c2c-PreBeta/issues/247)):
 
-- The BFF must inject `tenantId` and `userId` into the Studio
-  session bootstrap. Studio-IDE-3 implementation must not start
-  before this lands, or a placeholder `tenantId = "default"` will
-  ship and become production load-bearing.
+- The BFF must expose `POST /api/v0/session/bootstrap` returning, in
+  the JSON response body, the opaque pseudonymous `tenantId` and
+  `userId` plus a fresh `draftKeyWrappingSecret`. The authentication
+  cookie remains `HttpOnly` and is not exposed to JS. Studio-IDE-3
+  implementation must not start before this lands, or a placeholder
+  `tenantId = "default"` and an absent wrapping secret will ship and
+  become production load-bearing.
 
 **Named follow-ups**:
 

@@ -83,16 +83,20 @@ established by:
 
 ## Secret Handling
 
-- [ ] No secret (session token, API key, customer credential) is
-      logged.
+- [ ] No secret (session token, API key, customer credential, draft
+      key wrapping secret) is logged.
 - [ ] No secret is included in URL paths, query strings, or fragment
       identifiers.
 - [ ] No secret is embedded in client-side bundle code at build
       time.
 - [ ] No secret is committed to the repository, including `.env`
       files or fixture data. Secret-scanning CI passes.
-- [ ] Any new use of a session token uses the opaque secret, not the
-      JWT body.
+- [ ] Authentication cookies remain `HttpOnly`. Any new code path
+      that would require JS access to the auth token is reworked to
+      use a separate, scoped secret (e.g. the draft-key wrapping
+      secret in ADR 0005) instead.
+- [ ] Any new use of a session-related opaque secret is held in
+      memory only and never persisted to storage or query strings.
 
 ## Web Crypto / Key Derivation
 
@@ -127,6 +131,11 @@ established by:
       `tenantId`) are present on every read and write.
 - [ ] No client-supplied `tenantId` or `userId` is trusted by the
       BFF without verification against the session.
+- [ ] Identifiers surfaced to the Studio runtime (`tenantId`,
+      `userId`) are opaque pseudonyms — UUIDs or random opaque
+      strings — and never raw emails, employee IDs, or other
+      PII-bearing values. Mapping to real identity stays
+      server-side.
 
 ## Telemetry and Logging
 
