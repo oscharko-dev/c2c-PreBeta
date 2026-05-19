@@ -129,7 +129,11 @@ function disabledBuildTestRunner(): BuildTestRunnerClient {
 interface FakeRunnerOptions {
   response?: UpstreamResponse;
   error?: Error;
-  onCall?: (payload: { content: string; filePath?: string }) => void;
+  onCall?: (
+    payload: { content: string; filePath?: string },
+    timeoutOverrideMs?: number,
+    maxResponseBytes?: number,
+  ) => void;
 }
 
 function fakeBuildTestRunner(
@@ -137,8 +141,8 @@ function fakeBuildTestRunner(
 ): BuildTestRunnerClient {
   return {
     enabled: true,
-    async formatJava(payload) {
-      options.onCall?.(payload);
+    async formatJava(payload, timeoutOverrideMs, maxResponseBytes) {
+      options.onCall?.(payload, timeoutOverrideMs, maxResponseBytes);
       if (options.error) {
         throw options.error;
       }
@@ -462,7 +466,42 @@ test("POST /api/v0/format/java rejects oversize body with 413", async () => {
     );
     assert.equal(result.status, 413);
     const body = result.body as Record<string, unknown>;
-    assert.equal(body.code, "format_unavailable");
+    assert.equal(body.code, "format_input_too_large");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/format/java accepts content at the configured byte cap despite JSON envelope bytes", async () => {
+  const auth = createRouteAuth();
+  const content = "x".repeat(32);
+  const handler = createApp({
+    config: { ...baseConfig, formatJavaSourceMaxBytes: 32 },
+    samples: emptySamples(),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: fakeBuildTestRunner({
+      response: {
+        status: 200,
+        body: {
+          schemaVersion: "v0",
+          formattedContent: content,
+        },
+      },
+    }),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const result = await postJson(
+      `${server.baseUrl}/api/v0/format/java`,
+      { content },
+      auth.headers,
+    );
+    assert.equal(result.status, 200);
+    const body = result.body as Record<string, unknown>;
+    assert.equal(body.formattedContent, content);
   } finally {
     await server.close();
   }
@@ -496,14 +535,20 @@ test("POST /api/v0/format/java rejects non-string content with 400", async () =>
 
 test("POST /api/v0/format/java proxies a successful upstream response", async () => {
   const auth = createRouteAuth();
-  const captured: Array<{ content: string; filePath?: string }> = [];
+  const captured: Array<{
+    content: string;
+    filePath?: string;
+    timeoutOverrideMs?: number;
+    maxResponseBytes?: number;
+  }> = [];
   const handler = createApp({
     config: baseConfig,
     samples: emptySamples(),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     buildTestRunner: fakeBuildTestRunner({
-      onCall: (payload) => captured.push(payload),
+      onCall: (payload, timeoutOverrideMs, maxResponseBytes) =>
+        captured.push({ ...payload, timeoutOverrideMs, maxResponseBytes }),
       response: {
         status: 200,
         body: {
@@ -530,6 +575,8 @@ test("POST /api/v0/format/java proxies a successful upstream response", async ()
     assert.equal(body.formattedContent, "public class A {}\n");
     assert.equal(captured.length, 1);
     assert.equal(captured[0]?.filePath, "src/A.java");
+    assert.equal(captured[0]?.timeoutOverrideMs, baseConfig.formatJavaTimeoutMs);
+    assert.equal(captured[0]?.maxResponseBytes, baseConfig.artifactContentMaxBytes);
   } finally {
     await server.close();
   }

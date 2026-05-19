@@ -24,8 +24,16 @@ import {
 // to exercise the same surface without provider-missing crashes.
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
 import { LineageCoverageProvider } from "@/stores/lineageCoverage";
+import {
+  JavaEditorActionsProvider,
+  useJavaEditorActions,
+} from "@/stores/javaEditorActions";
 import { apiClient } from "@/lib/apiClient";
+import { JAVA_FORMAT_ON_SAVE_STORAGE_KEY } from "@/lib/editor/javaFormatOnSave";
 import type { ApiResult, Diagnostic, GeneratedFileContent } from "@/types/api";
+
+const formatJavaSpy = vi.hoisted(() => vi.fn());
+const lintJavaSpy = vi.hoisted(() => vi.fn(() => []));
 
 // Studio-IDE-4 (#245): exercise the editor surface (language, mode, model
 // URI, onChange) through a textarea-backed CodeEditor mock — Monaco itself
@@ -39,6 +47,7 @@ type EditorMockProps = {
   language: string;
   mode: string;
   modelUri?: string;
+  markerGroups?: Array<{ owner: string; markers: unknown[] }>;
   className?: string;
 };
 
@@ -48,18 +57,32 @@ type FakeEditor = {
     id: string;
     run: (editor: FakeEditor) => unknown;
   }) => { dispose: () => void };
-  getModel: () => {
-    getValue: () => string;
-    getLineCount: () => number;
-    getLineContent: (line: number) => string;
-    getValueInRange: () => string;
-  };
+  getModel: () => FakeModel;
+  executeEdits: (
+    source: string,
+    edits: Array<{ text: string }>,
+  ) => boolean;
   getPosition: () => { lineNumber: number; column: number };
   getSelection: () => { isEmpty: () => boolean } | null;
   onDidFocusEditorText: (callback: () => void) => { dispose: () => void };
   revealLineInCenterIfOutsideViewport: () => void;
   setPosition: () => void;
   focus: () => void;
+};
+
+type FakeModel = {
+  uri: string | undefined;
+  getValue: () => string;
+  getLineCount: () => number;
+  getLineContent: (line: number) => string;
+  getLineLength: (line: number) => number;
+  getValueInRange: () => string;
+  getFullModelRange: () => {
+    startLineNumber: number;
+    startColumn: number;
+    endLineNumber: number;
+    endColumn: number;
+  };
 };
 
 const editorMounts: Array<{
@@ -73,6 +96,33 @@ const editorMounts: Array<{
 const editorCommands: Array<{ keybinding: number; callback: () => void }> = [];
 const editorActions: string[] = [];
 let latestEditorValue = "";
+const fakeModelsByUri = new Map<string, FakeModel>();
+let currentFakeModel: FakeModel;
+
+function fakeModelFor(modelUri: string | undefined): FakeModel {
+  const key = modelUri ?? "__default__";
+  const existing = fakeModelsByUri.get(key);
+  if (existing) return existing;
+  const model: FakeModel = {
+    uri: modelUri,
+    getValue: () => latestEditorValue,
+    getLineCount: () => Math.max(1, latestEditorValue.split("\n").length),
+    getLineContent: (line) => latestEditorValue.split("\n")[line - 1] ?? "",
+    getLineLength: (line) =>
+      (latestEditorValue.split("\n")[line - 1] ?? "").length,
+    getValueInRange: () => latestEditorValue,
+    getFullModelRange: () => ({
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: Math.max(1, latestEditorValue.split("\n").length),
+      endColumn: latestEditorValue.length + 1,
+    }),
+  };
+  fakeModelsByUri.set(key, model);
+  return model;
+}
+
+currentFakeModel = fakeModelFor(undefined);
 
 const fakeMonaco = {
   KeyMod: { CtrlCmd: 1 << 11, Shift: 1 << 10, Alt: 1 << 9 },
@@ -90,11 +140,10 @@ const fakeEditor: FakeEditor = {
     editorActions.push(descriptor.id);
     return { dispose: vi.fn() };
   },
-  getModel: () => ({
-    getValue: () => latestEditorValue,
-    getLineCount: () => Math.max(1, latestEditorValue.split("\n").length),
-    getLineContent: (line) => latestEditorValue.split("\n")[line - 1] ?? "",
-    getValueInRange: () => latestEditorValue,
+  getModel: () => currentFakeModel,
+  executeEdits: vi.fn((_source, edits) => {
+    latestEditorValue = edits[0]?.text ?? latestEditorValue;
+    return true;
   }),
   getPosition: () => ({ lineNumber: 1, column: 1 }),
   getSelection: () => null,
@@ -108,6 +157,7 @@ vi.mock("@/components/editor/CodeEditor", async () => {
   const reactNs = await import("react");
   const CodeEditor = (props: EditorMockProps) => {
     latestEditorValue = props.value;
+    currentFakeModel = fakeModelFor(props.modelUri);
     reactNs.useEffect(() => {
       editorMounts.push({
         language: props.language,
@@ -144,6 +194,18 @@ vi.mock("@/lib/apiClient", () => ({
     getGeneratedFile: vi.fn(),
   },
 }));
+
+vi.mock("@/lib/editor/javaFormatClient", () => ({
+  formatJava: formatJavaSpy,
+}));
+
+vi.mock("@/lib/editor/javaLint", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/editor/javaLint")>();
+  return {
+    ...actual,
+    lintJava: lintJavaSpy,
+  };
+});
 
 const mockTransformationState = vi.fn();
 const setJavaBufferContentSpy = vi.fn();
@@ -250,6 +312,31 @@ function renderPaneWithSelector(path: string) {
   );
 }
 
+function CompileCheckStateProbe() {
+  const actions = useJavaEditorActions();
+  return (
+    <span data-testid="compile-check-state">
+      {actions.canCompileCheck ? "enabled" : "disabled"}
+    </span>
+  );
+}
+
+function renderPaneWithActionsAndSelector(path: string) {
+  return render(
+    <JavaEditorActionsProvider>
+      <OriginOverlayProvider>
+        <LineageCoverageProvider>
+          <GeneratedArtifactsProvider>
+            <CompileCheckStateProbe />
+            <SelectGeneratedFileButton path={path} />
+            <GeneratedJavaEditorPane />
+          </GeneratedArtifactsProvider>
+        </LineageCoverageProvider>
+      </OriginOverlayProvider>
+    </JavaEditorActionsProvider>,
+  );
+}
+
 function NavigateDiagnosticButton({
   diagnostic,
 }: {
@@ -302,6 +389,11 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     editorCommands.length = 0;
     editorActions.length = 0;
     latestEditorValue = "";
+    fakeModelsByUri.clear();
+    currentFakeModel = fakeModelFor(undefined);
+    globalThis.localStorage?.removeItem(JAVA_FORMAT_ON_SAVE_STORAGE_KEY);
+    lintJavaSpy.mockReset();
+    lintJavaSpy.mockReturnValue([]);
     setJavaBufferContentSpy.mockClear();
     ensureJavaBaselineSpy.mockClear();
     loadJavaDraftForSpy.mockClear();
@@ -401,6 +493,49 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     }
   });
 
+  it("runs Java lint 300ms after live editor changes without waiting for buffer persistence", async () => {
+    vi.useFakeTimers();
+    try {
+      mockTransformationState.mockReturnValue(
+        completedRunWith(["src/App.java"]),
+      );
+      mockGeneratedFileContents({
+        "src/App.java": "public class App { void m(int x, int y) {} }",
+      });
+
+      renderPane();
+
+      const editor = (await vi.waitFor(() =>
+        screen.getByTestId("code-editor-mock"),
+      )) as HTMLTextAreaElement;
+      lintJavaSpy.mockClear();
+
+      fireEvent.change(editor, {
+        target: {
+          value:
+            "public class App { void m(int x, int y) { if (x = y) return; } }",
+        },
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(299);
+      });
+      expect(lintJavaSpy).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await Promise.resolve();
+      });
+
+      expect(lintJavaSpy).toHaveBeenCalledWith(
+        "public class App { void m(int x, int y) { if (x = y) return; } }",
+        { filePath: "src/App.java" },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps Cmd/Ctrl+S registered after mounting on a read-only artifact and saves the live Java model", async () => {
     mockTransformationState.mockReturnValue(
       completedRunWith(["pom.xml", "src/App.java"], "pom.xml"),
@@ -449,6 +584,116 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       expect(saveJavaDraftSpy).toHaveBeenCalledWith("src/App.java", {
         content: "public class App { int saved; }",
       });
+    });
+  });
+
+  it("formats the live model before saving when format-on-save is enabled", async () => {
+    globalThis.localStorage?.setItem(JAVA_FORMAT_ON_SAVE_STORAGE_KEY, "true");
+    formatJavaSpy.mockResolvedValue({
+      ok: true,
+      formattedContent: "public class App {}\n",
+    });
+    mockTransformationState.mockReturnValue(completedRunWith(["src/App.java"]));
+    mockGeneratedFileContents({ "src/App.java": "public class App{}" });
+
+    renderPane();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Format Java on Save")).toBeChecked();
+    });
+    const saveKeybinding = fakeMonaco.KeyMod.CtrlCmd | fakeMonaco.KeyCode.KeyS;
+    const saveCommand = editorCommands.find(
+      (command) => command.keybinding === saveKeybinding,
+    );
+    expect(saveCommand).toBeDefined();
+
+    act(() => {
+      saveCommand!.callback();
+    });
+
+    await waitFor(() => {
+      expect(formatJavaSpy).toHaveBeenCalledWith({
+        content: "public class App{}",
+        filePath: "src/App.java",
+      });
+      expect(setJavaBufferContentSpy).toHaveBeenCalledWith(
+        "src/App.java",
+        "public class App {}\n",
+      );
+      expect(saveJavaDraftSpy).toHaveBeenCalledWith("src/App.java", {
+        content: "public class App {}\n",
+      });
+    });
+  });
+
+  it("does not apply a stale format result after switching editor models", async () => {
+    const formattedApp = "public class App { int formatted; }\n";
+    let resolveFormat!: (value: { ok: true; formattedContent: string }) => void;
+    formatJavaSpy.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFormat = resolve;
+      }),
+    );
+    mockTransformationState.mockReturnValue(
+      completedRunWith(["src/App.java", "src/Other.java"], "src/App.java"),
+    );
+    mockGeneratedFileContents({
+      "src/App.java": "public class App{}",
+      "src/Other.java": "public class Other {}",
+    });
+
+    renderPaneWithSelector("src/Other.java");
+
+    await screen.findByTestId("java-format-button");
+    fireEvent.click(screen.getByTestId("java-format-button"));
+    expect(formatJavaSpy).toHaveBeenCalledWith({
+      content: "public class App{}",
+      filePath: "src/App.java",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /select src\/other\.java/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId("code-editor-mock")).toHaveDisplayValue(
+        "public class Other {}",
+      );
+    });
+
+    await act(async () => {
+      resolveFormat({ ok: true, formattedContent: formattedApp });
+      await Promise.resolve();
+    });
+
+    expect(fakeEditor.executeEdits).not.toHaveBeenCalled();
+    expect(setJavaBufferContentSpy).not.toHaveBeenCalledWith(
+      "src/App.java",
+      formattedApp,
+    );
+    expect(latestEditorValue).toBe("public class Other {}");
+  });
+
+  it("exposes Compile Check only while the selected artifact is editable Java", async () => {
+    mockTransformationState.mockReturnValue(
+      completedRunWith(["pom.xml", "src/App.java"], "pom.xml"),
+    );
+    mockGeneratedFileContents({
+      "pom.xml": "<project />",
+      "src/App.java": "public class App {}",
+    });
+
+    renderPaneWithActionsAndSelector("src/App.java");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("compile-check-state").textContent).toBe(
+        "disabled",
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /select src\/app\.java/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("compile-check-state").textContent).toBe(
+        "enabled",
+      );
     });
   });
 

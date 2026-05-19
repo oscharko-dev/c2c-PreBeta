@@ -132,6 +132,35 @@ describe("formatJava client", () => {
     }
   });
 
+  it("keeps the timeout active while reading the response body", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      return {
+        ok: true,
+        status: 200,
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              const err = new Error("aborted");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      } as unknown as Response;
+    }) as unknown as FetchFn;
+
+    const result = await formatJava(
+      { content: "class A{}" },
+      { fetchImpl, timeoutMs: 10 },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("format_unavailable");
+      expect(result.message).toMatch(/exceeded 10 ms/);
+    }
+  });
+
   it("handles a malformed upstream JSON body", async () => {
     const fetchImpl = vi.fn(
       async () =>

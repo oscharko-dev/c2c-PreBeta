@@ -642,6 +642,7 @@ export interface BuildTestRunnerClient {
   formatJava(
     payload: { content: string; filePath?: string },
     timeoutOverrideMs?: number,
+    maxResponseBytes?: number,
   ): Promise<UpstreamResponse | undefined>;
   // Studio-IDE-13 (#255): compile-check and explicit-verify routes call
   // /v0/run-verification on the build-test-runner-service directly.
@@ -675,12 +676,13 @@ export function createBuildTestRunnerClient(
     : undefined;
   return {
     enabled: true,
-    async formatJava(payload, timeoutOverrideMs) {
+    async formatJava(payload, timeoutOverrideMs, maxResponseBytes) {
       return http.request(`${normalized}/v0/format-java`, {
         method: "POST",
         headers: controlHeaders,
         body: payload,
         timeoutMs: timeoutOverrideMs ?? timeoutMs,
+        ...(maxResponseBytes === undefined ? {} : { maxResponseBytes }),
       });
     },
     async runVerification(payload, timeoutOverrideMs) {

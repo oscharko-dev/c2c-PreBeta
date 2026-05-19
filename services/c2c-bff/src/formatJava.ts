@@ -4,7 +4,7 @@
 // at `/v0/format-java`. Response normalisation tolerates the same
 // upstream synonyms the diagnostics module already accepts.
 //
-// Goverened by the schemas under `schemas/format-java-{request,response}-v0.json`.
+// Governed by the schemas under `schemas/format-java-{request,response}-v0.json`.
 
 export const FORMAT_JAVA_SCHEMA_VERSION = "v0" as const;
 
@@ -215,5 +215,14 @@ export function formatUnavailable(message: string): FormatJavaError {
     status: "failed",
     code: "format_unavailable",
     error: message,
+  };
+}
+
+export function formatInputTooLarge(maxContentBytes: number): FormatJavaError {
+  return {
+    schemaVersion: FORMAT_JAVA_SCHEMA_VERSION,
+    status: "failed",
+    code: "format_input_too_large",
+    error: `content exceeds ${maxContentBytes} bytes`,
   };
 }

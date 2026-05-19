@@ -5,8 +5,11 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.Serial;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -34,6 +37,8 @@ public final class ServiceApp {
     private static final int DEFAULT_PORT = 8084;
     private static final ObjectMapper JSON = new ObjectMapper()
             .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+    private static final int MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
+    private static final int BODY_READ_BUFFER_BYTES = 8192;
     // Custom Harness control-plane headers. Hoisted to constants so static
     // analysis (Qodana / IntelliJ "Unknown HTTP header") does not flag them
     // as typos at the call sites.
@@ -93,12 +98,13 @@ public final class ServiceApp {
             return;
         }
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = JSON.readValue(exchange.getRequestBody(), Map.class);
+            Map<String, Object> request = readJsonRequest(exchange, MAX_REQUEST_BODY_BYTES);
             Map<String, Object> response = service.runVerification(request);
             int status = httpStatus(response);
             sendJson(exchange, status, response);
             emitEvents(harnessEndpoint, harnessEventToken, experienceEndpoint, response);
+        } catch (RequestBodyTooLargeException e) {
+            sendJson(exchange, 413, requestTooLargeBody());
         } catch (IllegalArgumentException e) {
             sendJson(exchange, 400, Map.of("status", "failed", "error", e.getMessage()));
         } catch (Exception e) {
@@ -120,9 +126,10 @@ public final class ServiceApp {
         }
         Map<String, Object> request;
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> parsed = JSON.readValue(exchange.getRequestBody(), Map.class);
-            request = parsed;
+            request = readJsonRequest(exchange, MAX_REQUEST_BODY_BYTES);
+        } catch (RequestBodyTooLargeException e) {
+            sendJson(exchange, 413, requestTooLargeBody());
+            return;
         } catch (Exception e) {
             sendJson(exchange, 400, Map.of(
                     "schemaVersion", "v0",
@@ -157,6 +164,59 @@ public final class ServiceApp {
             body.put("column", result.errorColumn());
         }
         sendJson(exchange, 422, body);
+    }
+
+    static Map<String, Object> readJsonRequest(HttpExchange exchange, int maxBodyBytes) throws IOException {
+        String rawLength = exchange.getRequestHeaders().getFirst("Content-Length");
+        byte[] body = readBoundedRequestBody(
+                exchange.getRequestBody(),
+                parseContentLength(rawLength),
+                maxBodyBytes);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parsed = JSON.readValue(body, Map.class);
+        return parsed;
+    }
+
+    static byte[] readBoundedRequestBody(InputStream input, long declaredLength, int maxBodyBytes) throws IOException {
+        if (maxBodyBytes <= 0) {
+            throw new IllegalArgumentException("maxBodyBytes must be positive");
+        }
+        if (declaredLength > maxBodyBytes) {
+            throw new RequestBodyTooLargeException();
+        }
+        int initialSize = Math.min(maxBodyBytes, BODY_READ_BUFFER_BYTES);
+        try (InputStream in = input; ByteArrayOutputStream out = new ByteArrayOutputStream(initialSize)) {
+            byte[] buffer = new byte[BODY_READ_BUFFER_BYTES];
+            int total = 0;
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                total += read;
+                if (total > maxBodyBytes) {
+                    throw new RequestBodyTooLargeException();
+                }
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    static long parseContentLength(String rawLength) {
+        if (rawLength == null || rawLength.isBlank()) {
+            return -1L;
+        }
+        try {
+            long parsed = Long.parseLong(rawLength.trim());
+            return parsed < 0 ? -1L : parsed;
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
+    }
+
+    private static Map<String, Object> requestTooLargeBody() {
+        return Map.of(
+                "schemaVersion", "v0",
+                "status", "failed",
+                "error", "request body too large");
     }
 
     static boolean isAuthorized(HttpExchange exchange, String controlToken) {
@@ -364,6 +424,15 @@ public final class ServiceApp {
         exchange.sendResponseHeaders(status, bytes.length);
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(bytes);
+        }
+    }
+
+    private static final class RequestBodyTooLargeException extends IOException {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        RequestBodyTooLargeException() {
+            super("request body too large");
         }
     }
 }

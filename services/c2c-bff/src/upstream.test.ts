@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { AddressInfo } from "node:net";
 
 import {
+  createBuildTestRunnerClient,
   createEvidenceClient,
   createModelGatewayClient,
   createNodeHttpClient,
@@ -480,6 +481,50 @@ test("http client returns the full body when the upstream stays under the cap", 
       server.close((err) => (err ? reject(err) : resolve())),
     );
   }
+});
+
+test("build-test-runner formatJava forwards timeout, auth, and response cap", async () => {
+  const calls: Array<{
+    url: string;
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: unknown;
+      timeoutMs: number;
+      maxResponseBytes?: number;
+    };
+  }> = [];
+  const client = {
+    async request(url: string, options: (typeof calls)[number]["options"]) {
+      calls.push({ url, options });
+      return { status: 200, body: { formattedContent: "ok" } };
+    },
+  };
+  const runner = createBuildTestRunnerClient(
+    "http://runner.local/",
+    client,
+    1_000,
+    "runner-token",
+  );
+
+  const response = await runner.formatJava(
+    { content: "class A{}" },
+    2_500,
+    4_096,
+  );
+
+  assert.equal(response?.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url, "http://runner.local/v0/format-java");
+  assert.equal(calls[0]?.options.method, "POST");
+  assert.deepEqual(calls[0]?.options.body, { content: "class A{}" });
+  assert.equal(calls[0]?.options.timeoutMs, 2_500);
+  assert.equal(calls[0]?.options.maxResponseBytes, 4_096);
+  assert.equal(
+    calls[0]?.options.headers?.authorization ??
+      calls[0]?.options.headers?.Authorization,
+    "Bearer runner-token",
+  );
 });
 
 // Studio-IDE-10 (#249): editor-assist channel — ModelGatewayClient.explain

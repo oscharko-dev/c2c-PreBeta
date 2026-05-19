@@ -2,12 +2,16 @@ package com.c2c.w0.buildtest;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServiceAppTest {
@@ -98,5 +102,35 @@ class ServiceAppTest {
         response.put("status", "ok");
         assertTrue(ServiceApp.buildExperienceEvents(response).isEmpty());
         assertFalse(ServiceApp.buildHarnessEvent(response).isEmpty());
+    }
+
+    @Test
+    void boundedRequestBodyAcceptsContentAtTheLimit() throws Exception {
+        byte[] body = "abcd".getBytes(StandardCharsets.UTF_8);
+
+        assertEquals("abcd", new String(ServiceApp.readBoundedRequestBody(
+                new ByteArrayInputStream(body),
+                body.length,
+                body.length), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void boundedRequestBodyRejectsDeclaredContentLengthAboveLimit() {
+        IOException thrown = assertThrows(IOException.class, () -> ServiceApp.readBoundedRequestBody(
+                new ByteArrayInputStream(new byte[0]),
+                5,
+                4));
+
+        assertEquals("request body too large", thrown.getMessage());
+    }
+
+    @Test
+    void boundedRequestBodyRejectsStreamThatExceedsLimitWithoutContentLength() {
+        IOException thrown = assertThrows(IOException.class, () -> ServiceApp.readBoundedRequestBody(
+                new ByteArrayInputStream("abcde".getBytes(StandardCharsets.UTF_8)),
+                -1,
+                4));
+
+        assertEquals("request body too large", thrown.getMessage());
     }
 }

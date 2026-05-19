@@ -53,6 +53,7 @@ export interface CompileCheckClientOptions {
 
 // 6 s — covers the 5 s Compile Check AC plus the BFF roundtrip headroom.
 const DEFAULT_TIMEOUT_MS = 6_000;
+const DEFAULT_FILE_PATH = "Main.java";
 
 const KNOWN_SEVERITIES = new Set<Diagnostic["severity"]>([
   "error",
@@ -222,15 +223,26 @@ export async function compileCheck(
     timeoutFired = true;
     controller.abort();
   }, timeoutMs);
+  const filePath =
+    payload.filePath && payload.filePath.length > 0
+      ? payload.filePath
+      : DEFAULT_FILE_PATH;
+  const requestBody = {
+    ...(payload.runId ? { runId: payload.runId } : {}),
+    javaFiles: [{ path: filePath, content: payload.content }],
+    entryFilePath: filePath,
+  };
   let response: Response;
+  let rawBody: string;
   try {
     response = await fetchImpl(`${baseUrlResult.data}/api/v0/compile-check`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
+    rawBody = await response.text();
   } catch (err) {
     if (timeoutFired) {
       emitResult("timeout", 0);
@@ -259,7 +271,6 @@ export async function compileCheck(
       externalSignal.removeEventListener("abort", externalAbortHandler);
     }
   }
-  const rawBody = await response.text();
   let parsed: unknown = null;
   if (rawBody.length > 0) {
     try {

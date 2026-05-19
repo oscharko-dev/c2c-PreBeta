@@ -44,6 +44,18 @@ class JavaFormatterTest {
     }
 
     @Test
+    void formatPreservesDiagnosticLocationForParseFailures() {
+        String input = "package com.example;\npublic class A {\n  void m() {\n    if (true) {\n  }\n";
+        JavaFormatter.FormatResult result = formatter.format(input);
+        assertFalse(result.isOk(), "invalid source must report a format failure");
+        assertNotNull(result.errorMessage(), "error message must be present");
+        assertNotNull(result.errorLine(), "error line must be present when formatter reports diagnostics");
+        assertNotNull(result.errorColumn(), "error column must be present when formatter reports diagnostics");
+        assertTrue(result.errorLine() > 0, "error line must be 1-indexed");
+        assertTrue(result.errorColumn() > 0, "error column must be 1-indexed");
+    }
+
+    @Test
     void formatTreatsNullContentAsBadRequest() {
         JavaFormatter.FormatResult result = formatter.format(null);
         assertFalse(result.isOk());
