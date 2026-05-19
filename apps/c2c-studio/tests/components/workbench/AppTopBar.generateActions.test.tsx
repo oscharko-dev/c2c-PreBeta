@@ -19,6 +19,7 @@ let javaBuffersMock: Record<
     content: string;
     generatorBaselineHash: string;
     bufferHash: string;
+    isDirty: boolean;
     manualEditOverlay: {
       schemaVersion: "v0";
       runId: string;
@@ -119,7 +120,8 @@ describe("AppTopBar generator actions", () => {
       "src/App.java": {
         content: "class App {}",
         generatorBaselineHash: "baseline-hash",
-        bufferHash: "dirty-buffer-hash",
+        bufferHash: "baseline-hash",
+        isDirty: true,
         manualEditOverlay: null,
       },
     };
@@ -128,6 +130,10 @@ describe("AppTopBar generator actions", () => {
     fireEvent.click(screen.getByTestId("topbar-generate-button"));
 
     expect(submitGenerateMock).toHaveBeenCalledTimes(1);
+    expect(submitGenerateMock).toHaveBeenCalledWith({
+      trigger: "generate",
+      hadManualEdits: true,
+    });
     expect(
       screen.queryByTestId("topbar-regenerate-confirm-dialog"),
     ).not.toBeInTheDocument();
@@ -138,7 +144,8 @@ describe("AppTopBar generator actions", () => {
       "src/App.java": {
         content: "class App {}",
         generatorBaselineHash: "baseline-hash",
-        bufferHash: "dirty-buffer-hash",
+        bufferHash: "baseline-hash",
+        isDirty: true,
         manualEditOverlay: null,
       },
     };
@@ -154,6 +161,31 @@ describe("AppTopBar generator actions", () => {
     fireEvent.click(screen.getByTestId("topbar-regenerate-confirm-proceed"));
 
     expect(submitGenerateMock).toHaveBeenCalledTimes(1);
+    expect(submitGenerateMock).toHaveBeenCalledWith({
+      trigger: "regenerate",
+      hadManualEdits: true,
+    });
+  });
+
+  it("passes synchronous Java dirty state into Generate & Verify telemetry", () => {
+    javaBuffersMock = {
+      "src/App.java": {
+        content: "class App {}",
+        generatorBaselineHash: "baseline-hash",
+        bufferHash: "baseline-hash",
+        isDirty: true,
+        manualEditOverlay: null,
+      },
+    };
+    renderTopBar();
+
+    fireEvent.click(screen.getByTestId("topbar-generate-and-verify-button"));
+
+    expect(submitTransformMock).toHaveBeenCalledTimes(1);
+    expect(submitTransformMock).toHaveBeenCalledWith({
+      trigger: "generate_and_verify",
+      hadManualEdits: true,
+    });
   });
 
   it("verifies only current-run Java buffers and forwards verification context", async () => {
@@ -176,6 +208,7 @@ describe("AppTopBar generator actions", () => {
         content: "class Main {}",
         generatorBaselineHash: "main-baseline",
         bufferHash: "main-dirty",
+        isDirty: true,
         manualEditOverlay: {
           schemaVersion: "v0",
           runId: "run-verify",
@@ -192,6 +225,7 @@ describe("AppTopBar generator actions", () => {
         content: "class Helper {}",
         generatorBaselineHash: "helper-baseline",
         bufferHash: "helper-dirty",
+        isDirty: true,
         manualEditOverlay: {
           schemaVersion: "v0",
           runId: "run-verify",
@@ -208,6 +242,7 @@ describe("AppTopBar generator actions", () => {
         content: "class Stale {}",
         generatorBaselineHash: "stale-baseline",
         bufferHash: "stale-dirty",
+        isDirty: true,
         manualEditOverlay: null,
       },
     };
@@ -251,6 +286,7 @@ describe("AppTopBar generator actions", () => {
         content: "class Helper {}",
         generatorBaselineHash: "helper-baseline",
         bufferHash: "helper-baseline",
+        isDirty: false,
         manualEditOverlay: null,
       },
     };

@@ -75,14 +75,15 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   // diverges from its captured Generator Baseline. Regenerate uses this to
   // explain that the post-run 3-Way Merge will preserve manual edits.
   const hasManualEditsAnywhere = Object.values(javaBuffers).some(
-    (entry) =>
-      entry.generatorBaselineHash.length > 0 &&
-      entry.bufferHash !== entry.generatorBaselineHash,
+    (entry) => entry.isDirty,
   );
 
   const handleGenerate = useCallback(() => {
-    void submitGenerate();
-  }, [submitGenerate]);
+    void submitGenerate({
+      trigger: "generate",
+      hadManualEdits: hasManualEditsAnywhere,
+    });
+  }, [hasManualEditsAnywhere, submitGenerate]);
 
   const handleRegenerate = useCallback(() => {
     // Regenerate always confirms first (AC: "always confirms via modal
@@ -92,8 +93,11 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
 
   const handleConfirmRegenerate = useCallback(() => {
     setRegenerateConfirmOpen(false);
-    void submitGenerate();
-  }, [submitGenerate]);
+    void submitGenerate({
+      trigger: "regenerate",
+      hadManualEdits: hasManualEditsAnywhere,
+    });
+  }, [hasManualEditsAnywhere, submitGenerate]);
 
   const handleVerifyCurrentBuffers = useCallback(async () => {
     const runId = runState.runId;
@@ -154,7 +158,10 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
 
   useKeyboardShortcuts({
     onStartTransform: () => {
-      void submitTransform();
+      void submitTransform({
+        trigger: "generate_and_verify",
+        hadManualEdits: hasManualEditsAnywhere,
+      });
     },
     canStartTransform: canStart,
   });
@@ -279,7 +286,10 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           aria-label="Generate & Verify"
           title="Generate & Verify (Cmd/Ctrl + Enter) — runs the deterministic generator and the full verification pipeline"
           onClick={() => {
-            void submitTransform();
+            void submitTransform({
+              trigger: "generate_and_verify",
+              hadManualEdits: hasManualEditsAnywhere,
+            });
           }}
         >
           <Play className="h-4 w-4 text-bg-0 fill-current" />
@@ -321,7 +331,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           className="flex items-center justify-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1 text-xs text-text-dim hover:text-text hover:bg-bg-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-1 focus-visible:ring-accent outline-none"
           aria-label="Run Compile Check on the current Java buffer"
           title="Compile Check (F5)"
-          onClick={() => triggerCompileCheck()}
+          onClick={() => triggerCompileCheck("toolbar")}
         >
           <Hammer className="h-3.5 w-3.5" />
           <span>{compileCheckPending ? "Compile…" : "Compile Check"}</span>

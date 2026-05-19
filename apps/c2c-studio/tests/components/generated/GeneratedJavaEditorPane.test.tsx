@@ -904,10 +904,13 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     });
 
     await waitFor(() => {
-      expect(formatJavaSpy).toHaveBeenCalledWith({
-        content: "public class App{}",
-        filePath: "src/App.java",
-      });
+      expect(formatJavaSpy).toHaveBeenCalledWith(
+        {
+          content: "public class App{}",
+          filePath: "src/App.java",
+        },
+        { telemetryTrigger: "on_save" },
+      );
       expect(setJavaBufferContentSpy).toHaveBeenCalledWith(
         "src/App.java",
         "public class App {}\n",
@@ -938,10 +941,13 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
 
     await screen.findByTestId("java-format-button");
     fireEvent.click(screen.getByTestId("java-format-button"));
-    expect(formatJavaSpy).toHaveBeenCalledWith({
-      content: "public class App{}",
-      filePath: "src/App.java",
-    });
+    expect(formatJavaSpy).toHaveBeenCalledWith(
+      {
+        content: "public class App{}",
+        filePath: "src/App.java",
+      },
+      { telemetryTrigger: "shortcut" },
+    );
 
     fireEvent.click(screen.getByRole("button", { name: /select src\/other\.java/i }));
     await waitFor(() => {

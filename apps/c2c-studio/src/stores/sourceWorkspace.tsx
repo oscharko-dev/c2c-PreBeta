@@ -17,13 +17,17 @@ import {
   deriveDraftProgramId,
 } from "../lib/sourceAnalysis";
 import { ApiResult, TransformResponse, GenerateResponse } from "../types/api";
-import { useTransformationRun } from "./transformationRun";
+import {
+  useTransformationRun,
+  type GenerateTelemetryOptions,
+} from "./transformationRun";
 import {
   editorPersistence,
   getCurrentDraftScope,
   subscribeToDraftPersistenceEvents,
 } from "../lib/editor/editorPersistence";
 import type { DraftPayload } from "../lib/editor/editorPersistence";
+import { emit as emitTelemetry } from "../lib/editor/editorTelemetry";
 
 const HASH_DEBOUNCE_MS = 500;
 
@@ -81,12 +85,16 @@ export interface SourceWorkspaceState {
   // Composed Generate & Verify (renamed in toolbar but kept as
   // ``submitTransform`` here for backwards compatibility with existing
   // call sites and tests).
-  submitTransform: () => Promise<ApiResult<TransformResponse>>;
+  submitTransform: (
+    telemetry?: GenerateTelemetryOptions,
+  ) => Promise<ApiResult<TransformResponse>>;
   // Studio-IDE-13 (#255): explicit Generator-Run-only action.
   // Equivalent inputs to ``submitTransform`` but invokes the
   // ``/api/v0/generate`` BFF endpoint (which the BFF tags with
   // ``runMode: "generate"``).
-  submitGenerate: () => Promise<ApiResult<GenerateResponse>>;
+  submitGenerate: (
+    telemetry?: GenerateTelemetryOptions,
+  ) => Promise<ApiResult<GenerateResponse>>;
   // Studio-IDE-3 actions.
   saveDraftNow: () => Promise<void>;
   resolveConflict: (
@@ -258,7 +266,12 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const canSubmitTransform =
     sourceText.trim().length > 0 && !isTransforming && !modelGatewayUnavailable;
 
-  const submitTransform = async (): Promise<ApiResult<TransformResponse>> => {
+  const submitTransform = async (
+    telemetry: GenerateTelemetryOptions = {
+      trigger: "generate_and_verify",
+      hadManualEdits: false,
+    },
+  ): Promise<ApiResult<TransformResponse>> => {
     const trimmed = sourceText.trim();
     if (trimmed.length === 0) {
       const result = {
@@ -299,10 +312,13 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
     } as const;
 
-    const result = await startTransform({
-      ...request,
-      useTransformationAgent: allowAiAssist,
-    });
+    const result = await startTransform(
+      {
+        ...request,
+        useTransformationAgent: allowAiAssist,
+      },
+      telemetry,
+    );
 
     if (!result.ok) {
       setTransformError(
@@ -329,7 +345,12 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   // existing run-polling, generated-files hydration, and Java-buffer
   // baselining all keep working unchanged because the orchestrator
   // returns the same TransformResponse shape.
-  const submitGenerate = async (): Promise<ApiResult<GenerateResponse>> => {
+  const submitGenerate = async (
+    telemetry: GenerateTelemetryOptions = {
+      trigger: "generate",
+      hadManualEdits: false,
+    },
+  ): Promise<ApiResult<GenerateResponse>> => {
     const trimmed = sourceText.trim();
     if (trimmed.length === 0) {
       const result = {
@@ -365,10 +386,13 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
       oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
     } as const;
-    const result = await startGenerate({
-      ...request,
-      useTransformationAgent: allowAiAssist,
-    });
+    const result = await startGenerate(
+      {
+        ...request,
+        useTransformationAgent: allowAiAssist,
+      },
+      telemetry,
+    );
     if (!result.ok) {
       setTransformError(
         result.status === 503
@@ -532,6 +556,16 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     if (!conflict) {
       return;
     }
+    const pick =
+      choice === "backendSample"
+        ? "backend_sample"
+        : choice === "localDraft"
+          ? "local_draft"
+          : "last_run_input";
+    emitTelemetry({
+      eventType: "conflict.resolved",
+      payload: { kind: "cobol", pick },
+    });
     const chosen = conflict[choice];
     setSourceTextInternal(chosen);
     setIsDirty(false);

@@ -17,6 +17,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,6 +66,7 @@ type editorTelemetryIngestResponse struct {
 type EditorTelemetryEventLog interface {
 	List() ([]EditorTelemetryEventV0, error)
 	Append(EditorTelemetryEventV0) error
+	AppendBatch([]EditorTelemetryEventV0) error
 	BySession(sessionID string) ([]EditorTelemetryEventV0, error)
 }
 
@@ -82,6 +84,7 @@ var allowedEditorTelemetryEventTypes = map[string]struct{}{
 	"assist.invoked":                {},
 	"assist.result":                 {},
 	"save.local":                    {},
+	"drafts.cleared":                {},
 	"conflict.resolved":             {},
 	"generate.invoked":              {},
 	"generate.result":               {},
@@ -212,6 +215,12 @@ func validateEditorTelemetryPayload(eventType string, raw json.RawMessage) error
 					return err
 				}
 				return requireBool(p, "encrypted")
+			})
+	case "drafts.cleared":
+		return ensureFields(payload,
+			[]string{"purgedCountBucket"}, nil,
+			func(p map[string]any) error {
+				return requireEnum(p, "purgedCountBucket", "zero", "lt_10", "lt_100", "ge_100")
 			})
 	case "conflict.resolved":
 		return ensureFields(payload,
@@ -470,12 +479,23 @@ func (s *InMemoryEditorTelemetryStore) List() ([]EditorTelemetryEventV0, error) 
 }
 
 func (s *InMemoryEditorTelemetryStore) Append(event EditorTelemetryEventV0) error {
-	if err := event.Validate(); err != nil {
-		return err
+	return s.AppendBatch([]EditorTelemetryEventV0{event})
+}
+
+func (s *InMemoryEditorTelemetryStore) AppendBatch(events []EditorTelemetryEventV0) error {
+	for _, event := range events {
+		if err := event.Validate(); err != nil {
+			return err
+		}
 	}
+	if len(events) == 0 {
+		return nil
+	}
+	batch := make([]EditorTelemetryEventV0, len(events))
+	copy(batch, events)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = append(s.events, event)
+	s.events = append(s.events, batch...)
 	return nil
 }
 
@@ -570,22 +590,36 @@ func (s *JSONLEditorTelemetryStore) restoreFromDisk() error {
 }
 
 func (s *JSONLEditorTelemetryStore) Append(event EditorTelemetryEventV0) error {
-	if err := event.Validate(); err != nil {
-		return err
+	return s.AppendBatch([]EditorTelemetryEventV0{event})
+}
+
+func (s *JSONLEditorTelemetryStore) AppendBatch(events []EditorTelemetryEventV0) error {
+	var lines strings.Builder
+	for _, event := range events {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		line, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		lines.Write(line)
+		lines.WriteByte('\n')
 	}
-	line, err := json.Marshal(event)
-	if err != nil {
-		return err
+	if lines.Len() == 0 {
+		return nil
 	}
+	batch := make([]EditorTelemetryEventV0, len(events))
+	copy(batch, events)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.file.Write(append(line, '\n')); err != nil {
+	if _, err := s.file.WriteString(lines.String()); err != nil {
 		return fmt.Errorf("append editor telemetry failed: %w", err)
 	}
 	if err := s.file.Sync(); err != nil {
 		return fmt.Errorf("sync editor telemetry log failed: %w", err)
 	}
-	s.events = append(s.events, event)
+	s.events = append(s.events, batch...)
 	return nil
 }
 
@@ -620,7 +654,13 @@ func (s *ExperienceLearningService) editorTelemetryHandler(w http.ResponseWriter
 		return
 	}
 	var req editorTelemetryIngestRequest
-	if err := json.Unmarshal(payload, &req); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid telemetry batch"})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid telemetry batch"})
 		return
 	}
@@ -637,12 +677,18 @@ func (s *ExperienceLearningService) editorTelemetryHandler(w http.ResponseWriter
 		return
 	}
 	for i := range req.Events {
-		if err := s.editorTelemetryLog.Append(req.Events[i]); err != nil {
+		if err := req.Events[i].Validate(); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": fmt.Sprintf("events[%d]: %s", i, err.Error()),
 			})
 			return
 		}
+	}
+	if err := s.editorTelemetryLog.AppendBatch(req.Events); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "append editor telemetry failed",
+		})
+		return
 	}
 	writeJSON(w, http.StatusCreated, editorTelemetryIngestResponse{
 		SchemaVersion: editorTelemetrySchemaVersion,

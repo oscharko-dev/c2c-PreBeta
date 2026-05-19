@@ -67,6 +67,10 @@ const { getCurrentDraftScopeMock, loadDraftMock, saveDraftMock } = vi.hoisted(
   }),
 );
 
+const { emitTelemetryMock } = vi.hoisted(() => ({
+  emitTelemetryMock: vi.fn(),
+}));
+
 vi.mock("@/lib/editor/editorPersistence", () => ({
   getCurrentDraftScope: getCurrentDraftScopeMock,
   subscribeToDraftPersistenceEvents: vi.fn(() => () => {}),
@@ -75,6 +79,16 @@ vi.mock("@/lib/editor/editorPersistence", () => ({
     saveDraft: saveDraftMock,
   },
 }));
+
+vi.mock("@/lib/editor/editorTelemetry", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/editor/editorTelemetry")
+  >("@/lib/editor/editorTelemetry");
+  return {
+    ...actual,
+    emit: emitTelemetryMock,
+  };
+});
 
 // Monaco does not boot under vitest's jsdom environment (the lazy loader
 // itself is exercised in tests/lib/editor/lazyMonaco.test.ts via mocks).
@@ -354,6 +368,25 @@ describe("COBOL source input", () => {
     return null;
   }
 
+  function DirtyJavaBufferHarness() {
+    const { ensureJavaBaseline, javaBuffers, setJavaBufferContent } =
+      useTransformationRun();
+
+    useEffect(() => {
+      void ensureJavaBaseline("src/App.java", "class App {}", "run-java").then(
+        () => {
+          setJavaBufferContent("src/App.java", "class App { int edited; }");
+        },
+      );
+    }, [ensureJavaBaseline, setJavaBufferContent]);
+
+    return (
+      <span data-testid="java-dirty-state">
+        {javaBuffers["src/App.java"]?.isDirty ? "dirty" : "clean"}
+      </span>
+    );
+  }
+
   it("renders a COBOL explorer without preloaded program loading", () => {
     renderSourceWorkbench(
       <>
@@ -474,6 +507,49 @@ describe("COBOL source input", () => {
         expectedOutput: undefined,
         oracleInput: undefined,
         useTransformationAgent: true,
+      });
+    });
+  });
+
+  it("passes synchronous Java dirty state into Start Transformation telemetry", async () => {
+    vi.mocked(apiClient.transform).mockResolvedValue({
+      ok: true,
+      data: {
+        runId: "r1",
+        programId: "SRC-1",
+        status: "starting",
+      } as unknown as TransformResponse,
+    });
+
+    renderSourceWorkbench(
+      <>
+        <DirtyJavaBufferHarness />
+        <CobolEditorPane />
+      </>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("java-dirty-state")).toHaveTextContent("dirty");
+    });
+
+    fireEvent.click(screen.getByText("Start Typing"));
+    const textarea = screen.getByRole("textbox", {
+      name: /COBOL source editor/i,
+    });
+    fireEvent.change(textarea, {
+      target: {
+        value: "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN01.\n",
+      },
+    });
+    fireEvent.click(screen.getByText("Start Transformation"));
+
+    await waitFor(() => {
+      expect(emitTelemetryMock).toHaveBeenCalledWith({
+        eventType: "generate.invoked",
+        payload: {
+          trigger: "generate_and_verify",
+          hadManualEdits: true,
+        },
       });
     });
   });

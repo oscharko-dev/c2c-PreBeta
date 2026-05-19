@@ -46,9 +46,10 @@ export interface CompileCheckClientOptions {
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
   // Studio-IDE-11 (#251): closed-enum trigger for the
-  // `compile_check.invoked` telemetry event. Defaults to `"toolbar"`
-  // when the caller does not specify.
-  telemetryTrigger?: "toolbar" | "shortcut";
+  // `compile_check.invoked` telemetry event. Callers must pass the real
+  // activation source so toolbar and shortcut usage do not collapse into
+  // one telemetry bucket.
+  telemetryTrigger: "toolbar" | "shortcut";
 }
 
 // 6 s — covers the 5 s Compile Check AC plus the BFF roundtrip headroom.
@@ -171,9 +172,9 @@ function buildFailure(
 
 export async function compileCheck(
   payload: CompileCheckRequestPayload,
-  options: CompileCheckClientOptions = {},
+  options: CompileCheckClientOptions,
 ): Promise<CompileCheckResult> {
-  const trigger = options.telemetryTrigger ?? "toolbar";
+  const trigger = options.telemetryTrigger;
   emitTelemetry({
     eventType: "compile_check.invoked",
     payload: { trigger },

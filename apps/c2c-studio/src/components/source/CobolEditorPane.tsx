@@ -171,6 +171,9 @@ export function CobolEditorPane() {
 
   const apiState = useC2cApi();
   const { productState, state: runState, javaBuffers } = useTransformationRun();
+  const hasJavaManualEdits = Object.values(javaBuffers).some(
+    (entry) => entry.isDirty,
+  );
   // Studio-IDE-10 (#249): Editor-Assist controller — fire Explain-on-region
   // from the Monaco action below. The store handles the BFF call, panel
   // state, and budget snapshot tracking.
@@ -647,7 +650,10 @@ export function CobolEditorPane() {
           <button
             type="button"
             onClick={() => {
-              void submitTransform();
+              void submitTransform({
+                trigger: "generate_and_verify",
+                hadManualEdits: hasJavaManualEdits,
+              });
             }}
             disabled={!canSubmitTransform || !readiness.startEnabled}
             className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-bg-0 hover:bg-accent-dim disabled:opacity-50"

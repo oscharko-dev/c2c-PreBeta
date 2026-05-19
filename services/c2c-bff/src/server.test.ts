@@ -8215,6 +8215,7 @@ function validHoverEvent() {
 
 test("editor telemetry route accepts a valid batch and forwards to experience-learning", async () => {
   const { client, calls } = liveLearningTelemetryCapture();
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, experienceLearningUrl: "http://el.test" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -8222,6 +8223,7 @@ test("editor telemetry route accepts a valid batch and forwards to experience-le
     evidence: disabledEvidence(),
     experienceLearning: client,
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -8229,6 +8231,7 @@ test("editor telemetry route accepts a valid batch and forwards to experience-le
       `${server.baseUrl}/api/v0/editor/telemetry`,
       {
         method: "POST",
+        headers: auth.headers,
         body: telemetryBatch([validHoverEvent()]),
       },
     );
@@ -8240,8 +8243,8 @@ test("editor telemetry route accepts a valid batch and forwards to experience-le
     assert.equal(calls.length, 1);
     const forwarded = calls[0] as { events: Array<Record<string, unknown>> };
     assert.equal(forwarded.events.length, 1);
-    assert.equal(forwarded.events[0]?.tenantId, "default");
-    assert.equal(forwarded.events[0]?.userId, "local");
+    assert.equal(forwarded.events[0]?.tenantId, "tenant-a");
+    assert.equal(forwarded.events[0]?.userId, "user-a");
     assert.equal(typeof forwarded.events[0]?.receivedAt, "string");
   } finally {
     await server.close();
@@ -8249,6 +8252,35 @@ test("editor telemetry route accepts a valid batch and forwards to experience-le
 });
 
 test("editor telemetry route accepts 202 when upstream is disabled", async () => {
+  const auth = createEditorAssistAuth();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/telemetry`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: telemetryBatch([validHoverEvent()]),
+      },
+    );
+    assert.equal(result.status, 202);
+    const body = result.body as Record<string, unknown>;
+    assert.equal(body.forwarded, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test("editor telemetry route rejects requests without an active Studio session", async () => {
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -8266,15 +8298,14 @@ test("editor telemetry route accepts 202 when upstream is disabled", async () =>
         body: telemetryBatch([validHoverEvent()]),
       },
     );
-    assert.equal(result.status, 202);
-    const body = result.body as Record<string, unknown>;
-    assert.equal(body.forwarded, false);
+    assert.equal(result.status, 401);
   } finally {
     await server.close();
   }
 });
 
 test("editor telemetry route returns 502 when upstream throws", async () => {
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, experienceLearningUrl: "http://el.test" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -8282,6 +8313,7 @@ test("editor telemetry route returns 502 when upstream throws", async () => {
     evidence: disabledEvidence(),
     experienceLearning: brokenLearningTelemetry(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const originalWarn = console.warn;
   const warnings: unknown[] = [];
@@ -8294,6 +8326,7 @@ test("editor telemetry route returns 502 when upstream throws", async () => {
       `${server.baseUrl}/api/v0/editor/telemetry`,
       {
         method: "POST",
+        headers: auth.headers,
         body: telemetryBatch([validHoverEvent()]),
       },
     );
@@ -8313,6 +8346,7 @@ test("editor telemetry route returns 502 when upstream throws", async () => {
 });
 
 test("editor telemetry route rejects bad JSON with 400", async () => {
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -8320,6 +8354,7 @@ test("editor telemetry route rejects bad JSON with 400", async () => {
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -8327,6 +8362,7 @@ test("editor telemetry route rejects bad JSON with 400", async () => {
       `${server.baseUrl}/api/v0/editor/telemetry`,
       {
         method: "POST",
+        headers: auth.headers,
         body: {
           schemaVersion: "v0",
           events: [{ ...validHoverEvent(), eventType: "not.real" }],

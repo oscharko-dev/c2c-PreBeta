@@ -22,6 +22,8 @@ function makeResponse(
 }
 
 describe("compileCheck client", () => {
+  const telemetryOptions = { telemetryTrigger: "toolbar" } as const;
+
   it("parses diagnostics from `{ diagnostics: [...] }`", async () => {
     let capturedInit: RequestInit | undefined;
     let capturedBody: unknown;
@@ -42,7 +44,10 @@ describe("compileCheck client", () => {
         ],
       });
     }) as unknown as FetchFn;
-    const result = await compileCheck({ content: "x" }, { fetchImpl });
+    const result = await compileCheck(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(true);
     expect(capturedInit).toMatchObject({ credentials: "include" });
     expect(capturedBody).toEqual({
@@ -65,7 +70,7 @@ describe("compileCheck client", () => {
 
     await compileCheck(
       { content: "class Foo {}", filePath: "src/Foo.java", runId: "run-1" },
-      { fetchImpl },
+      { fetchImpl, ...telemetryOptions },
     );
 
     expect(capturedBody).toEqual({
@@ -81,7 +86,10 @@ describe("compileCheck client", () => {
         { severity: "warning", code: "lint", message: "unused" },
       ]),
     ) as unknown as FetchFn;
-    const result = await compileCheck({ content: "x" }, { fetchImpl });
+    const result = await compileCheck(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.diagnostics).toHaveLength(1);
@@ -98,7 +106,10 @@ describe("compileCheck client", () => {
         ],
       }),
     ) as unknown as FetchFn;
-    const result = await compileCheck({ content: "x" }, { fetchImpl });
+    const result = await compileCheck(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.diagnostics).toHaveLength(1);
@@ -110,7 +121,10 @@ describe("compileCheck client", () => {
     const fetchImpl = vi.fn(async () =>
       makeResponse(404, { error: "not configured" }, { ok: false }),
     ) as unknown as FetchFn;
-    const result = await compileCheck({ content: "x" }, { fetchImpl });
+    const result = await compileCheck(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("compile_check_unavailable");
@@ -122,7 +136,10 @@ describe("compileCheck client", () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("offline");
     }) as unknown as FetchFn;
-    const result = await compileCheck({ content: "x" }, { fetchImpl });
+    const result = await compileCheck(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("compile_check_unavailable");
@@ -148,7 +165,7 @@ describe("compileCheck client", () => {
 
     const result = await compileCheck(
       { content: "class A{}" },
-      { fetchImpl, timeoutMs: 10 },
+      { fetchImpl, timeoutMs: 10, ...telemetryOptions },
     );
 
     expect(result.ok).toBe(false);
@@ -170,7 +187,10 @@ describe("compileCheck client", () => {
         }) as unknown as Response,
     ) as unknown as FetchFn;
 
-    const result = await compileCheck({ content: "x" }, { fetchImpl });
+    const result = await compileCheck(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -183,7 +203,10 @@ describe("compileCheck client", () => {
     const fetchImpl = vi.fn(async () =>
       makeResponse(200, { schemaVersion: "v0" }),
     ) as unknown as FetchFn;
-    const result = await compileCheck({ content: "x" }, { fetchImpl });
+    const result = await compileCheck(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.diagnostics).toEqual([]);

@@ -22,6 +22,8 @@ function makeResponse(
 }
 
 describe("formatJava client", () => {
+  const telemetryOptions = { telemetryTrigger: "shortcut" } as const;
+
   it("returns the formatted content on success", async () => {
     const fetchImpl = vi.fn(async () =>
       makeResponse(200, {
@@ -31,7 +33,7 @@ describe("formatJava client", () => {
     ) as unknown as FetchFn;
     const result = await formatJava(
       { content: "public class A{}" },
-      { fetchImpl },
+      { fetchImpl, ...telemetryOptions },
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -52,7 +54,7 @@ describe("formatJava client", () => {
     }) as unknown as FetchFn;
     await formatJava(
       { content: "class A{}", filePath: "src/A.java" },
-      { fetchImpl },
+      { fetchImpl, ...telemetryOptions },
     );
     expect(captured).toEqual({ content: "class A{}", filePath: "src/A.java" });
     expect(capturedInit).toMatchObject({ credentials: "include" });
@@ -69,7 +71,10 @@ describe("formatJava client", () => {
         column: 12,
       }),
     ) as unknown as FetchFn;
-    const result = await formatJava({ content: "broken" }, { fetchImpl });
+    const result = await formatJava(
+      { content: "broken" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("format_parse_error");
@@ -89,7 +94,10 @@ describe("formatJava client", () => {
         error: "service down",
       }),
     ) as unknown as FetchFn;
-    const result = await formatJava({ content: "x" }, { fetchImpl });
+    const result = await formatJava(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("format_unavailable");
@@ -100,7 +108,10 @@ describe("formatJava client", () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("connect ECONNREFUSED");
     }) as unknown as FetchFn;
-    const result = await formatJava({ content: "x" }, { fetchImpl });
+    const result = await formatJava(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("format_unavailable");
@@ -123,7 +134,7 @@ describe("formatJava client", () => {
     ) as unknown as FetchFn;
     const result = await formatJava(
       { content: "x" },
-      { fetchImpl, timeoutMs: 10 },
+      { fetchImpl, timeoutMs: 10, ...telemetryOptions },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -151,7 +162,7 @@ describe("formatJava client", () => {
 
     const result = await formatJava(
       { content: "class A{}" },
-      { fetchImpl, timeoutMs: 10 },
+      { fetchImpl, timeoutMs: 10, ...telemetryOptions },
     );
 
     expect(result.ok).toBe(false);
@@ -172,7 +183,10 @@ describe("formatJava client", () => {
           },
         }) as unknown as Response,
     ) as unknown as FetchFn;
-    const result = await formatJava({ content: "x" }, { fetchImpl });
+    const result = await formatJava(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("format_upstream_error");
@@ -183,7 +197,10 @@ describe("formatJava client", () => {
     const fetchImpl = vi.fn(async () =>
       makeResponse(200, { schemaVersion: "v0" }),
     ) as unknown as FetchFn;
-    const result = await formatJava({ content: "x" }, { fetchImpl });
+    const result = await formatJava(
+      { content: "x" },
+      { fetchImpl, ...telemetryOptions },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("format_upstream_error");
@@ -205,7 +222,7 @@ describe("formatJava client", () => {
     }) as unknown as FetchFn;
     const result = await formatJava(
       { content: "x" },
-      { fetchImpl, signal: controller.signal },
+      { fetchImpl, signal: controller.signal, ...telemetryOptions },
     );
     expect(result.ok).toBe(false);
   });
