@@ -6,8 +6,10 @@
 // location to a deterministic / agent / repair-attempted region, and
 // an "Open Java target" link when the envelope at least knows the full
 // Java path. Non-resolvable frames render as inactive monospace text
-// with an explicit tooltip. The raw trace is always preserved behind
-// a toggle so the user can copy or inspect non-frame lines.
+// with explicit accessible no-mapping messaging. Resolved rows also
+// expose the Java target link; unresolved rows stay fully inactive.
+// The raw trace is always preserved behind a toggle so the user can
+// copy or inspect non-frame lines.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
