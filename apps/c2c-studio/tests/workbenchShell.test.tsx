@@ -26,6 +26,7 @@ const { getCurrentDraftScopeMock, purgeExpiredMock } = vi.hoisted(() => ({
 
 vi.mock("../src/lib/editor/editorPersistence", () => ({
   getCurrentDraftScope: getCurrentDraftScopeMock,
+  subscribeToDraftPersistenceEvents: vi.fn(() => () => {}),
   editorPersistence: {
     purgeExpired: purgeExpiredMock,
   },
@@ -33,6 +34,7 @@ vi.mock("../src/lib/editor/editorPersistence", () => ({
 
 vi.mock("@/lib/editor/editorPersistence", () => ({
   getCurrentDraftScope: getCurrentDraftScopeMock,
+  subscribeToDraftPersistenceEvents: vi.fn(() => () => {}),
   editorPersistence: {
     purgeExpired: purgeExpiredMock,
   },

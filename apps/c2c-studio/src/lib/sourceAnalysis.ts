@@ -62,13 +62,15 @@ export async function deriveDraftProgramId({
   const parserId = nonEmpty(parserProgramId);
   if (parserId) return parserId;
 
+  const path = nonEmpty(normalizedPath);
+  if (path) {
+    return (await deriveLengthPrefixedSha256Hex(sourceName, path)).slice(0, 32);
+  }
+
   const localProgramId = nonEmpty(detectedProgramId);
   if (localProgramId) return localProgramId;
 
-  const path = nonEmpty(normalizedPath);
-  if (!path) return null;
-
-  return (await deriveLengthPrefixedSha256Hex(sourceName, path)).slice(0, 32);
+  return null;
 }
 
 async function deriveLengthPrefixedSha256Hex(

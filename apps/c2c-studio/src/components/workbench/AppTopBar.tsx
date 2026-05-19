@@ -32,6 +32,8 @@ interface AppTopBarProps {
   apiState: StudioApiState;
 }
 
+type ClearDraftsMode = "scoped" | "origin";
+
 export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
@@ -51,6 +53,8 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   const [clearDraftsScope, setClearDraftsScope] = useState<DraftScope | null>(
     null,
   );
+  const [clearDraftsMode, setClearDraftsMode] =
+    useState<ClearDraftsMode>("scoped");
   const [clearDraftsCount, setClearDraftsCount] = useState<number | null>(null);
   const [clearDraftsLoading, setClearDraftsLoading] = useState(false);
   const [clearDraftsPending, setClearDraftsPending] = useState(false);
@@ -160,17 +164,21 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     setMenuOpen(false);
     setConfirmOpen(true);
     setClearDraftsScope(null);
+    setClearDraftsMode("scoped");
     setClearDraftsCount(null);
     setClearDraftsError(null);
     setClearDraftsLoading(true);
     void (async () => {
       try {
         const scope = await getCurrentDraftScope();
-        const drafts = await editorPersistence.listDrafts(scope);
+        const draftCount = await editorPersistence.countDrafts(scope);
         setClearDraftsScope(scope);
-        setClearDraftsCount(drafts.length);
+        setClearDraftsCount(draftCount);
       } catch {
-        setClearDraftsError("Sign in again to clear local drafts.");
+        setClearDraftsMode("origin");
+        setClearDraftsError(
+          "Session unavailable. Clear will remove every local draft saved in this browser.",
+        );
       } finally {
         setClearDraftsLoading(false);
       }
@@ -178,13 +186,19 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   }, []);
 
   const onClearDrafts = useCallback(async () => {
-    if (!clearDraftsScope || clearDraftsLoading || clearDraftsPending) {
+    if (
+      clearDraftsLoading ||
+      clearDraftsPending ||
+      (clearDraftsMode === "scoped" && !clearDraftsScope)
+    ) {
       return;
     }
     setClearDraftsPending(true);
     setClearDraftsError(null);
     try {
-      const result = await editorPersistence.clearAll(clearDraftsScope);
+      const result = clearDraftsScope
+        ? await editorPersistence.clearAll(clearDraftsScope)
+        : await editorPersistence.clearLocalOrigin();
       emitTelemetry({
         eventType: "drafts.cleared",
         payload: {
@@ -206,6 +220,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     }
   }, [
     clearDraftsLoading,
+    clearDraftsMode,
     clearDraftsPending,
     clearDraftsScope,
     showFeedback,
@@ -393,6 +408,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           onCancel={() => setConfirmOpen(false)}
           onConfirm={onClearDrafts}
           scope={clearDraftsScope}
+          mode={clearDraftsMode}
           draftCount={clearDraftsCount}
           loading={clearDraftsLoading}
           pending={clearDraftsPending}
@@ -489,6 +505,7 @@ function ClearDraftsConfirmDialog({
   onCancel,
   onConfirm,
   scope,
+  mode,
   draftCount,
   loading,
   pending,
@@ -497,6 +514,7 @@ function ClearDraftsConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
   scope: DraftScope | null;
+  mode: ClearDraftsMode;
   draftCount: number | null;
   loading: boolean;
   pending: boolean;
@@ -516,12 +534,17 @@ function ClearDraftsConfirmDialog({
 
   const scopeLabel = scope
     ? `Tenant ${scope.tenantId} / User ${scope.userId}`
-    : "Current signed-in workspace";
+    : mode === "origin"
+      ? "All local drafts in this browser"
+      : "Current signed-in workspace";
   const countLabel =
     draftCount === null
-      ? "Checking local drafts…"
+      ? mode === "origin"
+        ? "Unavailable without an active session"
+        : "Checking local drafts…"
       : `${draftCount} local draft${draftCount === 1 ? "" : "s"}`;
-  const canConfirm = !loading && !pending && !error && scope !== null;
+  const canConfirm =
+    !loading && !pending && (scope !== null || mode === "origin");
 
   return (
     <div
@@ -542,9 +565,9 @@ function ClearDraftsConfirmDialog({
           Clear local drafts?
         </h2>
         <p className="text-sm text-text-dim">
-          This removes every locally saved COBOL and Java draft for this
-          workspace from your browser. The backend copies and any committed runs
-          are not affected. This action cannot be undone.
+          {mode === "origin"
+            ? "This removes every locally saved COBOL and Java draft for this browser origin. The backend copies and any committed runs are not affected. This action cannot be undone."
+            : "This removes every locally saved COBOL and Java draft for this workspace from your browser. The backend copies and any committed runs are not affected. This action cannot be undone."}
         </p>
         <div className="rounded border border-line-2 bg-bg-2 px-3 py-2 text-xs text-text-dim">
           <div>
@@ -553,7 +576,13 @@ function ClearDraftsConfirmDialog({
           <div>
             Drafts: <span className="font-medium text-text">{countLabel}</span>
           </div>
-          {error ? <div className="mt-2 text-error">{error}</div> : null}
+          {error ? (
+            <div
+              className={`mt-2 ${mode === "origin" ? "text-text" : "text-error"}`}
+            >
+              {error}
+            </div>
+          ) : null}
         </div>
         <div className="flex items-center justify-end gap-2">
           <button

@@ -107,6 +107,14 @@ function openRawDb(): Promise<IDBDatabase> {
   });
 }
 
+function openRawDbVersion(version: number): Promise<IDBDatabase> {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open("c2c-studio-drafts", version);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 async function resetEnvironment() {
   // Close the cached IndexedDB connection BEFORE deleteDatabase so the
   // delete request is not blocked on the open handle. Without this,
@@ -292,7 +300,7 @@ describe("editorPersistence", () => {
     expect(await p.loadDraft(scopeA, cobolKey)).not.toBeNull();
   });
 
-  it("purgeExpired removes expired records for only the active scope", async () => {
+  it("purgeExpired removes expired records globally without cloning scoped payloads", async () => {
     let now = 1_700_000_000_000;
     const p = persistenceFor(scopeA, {
       ttlMs: 1_000,
@@ -316,7 +324,7 @@ describe("editorPersistence", () => {
       nowMs: () => now,
     });
     const result = await pA2.purgeExpired(scopeA);
-    expect(result.purgedCount).toBe(1);
+    expect(result.purgedCount).toBe(2);
 
     expect(await pA2.loadDraft(scopeA, cobolKey)).toBeNull();
     const java = await pA2.loadDraft(scopeA, javaKey);
@@ -328,7 +336,7 @@ describe("editorPersistence", () => {
       nowMs: () => now,
     });
     const tenantB = await pB2.loadDraft(scopeB, cobolKey);
-    expect(tenantB?.payload.content).toBe("tenant-b-expired");
+    expect(tenantB).toBeNull();
   });
 
   it("clearAll removes only the requested scope's drafts", async () => {
@@ -354,11 +362,39 @@ describe("editorPersistence", () => {
     expect(survivor?.payload.content).toBe("b");
   });
 
+  it("clearLocalOrigin removes all local drafts without session bootstrap", async () => {
+    const pA = persistenceFor(scopeA);
+    await pA.saveDraft(scopeA, cobolKey, cobolPayload("a"));
+
+    await __resetEditorPersistenceForTests();
+    const pB = persistenceFor(scopeB);
+    await pB.saveDraft(scopeB, cobolKey, cobolPayload("b"));
+
+    await __resetEditorPersistenceForTests();
+    const pNoSession = createEditorPersistence({
+      sessionBootstrap: async () => {
+        throw new SessionBootstrapError(
+          "Unauthenticated",
+          "session bootstrap returned 401",
+        );
+      },
+    });
+    await expect(pNoSession.clearLocalOrigin()).resolves.toEqual({
+      purgedCount: 2,
+    });
+
+    await __resetEditorPersistenceForTests();
+    expect(await pA.loadDraft(scopeA, cobolKey)).toBeNull();
+    await __resetEditorPersistenceForTests();
+    expect(await pB.loadDraft(scopeB, cobolKey)).toBeNull();
+  });
+
   it("listDrafts returns metadata for both kinds under one scope", async () => {
     const p = persistenceFor(scopeA);
     await p.saveDraft(scopeA, cobolKey, cobolPayload());
     await p.saveDraft(scopeA, javaKey, javaPayload());
 
+    await expect(p.countDrafts(scopeA)).resolves.toBe(2);
     const drafts = await p.listDrafts(scopeA);
     expect(drafts).toHaveLength(2);
     expect(drafts.map((d) => d.kind).sort()).toEqual(["cobol", "java"]);
@@ -414,14 +450,14 @@ describe("editorPersistence", () => {
     );
   });
 
-  it("encrypts contents at rest — distinctive plaintext does not appear in ciphertext", async () => {
+  it("encrypts contents and identity metadata at rest", async () => {
     const distinctiveText = "SECRETPAYROLLDATA1234567890ZZZ";
     const p = persistenceFor(scopeA);
     await p.saveDraft(scopeA, cobolKey, cobolPayload(distinctiveText));
 
     const db = await openRawDb();
     try {
-      const records = await new Promise<Array<{ ciphertext: ArrayBuffer }>>(
+      const records = await new Promise<Array<Record<string, unknown>>>(
         (resolve) => {
           const tx = db.transaction("drafts", "readonly");
           const req = tx.objectStore("drafts").getAll();
@@ -429,10 +465,28 @@ describe("editorPersistence", () => {
         },
       );
       expect(records).toHaveLength(1);
-      const ciphertext = new Uint8Array(records[0].ciphertext);
+      const record = records[0];
+      const ciphertext = new Uint8Array(record.ciphertext as ArrayBuffer);
       expect(new TextDecoder().decode(ciphertext)).not.toContain(
         distinctiveText,
       );
+      const serializedRecord = JSON.stringify({
+        ...record,
+        ciphertext: undefined,
+        iv: undefined,
+      });
+      for (const leakedValue of [
+        scopeA.tenantId,
+        scopeA.userId,
+        cobolKey.programId,
+        cobolKey.sourceName,
+      ]) {
+        expect(serializedRecord).not.toContain(leakedValue);
+      }
+      expect(record).not.toHaveProperty("tenantId");
+      expect(record).not.toHaveProperty("userId");
+      expect(record).not.toHaveProperty("programId");
+      expect(record).not.toHaveProperty("sourceName");
     } finally {
       db.close();
     }
@@ -473,13 +527,33 @@ describe("editorPersistence", () => {
     expect(drafts).toHaveLength(0);
   });
 
-  it("drops legacy v1 schema records (Issue #272 migration to v2)", async () => {
+  it("rejects replaying ciphertext under a different source key (AAD binding)", async () => {
     const p = persistenceFor(scopeA);
-    await p.saveDraft(scopeA, cobolKey, cobolPayload());
+    await p.saveDraft(scopeA, cobolKey, cobolPayload("bound to PAYROLL.cbl"));
+    const replayKey: DraftKey = {
+      ...cobolKey,
+      sourceName: "OTHER.cbl",
+    };
+    const dbBeforeReplay = await openRawDb();
+    let originalRecord:
+      | { key: string; iv: ArrayBuffer; ciphertext: ArrayBuffer }
+      | undefined;
+    try {
+      const records = await new Promise<
+        Array<{ key: string; iv: ArrayBuffer; ciphertext: ArrayBuffer }>
+      >((resolve, reject) => {
+        const tx = dbBeforeReplay.transaction("drafts", "readonly");
+        const req = tx.objectStore("drafts").getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      originalRecord = records[0];
+    } finally {
+      dbBeforeReplay.close();
+    }
+    expect(originalRecord).toBeDefined();
+    await p.saveDraft(scopeA, replayKey, cobolPayload("target row"));
 
-    // Mutate the on-disk recordSchemaVersion to simulate a v1 record
-    // (the pre-#272 schema before the BFF-issued wrapping secret
-    // landed).
     const db = await openRawDb();
     try {
       await new Promise<void>((resolve, reject) => {
@@ -488,9 +562,87 @@ describe("editorPersistence", () => {
         const cursorReq = store.openCursor();
         cursorReq.onsuccess = () => {
           const cursor = cursorReq.result;
-          if (cursor) {
-            const record = cursor.value as { recordSchemaVersion: string };
-            record.recordSchemaVersion = "v1";
+          if (!cursor) {
+            return;
+          }
+          const record = cursor.value as {
+            key: string;
+            iv: ArrayBuffer;
+            ciphertext: ArrayBuffer;
+          };
+          if (record.key !== originalRecord?.key) {
+            cursor.update({
+              ...record,
+              iv: originalRecord?.iv,
+              ciphertext: originalRecord?.ciphertext,
+            });
+          }
+          cursor.continue();
+        };
+        cursorReq.onerror = () => reject(cursorReq.error);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally {
+      db.close();
+    }
+
+    expect(await p.loadDraft(scopeA, replayKey)).toBeNull();
+    expect((await p.loadDraft(scopeA, cobolKey))?.payload.content).toBe(
+      "bound to PAYROLL.cbl",
+    );
+    expect(
+      (await p.listDrafts(scopeA)).map((draft) => draft.sourceName),
+    ).toEqual([cobolKey.sourceName]);
+  });
+
+  it("does not purge a valid draft when WebCrypto is unavailable during load", async () => {
+    const p = persistenceFor(scopeA);
+    await p.saveDraft(scopeA, cobolKey, cobolPayload("keep me"));
+
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
+      },
+    });
+    try {
+      await expect(p.loadDraft(scopeA, cobolKey)).rejects.toEqual(
+        expect.objectContaining({
+          name: "EditorPersistenceError",
+          kind: "CryptoUnavailable",
+        }),
+      );
+    } finally {
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: originalCrypto,
+      });
+    }
+
+    expect((await p.loadDraft(scopeA, cobolKey))?.payload.content).toBe(
+      "keep me",
+    );
+  });
+
+  it("drops legacy schema records (Issue #247 migration to opaque selectors)", async () => {
+    const p = persistenceFor(scopeA);
+    await p.saveDraft(scopeA, cobolKey, cobolPayload());
+
+    // Mutate the on-disk recordSchemaVersion to simulate a pre-v3 record
+    // whose clear metadata shape is no longer trusted.
+    const db = await openRawDb();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("drafts", "readwrite");
+        const store = tx.objectStore("drafts");
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (cursor) {
+              const record = cursor.value as { recordSchemaVersion: string };
+            record.recordSchemaVersion = "v2";
             cursor.update(record);
             cursor.continue();
           }
@@ -599,5 +751,48 @@ describe("editorPersistence", () => {
     expect(err.kind).toBe("QuotaExceeded");
     expect(err.message).toBe("Storage full");
     expect(err).toBeInstanceOf(Error);
+  });
+
+  it("surfaces quota failures as QuotaExceeded", async () => {
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function quotaExceededPut() {
+      throw new DOMException("quota", "QuotaExceededError");
+    };
+    try {
+      const p = persistenceFor(scopeA);
+      await expect(p.saveDraft(scopeA, cobolKey, cobolPayload())).rejects.toEqual(
+        expect.objectContaining({
+          name: "EditorPersistenceError",
+          kind: "QuotaExceeded",
+        }),
+      );
+    } finally {
+      IDBObjectStore.prototype.put = originalPut;
+    }
+  });
+
+  it("resets a rejected IndexedDB open promise so later saves can recover", async () => {
+    const higherVersionDb = await openRawDbVersion(3);
+    higherVersionDb.close();
+
+    const p = persistenceFor(scopeA);
+    await expect(p.saveDraft(scopeA, cobolKey, cobolPayload())).rejects.toEqual(
+      expect.objectContaining({
+        name: "EditorPersistenceError",
+        kind: "StorageUnavailable",
+      }),
+    );
+
+    await deleteDatabase("c2c-studio-drafts");
+    await expect(
+      p.saveDraft(scopeA, cobolKey, cobolPayload("after recovery")),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        encryptedSize: expect.any(Number),
+      }),
+    );
+    expect((await p.loadDraft(scopeA, cobolKey))?.payload.content).toBe(
+      "after recovery",
+    );
   });
 });

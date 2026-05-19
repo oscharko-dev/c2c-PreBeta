@@ -22,9 +22,17 @@ import React, { type ReactNode } from "react";
 // AppTopBar gets the stub. `vi.hoisted` keeps the mock fns accessible
 // from inside the hoisted `vi.mock` factory while still letting tests
 // reset them between cases.
-const { clearAllMock, listDraftsMock, purgeExpiredMock, telemetryEmitMock } =
-  vi.hoisted(() => ({
+const {
+  clearAllMock,
+  clearLocalOriginMock,
+  countDraftsMock,
+  listDraftsMock,
+  purgeExpiredMock,
+  telemetryEmitMock,
+} = vi.hoisted(() => ({
   clearAllMock: vi.fn(),
+  clearLocalOriginMock: vi.fn(),
+  countDraftsMock: vi.fn(),
   listDraftsMock: vi.fn(),
   purgeExpiredMock: vi.fn(),
   telemetryEmitMock: vi.fn(),
@@ -37,12 +45,15 @@ vi.mock("@/lib/editor/editorPersistence", () => {
       loadDraft: vi.fn(async () => null),
       purgeExpired: purgeExpiredMock,
       clearAll: clearAllMock,
+      clearLocalOrigin: clearLocalOriginMock,
+      countDrafts: countDraftsMock,
       listDrafts: listDraftsMock,
     },
     getCurrentDraftScope: async () => ({
       tenantId: "tenant-A",
       userId: "user-1",
     }),
+    subscribeToDraftPersistenceEvents: vi.fn(() => () => {}),
   };
 });
 
@@ -99,10 +110,13 @@ function Wrapper({ children }: { children: ReactNode }) {
 describe("AppTopBar clear-local-drafts", () => {
   beforeEach(() => {
     clearAllMock.mockReset();
+    clearLocalOriginMock.mockReset();
+    countDraftsMock.mockReset();
     listDraftsMock.mockReset();
     purgeExpiredMock.mockReset();
     telemetryEmitMock.mockReset();
     listDraftsMock.mockResolvedValue([]);
+    countDraftsMock.mockResolvedValue(0);
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -149,11 +163,7 @@ describe("AppTopBar clear-local-drafts", () => {
   });
 
   it("invokes editorPersistence.clearAll with the current scope and surfaces the count", async () => {
-    listDraftsMock.mockResolvedValueOnce([
-      { kind: "cobol" },
-      { kind: "java" },
-      { kind: "java" },
-    ]);
+    countDraftsMock.mockResolvedValueOnce(3);
     clearAllMock.mockResolvedValueOnce({ purgedCount: 3 });
     renderTopBar();
 
@@ -200,8 +210,9 @@ describe("AppTopBar clear-local-drafts", () => {
     });
   });
 
-  it("keeps the destructive confirm disabled when draft scope lookup fails", async () => {
-    listDraftsMock.mockRejectedValueOnce(new Error("session expired"));
+  it("falls back to an auth-independent browser-local wipe when scope lookup fails", async () => {
+    countDraftsMock.mockRejectedValueOnce(new Error("session expired"));
+    clearLocalOriginMock.mockResolvedValueOnce({ purgedCount: 2 });
     renderTopBar();
 
     fireEvent.click(screen.getByLabelText(/more workbench actions/i));
@@ -210,9 +221,14 @@ describe("AppTopBar clear-local-drafts", () => {
     );
 
     expect(
-      await screen.findByText(/sign in again to clear local drafts/i),
+      await screen.findByText(/session unavailable/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear drafts" })).toBeDisabled();
+    expect(screen.getByText(/all local drafts in this browser/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear drafts" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Clear drafts" }));
+    await waitFor(() => {
+      expect(clearLocalOriginMock).toHaveBeenCalledTimes(1);
+    });
     expect(clearAllMock).not.toHaveBeenCalled();
   });
 

@@ -1,11 +1,29 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import React, { type ReactNode } from "react";
 
 import {
   TransformationRunProvider,
   useTransformationRun,
 } from "@/stores/transformationRun";
+import type { JavaOriginOverlay } from "@/types/api";
+
+const { getCurrentDraftScopeMock, loadDraftMock, saveDraftMock } = vi.hoisted(
+  () => ({
+    getCurrentDraftScopeMock: vi.fn(),
+    loadDraftMock: vi.fn(),
+    saveDraftMock: vi.fn(),
+  }),
+);
+
+vi.mock("@/lib/editor/editorPersistence", () => ({
+  getCurrentDraftScope: getCurrentDraftScopeMock,
+  subscribeToDraftPersistenceEvents: vi.fn(() => () => {}),
+  editorPersistence: {
+    loadDraft: loadDraftMock,
+    saveDraft: saveDraftMock,
+  },
+}));
 
 // Studio-IDE-3 (#247) + Studio-IDE-4 (#245): pin the cross-cutting Java
 // buffer semantics for the file-level "Stale" badge. These tests document
@@ -19,6 +37,19 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCurrentDraftScopeMock.mockResolvedValue({
+      tenantId: "tenant-A",
+      userId: "user-1",
+    });
+    loadDraftMock.mockResolvedValue(null);
+    saveDraftMock.mockResolvedValue({
+      encryptedSize: 1,
+      ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+    });
+  });
+
   it("hydrates a clean buffer with displayed === lastRunInput so the file is not stale", async () => {
     const { result } = renderHook(() => useTransformationRun(), { wrapper });
 
@@ -170,6 +201,141 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
       staleJava: false,
       manualEditsPresent: false,
     });
+  });
+
+  it("saveJavaDraft persists manualEditOverlay and lastRunInputContent", async () => {
+    const overlay: JavaOriginOverlay = {
+      schemaVersion: "v0",
+      runId: "run-1",
+      javaFile: "src/App.java",
+      regions: [
+        {
+          lineRange: { startLine: 1, endLine: 1 },
+          originClass: "manual_modified",
+        },
+      ],
+    };
+    const { result } = renderHook(() => useTransformationRun(), { wrapper });
+
+    act(() => {
+      result.current.setState((prev) => ({
+        ...prev,
+        runId: "run-1",
+        programId: "APP",
+      }));
+    });
+    await act(async () => {
+      await result.current.ensureJavaBaseline(
+        "src/App.java",
+        "public class App {}",
+        "run-1",
+      );
+    });
+    act(() => {
+      result.current.setJavaManualOverlay("src/App.java", overlay);
+    });
+
+    await act(async () => {
+      await result.current.saveJavaDraft("src/App.java");
+    });
+
+    expect(saveDraftMock).toHaveBeenCalledWith(
+      { tenantId: "tenant-A", userId: "user-1" },
+      {
+        kind: "java",
+        programId: "APP",
+        sourceName: "App.java",
+        javaFilePath: "src/App.java",
+      },
+      expect.objectContaining({
+        kind: "java",
+        content: "public class App {}",
+        lastRunInputContent: "public class App {}",
+        manualEditOverlay: overlay,
+      }),
+    );
+  });
+
+  it("persists Java conflict resolution and skips the same conflict on reopen", async () => {
+    const { result } = renderHook(() => useTransformationRun(), { wrapper });
+    act(() => {
+      result.current.setState((prev) => ({
+        ...prev,
+        runId: "run-1",
+        programId: "APP",
+      }));
+    });
+    await act(async () => {
+      await result.current.ensureJavaBaseline(
+        "src/App.java",
+        "backend version",
+        "run-1",
+      );
+    });
+
+    const savedPayloads: unknown[] = [];
+    loadDraftMock.mockResolvedValueOnce({
+      payload: {
+        schemaVersion: "v0",
+        kind: "java",
+        content: "local version",
+        bufferHash: "local-hash",
+        lastRunInputHash: "last-hash",
+        lastRunInputContent: "last run version",
+        generatorBaselineHash:
+          result.current.javaBuffers["src/App.java"].generatorBaselineHash,
+        generatorBaselineRunId: "run-1",
+        savedAt: "2026-05-19T00:00:00.000Z",
+      },
+      isExpired: false,
+      savedAt: "2026-05-19T00:00:00.000Z",
+      ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+    });
+    saveDraftMock.mockImplementation(async (...args: unknown[]) => {
+      savedPayloads.push(args[2]);
+      return {
+        encryptedSize: 1,
+        ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+      };
+    });
+
+    await act(async () => {
+      await result.current.loadJavaDraftFor("src/App.java", "backend version");
+    });
+    expect(result.current.javaConflict).toEqual(
+      expect.objectContaining({
+        localDraft: "local version",
+        lastRunInput: "last run version",
+      }),
+    );
+
+    act(() => {
+      result.current.resolveJavaConflict("localDraft");
+    });
+    await waitFor(() => expect(saveDraftMock).toHaveBeenCalledTimes(1));
+    expect(savedPayloads[0]).toEqual(
+      expect.objectContaining({
+        content: "local version",
+        lastRunInputContent: "last run version",
+        resolvedBackendHash: expect.any(String),
+      }),
+    );
+    expect(result.current.javaConflict).toBeNull();
+
+    loadDraftMock.mockResolvedValueOnce({
+      payload: savedPayloads[0],
+      isExpired: false,
+      savedAt: "2026-05-19T00:00:00.000Z",
+      ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+    });
+    await act(async () => {
+      await result.current.loadJavaDraftFor("src/App.java", "backend version");
+    });
+
+    expect(result.current.javaConflict).toBeNull();
+    expect(result.current.javaBuffers["src/App.java"].content).toBe(
+      "local version",
+    );
   });
 });
 
