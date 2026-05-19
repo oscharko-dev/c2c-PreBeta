@@ -21,6 +21,7 @@ import { useTransformationRun } from "./transformationRun";
 import {
   editorPersistence,
   getCurrentDraftScope,
+  subscribeToDraftPersistenceEvents,
 } from "../lib/editor/editorPersistence";
 import type { DraftPayload } from "../lib/editor/editorPersistence";
 
@@ -33,6 +34,10 @@ export interface CobolConflict {
   backendSample: string;
   localDraft: string;
   lastRunInput: string;
+  draftProgramId: string;
+  draftSourceName: string;
+  lastRunInputHash: string | null;
+  resolvedBackendHash: string;
 }
 
 // Status chip relationships. The editor renders these as small badges in
@@ -58,6 +63,7 @@ export interface SourceWorkspaceState {
   // conflict detection.
   bufferHash: string;
   lastRunInputHash: string | null;
+  lastRunInputContent: string | null;
   statusFlags: CobolStatusFlags;
   conflict: CobolConflict | null;
   saveNoticeAt: number | null;
@@ -109,9 +115,19 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [transformError, setTransformError] = useState<string | null>(null);
   const [bufferHash, setBufferHash] = useState("00000000");
   const [lastRunInputHash, setLastRunInputHash] = useState<string | null>(null);
+  const [lastRunInputContent, setLastRunInputContent] = useState<string | null>(
+    null,
+  );
   const [conflict, setConflict] = useState<CobolConflict | null>(null);
   const [saveNoticeAt, setSaveNoticeAt] = useState<number | null>(null);
   const draftRestoreTokenRef = useRef(0);
+
+  useEffect(() => {
+    return subscribeToDraftPersistenceEvents(() => {
+      setConflict(null);
+      setSaveNoticeAt(null);
+    });
+  }, []);
 
   const {
     state: runState,
@@ -149,7 +165,11 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       runState.runId !== lastSeenRunIdRef.current
     ) {
       lastSeenRunIdRef.current = runState.runId;
-      void deriveSourceHash(sourceText).then(setLastRunInputHash);
+      const completedSourceText = sourceText;
+      void deriveSourceHash(completedSourceText).then((hash) => {
+        setLastRunInputHash(hash);
+        setLastRunInputContent(completedSourceText);
+      });
     }
   }, [runState.runId, runState.phase, sourceText]);
 
@@ -163,6 +183,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setSourceTextInternal(text);
     setIsDirty(true);
     setTransformError(null);
+    setConflict(null);
     if (!sourceName) {
       setSourceName(DEFAULT_SOURCE_NAME);
       setSourceIdentityPath(null);
@@ -185,6 +206,8 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setIsDirty(false);
     setTransformError(null);
     setLastRunInputHash(null);
+    setLastRunInputContent(null);
+    setConflict(null);
     lastSeenRunIdRef.current = null;
     void loadDraftForSource({
       backendSample: text,
@@ -225,6 +248,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setIsDirty(false);
     setTransformError(null);
     setLastRunInputHash(null);
+    setLastRunInputContent(null);
     setBufferHash("00000000");
     setConflict(null);
     setSaveNoticeAt(null);
@@ -289,7 +313,11 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     } else {
       // Snapshot the hash of the input we just sent so the status chip
       // can later detect divergence.
-      void deriveSourceHash(sourceText).then(setLastRunInputHash);
+      const submittedSourceText = request.sourceText;
+      void deriveSourceHash(submittedSourceText).then((hash) => {
+        setLastRunInputHash(hash);
+        setLastRunInputContent(submittedSourceText);
+      });
     }
 
     return result;
@@ -348,7 +376,11 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
           : result.message,
       );
     } else {
-      void deriveSourceHash(sourceText).then(setLastRunInputHash);
+      const submittedSourceText = request.sourceText;
+      void deriveSourceHash(submittedSourceText).then((hash) => {
+        setLastRunInputHash(hash);
+        setLastRunInputContent(submittedSourceText);
+      });
     }
     return result;
   };
@@ -403,6 +435,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       content: sourceText,
       bufferHash: hash,
       lastRunInputHash: lastRunInputHash ?? undefined,
+      lastRunInputContent: lastRunInputContent ?? undefined,
       savedAt: new Date().toISOString(),
     };
     await editorPersistence.saveDraft(scope, key, payload);
@@ -447,11 +480,23 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     if (!loaded || loaded.isExpired) {
       return;
     }
-    if (backendSample && backendSample !== loaded.payload.content) {
+    const backendHash = backendSample
+      ? await deriveSourceHash(backendSample)
+      : "00000000";
+    if (
+      backendSample &&
+      backendSample !== loaded.payload.content &&
+      loaded.payload.resolvedBackendHash !== backendHash
+    ) {
       setConflict({
         backendSample,
         localDraft: loaded.payload.content,
-        lastRunInput: nextLastRunInputHash ? backendSample : "",
+        lastRunInput: loaded.payload.lastRunInputContent ?? "",
+        draftProgramId: key.programId,
+        draftSourceName: key.sourceName,
+        lastRunInputHash:
+          loaded.payload.lastRunInputHash ?? nextLastRunInputHash,
+        resolvedBackendHash: backendHash,
       });
       return;
     }
@@ -461,6 +506,9 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setIsDirty(false);
     if (loaded.payload.lastRunInputHash) {
       setLastRunInputHash(loaded.payload.lastRunInputHash);
+    }
+    if (loaded.payload.lastRunInputContent) {
+      setLastRunInputContent(loaded.payload.lastRunInputContent);
     }
   };
 
@@ -487,8 +535,42 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     const chosen = conflict[choice];
     setSourceTextInternal(chosen);
     setIsDirty(false);
+    if (conflict.lastRunInputHash) {
+      setLastRunInputHash(conflict.lastRunInputHash);
+    }
+    if (conflict.lastRunInput) {
+      setLastRunInputContent(conflict.lastRunInput);
+    }
     // Recompute hashes off the new content.
-    void deriveSourceHash(chosen).then(setBufferHash);
+    void deriveSourceHash(chosen).then((hash) => {
+      setBufferHash(hash);
+      void getCurrentDraftScope()
+        .then((scope) =>
+          editorPersistence.saveDraft(
+            scope,
+            {
+              kind: "cobol",
+              programId: conflict.draftProgramId,
+              sourceName: conflict.draftSourceName,
+            },
+            {
+              schemaVersion: "v0",
+              kind: "cobol",
+              content: chosen,
+              bufferHash: hash,
+              lastRunInputHash: conflict.lastRunInputHash ?? undefined,
+              lastRunInputContent: conflict.lastRunInput || undefined,
+              resolvedBackendHash: conflict.resolvedBackendHash,
+              savedAt: new Date().toISOString(),
+            },
+          ),
+        )
+        .catch(() => {
+          // The in-memory resolution is authoritative for the current
+          // session. If persistence is temporarily unavailable, the next
+          // explicit save will write the resolved buffer.
+        });
+    });
     setConflict(null);
   };
 
@@ -511,6 +593,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         canSubmitTransform,
         bufferHash,
         lastRunInputHash,
+        lastRunInputContent,
         statusFlags,
         conflict,
         saveNoticeAt,

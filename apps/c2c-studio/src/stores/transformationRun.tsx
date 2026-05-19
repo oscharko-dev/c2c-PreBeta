@@ -8,6 +8,7 @@ import {
   ReactNode,
   useMemo,
   useCallback,
+  useEffect,
 } from "react";
 import { TransformationRunState, RunPhase } from "../types/run";
 import { deriveProductState, StateContext } from "../types/state";
@@ -30,6 +31,7 @@ import { deriveSourceHash } from "../lib/sourceAnalysis";
 import {
   editorPersistence,
   getCurrentDraftScope,
+  subscribeToDraftPersistenceEvents,
 } from "../lib/editor/editorPersistence";
 import type { DraftPayload } from "../lib/editor/editorPersistence";
 import {
@@ -60,6 +62,7 @@ export interface JavaBufferEntry {
   content: string;
   bufferHash: string;
   lastRunInputHash: string | null;
+  lastRunInputContent: string | null;
   // Displayed artifact's source hash (sourced from traceability when
   // available; falls back to the hash of the BFF-delivered content).
   displayedArtifactSourceHash: string | null;
@@ -76,6 +79,13 @@ export interface JavaConflict {
   backendSample: string;
   localDraft: string;
   lastRunInput: string;
+  lastRunInputHash: string | null;
+  resolvedBackendHash: string;
+  draftProgramId: string;
+  draftSourceName: string;
+  generatorBaselineHash: string;
+  generatorBaselineRunId: string;
+  manualEditOverlay: JavaOriginOverlay | null;
 }
 
 export interface JavaStatusFlags {
@@ -243,6 +253,13 @@ export function TransformationRunProvider({
   const [cobolDiffHistory, setCobolDiffHistory] = useState<
     Record<string, Record<string, CobolSnapshot>>
   >({});
+
+  useEffect(() => {
+    return subscribeToDraftPersistenceEvents(() => {
+      setJavaConflict(null);
+      setSaveNoticeAt(null);
+    });
+  }, []);
 
   const recordJavaDiffSnapshot = useCallback(
     (sourceKey: string, filePath: string, snapshot: JavaFileSnapshot) => {
@@ -642,6 +659,7 @@ export function TransformationRunProvider({
             generatorBaselineHash: newBaselineHash,
             generatorBaselineRunId: review.newGeneratorRunId,
             lastRunInputHash: newBaselineHash,
+            lastRunInputContent: review.newGeneratorContent,
             displayedArtifactSourceHash: newBaselineHash,
             isDirty: merged !== review.newGeneratorContent,
           },
@@ -683,6 +701,7 @@ export function TransformationRunProvider({
             content: backendContent,
             bufferHash: hash,
             lastRunInputHash: hash,
+            lastRunInputContent: backendContent,
             displayedArtifactSourceHash: hash,
             generatorBaselineContent: backendContent,
             generatorBaselineHash: hash,
@@ -786,6 +805,7 @@ export function TransformationRunProvider({
         content,
         bufferHash,
         lastRunInputHash: entry.lastRunInputHash ?? undefined,
+        lastRunInputContent: entry.lastRunInputContent ?? undefined,
         generatorBaselineHash: entry.generatorBaselineHash,
         generatorBaselineRunId: entry.generatorBaselineRunId,
         manualEditOverlay: manualEditOverlay ?? undefined,
@@ -845,21 +865,53 @@ export function TransformationRunProvider({
       if (!loaded || loaded.isExpired) {
         return;
       }
-      if (loaded.payload.content !== backendContent) {
+      const backendHash = await deriveSourceHash(backendContent);
+      if (
+        loaded.payload.content !== backendContent &&
+        loaded.payload.resolvedBackendHash !== backendHash
+      ) {
         setJavaConflict({
           filePath,
           backendSample: backendContent,
           localDraft: loaded.payload.content,
-          lastRunInput: loaded.payload.lastRunInputHash ? backendContent : "",
+          lastRunInput: loaded.payload.lastRunInputContent ?? "",
+          lastRunInputHash: loaded.payload.lastRunInputHash ?? null,
+          resolvedBackendHash: backendHash,
+          draftProgramId: programId,
+          draftSourceName: sourceName,
+          generatorBaselineHash:
+            loaded.payload.generatorBaselineHash ?? backendHash,
+          generatorBaselineRunId:
+            loaded.payload.generatorBaselineRunId ??
+            state.runId ??
+            "unknown",
+          manualEditOverlay: loaded.payload.manualEditOverlay ?? null,
         });
         return;
       }
-      // Same content; restore overlay if present.
-      if (loaded.payload.manualEditOverlay) {
-        setJavaManualOverlay(filePath, loaded.payload.manualEditOverlay);
-      }
+      setJavaBuffers((prev) => {
+        const existing = prev[filePath];
+        if (!existing) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [filePath]: {
+            ...existing,
+            content: loaded.payload.content,
+            bufferHash: loaded.payload.bufferHash,
+            lastRunInputHash:
+              loaded.payload.lastRunInputHash ?? existing.lastRunInputHash,
+            lastRunInputContent:
+              loaded.payload.lastRunInputContent ?? existing.lastRunInputContent,
+            manualEditOverlay: loaded.payload.manualEditOverlay ?? null,
+            isDirty: loaded.payload.content !== existing.generatorBaselineContent,
+            lastSavedAt: loaded.savedAt,
+          },
+        };
+      });
     },
-    [state.programId, setJavaManualOverlay],
+    [state.programId, state.runId],
   );
 
   const resolveJavaConflict = useCallback(
@@ -869,6 +921,8 @@ export function TransformationRunProvider({
           return null;
         }
         const chosen = current[choice];
+        const manualEditOverlay =
+          choice === "localDraft" ? current.manualEditOverlay : null;
         setJavaBuffers((prev) => {
           const existing = prev[current.filePath];
           if (!existing) {
@@ -879,6 +933,7 @@ export function TransformationRunProvider({
             [current.filePath]: {
               ...existing,
               content: chosen,
+              manualEditOverlay,
               isDirty: chosen !== existing.generatorBaselineContent,
             },
           };
@@ -891,9 +946,42 @@ export function TransformationRunProvider({
             }
             return {
               ...prev,
-              [current.filePath]: { ...existing, bufferHash: hash },
+              [current.filePath]: {
+                ...existing,
+                bufferHash: hash,
+                lastRunInputContent: current.lastRunInput || null,
+              },
             };
           });
+          void getCurrentDraftScope()
+            .then((scope) =>
+              editorPersistence.saveDraft(
+                scope,
+                {
+                  kind: "java",
+                  programId: current.draftProgramId,
+                  sourceName: current.draftSourceName,
+                  javaFilePath: current.filePath,
+                },
+                {
+                  schemaVersion: "v0",
+                  kind: "java",
+                  content: chosen,
+                  bufferHash: hash,
+                  lastRunInputHash: current.lastRunInputHash ?? undefined,
+                  lastRunInputContent: current.lastRunInput || undefined,
+                  generatorBaselineHash: current.generatorBaselineHash,
+                  generatorBaselineRunId: current.generatorBaselineRunId,
+                  manualEditOverlay: manualEditOverlay ?? undefined,
+                  resolvedBackendHash: current.resolvedBackendHash,
+                  savedAt: new Date().toISOString(),
+                },
+              ),
+            )
+            .catch(() => {
+              // Keep the resolved buffer in memory. A later explicit save
+              // will persist it if storage/session availability recovers.
+            });
         });
         return null;
       });

@@ -69,6 +69,7 @@ const { getCurrentDraftScopeMock, loadDraftMock, saveDraftMock } = vi.hoisted(
 
 vi.mock("@/lib/editor/editorPersistence", () => ({
   getCurrentDraftScope: getCurrentDraftScopeMock,
+  subscribeToDraftPersistenceEvents: vi.fn(() => () => {}),
   editorPersistence: {
     loadDraft: loadDraftMock,
     saveDraft: saveDraftMock,
@@ -187,6 +188,73 @@ function SameBasenameHarness() {
       >
         Open Duplicate B
       </button>
+    </>
+  );
+}
+
+function DraftKeyHarness() {
+  const { setSourceFile, setSourceText, saveDraftNow } = useSourceWorkspace();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          setSourceFile(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OLDID.\n",
+            "PAYROLL.cbl",
+            "src/PAYROLL.cbl",
+          )
+        }
+      >
+        Open Payroll
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setSourceText(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. NEWID.\n",
+          )
+        }
+      >
+        Rename Program
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void saveDraftNow();
+        }}
+      >
+        Save Draft
+      </button>
+    </>
+  );
+}
+
+function ConflictStoreHarness() {
+  const { setSourceFile, sourceText, conflict, resolveConflict } =
+    useSourceWorkspace();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          setSourceFile("backend version", "PAYROLL.cbl", "src/PAYROLL.cbl")
+        }
+      >
+        Open Backend
+      </button>
+      <button
+        type="button"
+        onClick={() => resolveConflict("localDraft")}
+        disabled={!conflict}
+      >
+        Keep Local
+      </button>
+      <output data-testid="source-text">{sourceText}</output>
+      <output data-testid="conflict-local">{conflict?.localDraft ?? ""}</output>
+      <output data-testid="conflict-last-run">
+        {conflict?.lastRunInput ?? ""}
+      </output>
     </>
   );
 }
@@ -414,6 +482,85 @@ describe("COBOL source input", () => {
         `inmemory://cobol-editor/${encodeURIComponent("src/b/DUPLICATE.cbl")}`,
       );
     });
+  });
+
+  it("uses a stable path-backed draft key even when PROGRAM-ID changes before save", async () => {
+    renderSourceWorkbench(<DraftKeyHarness />);
+
+    fireEvent.click(screen.getByText("Open Payroll"));
+    await waitFor(() => expect(loadDraftMock).toHaveBeenCalled());
+    const openedKey = loadDraftMock.mock.calls[0][1] as { programId: string };
+
+    fireEvent.click(screen.getByText("Rename Program"));
+    fireEvent.click(screen.getByText("Save Draft"));
+
+    await waitFor(() => expect(saveDraftMock).toHaveBeenCalledTimes(1));
+    const savedKey = saveDraftMock.mock.calls[0][1] as { programId: string };
+    expect(savedKey.programId).toBe(openedKey.programId);
+    expect(savedKey.programId).not.toBe("NEWID");
+    expect(savedKey.programId).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("persists a COBOL conflict resolution and suppresses the same conflict on reopen", async () => {
+    const savedPayloads: unknown[] = [];
+    loadDraftMock.mockResolvedValueOnce({
+      payload: {
+        schemaVersion: "v0",
+        kind: "cobol",
+        content: "local version",
+        bufferHash: "local-hash",
+        lastRunInputHash: "last-hash",
+        lastRunInputContent: "last run version",
+        savedAt: "2026-05-19T00:00:00.000Z",
+      },
+      isExpired: false,
+      savedAt: "2026-05-19T00:00:00.000Z",
+      ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+    });
+    saveDraftMock.mockImplementation(async (...args: unknown[]) => {
+      savedPayloads.push(args[2]);
+      return {
+        encryptedSize: 1,
+        ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+      };
+    });
+
+    renderSourceWorkbench(<ConflictStoreHarness />);
+
+    fireEvent.click(screen.getByText("Open Backend"));
+    await waitFor(() => {
+      expect(screen.getByTestId("conflict-local")).toHaveTextContent(
+        "local version",
+      );
+    });
+    expect(screen.getByTestId("conflict-last-run")).toHaveTextContent(
+      "last run version",
+    );
+
+    fireEvent.click(screen.getByText("Keep Local"));
+    await waitFor(() => expect(saveDraftMock).toHaveBeenCalledTimes(1));
+    expect(savedPayloads[0]).toEqual(
+      expect.objectContaining({
+        content: "local version",
+        lastRunInputContent: "last run version",
+        resolvedBackendHash: expect.any(String),
+      }),
+    );
+
+    loadDraftMock.mockResolvedValueOnce({
+      payload: savedPayloads[0],
+      isExpired: false,
+      savedAt: "2026-05-19T00:00:00.000Z",
+      ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+    });
+    fireEvent.click(screen.getByText("Open Backend"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("source-text")).toHaveTextContent(
+        "local version",
+      );
+    });
+    expect(screen.getByTestId("conflict-local")).toHaveTextContent("");
   });
 
   it("submits optional expected output and oracle input when provided", async () => {

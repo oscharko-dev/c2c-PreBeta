@@ -14,13 +14,31 @@ describe("deriveDraftProgramId", () => {
     ).resolves.toBe("PAYROLL01");
   });
 
-  it("uses the locally detected PROGRAM-ID before hashing the path fallback", async () => {
+  it("uses source identity path before a locally detected PROGRAM-ID", async () => {
+    const first = await deriveDraftProgramId({
+      parserProgramId: null,
+      detectedProgramId: "LOCAL01",
+      sourceName: "payroll.cbl",
+      normalizedPath: "src/payroll.cbl",
+    });
+    const second = await deriveDraftProgramId({
+      parserProgramId: null,
+      detectedProgramId: "RENAMED01",
+      sourceName: "payroll.cbl",
+      normalizedPath: "src/payroll.cbl",
+    });
+
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(second).toBe(first);
+  });
+
+  it("uses the locally detected PROGRAM-ID when no stable path exists", async () => {
     await expect(
       deriveDraftProgramId({
         parserProgramId: null,
         detectedProgramId: "LOCAL01",
         sourceName: "payroll.cbl",
-        normalizedPath: "src/payroll.cbl",
+        normalizedPath: null,
       }),
     ).resolves.toBe("LOCAL01");
   });
