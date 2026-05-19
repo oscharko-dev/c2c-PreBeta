@@ -29,7 +29,9 @@ from .run_contract import (
     JAVA_REGION_ORIGIN_AGENT_PROPOSED,
     JAVA_REGION_ORIGIN_CLASSES,
     JAVA_REGION_ORIGIN_DETERMINISTIC,
+    JAVA_REGION_ORIGIN_MANUAL_EDIT,
     JAVA_REGION_ORIGIN_MANUAL_CLASSES,
+    JAVA_REGION_ORIGIN_MANUAL_MODIFIED,
     JAVA_REGION_ORIGIN_REPAIR_ATTEMPTED,
     AssistDecision,
 )
@@ -227,8 +229,34 @@ def _normalise_manual_overlay(
                 f"manual overlay value must be a manual class "
                 f"{sorted(JAVA_REGION_ORIGIN_MANUAL_CLASSES)}, got {value!r}"
             )
-        normalised[(int(key[0]), int(key[1]))] = value
+        start_line = int(key[0])
+        end_line = int(key[1])
+        if start_line < 1 or end_line < start_line:
+            raise ValueError(
+                f"manual overlay range must be valid, got {(start_line, end_line)!r}"
+            )
+        normalised[(start_line, end_line)] = value
     return normalised
+
+
+def _ranges_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    return left[0] <= right[1] and right[0] <= left[1]
+
+
+def _manual_origin_for_overlap(
+    line_range: tuple[int, int],
+    overlay: Mapping[tuple[int, int], str],
+) -> str | None:
+    overlapping = [
+        origin_class
+        for overlay_range, origin_class in overlay.items()
+        if _ranges_overlap(line_range, overlay_range)
+    ]
+    if JAVA_REGION_ORIGIN_MANUAL_MODIFIED in overlapping:
+        return JAVA_REGION_ORIGIN_MANUAL_MODIFIED
+    if JAVA_REGION_ORIGIN_MANUAL_EDIT in overlapping:
+        return JAVA_REGION_ORIGIN_MANUAL_EDIT
+    return None
 
 
 def derive_origin_class(
@@ -241,15 +269,18 @@ def derive_origin_class(
     """Return the ``originClass`` for a region.
 
     Priority (issue #248):
-      1. Manual overlay wins if it covers this line range exactly.
+      1. Manual overlay wins if it overlaps this line range. Studio tracks
+         changed-line subranges, while the orchestrator can classify broader
+         IR-anchored regions.
       2. Else assist_required + at least one repair attempt with
          ``repairDecision == 'propose_candidate'`` → ``repair_attempted``.
       3. Else assist_required → ``agent_proposed``.
       4. Else → ``deterministic``.
     """
     overlay = _normalise_manual_overlay(manual_overlay)
-    if line_range in overlay:
-        return overlay[line_range]
+    manual_origin = _manual_origin_for_overlap(line_range, overlay)
+    if manual_origin is not None:
+        return manual_origin
     if assist_decision is not None and assist_decision.outcome == ASSIST_OUTCOME_REQUIRED:
         has_propose_candidate = any(
             (entry.get("repairDecision") == "propose_candidate")
