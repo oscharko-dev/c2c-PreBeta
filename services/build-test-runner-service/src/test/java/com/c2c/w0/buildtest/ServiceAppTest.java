@@ -1,9 +1,16 @@
 package com.c2c.w0.buildtest;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServiceAppTest {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @Test
     void httpStatusIsAlwaysTwoHundredForStructuredOutcomes() {
@@ -132,5 +141,81 @@ class ServiceAppTest {
                 4));
 
         assertEquals("request body too large", thrown.getMessage());
+    }
+
+    @Test
+    void formatJavaRouteReturnsFormattedContent() throws Exception {
+        HttpServer server = startFormatJavaServer();
+        try {
+            HttpResponse<String> response = postJson(server, Map.of(
+                    "content", "class X{void m(){System.out.println(\"hi\");}}"));
+
+            assertEquals(200, response.statusCode());
+            Map<String, Object> body = readJsonObject(response.body());
+            assertEquals("v0", body.get("schemaVersion"));
+            assertTrue(((String) body.get("formattedContent")).contains("class X {"));
+            assertFalse(body.containsKey("status"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void formatJavaRouteReturnsBadRequestForInvalidJson() throws Exception {
+        HttpServer server = startFormatJavaServer();
+        try {
+            HttpResponse<String> response = postRawJson(server, "{\"content\":");
+
+            assertEquals(400, response.statusCode());
+            Map<String, Object> body = readJsonObject(response.body());
+            assertEquals("v0", body.get("schemaVersion"));
+            assertEquals("failed", body.get("status"));
+            assertEquals("invalid json", body.get("error"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void formatJavaRouteReturnsUnprocessableEntityForInvalidJava() throws Exception {
+        HttpServer server = startFormatJavaServer();
+        try {
+            HttpResponse<String> response = postJson(server, Map.of(
+                    "content", "class X { void m( { }"));
+
+            assertEquals(422, response.statusCode());
+            Map<String, Object> body = readJsonObject(response.body());
+            assertEquals("v0", body.get("schemaVersion"));
+            assertEquals("failed", body.get("status"));
+            assertTrue(((String) body.get("error")).length() > 0);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static HttpServer startFormatJavaServer() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v0/format-java",
+                exchange -> ServiceApp.handleFormatJava(exchange, new JavaFormatter(), null));
+        server.start();
+        return server;
+    }
+
+    private static HttpResponse<String> postJson(HttpServer server, Map<String, Object> body) throws Exception {
+        return postRawJson(server, JSON.writeValueAsString(body));
+    }
+
+    private static HttpResponse<String> postRawJson(HttpServer server, String body) throws Exception {
+        URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v0/format-java");
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .build();
+        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> readJsonObject(String raw) throws IOException {
+        return JSON.readValue(raw, Map.class);
     }
 }

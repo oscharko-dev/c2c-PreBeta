@@ -113,9 +113,9 @@ public final class ServiceApp {
         }
     }
 
-    private static void handleFormatJava(HttpExchange exchange,
-                                         JavaFormatter formatter,
-                                         String controlToken) throws IOException {
+    static void handleFormatJava(HttpExchange exchange,
+                                 JavaFormatter formatter,
+                                 String controlToken) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendText(exchange, 405, "method not allowed");
             return;

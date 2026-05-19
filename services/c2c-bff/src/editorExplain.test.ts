@@ -309,6 +309,14 @@ test("validateExplainRequest rejects missing or malformed studioRedactionMetadat
     },
   });
   assert.equal(validateExplainRequest(badPatterns).ok, false);
+
+  const rawPatternValue = validRequest({
+    studioRedactionMetadata: {
+      studioRedactionProfileVersion: "v1.0.0",
+      matchedPatternIds: ["field-name-class:email", "alice@example.invalid"],
+    },
+  });
+  assert.equal(validateExplainRequest(rawPatternValue).ok, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -517,6 +525,22 @@ test("extractLedgerRef returns the gateway value when present and non-empty", ()
     "urn:ledger/explain/abc",
   );
   assert.equal(extractLedgerRef({ ledgerRef: "" }), null);
+  assert.equal(
+    extractLedgerRef({ ledgerRef: "https://internal.example/run?token=x" }),
+    null,
+  );
+  assert.equal(
+    extractLedgerRef({
+      ledgerRef: { uri: "urn:model-gateway/editor-assist/abc-123" },
+    }),
+    "urn:model-gateway/editor-assist/abc-123",
+  );
+  assert.equal(
+    extractLedgerRef({
+      ledgerRef: { uri: "urn:model-gateway/editor-assist/alice@example.com" },
+    }),
+    null,
+  );
   assert.equal(extractLedgerRef({}), null);
   assert.equal(extractLedgerRef(null), null);
   assert.equal(extractLedgerRef("not an object"), null);
@@ -557,6 +581,21 @@ test("normaliseGatewayRedactedFields drops non-string gateway entries", () => {
   assert.deepEqual(result.sort(), ["iban-eu", "ssn-us"].sort());
 });
 
+test("normaliseGatewayRedactedFields drops unsafe gateway entries", () => {
+  const result = normaliseGatewayRedactedFields({
+    studioMatchedPatternIds: ["field-name-class:email", "ssn-us"],
+    gatewayRedactedFields: [
+      "customerName",
+      "alice@example.invalid",
+      "https://internal.example/redaction/1",
+    ],
+  });
+  assert.deepEqual(
+    result.sort(),
+    ["customerName", "field-name-class:email", "ssn-us"].sort(),
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Gateway response mapping
 // ---------------------------------------------------------------------------
@@ -583,6 +622,23 @@ test("mapGatewayResponse maps 2xx with explanation to ok", () => {
   assert.equal(result.explanation, "MOVE moves bytes from A to B");
   assert.equal(result.gatewayLedgerRef, "urn:ledger/x");
   assert.deepEqual(result.gatewayRedactedFields, ["customerName"]);
+});
+
+test("mapGatewayResponse drops unsafe gateway metadata", () => {
+  const result = mapGatewayResponse({
+    status: 200,
+    body: {
+      explanation: "MOVE moves bytes from A to B",
+      invocationId: "https://internal.example/inv/123",
+      ledgerRef: "https://internal.example/run?token=opaque",
+      redactedFields: ["field-name-class:email", "alice@example.invalid"],
+    },
+  });
+  assert.equal(result.kind, "ok");
+  if (result.kind !== "ok") return;
+  assert.equal(result.invocationId, null);
+  assert.equal(result.gatewayLedgerRef, null);
+  assert.deepEqual(result.gatewayRedactedFields, ["field-name-class:email"]);
 });
 
 test("mapGatewayResponse maps 2xx without explanation to gateway_unavailable", () => {
