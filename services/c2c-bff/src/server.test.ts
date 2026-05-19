@@ -6880,6 +6880,74 @@ test("POST /api/v0/verify stamps manualEditsCarriedOver and manualDriftRegionCou
   }
 });
 
+test("POST /api/v0/verify aggregates manual drift across multi-file overlays", async () => {
+  const auth = createRouteAuth();
+  const upstreamBody = {
+    status: "success",
+    classification: "success",
+    diagnostics: [],
+  };
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: stubBuildTestRunner({ status: 200, body: upstreamBody }),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
+        runId: "run-multi",
+        javaFiles: [
+          { path: "Foo.java", content: "class Foo {}" },
+          { path: "Bar.java", content: "class Bar {}" },
+        ],
+        manualEditOverlays: [
+          {
+            schemaVersion: "v0",
+            runId: "run-multi",
+            javaFile: "Foo.java",
+            regions: [
+              {
+                lineRange: { startLine: 1, endLine: 1 },
+                originClass: "manual_modified",
+              },
+            ],
+          },
+          {
+            schemaVersion: "v0",
+            runId: "run-multi",
+            javaFile: "Bar.java",
+            regions: [
+              {
+                lineRange: { startLine: 2, endLine: 2 },
+                originClass: "manual_edit",
+              },
+              {
+                lineRange: { startLine: 3, endLine: 3 },
+                originClass: "deterministic",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as {
+      manualEditsCarriedOver: boolean;
+      manualDriftRegionCount: number;
+    };
+    assert.equal(body.manualEditsCarriedOver, true);
+    assert.equal(body.manualDriftRegionCount, 2);
+  } finally {
+    await server.close();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Studio-IDE-10 (#249): POST /api/v0/editor/explain + GET /api/v0/editor/budget
 // ---------------------------------------------------------------------------

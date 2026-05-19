@@ -525,7 +525,9 @@ export function TransformationRunProvider({
       eventType: "verify.invoked",
       payload: {
         trigger: "toolbar",
-        hadManualEdits: Boolean(request.manualEditOverlay),
+        hadManualEdits: Boolean(
+          request.manualEditOverlay || request.manualEditOverlays?.length,
+        ),
       },
     });
     const result = await apiClient.verify(request);
@@ -678,20 +680,29 @@ export function TransformationRunProvider({
       const hash = await deriveSourceHash(backendContent);
       setJavaBuffers((prev) => {
         const existing = prev[filePath];
-        // If the user already has a dirty buffer, do not overwrite content;
-        // only refresh the generator baseline metadata if the run changed.
+        // If the user already has a dirty buffer, do not overwrite content or
+        // advance the baseline merely because a new run landed. The 3-Way
+        // Merge review owns that transition. The only safe exception is when
+        // the fresh generator output already equals the user's buffer; then
+        // there is no merge decision to make and the buffer can become clean.
         if (existing && existing.isDirty) {
           if (existing.generatorBaselineRunId === runId) {
+            return prev;
+          }
+          if (backendContent !== existing.content) {
             return prev;
           }
           return {
             ...prev,
             [filePath]: {
               ...existing,
+              lastRunInputHash: hash,
+              lastRunInputContent: backendContent,
               generatorBaselineContent: backendContent,
               generatorBaselineHash: hash,
               generatorBaselineRunId: runId,
               displayedArtifactSourceHash: hash,
+              isDirty: false,
             },
           };
         }

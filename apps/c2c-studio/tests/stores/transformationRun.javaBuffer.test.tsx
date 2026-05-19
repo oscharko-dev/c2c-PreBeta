@@ -109,7 +109,7 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
     expect(flags.clean).toBe(true);
   });
 
-  it("keeps a dirty user-edit buffer when a new run lands; refreshes only the baseline metadata", async () => {
+  it("keeps a dirty user-edit buffer and baseline when a divergent new run lands", async () => {
     const { result } = renderHook(() => useTransformationRun(), { wrapper });
 
     await act(async () => {
@@ -140,9 +140,45 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
     // User content is preserved.
     expect(entry.content).toContain("/* user edit */");
     expect(entry.isDirty).toBe(true);
-    // Baseline metadata is rotated to the new run.
+    // Baseline metadata stays anchored to the pre-merge generator run; the
+    // 3-Way Merge apply path is the only place that can advance it.
+    expect(entry.generatorBaselineRunId).toBe("run-1");
+    expect(entry.generatorBaselineContent).toBe("public class App {}");
+  });
+
+  it("advances a dirty buffer baseline when the new generator output already matches the buffer", async () => {
+    const { result } = renderHook(() => useTransformationRun(), { wrapper });
+
+    await act(async () => {
+      await result.current.ensureJavaBaseline(
+        "src/App.java",
+        "public class App {}",
+        "run-1",
+      );
+    });
+
+    act(() => {
+      result.current.setJavaBufferContent(
+        "src/App.java",
+        "public class App { /* user edit */ }",
+      );
+    });
+
+    await act(async () => {
+      await result.current.ensureJavaBaseline(
+        "src/App.java",
+        "public class App { /* user edit */ }",
+        "run-2",
+      );
+    });
+
+    const entry = result.current.javaBuffers["src/App.java"];
+    expect(entry.content).toBe("public class App { /* user edit */ }");
     expect(entry.generatorBaselineRunId).toBe("run-2");
-    expect(entry.generatorBaselineContent).toContain("int regenerated");
+    expect(entry.generatorBaselineContent).toBe(
+      "public class App { /* user edit */ }",
+    );
+    expect(entry.isDirty).toBe(false);
   });
 
   it("manualEditsPresent flips on when the buffer hash diverges from the Generator Baseline (#247 V2 chip)", async () => {

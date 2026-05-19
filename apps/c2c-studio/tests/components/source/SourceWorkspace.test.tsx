@@ -230,6 +230,24 @@ function DraftKeyHarness() {
   );
 }
 
+function findPayrollDraftKey(calls: unknown[][]) {
+  return calls
+    .map((call) => call[1])
+    .find(
+      (
+        key,
+      ): key is {
+        programId: string;
+        sourceName: string;
+      } =>
+        typeof key === "object" &&
+        key !== null &&
+        "programId" in key &&
+        "sourceName" in key &&
+        key.sourceName === "PAYROLL.cbl",
+    );
+}
+
 function ConflictStoreHarness() {
   const { setSourceFile, sourceText, conflict, resolveConflict } =
     useSourceWorkspace();
@@ -488,14 +506,24 @@ describe("COBOL source input", () => {
     renderSourceWorkbench(<DraftKeyHarness />);
 
     fireEvent.click(screen.getByText("Open Payroll"));
-    await waitFor(() => expect(loadDraftMock).toHaveBeenCalled());
-    const openedKey = loadDraftMock.mock.calls[0][1] as { programId: string };
+    await waitFor(() =>
+      expect(findPayrollDraftKey(loadDraftMock.mock.calls)).toBeDefined(),
+    );
+    const openedKey = findPayrollDraftKey(loadDraftMock.mock.calls);
+    if (!openedKey) {
+      throw new Error("PAYROLL.cbl draft load key was not captured.");
+    }
 
     fireEvent.click(screen.getByText("Rename Program"));
     fireEvent.click(screen.getByText("Save Draft"));
 
-    await waitFor(() => expect(saveDraftMock).toHaveBeenCalledTimes(1));
-    const savedKey = saveDraftMock.mock.calls[0][1] as { programId: string };
+    await waitFor(() =>
+      expect(findPayrollDraftKey(saveDraftMock.mock.calls)).toBeDefined(),
+    );
+    const savedKey = findPayrollDraftKey(saveDraftMock.mock.calls);
+    if (!savedKey) {
+      throw new Error("PAYROLL.cbl draft save key was not captured.");
+    }
     expect(savedKey.programId).toBe(openedKey.programId);
     expect(savedKey.programId).not.toBe("NEWID");
     expect(savedKey.programId).toMatch(/^[0-9a-f]{32}$/);

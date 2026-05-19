@@ -4890,17 +4890,22 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         };
         // Studio-IDE-13 / ADR-0007: derive manual-edit provenance fields from
         // the optional overlay submitted by the Studio. Both fields default to
-        // false/0 when the overlay is absent (per ADR 0007 §4).
+        // false/0 when the overlay is absent (per ADR 0007 §4). Multi-file
+        // Studio verification sends manualEditOverlays so every file's manual
+        // regions contribute to the aggregate run-summary count.
         let manualEditsCarriedOver = false;
         let manualDriftRegionCount = 0;
-        const vOverlayRaw = vRecord.manualEditOverlay;
-        if (
-          vOverlayRaw &&
-          typeof vOverlayRaw === "object" &&
-          !Array.isArray(vOverlayRaw)
-        ) {
+        const countManualRegions = (vOverlayRaw: unknown): number => {
+          if (
+            !vOverlayRaw ||
+            typeof vOverlayRaw !== "object" ||
+            Array.isArray(vOverlayRaw)
+          ) {
+            return 0;
+          }
           const overlayRecord = vOverlayRaw as Record<string, unknown>;
           const overlayRegions = overlayRecord.regions;
+          let count = 0;
           if (Array.isArray(overlayRegions)) {
             for (const region of overlayRegions) {
               if (
@@ -4913,13 +4918,25 @@ export function createApp(deps: ServerDeps): http.RequestListener {
                   regionRecord.originClass === "manual_modified" ||
                   regionRecord.originClass === "manual_edit"
                 ) {
-                  manualDriftRegionCount += 1;
+                  count += 1;
                 }
               }
             }
-            manualEditsCarriedOver = manualDriftRegionCount > 0;
           }
+          return count;
+        };
+        if (vRecord.manualEditOverlays !== undefined) {
+          if (!Array.isArray(vRecord.manualEditOverlays)) {
+            badRequest(res, "manualEditOverlays must be an array");
+            return;
+          }
+          for (const overlay of vRecord.manualEditOverlays) {
+            manualDriftRegionCount += countManualRegions(overlay);
+          }
+        } else {
+          manualDriftRegionCount += countManualRegions(vRecord.manualEditOverlay);
         }
+        manualEditsCarriedOver = manualDriftRegionCount > 0;
         try {
           const upstream = await buildTestRunner.runVerification(
             vPayload,

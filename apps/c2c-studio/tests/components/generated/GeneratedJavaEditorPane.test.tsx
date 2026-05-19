@@ -498,6 +498,26 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     expect(editor.readOnly).toBe(false);
   });
 
+  it("renders generated Java for generator-only runs awaiting explicit Verify", async () => {
+    mockTransformationState.mockReturnValue({
+      ...completedRunWith(["src/App.java"]),
+      workflow: {
+        finalClassification: "incomplete",
+        failureCode: "generate_only_complete",
+        failureMessage:
+          "generator-only run completed; verification was not requested",
+      },
+    });
+    mockGeneratedFileContents({ "src/App.java": "public class App {}" });
+
+    renderPane();
+
+    const editor = await screen.findByTestId("code-editor-mock");
+    expect(editor).toHaveAttribute("data-language", "java");
+    expect(editor).toHaveAttribute("data-mode", "editable");
+    expect(screen.queryByTestId("generated-pane-progress")).toBeNull();
+  });
+
   it("publishes fetched traceability into trust-pillar decorations and lineage coverage", async () => {
     mockTransformationState.mockReturnValue(completedRunWith(["src/App.java"]));
     mockGeneratedFileContents({
