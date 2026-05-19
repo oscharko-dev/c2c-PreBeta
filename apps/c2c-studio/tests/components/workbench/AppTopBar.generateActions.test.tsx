@@ -235,4 +235,36 @@ describe("AppTopBar generator actions", () => {
       ],
     });
   });
+
+  it("omits entry metadata when the entry file is not in the verified buffers", async () => {
+    transformationStateMock = {
+      runId: "run-verify",
+      programId: "PROG1",
+      generated: { entryClass: "com.example.Main" },
+      generatedFiles: {
+        entryFilePath: "src/Main.java",
+        files: [{ path: "src/Main.java" }, { path: "src/Helper.java" }],
+      },
+    };
+    javaBuffersMock = {
+      "src/Helper.java": {
+        content: "class Helper {}",
+        generatorBaselineHash: "helper-baseline",
+        bufferHash: "helper-baseline",
+        manualEditOverlay: null,
+      },
+    };
+    renderTopBar();
+
+    fireEvent.click(screen.getByTestId("topbar-verify-button"));
+
+    await waitFor(() => {
+      expect(startVerifyMock).toHaveBeenCalledTimes(1);
+    });
+    expect(startVerifyMock).toHaveBeenCalledWith({
+      runId: "run-verify",
+      programId: "PROG1",
+      javaFiles: [{ path: "src/Helper.java", content: "class Helper {}" }],
+    });
+  });
 });

@@ -117,14 +117,19 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
       const manualEditOverlays = entries.flatMap(([, entry]) =>
         entry.manualEditOverlay ? [entry.manualEditOverlay] : [],
       );
+      const verifiedFilePaths = new Set(entries.map(([path]) => path));
+      const generatedEntryFilePath = runState.generatedFiles?.entryFilePath;
       const entryFilePath =
-        runState.generatedFiles?.entryFilePath ?? generatedFilePaths[0];
+        generatedEntryFilePath && verifiedFilePaths.has(generatedEntryFilePath)
+          ? generatedEntryFilePath
+          : undefined;
+      const entryClass = entryFilePath
+        ? runState.generated?.entryClass
+        : undefined;
       await startVerify({
         runId,
         ...(runState.programId ? { programId: runState.programId } : {}),
-        ...(runState.generated?.entryClass
-          ? { entryClass: runState.generated.entryClass }
-          : {}),
+        ...(entryClass ? { entryClass } : {}),
         ...(entryFilePath ? { entryFilePath } : {}),
         javaFiles,
         ...(expectedOutput.length > 0 ? { expectedOutput } : {}),
