@@ -5784,7 +5784,10 @@ test("GET /api/v0/runs/{runId}/traceability preserves cached classifications acr
     };
     assert.equal(outage.status, 200);
     assert.equal(outageBody.javaRegionClassification, null);
-    assert.ok(outageBody.note);
+    assert.equal(
+      outageBody.note,
+      "Traceability upstream returned 503; traceability cannot be served.",
+    );
 
     const summary = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
@@ -5795,6 +5798,49 @@ test("GET /api/v0/runs/{runId}/traceability preserves cached classifications acr
     assert.deepEqual(summaryBody.javaRegionClassification, {
       "src/main/java/Foo.java": [{ ...classification, schemaVersion: "v0" }],
     });
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId}/traceability reports request failures distinctly", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator();
+  const throwingOrchestrator: OrchestratorClient = {
+    ...orch,
+    async getTraceability() {
+      throw new Error("upstream network failure");
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: throwingOrchestrator,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+
+    const result = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+    );
+    const body = result.body as {
+      javaRegionClassification: unknown;
+      note?: string;
+    };
+    assert.equal(result.status, 200);
+    assert.equal(body.javaRegionClassification, null);
+    assert.equal(
+      body.note,
+      "Traceability upstream request failed; traceability cannot be served.",
+    );
   } finally {
     await server.close();
   }

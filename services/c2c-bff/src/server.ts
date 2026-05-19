@@ -2088,7 +2088,9 @@ async function liveTraceabilityView(
       return {
         view: {
           ...stubEnvelope,
-          note: "Live run id is unavailable; traceability cannot be served.",
+          note: `Traceability upstream returned ${
+            upstream?.status ?? "no response"
+          }; traceability cannot be served.`,
         },
         cacheJavaRegionClassification: false,
       };
@@ -2133,7 +2135,8 @@ async function liveTraceabilityView(
     return {
       view: {
         ...stubEnvelope,
-        note: "Live run id is unavailable; traceability cannot be served.",
+        note:
+          "Traceability upstream request failed; traceability cannot be served.",
       },
       cacheJavaRegionClassification: false,
     };

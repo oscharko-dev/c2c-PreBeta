@@ -23,7 +23,10 @@ import {
 // renders them as no-op shells so the existing pane assertions continue
 // to exercise the same surface without provider-missing crashes.
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
-import { LineageCoverageProvider } from "@/stores/lineageCoverage";
+import {
+  LineageCoverageProvider,
+  useLineageCoverage,
+} from "@/stores/lineageCoverage";
 import {
   JavaEditorActionsProvider,
   useJavaEditorActions,
@@ -34,6 +37,8 @@ import type { ApiResult, Diagnostic, GeneratedFileContent } from "@/types/api";
 
 const formatJavaSpy = vi.hoisted(() => vi.fn());
 const lintJavaSpy = vi.hoisted(() => vi.fn(() => []));
+const fetchTraceabilitySpy = vi.hoisted(() => vi.fn());
+const resolveJavaToCobolSpy = vi.hoisted(() => vi.fn());
 
 // Studio-IDE-4 (#245): exercise the editor surface (language, mode, model
 // URI, onChange) through a textarea-backed CodeEditor mock — Monaco itself
@@ -65,6 +70,10 @@ type FakeEditor = {
   getPosition: () => { lineNumber: number; column: number };
   getSelection: () => { isEmpty: () => boolean } | null;
   onDidFocusEditorText: (callback: () => void) => { dispose: () => void };
+  createDecorationsCollection: (decorations: unknown[]) => {
+    set: (decorations: unknown[]) => void;
+    clear: () => void;
+  };
   revealLineInCenterIfOutsideViewport: () => void;
   setPosition: () => void;
   focus: () => void;
@@ -76,6 +85,7 @@ type FakeModel = {
   getLineCount: () => number;
   getLineContent: (line: number) => string;
   getLineLength: (line: number) => number;
+  getLineMaxColumn: (line: number) => number;
   getValueInRange: () => string;
   getFullModelRange: () => {
     startLineNumber: number;
@@ -94,7 +104,12 @@ const editorMounts: Array<{
 }> = [];
 
 const editorCommands: Array<{ keybinding: number; callback: () => void }> = [];
-const editorActions: string[] = [];
+const editorActions: Array<{
+  id: string;
+  run: (editor: FakeEditor) => unknown;
+}> = [];
+const decorationSetCalls: unknown[][] = [];
+const decorationClearCalls: unknown[] = [];
 let latestEditorValue = "";
 const fakeModelsByUri = new Map<string, FakeModel>();
 let currentFakeModel: FakeModel;
@@ -110,6 +125,8 @@ function fakeModelFor(modelUri: string | undefined): FakeModel {
     getLineContent: (line) => latestEditorValue.split("\n")[line - 1] ?? "",
     getLineLength: (line) =>
       (latestEditorValue.split("\n")[line - 1] ?? "").length,
+    getLineMaxColumn: (line) =>
+      (latestEditorValue.split("\n")[line - 1] ?? "").length + 1,
     getValueInRange: () => latestEditorValue,
     getFullModelRange: () => ({
       startLineNumber: 1,
@@ -124,12 +141,12 @@ function fakeModelFor(modelUri: string | undefined): FakeModel {
 
 currentFakeModel = fakeModelFor(undefined);
 
-const fakeMonaco = {
+const fakeMonaco = vi.hoisted(() => ({
   KeyMod: { CtrlCmd: 1 << 11, Shift: 1 << 10, Alt: 1 << 9 },
   KeyCode: { KeyS: 49, KeyF: 36, KeyJ: 41, KeyE: 35, F5: 66 },
   MarkerSeverity: { Info: 2 },
   editor: { setModelMarkers: vi.fn() },
-};
+}));
 
 const fakeEditor: FakeEditor = {
   addCommand: (keybinding, callback) => {
@@ -137,7 +154,7 @@ const fakeEditor: FakeEditor = {
     return `command-${editorCommands.length}`;
   },
   addAction: (descriptor) => {
-    editorActions.push(descriptor.id);
+    editorActions.push(descriptor);
     return { dispose: vi.fn() };
   },
   getModel: () => currentFakeModel,
@@ -148,6 +165,17 @@ const fakeEditor: FakeEditor = {
   getPosition: () => ({ lineNumber: 1, column: 1 }),
   getSelection: () => null,
   onDidFocusEditorText: () => ({ dispose: vi.fn() }),
+  createDecorationsCollection: (decorations) => {
+    decorationSetCalls.push(decorations);
+    return {
+      set: (nextDecorations) => {
+        decorationSetCalls.push(nextDecorations);
+      },
+      clear: () => {
+        decorationClearCalls.push(true);
+      },
+    };
+  },
   revealLineInCenterIfOutsideViewport: vi.fn(),
   setPosition: vi.fn(),
   focus: vi.fn(),
@@ -189,6 +217,10 @@ vi.mock("@/components/editor/CodeEditor", async () => {
   return { CodeEditor };
 });
 
+vi.mock("@/lib/editor/lazyMonaco", () => ({
+  useMonacoReady: () => fakeMonaco,
+}));
+
 vi.mock("@/lib/apiClient", () => ({
   apiClient: {
     getGeneratedFile: vi.fn(),
@@ -206,6 +238,15 @@ vi.mock("@/lib/editor/javaLint", async (importOriginal) => {
     lintJava: lintJavaSpy,
   };
 });
+
+vi.mock("@/lib/editor/traceParser", () => ({
+  fetchTraceability: (...args: unknown[]) => fetchTraceabilitySpy(...args),
+  TraceabilityNotFoundError: class TraceabilityNotFoundError extends Error {},
+}));
+
+vi.mock("@/lib/editor/lineageNavigation", () => ({
+  resolveJavaToCobol: (...args: unknown[]) => resolveJavaToCobolSpy(...args),
+}));
 
 const mockTransformationState = vi.fn();
 const setJavaBufferContentSpy = vi.fn();
@@ -321,6 +362,28 @@ function CompileCheckStateProbe() {
   );
 }
 
+function LineageCoverageProbe() {
+  const coverage = useLineageCoverage();
+  return (
+    <span data-testid="lineage-coverage">
+      {coverage ? `${coverage.filePath}:${coverage.pct}` : "none"}
+    </span>
+  );
+}
+
+function renderPaneWithLineageProbe() {
+  return render(
+    <OriginOverlayProvider>
+      <LineageCoverageProvider>
+        <GeneratedArtifactsProvider>
+          <LineageCoverageProbe />
+          <GeneratedJavaEditorPane />
+        </GeneratedArtifactsProvider>
+      </LineageCoverageProvider>
+    </OriginOverlayProvider>,
+  );
+}
+
 function renderPaneWithActionsAndSelector(path: string) {
   return render(
     <JavaEditorActionsProvider>
@@ -388,6 +451,8 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     editorMounts.length = 0;
     editorCommands.length = 0;
     editorActions.length = 0;
+    decorationSetCalls.length = 0;
+    decorationClearCalls.length = 0;
     latestEditorValue = "";
     fakeModelsByUri.clear();
     currentFakeModel = fakeModelFor(undefined);
@@ -398,6 +463,15 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     ensureJavaBaselineSpy.mockClear();
     loadJavaDraftForSpy.mockClear();
     saveJavaDraftSpy.mockClear();
+    fetchTraceabilitySpy.mockReset();
+    fetchTraceabilitySpy.mockRejectedValue(
+      new Error("traceability fixture not configured"),
+    );
+    resolveJavaToCobolSpy.mockReset();
+    resolveJavaToCobolSpy.mockResolvedValue({
+      ok: false,
+      reason: "no_mapping",
+    });
     javaStatusFlagsSpy.mockReturnValue({
       clean: false,
       pendingReRun: false,
@@ -422,6 +496,142 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       "inmemory://c2c-studio/generated/run-123/src/App.java",
     );
     expect(editor.readOnly).toBe(false);
+  });
+
+  it("publishes fetched traceability into trust-pillar decorations and lineage coverage", async () => {
+    mockTransformationState.mockReturnValue(completedRunWith(["src/App.java"]));
+    mockGeneratedFileContents({
+      "src/App.java": ["line 1", "line 2", "line 3", "line 4"].join("\n"),
+    });
+    fetchTraceabilitySpy.mockResolvedValue({
+      runId: "run-123",
+      programId: "APP",
+      trace: { ready: true },
+      irSymbolMap: new Map(),
+      javaRegionClassification: new Map([
+        [
+          "src/App.java",
+          [
+            {
+              schemaVersion: "v0",
+              lineRange: { startLine: 1, endLine: 2 },
+              originClass: "deterministic",
+              verificationOutcome: "oracle_passed",
+              mappingClass: "direct",
+            },
+          ],
+        ],
+      ]),
+    });
+
+    renderPaneWithLineageProbe();
+
+    await screen.findByTestId("code-editor-mock");
+    await waitFor(() => {
+      expect(decorationSetCalls.length).toBeGreaterThan(0);
+    });
+    const latestDecorations = decorationSetCalls.at(-1) as Array<{
+      options: { linesDecorationsClassName: string };
+    }>;
+    expect(latestDecorations[0]?.options.linesDecorationsClassName).toContain(
+      "deterministic-passed",
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("lineage-coverage").textContent).toBe(
+        "src/App.java:50",
+      );
+    });
+  });
+
+  it("Alt+J dispatches c2c:reveal-cobol and clears lineage markers on success", async () => {
+    mockTransformationState.mockReturnValue(completedRunWith(["src/App.java"]));
+    mockGeneratedFileContents({ "src/App.java": "public class App {}" });
+    resolveJavaToCobolSpy.mockResolvedValue({
+      ok: true,
+      target: { cobolFile: "PROG1.cbl", cobolLine: 7 },
+    });
+
+    renderPane();
+
+    await screen.findByTestId("code-editor-mock");
+    const action = editorActions.find(
+      (entry) => entry.id === "c2c.lineage.javaToCobol",
+    );
+    expect(action).toBeDefined();
+    const events: CustomEvent[] = [];
+    const listener = (ev: Event) => events.push(ev as CustomEvent);
+    window.addEventListener("c2c:reveal-cobol", listener);
+    try {
+      await act(async () => {
+        await action!.run(fakeEditor);
+      });
+    } finally {
+      window.removeEventListener("c2c:reveal-cobol", listener);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toEqual({
+      cobolFile: "PROG1.cbl",
+      cobolLine: 7,
+    });
+    expect(fakeMonaco.editor.setModelMarkers).toHaveBeenCalledWith(
+      currentFakeModel,
+      "c2c-lineage-feedback",
+      [],
+    );
+  });
+
+  it.each([
+    ["no_mapping", "No source mapping available for this line"],
+    ["stale_manual_edit", "Lineage stale due to manual edit"],
+    [
+      "manual_only",
+      "Region did not exist in Generator Baseline; no COBOL lineage",
+    ],
+  ])("Alt+J paints the %s lineage marker", async (reason, message) => {
+    mockTransformationState.mockReturnValue(completedRunWith(["src/App.java"]));
+    mockGeneratedFileContents({ "src/App.java": "public class App {}" });
+    resolveJavaToCobolSpy.mockResolvedValue({ ok: false, reason });
+
+    renderPane();
+
+    await screen.findByTestId("code-editor-mock");
+    const action = editorActions.find(
+      (entry) => entry.id === "c2c.lineage.javaToCobol",
+    );
+    expect(action).toBeDefined();
+    await act(async () => {
+      await action!.run(fakeEditor);
+    });
+
+    const markers = fakeMonaco.editor.setModelMarkers.mock.calls.at(-1)?.[2] as
+      | Array<{ message: string }>
+      | undefined;
+    expect(markers?.[0]?.message).toBe(message);
+  });
+
+  it("Alt+J treats resolver failures as no_mapping feedback", async () => {
+    mockTransformationState.mockReturnValue(completedRunWith(["src/App.java"]));
+    mockGeneratedFileContents({ "src/App.java": "public class App {}" });
+    resolveJavaToCobolSpy.mockRejectedValue(new Error("traceability failed"));
+
+    renderPane();
+
+    await screen.findByTestId("code-editor-mock");
+    const action = editorActions.find(
+      (entry) => entry.id === "c2c.lineage.javaToCobol",
+    );
+    expect(action).toBeDefined();
+    await act(async () => {
+      await action!.run(fakeEditor);
+    });
+
+    const markers = fakeMonaco.editor.setModelMarkers.mock.calls.at(-1)?.[2] as
+      | Array<{ message: string }>
+      | undefined;
+    expect(markers?.[0]?.message).toBe(
+      "No source mapping available for this line",
+    );
   });
 
   it.each([

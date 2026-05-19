@@ -86,6 +86,38 @@ function emitLineageNavigate(
   emitTelemetry({ eventType: "lineage.navigate", payload });
 }
 
+function pathSegments(value: string): string[] {
+  return value.split(/[\\/]+/).filter(Boolean);
+}
+
+function pathBasename(value: string): string {
+  const segments = pathSegments(value);
+  return (segments.at(-1) ?? value).toLowerCase();
+}
+
+function suffixPathMatches(left: string, right: string): boolean {
+  const a = pathSegments(left);
+  const b = pathSegments(right);
+  if (a.length === 0 || b.length === 0) return false;
+  const minLen = Math.min(a.length, b.length);
+  for (let i = 0; i < minLen; i += 1) {
+    if (a[a.length - 1 - i] !== b[b.length - 1 - i]) return false;
+  }
+  return true;
+}
+
+function cobolFileMatches(
+  traceCobolFile: string,
+  requestedCobolFile: string,
+  programId: string,
+): boolean {
+  if (traceCobolFile === requestedCobolFile) return true;
+  if (suffixPathMatches(traceCobolFile, requestedCobolFile)) return true;
+  const traceBase = pathBasename(traceCobolFile);
+  const programBase = programId ? `${programId.toLowerCase()}.cbl` : "";
+  return programBase.length > 0 && traceBase === programBase;
+}
+
 export async function resolveJavaToCobol(
   runId: string,
   javaFile: string,
@@ -167,7 +199,9 @@ function collectJavaTargets(
     for (const anchor of anchors) {
       const irAnchor = parsed.irSymbolMap.get(anchor.irNodeId);
       if (!irAnchor) continue;
-      if (irAnchor.cobolFile !== cobolFile) continue;
+      if (!cobolFileMatches(irAnchor.cobolFile, cobolFile, parsed.programId)) {
+        continue;
+      }
       if (irAnchor.cobolLine !== cobolLine) continue;
       const region = findEnclosingRegion(regions, anchor.javaLine);
       if (!region) continue;

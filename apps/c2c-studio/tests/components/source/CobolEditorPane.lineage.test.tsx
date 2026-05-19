@@ -6,13 +6,19 @@
 // invokes the `run` callback, and asserts that the matching
 // `c2c:reveal-java` window event fires with the expected detail shape.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 
 import { CobolEditorPane } from "@/components/source/CobolEditorPane";
-import { SourceWorkspaceProvider } from "@/stores/sourceWorkspace";
-import { TransformationRunProvider } from "@/stores/transformationRun";
+import {
+  SourceWorkspaceProvider,
+  useSourceWorkspace,
+} from "@/stores/sourceWorkspace";
+import {
+  TransformationRunProvider,
+  useTransformationRun,
+} from "@/stores/transformationRun";
 import { WorkbenchProvider } from "@/stores/workbench";
 
 // Capture the Alt+C action descriptor + the Monaco editor stub passed to
@@ -24,6 +30,20 @@ interface CapturedAction {
 }
 const capturedActions: CapturedAction[] = [];
 const setMarkersCalls: Array<{ owner: string; markers: unknown[] }> = [];
+const COBOL_SOURCE = [
+  "       IDENTIFICATION DIVISION.",
+  "       PROGRAM-ID. PROG1.",
+  "       PROCEDURE DIVISION.",
+  "           DISPLAY 'A'.",
+  "           STOP RUN.",
+].join("\n");
+const JAVA_FILE = "src/main/java/com/example/F.java";
+const JAVA_SOURCE = [
+  "public final class F {",
+  "  // display [s-display-a line 4]",
+  "  void run() {}",
+  "}",
+].join("\n");
 
 interface FakeEditor {
   updateOptions: (options: unknown) => void;
@@ -120,7 +140,7 @@ vi.mock("@/lib/editor/lazyMonaco", () => ({
   useMonacoReady: () => null,
 }));
 
-const resolveCobolToJavaMock = vi.fn();
+const resolveCobolToJavaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/editor/lineageNavigation", () => ({
   resolveCobolToJava: (...args: unknown[]) => resolveCobolToJavaMock(...args),
 }));
@@ -135,11 +155,50 @@ vi.mock("@/hooks/useC2cApi", () => ({
   }),
 }));
 
+function SeedPaneState() {
+  const { setSourceFile } = useSourceWorkspace();
+  const { setState, ensureJavaBaseline, javaBuffers } = useTransformationRun();
+  const seededRef = React.useRef(false);
+  React.useEffect(() => {
+    if (seededRef.current) return;
+    seededRef.current = true;
+    setSourceFile(COBOL_SOURCE, "pasted-source.cbl", null);
+    setState((current) => ({
+      ...current,
+      phase: "completed",
+      runId: "run-248",
+      programId: "PROG1",
+      generated: {
+        runId: "run-248",
+        programId: "PROG1",
+        mode: "live",
+        productMode: "live",
+        status: "generated",
+        artifactRef: null,
+        diagnostics: [],
+      },
+      generatedFiles: {
+        status: "complete",
+        entryFilePath: JAVA_FILE,
+        files: [{ path: JAVA_FILE, sha256: "a".repeat(64) }],
+        missingArtifacts: [],
+      },
+    }));
+    void ensureJavaBaseline(JAVA_FILE, JAVA_SOURCE, "run-248");
+  }, [ensureJavaBaseline, setSourceFile, setState]);
+  return (
+    <span data-testid="java-buffer-ready">
+      {javaBuffers[JAVA_FILE]?.content === JAVA_SOURCE ? "ready" : "pending"}
+    </span>
+  );
+}
+
 function renderPane() {
   return render(
     <WorkbenchProvider>
       <TransformationRunProvider>
         <SourceWorkspaceProvider>
+          <SeedPaneState />
           <CobolEditorPane />
         </SourceWorkspaceProvider>
       </TransformationRunProvider>
@@ -166,16 +225,9 @@ describe("CobolEditorPane Alt+C lineage dispatch (Studio-IDE-6 #248)", () => {
     return action!;
   }
 
-  it("registers an Alt+C action with id c2c.lineage.cobolToJava on mount", () => {
-    // Seed minimal source so the pane renders the editor (not the empty state).
+  it("registers an Alt+C action with id c2c.lineage.cobolToJava on mount", async () => {
     renderPane();
-    const textarea = screen.queryByTestId("code-editor-mock");
-    if (!textarea) {
-      // The empty state is in play; type a character to flip to editor mode.
-      const wrapper = screen.getByText(/No source file selected/i);
-      expect(wrapper).toBeInTheDocument();
-      return; // Registration assertion would mis-fire from the empty state.
-    }
+    await screen.findByTestId("code-editor-mock");
     expect(
       capturedActions.some((a) => a.id === "c2c.lineage.cobolToJava"),
     ).toBe(true);
@@ -183,12 +235,12 @@ describe("CobolEditorPane Alt+C lineage dispatch (Studio-IDE-6 #248)", () => {
 
   it("dispatches c2c:reveal-java when resolveCobolToJava returns a target", async () => {
     renderPane();
-    // The pane only mounts the editor once source content is present. Drive
-    // the empty-state branch by entering text via the textarea-fallback if
-    // present; if the empty-state element is shown instead, skip — the
-    // action-registration assertion above covers the other branch.
-    const textarea = screen.queryByTestId("code-editor-mock");
-    if (!textarea) return;
+    await screen.findByTestId("code-editor-mock");
+    await waitFor(() =>
+      expect(screen.getByTestId("java-buffer-ready").textContent).toBe(
+        "ready",
+      ),
+    );
 
     const action = altCAction();
     resolveCobolToJavaMock.mockResolvedValue({
@@ -209,6 +261,17 @@ describe("CobolEditorPane Alt+C lineage dispatch (Studio-IDE-6 #248)", () => {
     } finally {
       window.removeEventListener("c2c:reveal-java", listener);
     }
+    expect(resolveCobolToJavaMock).toHaveBeenCalledWith(
+      "run-248",
+      "pasted-source.cbl",
+      5,
+      undefined,
+      expect.any(Function),
+    );
+    const provider = resolveCobolToJavaMock.mock.calls[0][4] as (
+      javaFile: string,
+    ) => string | null;
+    expect(provider(JAVA_FILE)).toBe(JAVA_SOURCE);
     expect(events).toHaveLength(1);
     expect(events[0].detail).toEqual({
       javaFile: "src/main/java/com/example/F.java",
@@ -223,8 +286,7 @@ describe("CobolEditorPane Alt+C lineage dispatch (Studio-IDE-6 #248)", () => {
 
   it("paints a Monaco info marker when resolveCobolToJava returns no target", async () => {
     renderPane();
-    const textarea = screen.queryByTestId("code-editor-mock");
-    if (!textarea) return;
+    await screen.findByTestId("code-editor-mock");
     const action = altCAction();
     resolveCobolToJavaMock.mockResolvedValue({
       ok: false,
@@ -244,6 +306,19 @@ describe("CobolEditorPane Alt+C lineage dispatch (Studio-IDE-6 #248)", () => {
     const last = setMarkersCalls.at(-1);
     expect(last?.owner).toBe("c2c-lineage-feedback");
     expect(last?.markers).toHaveLength(1);
+    expect((last?.markers[0] as { message: string }).message).toBe(
+      "No Java target mapped for this COBOL line",
+    );
+  });
+
+  it("paints the same marker when resolveCobolToJava rejects", async () => {
+    renderPane();
+    await screen.findByTestId("code-editor-mock");
+    const action = altCAction();
+    resolveCobolToJavaMock.mockRejectedValue(new Error("traceability failed"));
+    await action.run(fakeEditor);
+    const last = setMarkersCalls.at(-1);
+    expect(last?.owner).toBe("c2c-lineage-feedback");
     expect((last?.markers[0] as { message: string }).message).toBe(
       "No Java target mapped for this COBOL line",
     );

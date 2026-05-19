@@ -44,7 +44,10 @@ import {
 } from "@/lib/editor/diagnosticMarkers";
 import { useEditorMarkerRegistration } from "@/lib/editor/markerNavigation";
 import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
-import { resolveCobolToJava } from "@/lib/editor/lineageNavigation";
+import {
+  resolveCobolToJava,
+  type JavaSourceProvider,
+} from "@/lib/editor/lineageNavigation";
 import { useEditorAssist } from "@/stores/editorAssist";
 import { getOrCreateEditorAssistSessionId } from "@/lib/editor/editorAssistSession";
 import { computeSha256Hex, redactRegion } from "@/lib/editor/preRedaction";
@@ -67,6 +70,58 @@ interface RevealCobolDetail {
 interface RevealJavaDetail {
   javaFile: string;
   javaLine: number;
+}
+
+function pathSegments(value: string): string[] {
+  return value.split(/[\\/]+/).filter(Boolean);
+}
+
+function pathBasename(value: string): string {
+  const segments = pathSegments(value);
+  return (segments.at(-1) ?? value).toLowerCase();
+}
+
+function suffixPathMatches(left: string, right: string): boolean {
+  const a = pathSegments(left);
+  const b = pathSegments(right);
+  if (a.length === 0 || b.length === 0) return false;
+  const minLen = Math.min(a.length, b.length);
+  for (let i = 0; i < minLen; i += 1) {
+    if (a[a.length - 1 - i] !== b[b.length - 1 - i]) return false;
+  }
+  return true;
+}
+
+function cobolFileMatches(
+  activeCobolFile: string,
+  requestedCobolFile: string,
+  programId: string | null,
+): boolean {
+  if (activeCobolFile === requestedCobolFile) return true;
+  if (suffixPathMatches(activeCobolFile, requestedCobolFile)) return true;
+  const activeBase = pathBasename(activeCobolFile);
+  const requestedBase = pathBasename(requestedCobolFile);
+  const programBase = programId ? `${programId.toLowerCase()}.cbl` : "";
+  return (
+    programBase.length > 0 &&
+    (requestedBase === programBase || activeBase === programBase)
+  );
+}
+
+function javaBufferContentFor(
+  buffers: ReturnType<typeof useTransformationRun>["javaBuffers"],
+  javaFile: string,
+): string | null {
+  const direct = buffers[javaFile]?.content;
+  if (typeof direct === "string") {
+    return direct;
+  }
+  for (const [path, entry] of Object.entries(buffers)) {
+    if (suffixPathMatches(path, javaFile)) {
+      return entry.content;
+    }
+  }
+  return null;
 }
 
 // View-state preservation in Monaco is keyed by model URI. Re-using the same
@@ -115,7 +170,7 @@ export function CobolEditorPane() {
   const [showSaveNotice, setShowSaveNotice] = useState(false);
 
   const apiState = useC2cApi();
-  const { productState, state: runState } = useTransformationRun();
+  const { productState, state: runState, javaBuffers } = useTransformationRun();
   // Studio-IDE-10 (#249): Editor-Assist controller — fire Explain-on-region
   // from the Monaco action below. The store handles the BFF call, panel
   // state, and budget snapshot tracking.
@@ -263,6 +318,17 @@ export function CobolEditorPane() {
   useEffect(() => {
     cobolFileRef.current = activeCobolFile;
   }, [activeCobolFile]);
+  const programIdRef = useRef<string | null>(
+    detectedProgramId ?? runState.programId ?? null,
+  );
+  useEffect(() => {
+    programIdRef.current = detectedProgramId ?? runState.programId ?? null;
+  }, [detectedProgramId, runState.programId]);
+  const javaBuffersRef = useRef(javaBuffers);
+  javaBuffersRef.current = javaBuffers;
+  const javaSourceProvider = useCallback<JavaSourceProvider>((javaFile) => {
+    return javaBufferContentFor(javaBuffersRef.current, javaFile);
+  }, []);
 
   // Studio-IDE-10 (#249): ref-based capture of `runExplain` so the Monaco
   // action (registered once on editor mount) always invokes the latest
@@ -291,9 +357,7 @@ export function CobolEditorPane() {
       if (
         detail.cobolFile &&
         active &&
-        detail.cobolFile !== active &&
-        !active.endsWith(detail.cobolFile) &&
-        !detail.cobolFile.endsWith(active)
+        !cobolFileMatches(active, detail.cobolFile, programIdRef.current)
       ) {
         return;
       }
@@ -384,7 +448,9 @@ export function CobolEditorPane() {
               runId,
               cobolFile,
               position.lineNumber,
-            );
+              undefined,
+              javaSourceProvider,
+            ).catch(() => ({ ok: false as const, reason: "no_mapping" }));
             if (result.ok && result.target.length > 0) {
               monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
               const first = result.target[0];
@@ -480,7 +546,7 @@ export function CobolEditorPane() {
         }),
       );
     },
-    [rulerEnabled, saveDraftNow, registerMarkerEditor],
+    [rulerEnabled, saveDraftNow, registerMarkerEditor, javaSourceProvider],
   );
 
   // Studio-IDE-12 (#250): dispose every tracked Monaco command /

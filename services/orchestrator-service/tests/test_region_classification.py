@@ -22,6 +22,7 @@ through the BFF.
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from orchestrator_service import region_classification as rc
 from orchestrator_service.run_contract import (
@@ -126,6 +127,38 @@ class DeriveRegionsTests(unittest.TestCase):
         self.assertEqual(regions[0].ir_node_ids, ("s1",))
         self.assertEqual(regions[1].line_range, (3, 4))
         self.assertEqual(regions[1].ir_node_ids, ("s2",))
+
+    def test_block_closer_with_semicolon_starts_synthesized_footer(self) -> None:
+        text = "\n".join(
+            [
+                "// call [s1 line 1] CALL ASYNC",  # 1
+                "CompletableFuture.runAsync(() -> {",  # 2
+                "doWork();",  # 3
+                "});",  # 4
+            ]
+        )
+        regions = rc.derive_regions(text)
+        self.assertEqual(regions[0].line_range, (1, 3))
+        self.assertEqual(regions[0].ir_node_ids, ("s1",))
+        self.assertEqual(regions[1].line_range, (4, 4))
+        self.assertEqual(regions[1].ir_node_ids, ())
+
+    def test_non_final_closing_brace_between_ir_regions_is_not_dropped(self) -> None:
+        text = "\n".join(
+            [
+                "// if [s1 line 1] IF FLAG",  # 1
+                "if (flag) {",  # 2
+                "doWork();",  # 3
+                "}",  # 4
+                "// display [s2 line 2] DISPLAY FLAG",  # 5
+                "System.out.println(flag);",  # 6
+            ]
+        )
+        regions = rc.derive_regions(text)
+        self.assertEqual(
+            [(region.line_range, region.ir_node_ids) for region in regions],
+            [((1, 3), ("s1",)), ((4, 4), ()), ((5, 6), ("s2",))],
+        )
 
     def test_empty_file_returns_no_regions(self) -> None:
         self.assertEqual(rc.derive_regions(""), [])
@@ -792,6 +825,26 @@ class TraceabilityRouteTests(unittest.TestCase):
             {"cobolFile": "BRNCH01.cbl", "cobolLine": 7},
         )
         self.assertIn("Foo.java", payload["javaRegionClassification"])
+
+    def test_ignores_non_mapping_classification_entries(self) -> None:
+        service, runner = self._service()
+        run_id = "run-trace-malformed-classification"
+        self._seed_run(service.artifact_store, run_id)
+        valid = {
+            "lineRange": {"startLine": 1, "endLine": 2},
+            "originClass": "deterministic",
+            "verificationOutcome": "no_oracle",
+            "mappingClass": "direct",
+            "schemaVersion": "v0",
+        }
+        runner._contracts[run_id] = {
+            "javaRegionClassification": {
+                "Foo.java": [valid, "legacy-bad-region", 123, None]
+            }
+        }
+        status, payload = service._artifact_endpoint(run_id, "traceability")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["javaRegionClassification"], {"Foo.java": [valid]})
 
     def test_returns_null_trace_when_artifact_absent(self) -> None:
         service, runner = self._service()

@@ -174,6 +174,26 @@ describe("fetchTraceability", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("does not cache an incomplete successful envelope", async () => {
+    clearTraceCache();
+    const incomplete: TraceabilityEnvelope = {
+      schemaVersion: "v0",
+      runId: "run-1",
+      programId: "PROG1",
+      trace: null,
+      irSymbolMap: {},
+      javaRegionClassification: null,
+    };
+    const fetchImpl = vi.fn(async () =>
+      makeResponse(200, incomplete),
+    ) as unknown as FetchFn;
+
+    await fetchTraceability("run-1", fetchImpl);
+    await fetchTraceability("run-1", fetchImpl);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("dedupes concurrent fetches for the same runId", async () => {
     clearTraceCache();
     const fetchImpl = vi.fn(async () =>

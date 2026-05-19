@@ -132,7 +132,7 @@ def _is_block_closer(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return False
-    return all(ch in "})" for ch in stripped)
+    return stripped.startswith("}") and all(ch in "});" for ch in stripped)
 
 
 def derive_regions(java_text: str) -> list[Region]:
@@ -183,9 +183,15 @@ def derive_regions(java_text: str) -> list[Region]:
             else total_lines + 1
         )
         end_line = next_ir_line - 1
+        synthesized_gap: Region | None = None
         for probe in range(start_line + 1, next_ir_line):
             if _is_block_closer(lines[probe - 1]):
                 end_line = probe - 1
+                if position + 1 < len(ir_indices):
+                    synthesized_gap = Region(
+                        line_range=(probe, next_ir_line - 1),
+                        ir_node_ids=(),
+                    )
                 break
         if end_line < start_line:
             # Defensive: an IR comment immediately followed by a closing
@@ -194,6 +200,8 @@ def derive_regions(java_text: str) -> list[Region]:
         regions.append(
             Region(line_range=(start_line, end_line), ir_node_ids=(stmt_id,))
         )
+        if synthesized_gap is not None:
+            regions.append(synthesized_gap)
 
     # Footer: any lines after the last IR-anchored region's end.
     last_end = regions[-1].line_range[1]

@@ -315,6 +315,35 @@ describe("resolveCobolToJava", () => {
     }
   });
 
+  it("accepts the program-id COBOL filename fallback for pasted or uploaded sources", async () => {
+    clearTraceCache();
+    const env = envelopeWith(
+      {
+        "Prog1.java": [
+          { startLine: 1, endLine: 9, originClass: "deterministic" },
+        ],
+      },
+      { "s-move-x": { cobolFile: "PROG1.cbl", cobolLine: 15 } },
+    );
+
+    const result = await resolveCobolToJava(
+      "run-1",
+      "workspace/uploaded-source.cbl",
+      15,
+      fetcherFor(env),
+      () => SAMPLE_JAVA,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.target[0]).toMatchObject({
+        javaFile: "Prog1.java",
+        javaStartLine: 1,
+        javaEndLine: 9,
+      });
+    }
+  });
+
   it("returns no_mapping when no Java region anchors back at the COBOL line", async () => {
     clearTraceCache();
     const env = envelopeWith(
