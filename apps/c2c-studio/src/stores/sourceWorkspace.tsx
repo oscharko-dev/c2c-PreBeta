@@ -332,7 +332,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     if (sourceText.length === 0 && !isDirty) {
       return;
     }
-    const scope = getCurrentDraftScope();
+    const scope = await getCurrentDraftScope();
     const key = makeCobolKey(programId);
     const hash = await deriveSourceHash(sourceText);
     const payload: DraftPayload = {
@@ -356,7 +356,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     nextProgramId: string,
     nextSourceName: string,
   ): Promise<void> => {
-    const scope = getCurrentDraftScope();
+    const scope = await getCurrentDraftScope();
     const key = {
       kind: "cobol" as const,
       programId: nextProgramId,

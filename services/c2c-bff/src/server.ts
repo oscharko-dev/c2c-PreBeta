@@ -1,7 +1,7 @@
 import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { URL } from "node:url";
 
 import type { BffConfig } from "./config";
@@ -112,6 +112,22 @@ import {
   parseCspReportPayload,
   type SanitizedCspReport,
 } from "./cspReport";
+// Issue #272 / ADR-0005 §2 "Encryption at Rest" + "Named prerequisites":
+// the BFF session-bootstrap surface that issues the draft-key wrapping
+// secret to the Studio. The store is in-process; the cookie helpers
+// own the HttpOnly / SameSite / Secure flag plumbing.
+import {
+  createSessionStore,
+  validateSessionIdentity,
+  SessionIdentifierError,
+  type SessionStore,
+} from "./sessionStore";
+import {
+  isRequestSecure,
+  parseSessionCookieFromRequest,
+  serializeClearedSessionCookie,
+  serializeSessionCookie,
+} from "./sessionCookie";
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -161,6 +177,11 @@ export interface ServerDeps {
   // pass a capturing array to assert on the canonical log shape and
   // to prove no PII leaks into the record.
   cspReportSink?: (report: SanitizedCspReport) => void;
+  // Issue #272 / ADR-0005 §2: in-memory session store for the
+  // draft-key wrapping secret. Tests inject a deterministic store
+  // (seeded ``randomBytes``) to assert on exact secret values
+  // without leaking platform randomness into the snapshot.
+  sessionStore?: SessionStore;
   now?: () => Date;
 }
 
@@ -179,6 +200,7 @@ interface ResolvedDeps {
   editorAssistSequence: SequenceCounter;
   editorAssistLedgerSink: (entry: EditorAssistLedgerEntry) => void;
   cspReportSink: (report: SanitizedCspReport) => void;
+  sessionStore: SessionStore;
   now: () => Date;
 }
 
@@ -268,6 +290,9 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
     editorAssistSequence: deps.editorAssistSequence ?? createSequenceCounter(),
     editorAssistLedgerSink: deps.editorAssistLedgerSink ?? (() => undefined),
     cspReportSink: deps.cspReportSink ?? defaultCspReportSink,
+    sessionStore:
+      deps.sessionStore ??
+      createSessionStore({ now: deps.now ?? (() => new Date()) }),
     now: deps.now ?? (() => new Date()),
   };
 }
@@ -287,6 +312,52 @@ function defaultCspReportSink(report: SanitizedCspReport): void {
       report,
     }),
   );
+}
+
+// Issue #272 — body size cap for fixture sign-in. The endpoint only
+// reads an optional ``{tenantId, userId}`` override (each capped at
+// 128 chars by the session-store validator), so 1 KiB is more than
+// enough headroom and far below any pathological payload.
+const SESSION_SIGN_IN_MAX_BODY_BYTES = 1024;
+
+// Issue #272 — opaque pseudonymous identifier minting for the dev /
+// fixture sign-in path. When the request body omits an override, the
+// BFF mints a UUID-shaped opaque token using the session store's
+// own random source (so tests with a seeded ``randomBytes`` see
+// deterministic values).
+//
+// The body override is accepted so test harnesses and dev tooling
+// can drive specific ``(tenantId, userId)`` pairs through the
+// system. The validator rejects ``@`` / whitespace / out-of-class
+// characters per ADR-0005 §3, so a hostile client cannot smuggle
+// an email or display-name through this path.
+function resolveFixtureSignInIdentity(
+  raw: unknown,
+  _store: SessionStore,
+): { tenantId: string; userId: string } {
+  const body =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const tenantOverride =
+    typeof body.tenantId === "string" ? body.tenantId : undefined;
+  const userOverride =
+    typeof body.userId === "string" ? body.userId : undefined;
+  const tenantId = tenantOverride ?? mintFixtureIdentifier("tenant");
+  const userId = userOverride ?? mintFixtureIdentifier("user");
+  // Re-validate even when minted internally so a regression in the
+  // mint helper cannot bypass the @ / whitespace rule.
+  validateSessionIdentity({ tenantId, userId });
+  return { tenantId, userId };
+}
+
+// Mints a ``<prefix>-<16 random hex chars>`` opaque identifier for
+// the fixture sign-in path. Production deployments with a real
+// identity layer behind the bootstrap supply ``tenantId`` / ``userId``
+// from the IdP response and never call this helper (the route
+// handler returns 404 when ``enableFixtureSessions`` is false).
+function mintFixtureIdentifier(prefix: string): string {
+  return `${prefix}-${randomBytes(8).toString("hex")}`;
 }
 
 function jsonResponse(
@@ -332,6 +403,16 @@ function applyLocalApiCors(
   res.setHeader("access-control-allow-origin", origin);
   res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
   res.setHeader("access-control-allow-headers", "Content-Type");
+  // Issue #272: the Studio session-bootstrap flow uses
+  // ``credentials: "include"`` so the browser attaches the HttpOnly
+  // ``c2c.sid`` cookie. CORS requires the matching
+  // ``Access-Control-Allow-Credentials`` header and a non-``*``
+  // origin echo — both already satisfied here, the credentials flag
+  // is the missing link. The local-CORS gate above means this only
+  // applies to ``localhost`` / ``127.0.0.1`` / ``::1`` origins,
+  // matching the W0 dev posture where Studio (port 3000) talks to
+  // the BFF (port 8090) over the same registrable domain.
+  res.setHeader("access-control-allow-credentials", "true");
   res.setHeader("access-control-max-age", "600");
   res.setHeader("vary", "Origin");
 }
@@ -2827,6 +2908,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
     editorAssistSequence,
     editorAssistLedgerSink,
     cspReportSink,
+    sessionStore,
     now: nowFn,
   } = resolved;
 
@@ -2882,6 +2964,116 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         for (const report of parsed.reports) cspReportSink(report);
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      // Issue #272 / ADR-0005 §2 "Encryption at Rest" + "Named
+      // prerequisites": dev-mode session sign-in. Mints an opaque
+      // pseudonymous ``(tenantId, userId)`` pair, allocates a fresh
+      // ``draftKeyWrappingSecret`` keyed by ``sessionId``, and sets
+      // the ``HttpOnly`` session cookie. The endpoint returns 404
+      // in deployments that have disabled fixture sessions via
+      // ``C2C_ENABLE_FIXTURE_SESSIONS=false`` (production with a
+      // real identity layer behind the bootstrap). The response
+      // body is intentionally narrow — only ``{tenantId, userId}``
+      // — because the wrapping secret is the bootstrap response's
+      // contract, not the sign-in's.
+      if (pathname === "/api/v0/session/sign-in" && method === "POST") {
+        if (!config.enableFixtureSessions) {
+          notFound(res);
+          return;
+        }
+        let raw: unknown;
+        try {
+          raw = await readJsonBody(req, SESSION_SIGN_IN_MAX_BODY_BYTES);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, { error: "request body too large" });
+            return;
+          }
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        let identity: { tenantId: string; userId: string };
+        try {
+          identity = resolveFixtureSignInIdentity(raw, sessionStore);
+        } catch (err) {
+          if (err instanceof SessionIdentifierError) {
+            badRequest(res, err.message);
+            return;
+          }
+          throw err;
+        }
+        const record = sessionStore.create(identity);
+        const secureCookie =
+          config.forceSecureSessionCookies || isRequestSecure(req);
+        res.setHeader(
+          "set-cookie",
+          serializeSessionCookie(record.sessionId, { secure: secureCookie }),
+        );
+        jsonResponse(res, 200, {
+          tenantId: record.tenantId,
+          userId: record.userId,
+        });
+        return;
+      }
+
+      // Issue #272 / ADR-0005 §2: draft-key bootstrap. Requires the
+      // session cookie set by ``/api/v0/session/sign-in`` (or by a
+      // future real identity layer). Returns the **same**
+      // ``draftKeyWrappingSecret`` on every call within the same
+      // auth session, so a Studio reload re-fetches the secret and
+      // can decrypt drafts written earlier in the session. The
+      // wrapping secret is **not** an authentication credential —
+      // it grants only the ability to decrypt local drafts on the
+      // user's device — but is treated with the same hygiene
+      // (no logging, no echoing in error paths).
+      if (pathname === "/api/v0/session/bootstrap" && method === "POST") {
+        const sessionId = parseSessionCookieFromRequest(req);
+        if (!sessionId) {
+          jsonResponse(res, 401, { error: "session cookie missing" });
+          return;
+        }
+        const record = sessionStore.get(sessionId);
+        if (!record) {
+          // The cookie value did not match any in-memory session.
+          // Either the BFF restarted, the session was deleted via
+          // logout, or the cookie was forged. Clear the cookie on
+          // the way out so the browser does not keep replaying a
+          // dead identifier.
+          const secureCookie =
+            config.forceSecureSessionCookies || isRequestSecure(req);
+          res.setHeader(
+            "set-cookie",
+            serializeClearedSessionCookie({ secure: secureCookie }),
+          );
+          jsonResponse(res, 401, { error: "session not found" });
+          return;
+        }
+        jsonResponse(res, 200, {
+          tenantId: record.tenantId,
+          userId: record.userId,
+          draftKeyWrappingSecret: record.draftKeyWrappingSecret,
+        });
+        return;
+      }
+
+      // Issue #272 / ADR-0005 §2: explicit logout. Deletes the
+      // server-side session record and clears the cookie. Drafts
+      // encrypted under the deleted secret become permanently
+      // unreadable per ADR-0005 §2 "Rotation". Idempotent: returns
+      // 204 whether or not the cookie / record existed.
+      if (pathname === "/api/v0/session/logout" && method === "POST") {
+        const sessionId = parseSessionCookieFromRequest(req);
+        if (sessionId) sessionStore.delete(sessionId);
+        const secureCookie =
+          config.forceSecureSessionCookies || isRequestSecure(req);
+        res.setHeader(
+          "set-cookie",
+          serializeClearedSessionCookie({ secure: secureCookie }),
+        );
         res.writeHead(204);
         res.end();
         return;

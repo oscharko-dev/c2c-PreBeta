@@ -3,9 +3,29 @@
  *
  * IndexedDB-backed local persistence for the COBOL editor buffer and the
  * Java editor buffer, governed by ADR 0005 (#240). Drafts are encrypted at
- * rest with AES-GCM 256 using a per-installation HKDF-derived key; the
- * client secret lives in localStorage so drafts survive reload/restart but
- * become unreadable if the user clears site data.
+ * rest with AES-GCM 256 using a per-session HKDF-derived key.
+ *
+ * Key derivation (Issue #272 / ADR 0005 §2):
+ *
+ *   * **IKM** — the `draftKeyWrappingSecret` issued by the BFF at
+ *     `POST /api/v0/session/bootstrap`. Held in memory only by
+ *     `./sessionBootstrap`; never persisted, never logged. Rotates on
+ *     sign-in; deleted on logout, at which point drafts encrypted
+ *     under the prior secret become permanently unreadable. The
+ *     placeholder per-installation localStorage secret that
+ *     pre-#272 builds used is gone.
+ *   * **Salt** — `SHA-256(u32be(len(tenantId)) || tenantId ||
+ *     u32be(len(userId)) || userId)`. Deterministic from the
+ *     identity pair, so the same scope on two devices (or on the
+ *     same device after a reload) derives the same key from the
+ *     same secret. Length-prefix domain separation prevents the
+ *     ambiguity whereby `(tenantId="ab", userId="c")` and
+ *     `(tenantId="a", userId="bc")` would otherwise hash to the
+ *     same value.
+ *   * **Info** — the constant ASCII string `"c2c-studio-draft-v1"`.
+ *     Versions the derivation so a future v2 procedure does not
+ *     collide with v1.
+ *   * **Algorithm** — HKDF-SHA-256 → 256-bit AES-GCM key.
  *
  * AEAD additional-authenticated-data (AAD) per ADR 0005 §2 binds each
  * ciphertext to its `(schemaVersion, scope, key)` tuple — a record cannot
@@ -21,6 +41,10 @@
  * with a discriminated `kind` field so the UI can distinguish quota
  * exhaustion ("local storage full") from web-crypto unavailability
  * ("secure storage not available in this browser") and act accordingly.
+ * On a 401 from the bootstrap endpoint mid-edit, `saveDraft` rejects
+ * with `EditorPersistenceError("SessionExpiredDuringEdit")` so the
+ * workbench can prompt re-auth without discarding the in-memory buffer
+ * (ADR 0005 §2 "Session expiry mid-edit").
  *
  * Cross-tab strategy: last-write-wins (LWW). IndexedDB serialises writes
  * (the object store is the synchronisation point) so two tabs can save
@@ -33,6 +57,11 @@ import { openDB, IDBPDatabase } from "idb";
 
 import { emit as emitTelemetry } from "@/lib/editor/editorTelemetry";
 import type { JavaOriginOverlay } from "../../types/api";
+import {
+  getSessionBootstrap as defaultGetSessionBootstrap,
+  SessionBootstrapError,
+  type SessionBootstrap,
+} from "./sessionBootstrap";
 
 // ----- Public types -------------------------------------------------------
 
@@ -138,22 +167,22 @@ const DB_NAME = "c2c-studio-drafts";
 const DB_VERSION = 1;
 const STORE_NAME = "drafts";
 
-// Persistence schema version. Bump when the on-disk record shape changes.
-// v1 introduced AAD-bound AES-GCM records per ADR 0005 §2. Records written
-// under v0 (no AAD) are abandoned on read — see ADR 0005 Consequences:
-// drafts are working copies, not durable artifacts.
-const RECORD_SCHEMA_VERSION = "v1" as const;
-const RECORD_SCHEMA_VERSION_BYTE = 1;
+// Persistence schema version. Bump when the on-disk record shape
+// changes. v2 (Issue #272) swapped the placeholder localStorage
+// client secret for the BFF-issued draft-key wrapping secret;
+// records encrypted under v0 (no AAD) or v1 (localStorage secret)
+// are abandoned on read — see ADR 0005 Consequences: drafts are
+// working copies, not durable artifacts.
+const RECORD_SCHEMA_VERSION = "v2" as const;
+const RECORD_SCHEMA_VERSION_BYTE = 2;
 
 // Default TTL: 14 days, per ADR 0005 §1.
 export const DEFAULT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-// HKDF parameters for AES-GCM key derivation.
-const HKDF_SALT_BYTES = 16;
-const HKDF_INFO = new TextEncoder().encode("c2c-studio:editor-draft-aead:v0");
-const CLIENT_SECRET_BYTES = 32;
-const CLIENT_SECRET_LS_KEY = "c2c-studio:persistence:client-secret";
-const HKDF_SALT_LS_KEY = "c2c-studio:persistence:hkdf-salt";
+// HKDF parameters for AES-GCM key derivation. The `info` string is
+// taken verbatim from ADR 0005 §2 — a future v2 derivation procedure
+// must change this so derived keys do not collide.
+const HKDF_INFO = new TextEncoder().encode("c2c-studio-draft-v1");
 const AES_KEY_BITS = 256;
 const AES_IV_BYTES = 12;
 
@@ -183,7 +212,18 @@ interface DraftRecord {
 // ----- Module-private state ----------------------------------------------
 
 let cachedDb: Promise<IDBPDatabase> | null = null;
-let cachedAesKey: Promise<CryptoKey> | null = null;
+// AES key cache. Keyed by ``(bootstrapFingerprint, tenantId, userId)``
+// so a session change (sign-in rotation, logout) automatically
+// invalidates the cached key. The fingerprint is a SHA-256 of the
+// wrapping secret bytes — kept opaque so the raw secret never
+// leaves ``sessionBootstrap``.
+interface CachedAesKeyEntry {
+  fingerprint: string;
+  tenantId: string;
+  userId: string;
+  key: Promise<CryptoKey>;
+}
+let cachedAesKeyEntry: CachedAesKeyEntry | null = null;
 
 function isBrowserEnvironment(): boolean {
   return (
@@ -221,56 +261,7 @@ function getDb(): Promise<IDBPDatabase> {
   return cachedDb;
 }
 
-// ----- Storage backend (localStorage with safe fallback) ------------------
-
-interface StorageBackend {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-let storageBackend: StorageBackend | null = null;
-
-function getStorage(): StorageBackend {
-  if (storageBackend) {
-    return storageBackend;
-  }
-  try {
-    const probeKey = `${CLIENT_SECRET_LS_KEY}:probe`;
-    globalThis.localStorage.setItem(probeKey, "1");
-    globalThis.localStorage.removeItem(probeKey);
-    storageBackend = {
-      getItem: (key) => globalThis.localStorage.getItem(key),
-      setItem: (key, value) => {
-        globalThis.localStorage.setItem(key, value);
-      },
-    };
-    return storageBackend;
-  } catch {
-    // localStorage unavailable (private browsing on some legacy browsers,
-    // or a sandboxed iframe). Fall back to an in-memory map so the
-    // module still functions for the session — drafts will be unreadable
-    // after reload, which matches the documented degraded-mode behaviour.
-    const memory = new Map<string, string>();
-    storageBackend = {
-      getItem: (key) => memory.get(key) ?? null,
-      setItem: (key, value) => {
-        memory.set(key, value);
-      },
-    };
-    return storageBackend;
-  }
-}
-
 // ----- Crypto helpers -----------------------------------------------------
-
-function base64Encode(bytes: Uint8Array): string {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  // btoa is present in browser and jsdom.
-  return globalThis.btoa(binary);
-}
 
 // All Uint8Array values that flow into Web Crypto must be backed by a
 // concrete `ArrayBuffer` (not the wider `ArrayBufferLike` union that
@@ -279,81 +270,106 @@ function base64Encode(bytes: Uint8Array): string {
 // the constraint explicit at every call site.
 type Bytes = Uint8Array<ArrayBuffer>;
 
-function base64Decode(value: string): Bytes {
-  const binary = globalThis.atob(value);
-  const out: Bytes = new Uint8Array(new ArrayBuffer(binary.length));
-  for (let index = 0; index < binary.length; index += 1) {
-    out[index] = binary.charCodeAt(index);
-  }
-  return out;
-}
-
 function freshRandomBytes(size: number): Bytes {
   const view: Bytes = new Uint8Array(new ArrayBuffer(size));
   globalThis.crypto.getRandomValues(view);
   return view;
 }
 
-function getOrCreateClientSecret(): Bytes {
-  const storage = getStorage();
-  const existing = storage.getItem(CLIENT_SECRET_LS_KEY);
-  if (existing) {
-    try {
-      const decoded = base64Decode(existing);
-      if (decoded.byteLength === CLIENT_SECRET_BYTES) {
-        return decoded;
-      }
-    } catch {
-      // fall through and regenerate.
-    }
-  }
-  const fresh = freshRandomBytes(CLIENT_SECRET_BYTES);
-  storage.setItem(CLIENT_SECRET_LS_KEY, base64Encode(fresh));
-  return fresh;
+// Salt derivation per ADR 0005 §2: deterministic from the identity
+// pair so the same scope on two devices derives the same key from
+// the same wrapping secret. Length-prefix encoded so
+// `(tenantId="ab", userId="c")` and `(tenantId="a", userId="bc")`
+// do not collide.
+async function deriveHkdfSalt(
+  subtle: SubtleCrypto,
+  scope: DraftScope,
+): Promise<Bytes> {
+  const encoder = new TextEncoder();
+  const tenant = encoder.encode(scope.tenantId);
+  const user = encoder.encode(scope.userId);
+  const buffer = new ArrayBuffer(4 + tenant.byteLength + 4 + user.byteLength);
+  const view = new DataView(buffer);
+  const out: Bytes = new Uint8Array(buffer);
+  let offset = 0;
+  view.setUint32(offset, tenant.byteLength, false);
+  offset += 4;
+  out.set(tenant, offset);
+  offset += tenant.byteLength;
+  view.setUint32(offset, user.byteLength, false);
+  offset += 4;
+  out.set(user, offset);
+  const digest = await subtle.digest("SHA-256", buffer);
+  return new Uint8Array(digest) as Bytes;
 }
 
-function getOrCreateHkdfSalt(): Bytes {
-  const storage = getStorage();
-  const existing = storage.getItem(HKDF_SALT_LS_KEY);
-  if (existing) {
-    try {
-      const decoded = base64Decode(existing);
-      if (decoded.byteLength === HKDF_SALT_BYTES) {
-        return decoded;
-      }
-    } catch {
-      // regenerate below.
-    }
-  }
-  const fresh = freshRandomBytes(HKDF_SALT_BYTES);
-  storage.setItem(HKDF_SALT_LS_KEY, base64Encode(fresh));
-  return fresh;
+// Fingerprint of the wrapping secret used as a cache key. Stays
+// opaque so the raw secret never leaves this module and the cache
+// entry can be compared in constant time across sessions.
+async function fingerprintSecret(
+  subtle: SubtleCrypto,
+  secret: Uint8Array<ArrayBuffer>,
+): Promise<string> {
+  const digest = await subtle.digest("SHA-256", secret);
+  const bytes = new Uint8Array(digest);
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex;
 }
 
-async function deriveAesKey(): Promise<CryptoKey> {
-  if (!cachedAesKey) {
-    cachedAesKey = (async () => {
-      const subtle = requireSubtleCrypto();
-      const secret = getOrCreateClientSecret();
-      const salt = getOrCreateHkdfSalt();
-      const baseKey = await subtle.importKey("raw", secret, "HKDF", false, [
-        "deriveKey",
-      ]);
-      return subtle.deriveKey(
-        {
-          name: "HKDF",
-          hash: "SHA-256",
-          salt,
-          info: HKDF_INFO,
-        },
-        baseKey,
-        { name: "AES-GCM", length: AES_KEY_BITS },
-        false,
-        ["encrypt", "decrypt"],
-      );
-    })();
+async function deriveAesKey(bootstrap: SessionBootstrap): Promise<CryptoKey> {
+  const subtle = requireSubtleCrypto();
+  const fingerprint = await fingerprintSecret(
+    subtle,
+    bootstrap.draftKeyWrappingSecret,
+  );
+  if (
+    cachedAesKeyEntry &&
+    cachedAesKeyEntry.fingerprint === fingerprint &&
+    cachedAesKeyEntry.tenantId === bootstrap.tenantId &&
+    cachedAesKeyEntry.userId === bootstrap.userId
+  ) {
+    return cachedAesKeyEntry.key;
   }
-  return cachedAesKey;
+  const keyPromise = (async () => {
+    const salt = await deriveHkdfSalt(subtle, {
+      tenantId: bootstrap.tenantId,
+      userId: bootstrap.userId,
+    });
+    const baseKey = await subtle.importKey(
+      "raw",
+      bootstrap.draftKeyWrappingSecret,
+      "HKDF",
+      false,
+      ["deriveKey"],
+    );
+    return subtle.deriveKey(
+      {
+        name: "HKDF",
+        hash: "SHA-256",
+        salt,
+        info: HKDF_INFO,
+      },
+      baseKey,
+      { name: "AES-GCM", length: AES_KEY_BITS },
+      false,
+      ["encrypt", "decrypt"],
+    );
+  })();
+  cachedAesKeyEntry = {
+    fingerprint,
+    tenantId: bootstrap.tenantId,
+    userId: bootstrap.userId,
+    key: keyPromise,
+  };
+  // If derivation throws, drop the cache so the next call retries
+  // cleanly.
+  keyPromise.catch(() => {
+    if (cachedAesKeyEntry?.key === keyPromise) {
+      cachedAesKeyEntry = null;
+    }
+  });
+  return keyPromise;
 }
 
 // AEAD AAD per ADR 0005 §2: binds the ciphertext to its key + identity
@@ -397,12 +413,12 @@ function deriveAad(scope: DraftScope, key: DraftKey): Bytes {
 }
 
 async function encryptPayload(
-  scope: DraftScope,
+  bootstrap: SessionBootstrap,
   key: DraftKey,
   payload: DraftPayload,
 ): Promise<{ iv: Bytes; ciphertext: ArrayBuffer }> {
   const subtle = requireSubtleCrypto();
-  const aesKey = await deriveAesKey();
+  const aesKey = await deriveAesKey(bootstrap);
   const iv = freshRandomBytes(AES_IV_BYTES);
   const plaintextSource = new TextEncoder().encode(JSON.stringify(payload));
   // Copy into a fresh ArrayBuffer-backed view so TypeScript's strict
@@ -411,7 +427,10 @@ async function encryptPayload(
     new ArrayBuffer(plaintextSource.byteLength),
   );
   plaintext.set(plaintextSource);
-  const additionalData = deriveAad(scope, key);
+  const additionalData = deriveAad(
+    { tenantId: bootstrap.tenantId, userId: bootstrap.userId },
+    key,
+  );
   const ciphertext = await subtle.encrypt(
     { name: "AES-GCM", iv, additionalData },
     aesKey,
@@ -421,15 +440,18 @@ async function encryptPayload(
 }
 
 async function decryptPayload(
-  scope: DraftScope,
+  bootstrap: SessionBootstrap,
   key: DraftKey,
   iv: ArrayBuffer,
   ciphertext: ArrayBuffer,
 ): Promise<DraftPayload | null> {
   try {
     const subtle = requireSubtleCrypto();
-    const aesKey = await deriveAesKey();
-    const additionalData = deriveAad(scope, key);
+    const aesKey = await deriveAesKey(bootstrap);
+    const additionalData = deriveAad(
+      { tenantId: bootstrap.tenantId, userId: bootstrap.userId },
+      key,
+    );
     const plaintext = await subtle.decrypt(
       { name: "AES-GCM", iv: new Uint8Array(iv), additionalData },
       aesKey,
@@ -446,10 +468,10 @@ async function decryptPayload(
     }
     return parsed;
   } catch {
-    // AAD mismatch, tampered ciphertext, wrong key (localStorage wiped
-    // mid-session), or schema drift. Treat as CorruptDraft: return null so
-    // the caller falls back to backend content; the load path purges the
-    // row so subsequent reads do not keep failing.
+    // AAD mismatch, tampered ciphertext, key change (sign-in rotation,
+    // logout), or schema drift. Treat as CorruptDraft: return null so
+    // the caller falls back to backend content; the load path purges
+    // the row so subsequent reads do not keep failing.
     return null;
   }
 }
@@ -476,11 +498,64 @@ function serializeKey(scope: DraftScope, key: DraftKey): string {
 
 // ----- Public API ---------------------------------------------------------
 
+export type SessionBootstrapProvider = () => Promise<SessionBootstrap>;
+
 function makePersistence(
-  options: { ttlMs?: number; nowMs?: () => number } = {},
+  options: {
+    ttlMs?: number;
+    nowMs?: () => number;
+    sessionBootstrap?: SessionBootstrapProvider;
+  } = {},
 ): EditorPersistence {
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const nowMs = options.nowMs ?? (() => Date.now());
+  const sessionBootstrapProvider =
+    options.sessionBootstrap ?? defaultGetSessionBootstrap;
+
+  // Fetches the active session bootstrap and asserts that the scope
+  // the caller asked us to operate on (the `(tenantId, userId)` pair
+  // in the SourceKey path) matches the BFF-issued identity. A
+  // mismatch means a caller is passing the placeholder
+  // `("default", "local")` after #272 should have replaced it; we
+  // refuse the operation rather than let a wrong key derive a
+  // wrong AES key. The check also surfaces 401 from the bootstrap
+  // as `SessionExpiredDuringEdit` per ADR-0005 §2.
+  async function bootstrapFor(scope: DraftScope): Promise<SessionBootstrap> {
+    let bootstrap: SessionBootstrap;
+    try {
+      bootstrap = await sessionBootstrapProvider();
+    } catch (cause) {
+      if (
+        cause instanceof SessionBootstrapError &&
+        cause.kind === "Unauthenticated"
+      ) {
+        throw new EditorPersistenceError(
+          "SessionExpiredDuringEdit",
+          "Session expired during edit; re-authentication required.",
+        );
+      }
+      // CryptoUnavailable is the closest existing kind for "bootstrap
+      // is unreachable" — the UI surfaces it as "drafts unavailable"
+      // and disables save, matching the documented degraded-mode
+      // posture. Cause is preserved for diagnostic surfaces.
+      throw new EditorPersistenceError(
+        "CryptoUnavailable",
+        cause instanceof Error
+          ? `Session bootstrap unavailable: ${cause.message}`
+          : "Session bootstrap unavailable",
+      );
+    }
+    if (
+      bootstrap.tenantId !== scope.tenantId ||
+      bootstrap.userId !== scope.userId
+    ) {
+      throw new EditorPersistenceError(
+        "SessionExpiredDuringEdit",
+        "Draft scope does not match the active session.",
+      );
+    }
+    return bootstrap;
+  }
 
   async function isAvailable(): Promise<boolean> {
     if (!isBrowserEnvironment()) {
@@ -508,6 +583,7 @@ function makePersistence(
         `editorPersistence.saveDraft: payload.kind (${payload.kind}) does not match key.kind (${key.kind}).`,
       );
     }
+    const bootstrap = await bootstrapFor(scope);
     let db: IDBPDatabase;
     try {
       db = await getDb();
@@ -519,7 +595,7 @@ function makePersistence(
         }`,
       );
     }
-    const { iv, ciphertext } = await encryptPayload(scope, key, payload);
+    const { iv, ciphertext } = await encryptPayload(bootstrap, key, payload);
     const savedAtMs = nowMs();
     const ttlExpiresAtMs = savedAtMs + ttlMs;
     const record: DraftRecord = {
@@ -580,6 +656,7 @@ function makePersistence(
     scope: DraftScope,
     key: DraftKey,
   ): Promise<LoadedDraft | null> {
+    const bootstrap = await bootstrapFor(scope);
     let db: IDBPDatabase;
     try {
       db = await getDb();
@@ -599,13 +676,14 @@ function makePersistence(
     }
     if (record.recordSchemaVersion !== RECORD_SCHEMA_VERSION) {
       // Old-schema row (e.g., a v0 record from a previous Studio build
-      // before AAD was bound). Drop it so the next save can succeed
-      // without colliding on the primary key.
+      // before AAD was bound, or a v1 record encrypted under the
+      // pre-#272 localStorage secret). Drop it so the next save can
+      // succeed without colliding on the primary key.
       await db.delete(STORE_NAME, record.key);
       return null;
     }
     const payload = await decryptPayload(
-      scope,
+      bootstrap,
       key,
       record.iv,
       record.ciphertext,
@@ -696,19 +774,22 @@ function makePersistence(
 // Default singleton with the ADR-defined 14-day TTL.
 export const editorPersistence: EditorPersistence = makePersistence();
 
-// Factory for tests / future per-tenant override (ADR-2 §1 configurability).
+// Factory for tests / future per-tenant override (ADR-2 §1
+// configurability). Tests inject a stub ``sessionBootstrap`` provider
+// so the encryption path is exercised without standing up a BFF.
 export function createEditorPersistence(options: {
   ttlMs?: number;
   nowMs?: () => number;
+  sessionBootstrap?: SessionBootstrapProvider;
 }): EditorPersistence {
   return makePersistence(options);
 }
 
 // Test-only reset for vitest. Closes any cached IDB connection (so a
 // subsequent `indexedDB.deleteDatabase` does not block on an open
-// handle), then drops the cached DB handle, AES key, and storage
-// backend so the next call re-derives them with a fresh client secret
-// and salt. Not exported through the public API surface beyond tests.
+// handle), then drops the cached DB handle and AES key cache so the
+// next call re-derives them. Not exported through the public API
+// surface beyond tests.
 export async function __resetEditorPersistenceForTests(): Promise<void> {
   if (cachedDb) {
     try {
@@ -719,16 +800,20 @@ export async function __resetEditorPersistenceForTests(): Promise<void> {
     }
   }
   cachedDb = null;
-  cachedAesKey = null;
-  storageBackend = null;
+  cachedAesKeyEntry = null;
 }
 
 // ----- Scope helpers ------------------------------------------------------
 
-// Until a real auth surface lands (see ADR 0005 §3), the Studio runs in a
-// single-user/single-tenant local-dev configuration. We expose stable
-// defaults here so call-sites do not hard-code the strings; when auth
-// integrates, only this function needs to learn how to read the session.
-export function getCurrentDraftScope(): DraftScope {
-  return { tenantId: "default", userId: "local" };
+// Issue #272 / ADR-0005 §2: the Studio reads its draft scope from the
+// BFF session-bootstrap surface. The placeholder
+// ``{ tenantId: "default", userId: "local" }`` that pre-#272 builds
+// returned has been removed; callers must `await` this and handle
+// `SessionBootstrapError` (typically by promoting it to the
+// re-auth UI flow). The function is intentionally thin — it routes
+// to the session bootstrap so a future identity-layer integration
+// changes nothing else in the call sites.
+export async function getCurrentDraftScope(): Promise<DraftScope> {
+  const bootstrap = await defaultGetSessionBootstrap();
+  return { tenantId: bootstrap.tenantId, userId: bootstrap.userId };
 }

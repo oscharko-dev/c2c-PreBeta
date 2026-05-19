@@ -747,7 +747,7 @@ export function TransformationRunProvider({
       if (!programId) {
         return;
       }
-      const scope = getCurrentDraftScope();
+      const scope = await getCurrentDraftScope();
       const payload: DraftPayload = {
         schemaVersion: "v0",
         kind: "java",
@@ -791,7 +791,7 @@ export function TransformationRunProvider({
       if (!programId) {
         return;
       }
-      const scope = getCurrentDraftScope();
+      const scope = await getCurrentDraftScope();
       const sourceName = filePath.split("/").pop() ?? filePath;
       const loaded = await editorPersistence.loadDraft(scope, {
         kind: "java",

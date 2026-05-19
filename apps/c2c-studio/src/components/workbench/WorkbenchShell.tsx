@@ -15,6 +15,7 @@ import { BottomWorkbench } from "@/components/workbench/BottomWorkbench";
 import { StatusBar } from "@/components/workbench/StatusBar";
 import { RightObservabilityStripe } from "@/components/observability/RightObservabilityStripe";
 import { editorPersistence } from "@/lib/editor/editorPersistence";
+import { getSessionBootstrap } from "@/lib/editor/sessionBootstrap";
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
 import { MarkerNavigationProvider } from "@/lib/editor/markerNavigation";
 import { JavaEditorActionsProvider } from "@/stores/javaEditorActions";
@@ -26,6 +27,21 @@ import { PerfHarnessBridge } from "@/components/workbench/PerfHarnessBridge";
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
+
+  // Issue #272 / ADR-0005 §2: prime the session bootstrap so the first
+  // draft save / load does not pay a serialised round-trip on the hot
+  // path. Fire-and-forget — a 401 surfaces later when the editor
+  // actually tries to use the persistence layer, which raises
+  // ``SessionExpiredDuringEdit`` and triggers the re-auth UI. We do
+  // not block render on the bootstrap; the workbench shell renders
+  // even when drafts are unavailable (degraded mode per ADR-0005
+  // "Behavioural contract").
+  useEffect(() => {
+    void getSessionBootstrap().catch(() => {
+      // Bootstrap failures are surfaced lazily by the persistence
+      // layer; nothing to do here.
+    });
+  }, []);
 
   // Studio-IDE-3 (#247) / ADR-2 §1: purge expired drafts on Studio start.
   // Fire-and-forget; IndexedDB is unavailable in some test environments

@@ -143,7 +143,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   }, [menuOpen]);
 
   const onClearDrafts = useCallback(async () => {
-    const scope = getCurrentDraftScope();
+    const scope = await getCurrentDraftScope();
     const result = await editorPersistence.clearAll(scope);
     setConfirmOpen(false);
     setFeedback(
