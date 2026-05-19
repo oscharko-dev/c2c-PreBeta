@@ -812,9 +812,15 @@ function isSafeGeneratedRelpath(raw: string): boolean {
 }
 
 function isSafeRequestJavaFilePath(raw: string): boolean {
-  if (raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw)) return false;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return false;
-  return isSafeGeneratedRelpath(raw);
+  const normalized = normalizeRequestJavaFilePath(raw);
+  if (normalized.startsWith("/")) return false;
+  if (/^[A-Za-z]:\//.test(normalized)) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) return false;
+  return isSafeGeneratedRelpath(normalized);
+}
+
+function normalizeRequestJavaFilePath(raw: string): string {
+  return raw.replace(/\\/g, "/");
 }
 
 function transformLinks(runId: string): Record<string, string> {
@@ -4560,6 +4566,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "javaFiles must be a non-empty array");
           return;
         }
+        const ccFilePaths = new Set<string>();
         for (let i = 0; i < ccJavaFiles.length; i += 1) {
           const entry = ccJavaFiles[i];
           if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
@@ -4578,6 +4585,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
             return;
           }
+          ccFilePaths.add(normalizeRequestJavaFilePath(entryRecord.path));
           if (typeof entryRecord.content !== "string") {
             badRequest(res, `javaFiles[${i}].content must be a string`);
             return;
@@ -4605,12 +4613,23 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           typeof ccRecord.entryFilePath === "string"
             ? ccRecord.entryFilePath
             : "";
+        if (
+          ccEntryFilePath.length > 0 &&
+          (!isSafeRequestJavaFilePath(ccEntryFilePath) ||
+            !ccFilePaths.has(normalizeRequestJavaFilePath(ccEntryFilePath)))
+        ) {
+          badRequest(
+            res,
+            "entryFilePath must be a safe relative path from javaFiles",
+          );
+          return;
+        }
         const ccFiles: Record<string, string> = {};
         for (const entry of ccJavaFiles as Array<{
           path: string;
           content: string;
         }>) {
-          ccFiles[entry.path] = entry.content;
+          ccFiles[normalizeRequestJavaFilePath(entry.path)] = entry.content;
         }
         const ccPayload = {
           programId: ccRunId,
@@ -4725,6 +4744,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "javaFiles must be a non-empty array");
           return;
         }
+        const vFilePaths = new Set<string>();
         for (let i = 0; i < vJavaFiles.length; i += 1) {
           const entry = vJavaFiles[i];
           if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
@@ -4743,6 +4763,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
             return;
           }
+          vFilePaths.add(normalizeRequestJavaFilePath(entryRecord.path));
           if (typeof entryRecord.content !== "string") {
             badRequest(res, `javaFiles[${i}].content must be a string`);
             return;
@@ -4770,6 +4791,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           typeof vRecord.entryFilePath === "string"
             ? vRecord.entryFilePath
             : "";
+        if (
+          vEntryFilePath.length > 0 &&
+          (!isSafeRequestJavaFilePath(vEntryFilePath) ||
+            !vFilePaths.has(normalizeRequestJavaFilePath(vEntryFilePath)))
+        ) {
+          badRequest(
+            res,
+            "entryFilePath must be a safe relative path from javaFiles",
+          );
+          return;
+        }
         const vExpectedOutput =
           typeof vRecord.expectedOutput === "string"
             ? vRecord.expectedOutput
@@ -4783,7 +4815,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           path: string;
           content: string;
         }>) {
-          vFiles[entry.path] = entry.content;
+          vFiles[normalizeRequestJavaFilePath(entry.path)] = entry.content;
         }
         const vOracle: Record<string, unknown> = {};
         if (vExpectedOutput !== undefined)

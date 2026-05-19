@@ -185,6 +185,28 @@ function normalizedFilePath(filePath: string): string {
   return filePath.replace(/\\/g, "/").replace(/\/+/g, "/").trim();
 }
 
+function pathSegments(filePath: string): string[] {
+  return normalizedFilePath(filePath).split("/").filter(Boolean);
+}
+
+function pathSegmentsMatch(left: string[], right: string[]): boolean {
+  if (left.length === 0 || right.length === 0) return false;
+  const short = left.length < right.length ? left : right;
+  const long = left.length < right.length ? right : left;
+  for (let i = 0; i < short.length; i += 1) {
+    if (short[short.length - 1 - i] !== long[long.length - 1 - i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+interface MarkerOverflowBucket {
+  surface: MarkerSurface;
+  filePathParts: string[];
+  count: number;
+}
+
 // Count diagnostics that will be dropped from editor marker surfaces while
 // still appearing in the Problems panel. The cap is shared by all marker
 // owners attached to the same editor surface and file, matching the COBOL
@@ -193,7 +215,7 @@ export function countEditorMarkerOverflow(
   entries: DiagnosticEntry[],
   limit = DEFAULT_MARKER_LIMIT,
 ): number {
-  const countsBySurfaceFile = new Map<string, number>();
+  const buckets: MarkerOverflowBucket[] = [];
 
   for (const { diagnostic } of entries) {
     if (diagnostic.line === undefined || diagnostic.filePath === undefined) {
@@ -203,17 +225,25 @@ export function countEditorMarkerOverflow(
     if (surface === null) {
       continue;
     }
-    const filePath = normalizedFilePath(diagnostic.filePath);
-    if (filePath.length === 0) {
+    const filePathParts = pathSegments(diagnostic.filePath);
+    if (filePathParts.length === 0) {
       continue;
     }
-    const key = `${surface}\0${filePath}`;
-    countsBySurfaceFile.set(key, (countsBySurfaceFile.get(key) ?? 0) + 1);
+    const bucket = buckets.find(
+      (candidate) =>
+        candidate.surface === surface &&
+        pathSegmentsMatch(candidate.filePathParts, filePathParts),
+    );
+    if (bucket) {
+      bucket.count += 1;
+    } else {
+      buckets.push({ surface, filePathParts, count: 1 });
+    }
   }
 
   let overflow = 0;
-  for (const count of countsBySurfaceFile.values()) {
-    overflow += Math.max(0, count - limit);
+  for (const bucket of buckets) {
+    overflow += Math.max(0, bucket.count - limit);
   }
   return overflow;
 }

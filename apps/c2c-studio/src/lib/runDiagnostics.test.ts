@@ -60,6 +60,31 @@ describe("countEditorMarkerOverflow", () => {
     expect(countEditorMarkerOverflow(diagnostics)).toBe(0);
   });
 
+  it("buckets absolute and project-relative paths together when their suffix segments match", () => {
+    const diagnostics = [
+      ...Array.from({ length: 1500 }, (_, index) =>
+        entry(
+          diagnostic({
+            sourceKind: "generated_java",
+            filePath: "/tmp/work/src/main/java/com/example/Foo.java",
+            message: `absolute-${index}`,
+          }),
+        ),
+      ),
+      ...Array.from({ length: 1500 }, (_, index) =>
+        entry(
+          diagnostic({
+            sourceKind: "build",
+            filePath: "src/main/java/com/example/Foo.java",
+            message: `relative-${index}`,
+          }),
+        ),
+      ),
+    ];
+
+    expect(countEditorMarkerOverflow(diagnostics)).toBe(1000);
+  });
+
   it("shares the COBOL editor budget across COBOL and IR owners for the same file", () => {
     const diagnostics = [
       ...Array.from({ length: 1500 }, (_, index) =>

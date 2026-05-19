@@ -435,7 +435,7 @@ test("normalizeDiagnostics rewrites absolute javac source paths to relative ones
   assert.equal(result[2]?.filePath, undefined);
 });
 
-test("normalizeDiagnostics redacts upstream diagnostic messages and fallback absolute file paths", () => {
+test("normalizeDiagnostics redacts upstream diagnostic messages and omits ambiguous absolute file paths", () => {
   const result = normalizeDiagnostics([
     {
       severity: "error",
@@ -458,6 +458,6 @@ test("normalizeDiagnostics redacts upstream diagnostic messages and fallback abs
   assert.equal(result[0]?.message.includes("https://internal.example"), false);
   assert.equal(result[0]?.message.includes("/home/buildsvc"), false);
   assert.equal(result[0]?.message.includes("sk-test"), false);
-  assert.equal(result[0]?.filePath, "Foo.java");
-  assert.equal(result[1]?.filePath, "Bar.java");
+  assert.equal(result[0]?.filePath, undefined);
+  assert.equal(result[1]?.filePath, undefined);
 });
