@@ -1990,6 +1990,181 @@ test("live evidence exposes manifestHash, validationStatus, exportRef, and aggre
   }
 });
 
+// ADR 0007 (#257, Issue #279): the BFF /evidence view surfaces the
+// orchestrator's manual-edit provenance run-summary fields plus the
+// persisted manualEditOverlay reference so the Studio can fetch the
+// per-region overlay JSON for audit review.
+test("live evidence surfaces manualEditOverlay reference and run-summary fields", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const overlay = {
+    uri: "urn:c2c/manual-edit-overlay/live-run-1",
+    sha256: "a".repeat(64),
+    byteSize: 256,
+    mimeType: "application/json",
+    kind: "manual-edit-overlay",
+    schemaVersion: "v0",
+    regionCount: 2,
+  };
+  const manifest = {
+    schemaVersion: "v0",
+    capability: "evidence.pack",
+    service: "evidence-service",
+    packId: "epk-live-overlay-1",
+    runId: "live-run-1",
+    wave: "w0.2",
+    status: "complete",
+    completenessStatus: "complete",
+    classification: "success",
+    createdAt: "2026-05-19T10:00:30Z",
+    manualEditsCarriedOver: true,
+    manualDriftRegionCount: 2,
+    artifacts: {
+      manualEditOverlay: overlay,
+    },
+    validation: {
+      ok: true,
+      requiredArtifacts: [],
+      missingArtifacts: [],
+      messages: [],
+      completenessStatus: "complete",
+    },
+  };
+  const { client: orch } = stubOrchestrator({
+    evidence: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
+        missingArtifacts: [],
+        data: manifest,
+        artifactRef: {
+          uri: "file:///run/evidence-pack-manifest.json",
+          sha256: "f".repeat(64),
+          byteSize: 768,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+    );
+    assert.equal(evidence.status, 200);
+    const body = evidence.body as {
+      packId: string;
+      manualEditsCarriedOver: boolean;
+      manualDriftRegionCount: number;
+      manualEditOverlay: {
+        uri: string;
+        sha256: string;
+        byteSize: number;
+        mimeType?: string;
+        kind?: string;
+        schemaVersion?: "v0";
+        regionCount: number;
+      } | null;
+    };
+    assert.equal(body.packId, "epk-live-overlay-1");
+    assert.equal(body.manualEditsCarriedOver, true);
+    assert.equal(body.manualDriftRegionCount, 2);
+    assert.ok(body.manualEditOverlay, "manualEditOverlay must be surfaced");
+    assert.equal(body.manualEditOverlay!.uri, overlay.uri);
+    assert.equal(body.manualEditOverlay!.sha256, overlay.sha256);
+    assert.equal(body.manualEditOverlay!.byteSize, overlay.byteSize);
+    assert.equal(body.manualEditOverlay!.regionCount, 2);
+    assert.equal(body.manualEditOverlay!.schemaVersion, "v0");
+  } finally {
+    await server.close();
+  }
+});
+
+test("live evidence omits manualEditOverlay and defaults run-summary fields when no manual edits", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const manifest = {
+    schemaVersion: "v0",
+    capability: "evidence.pack",
+    service: "evidence-service",
+    packId: "epk-live-overlay-2",
+    runId: "live-run-1",
+    wave: "w0.2",
+    status: "complete",
+    completenessStatus: "complete",
+    classification: "success",
+    createdAt: "2026-05-19T10:00:30Z",
+    artifacts: {},
+    validation: {
+      ok: true,
+      requiredArtifacts: [],
+      missingArtifacts: [],
+      messages: [],
+      completenessStatus: "complete",
+    },
+  };
+  const { client: orch } = stubOrchestrator({
+    evidence: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
+        missingArtifacts: [],
+        data: manifest,
+        artifactRef: {
+          uri: "file:///run/evidence-pack-manifest.json",
+          sha256: "f".repeat(64),
+          byteSize: 768,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+    );
+    const body = evidence.body as {
+      manualEditsCarriedOver: boolean;
+      manualDriftRegionCount: number;
+      manualEditOverlay: unknown;
+    };
+    assert.equal(body.manualEditsCarriedOver, false);
+    assert.equal(body.manualDriftRegionCount, 0);
+    assert.equal(body.manualEditOverlay, null);
+  } finally {
+    await server.close();
+  }
+});
+
 test("live evidence with missing manifest reports incomplete status and zero pack id; never claims complete", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();

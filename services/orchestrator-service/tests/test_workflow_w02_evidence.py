@@ -946,5 +946,90 @@ class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):
         self._assert_pack_satisfies_assist_gate_inference(artifacts)
 
 
+class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
+    """ADR 0007 (#257, Issue #279): the orchestrator suppresses the
+    run-summary manual-edit signals until the overlay-artifact wiring
+    lands. Forwarding the signal alone would cause evidence-service to
+    reject the write-evidence step (the v0 manifest cross-field
+    consistency rule requires the overlay when carried_over=true), so
+    the pre-ADR-0007 wire shape is preserved end-to-end."""
+
+    def _w02_contract(self):
+        return new_run_contract(
+            run_id="run-evidence",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            source_ref={"uri": "urn:source/HELLO.cob"},
+        )
+
+    def _build_payload(self, contract):
+        context = self._w0_context(use_transformation_agent=True)
+        baseline_ref = {
+            "uri": "urn:run/baseline",
+            "sha256": "1" * 64,
+            "byteSize": 12,
+        }
+        transformation_model_ref = _model_invocation_ref(
+            "transformation",
+            invocation_id="inv-run-evidence-00-transformation",
+            sha="a" * 64,
+        )
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "ok",
+                "classification": "match",
+                "comparison": {"matched": True},
+                "goldenMaster": {"classification": "true"},
+            },
+            output_uri="urn:run/build-1",
+        )
+        return self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step(
+                "generate-java", output_uri="urn:run/baseline"
+            ),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={
+                "schemaVersion": "v0",
+                "runId": "run-evidence",
+                "steps": [],
+            },
+            generated_artifact_ref=baseline_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=False,
+            productive_model_invocations=[transformation_model_ref],
+        )
+
+    def test_omits_manual_edit_signals_when_no_drift(self) -> None:
+        contract = self._w02_contract()
+        payload = self._build_payload(contract)
+        self.assertNotIn("manualEditsCarriedOver", payload)
+        self.assertNotIn("manualDriftRegionCount", payload)
+
+    def test_omits_manual_edit_signals_even_when_contract_carries_drift(self) -> None:
+        # Until the overlay-artifact wiring lands, the orchestrator MUST
+        # NOT forward ``manualEditsCarriedOver`` on its own — doing so
+        # without the matching overlay would make evidence-service reject
+        # the write-evidence step.
+        contract = self._w02_contract()
+        contract.set_manual_edit_summary(
+            carried_over=True, drift_region_count=3
+        )
+        payload = self._build_payload(contract)
+        self.assertNotIn("manualEditsCarriedOver", payload)
+        self.assertNotIn("manualDriftRegionCount", payload)
+        # The contract itself still records the drift — only the wire
+        # shape suppresses it pending the overlay wiring.
+        self.assertTrue(contract.manual_edits_carried_over)
+        self.assertEqual(contract.manual_drift_region_count, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

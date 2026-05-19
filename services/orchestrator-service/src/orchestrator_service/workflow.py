@@ -3304,6 +3304,18 @@ class W0WorkflowRunner:
         }
         if is_w02:
             payload["blocked"] = bool(w02_blocked)
+            # ADR 0007 (#257, #279): the orchestrator forwards the run-summary
+            # manual-edit provenance signals ONLY when it can also forward the
+            # overlay artifact reference, because evidence-service rejects a
+            # ``manualEditsCarriedOver=true`` payload that lacks the overlay
+            # (cross-field consistency rule on the v0 manifest schema). The
+            # overlay artifact wiring — Studio overlay → BFF /verify →
+            # orchestrator artifact-store → evidence-pack — is a separate
+            # follow-up. Until that lands, suppressing the signal keeps the
+            # wire shape identical to pre-ADR-0007 packs (consumers default to
+            # ``false`` / ``0`` per ADR 0006 §2 absence semantics) and avoids
+            # a latent failure mode where the very first run with manual edits
+            # would crash write-evidence instead of persisting the pack.
         return payload
 
     @staticmethod

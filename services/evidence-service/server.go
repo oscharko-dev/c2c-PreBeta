@@ -255,8 +255,11 @@ func (s *Service) packItemHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Re-evaluate against the latest artifact set; the orchestrator may
-		// have added evidence via PATCH between requests.
-		result := EvaluateValidationForWave(&manifest.Artifacts, manifest.Wave)
+		// have added evidence via PATCH between requests. ADR 0007 (#279):
+		// EvaluateValidationForManifest folds the manual-edit overlay
+		// requirement into the wave-specific artifact check so reviewers see
+		// the same missing-artifact list the manifest itself records.
+		result := EvaluateValidationForManifest(manifest)
 		result.CompletenessStatus = deriveCompletenessStatus(
 			result,
 			manifest.Classification == ClassificationBlocked,

@@ -1528,6 +1528,59 @@ function deriveMissingFromValidation(
   return raw.filter((entry): entry is string => typeof entry === "string");
 }
 
+// ManualEditOverlayView (ADR 0007 #257, Issue #279) is the BFF-side
+// projection of the evidence-pack ``artifacts.manualEditOverlay`` reference
+// surfaced to the Studio so an auditor can fetch the persisted overlay JSON.
+// Fields mirror the schema's manualEditOverlayRef $def: ``uri`` and ``sha256``
+// are mandatory on a valid reference; ``regionCount`` mirrors the run-summary
+// ``manualDriftRegionCount``.
+interface ManualEditOverlayView {
+  uri: string;
+  sha256: string;
+  byteSize?: number;
+  mimeType?: string;
+  kind?: string;
+  schemaVersion?: "v0";
+  regionCount: number;
+}
+
+function deriveManualEditOverlayRef(
+  data: Record<string, unknown> | undefined,
+): ManualEditOverlayView | null {
+  if (!data) return null;
+  const artifacts = asRecord(data.artifacts);
+  if (!artifacts) return null;
+  const overlayRaw = artifacts.manualEditOverlay;
+  if (overlayRaw === null || overlayRaw === undefined) return null;
+  const record = asRecord(overlayRaw);
+  if (!record) return null;
+  const uri = asString(record.uri);
+  const sha256 = asString(record.sha256);
+  if (uri.length === 0 || sha256.length === 0) return null;
+  const view: ManualEditOverlayView = {
+    uri,
+    sha256,
+    regionCount: 0,
+  };
+  const byteSize = asNumber(record.byteSize);
+  if (byteSize !== undefined) view.byteSize = byteSize;
+  const mimeType = asString(record.mimeType);
+  if (mimeType.length > 0) view.mimeType = mimeType;
+  const kind = asString(record.kind);
+  if (kind.length > 0) view.kind = kind;
+  const schemaVersion = asString(record.schemaVersion);
+  if (schemaVersion === "v0") view.schemaVersion = "v0";
+  const regionCount = asNumber(record.regionCount);
+  if (
+    regionCount !== undefined &&
+    Number.isInteger(regionCount) &&
+    regionCount >= 0
+  ) {
+    view.regionCount = regionCount;
+  }
+  return view;
+}
+
 async function liveEvidenceView(
   stored: StoredRun,
   orchestrator: OrchestratorClient,
@@ -1583,6 +1636,21 @@ async function liveEvidenceView(
         : validationStatus === "invalid"
           ? "invalid"
           : "incomplete";
+    // ADR 0007 (#257, Issue #279): surface the orchestrator's manual-edit
+    // provenance summary and the persisted overlay reference so the Studio
+    // can fetch the per-region overlay JSON for audit review. The signals
+    // mirror the W02RunContract / evidence-pack manifest fields; absence is
+    // legal (pre-ADR-0007 runs, or runs with no manual edits) and consumers
+    // treat absence as ``false`` / ``0`` / ``null`` per ADR 0006 §2.
+    const manualEditsCarriedOver = data?.manualEditsCarriedOver === true;
+    const manualDriftRegionCountRaw = asNumber(data?.manualDriftRegionCount);
+    const manualDriftRegionCount =
+      manualDriftRegionCountRaw !== undefined &&
+      Number.isInteger(manualDriftRegionCountRaw) &&
+      manualDriftRegionCountRaw >= 0
+        ? manualDriftRegionCountRaw
+        : 0;
+    const manualEditOverlay = deriveManualEditOverlayRef(data);
     return {
       runId: stored.runId,
       programId: stored.programId || asString(envelope.programId),
@@ -1597,6 +1665,9 @@ async function liveEvidenceView(
       orchestratorRunId: liveRunId,
       artifactRef: normalizeOutputRef(artifactRef),
       generatedArtifactRef: normalizeOutputRef(envelope.generatedArtifactRef),
+      manualEditsCarriedOver,
+      manualDriftRegionCount,
+      manualEditOverlay,
     };
   } catch (err) {
     return {
