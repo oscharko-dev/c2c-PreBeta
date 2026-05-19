@@ -136,6 +136,30 @@ describe("parseStackTrace", () => {
     });
   });
 
+  it("parses Java 9+ module-prefixed frames", () => {
+    const trace = "  at java.base/com.example.Foo.bar(Foo.java:8)";
+    const frames = parseStackTrace(trace);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toMatchObject({
+      className: "com.example.Foo",
+      methodName: "bar",
+      javaFile: "Foo.java",
+      javaLine: 8,
+    });
+  });
+
+  it("parses class-loader-prefixed frames", () => {
+    const trace = "  at app//com.example.Foo.bar(Foo.java:8)";
+    const frames = parseStackTrace(trace);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toMatchObject({
+      className: "com.example.Foo",
+      methodName: "bar",
+      javaFile: "Foo.java",
+      javaLine: 8,
+    });
+  });
+
   it("skips native-method frames with no file:line info", () => {
     const trace = [
       "java.lang.NullPointerException",
@@ -254,6 +278,89 @@ describe("mapStackFrames", () => {
       fetcherFor(env),
     );
     expect(resolved[0].cobol).toEqual({ file: "PROG1.cbl", line: 10 });
+  });
+
+  it("uses the frame class package to disambiguate same-basename Java files", async () => {
+    clearTraceCache();
+    const env = envelope(
+      {
+        "src/main/java/com/alpha/Foo.java": [
+          { startLine: 1, endLine: 8, originClass: "deterministic" },
+        ],
+        "src/main/java/com/beta/Foo.java": [
+          { startLine: 1, endLine: 8, originClass: "deterministic" },
+        ],
+      },
+      {
+        "s-alpha": { cobolFile: "ALPHA.cbl", cobolLine: 11 },
+        "s-beta": { cobolFile: "BETA.cbl", cobolLine: 22 },
+      },
+    );
+    const frames = parseStackTrace(
+      [
+        "  at com.beta.Foo.run(Foo.java:4)",
+        "  at com.alpha.Foo.run(Foo.java:4)",
+      ].join("\n"),
+    );
+    const provider: JavaSourceProvider = vi.fn(async (path) => {
+      if (path === "src/main/java/com/alpha/Foo.java") {
+        return [
+          "package com.alpha;",
+          "public class Foo {",
+          "  // move [s-alpha line 11]",
+          "  void run() {}",
+          "}",
+        ].join("\n");
+      }
+      if (path === "src/main/java/com/beta/Foo.java") {
+        return [
+          "package com.beta;",
+          "public class Foo {",
+          "  // move [s-beta line 22]",
+          "  void run() {}",
+          "}",
+        ].join("\n");
+      }
+      return null;
+    });
+    const resolved = await mapStackFrames(
+      "run-1",
+      frames,
+      provider,
+      fetcherFor(env),
+    );
+    expect(resolved[0]).toMatchObject({
+      javaFilePath: "src/main/java/com/beta/Foo.java",
+      cobol: { file: "BETA.cbl", line: 22 },
+    });
+    expect(resolved[1]).toMatchObject({
+      javaFilePath: "src/main/java/com/alpha/Foo.java",
+      cobol: { file: "ALPHA.cbl", line: 11 },
+    });
+    expect(provider).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fake-resolve ambiguous same-basename Java files", async () => {
+    clearTraceCache();
+    const env = envelope({
+      "src/main/java/com/alpha/Foo.java": [
+        { startLine: 1, endLine: 8, originClass: "deterministic" },
+      ],
+      "src/main/java/com/beta/Foo.java": [
+        { startLine: 1, endLine: 8, originClass: "deterministic" },
+      ],
+    });
+    const frames = parseStackTrace("  at com.gamma.Foo.run(Foo.java:4)");
+    const provider: JavaSourceProvider = vi.fn(async () => SAMPLE_JAVA);
+    const resolved = await mapStackFrames(
+      "run-1",
+      frames,
+      provider,
+      fetcherFor(env),
+    );
+    expect(resolved[0].javaFilePath).toBeUndefined();
+    expect(resolved[0].cobol).toBeUndefined();
+    expect(provider).not.toHaveBeenCalled();
   });
 
   it("returns frames without `cobol` when lineage classifies the region as manual_only", async () => {

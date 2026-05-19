@@ -44,12 +44,13 @@ export function BuildTestPanel({
               />
             ))}
           </div>
-
-          {bt && bt.status !== "ok" && bt.note && (
-            <StackTraceView raw={bt.note} runId={state.runId ?? null} />
-          )}
         </div>
-        <div className="flex-1 flex flex-col min-w-0 border-l border-line-2 pl-8">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-y-auto border-l border-line-2 pl-8 pr-2">
+          {bt && bt.status !== "ok" && bt.note && (
+            <div className="mb-4">
+              <StackTraceView raw={bt.note} runId={state.runId ?? null} />
+            </div>
+          )}
           <h3 className="font-medium text-text mb-4">Equivalence Analysis</h3>
           <EquivalencePanel buildTest={bt} isPending={isPending} />
         </div>

@@ -38,12 +38,18 @@ interface FakeJavaEditor {
 }
 
 const revealCalls: number[] = [];
+const revealCallDetails: Array<{
+  line: number;
+  modelUri: string | undefined;
+}> = [];
 const setPositionCalls: Array<{ lineNumber: number; column: number }> = [];
 const focusCalls: number[] = [];
+let currentModelUri: string | undefined;
 
 const fakeJavaEditor: FakeJavaEditor = {
   revealLineInCenterIfOutsideViewport: (line) => {
     revealCalls.push(line);
+    revealCallDetails.push({ line, modelUri: currentModelUri });
   },
   setPosition: (pos) => {
     setPositionCalls.push(pos);
@@ -73,6 +79,7 @@ type EditorMockProps = {
 vi.mock("@/components/editor/CodeEditor", async () => {
   const reactNs = await import("react");
   const CodeEditor = (props: EditorMockProps) => {
+    currentModelUri = props.modelUri;
     reactNs.useEffect(() => {
       props.onMount?.({
         editor: fakeJavaEditor,
@@ -224,8 +231,10 @@ function renderPane() {
 describe("GeneratedJavaEditorPane c2c:reveal-java listener (Studio-IDE-8 #253)", () => {
   beforeEach(() => {
     revealCalls.length = 0;
+    revealCallDetails.length = 0;
     setPositionCalls.length = 0;
     focusCalls.length = 0;
+    currentModelUri = undefined;
     vi.mocked(apiClient.getGeneratedFile).mockReset();
   });
 
@@ -283,6 +292,51 @@ describe("GeneratedJavaEditorPane c2c:reveal-java listener (Studio-IDE-8 #253)",
     });
     await waitFor(() => {
       expect(revealCalls).toContain(7);
+    });
+  });
+
+  it("waits for a cross-file selection switch before revealing the Java line", async () => {
+    mockTransformationState.mockReturnValue(
+      completedRun(
+        [
+          "src/main/java/com/example/Initial.java",
+          "src/main/java/com/example/Foo.java",
+        ],
+        "src/main/java/com/example/Initial.java",
+      ),
+    );
+    mockGeneratedFileContents({
+      "src/main/java/com/example/Initial.java": "// initial",
+      "src/main/java/com/example/Foo.java": "// foo",
+    });
+    renderPane();
+    await waitFor(() => {
+      expect(screen.getByTestId("code-editor-mock")).toHaveAttribute(
+        "data-model-uri",
+        "inmemory://c2c-studio/generated/run-123/src/main/java/com/example/Initial.java",
+      );
+    });
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("c2c:reveal-java", {
+          detail: {
+            javaFile: "Foo.java",
+            javaLine: 13,
+          },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("code-editor-mock")).toHaveAttribute(
+        "data-model-uri",
+        "inmemory://c2c-studio/generated/run-123/src/main/java/com/example/Foo.java",
+      );
+      expect(revealCalls).toContain(13);
+    });
+    expect(revealCallDetails).toContainEqual({
+      line: 13,
+      modelUri:
+        "inmemory://c2c-studio/generated/run-123/src/main/java/com/example/Foo.java",
     });
   });
 

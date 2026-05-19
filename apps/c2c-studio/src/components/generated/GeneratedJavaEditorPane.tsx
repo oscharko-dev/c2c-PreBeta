@@ -646,7 +646,10 @@ export function GeneratedJavaEditorPane() {
     token: number;
   } | null>(null);
   const revealJavaTokenRef = useRef(0);
-  const pendingRevealJavaTokenRef = useRef<number | null>(null);
+  const pendingRevealJavaRef = useRef<{
+    token: number;
+    resolvedFilePath: string;
+  } | null>(null);
   useEffect(() => {
     function onReveal(ev: Event) {
       const detail = (ev as CustomEvent<RevealJavaDetail>).detail;
@@ -687,7 +690,10 @@ export function GeneratedJavaEditorPane() {
       return true;
     });
     if (!matched) return;
-    pendingRevealJavaTokenRef.current = revealJavaTarget.token;
+    pendingRevealJavaRef.current = {
+      token: revealJavaTarget.token,
+      resolvedFilePath: matched.path,
+    };
     selectFile(matched.path);
   }, [
     revealJavaTarget,
@@ -707,15 +713,14 @@ export function GeneratedJavaEditorPane() {
     // synchronously on the event. Cross-file path: only fire when the
     // file switch resolved to the same file the event targeted.
     if (!sameFile) {
-      if (pendingRevealJavaTokenRef.current !== revealJavaTarget.token) return;
-      // Match the existing file-switching logic — selectedFilePath is
-      // a full path from generatedFiles; the event detail may carry a
-      // suffix path. Both refer to the same file when we reach here.
+      const pending = pendingRevealJavaRef.current;
+      if (!pending || pending.token !== revealJavaTarget.token) return;
+      if (pending.resolvedFilePath !== selectedFilePath) return;
     }
     editor.revealLineInCenterIfOutsideViewport(revealJavaTarget.line);
     editor.setPosition({ lineNumber: revealJavaTarget.line, column: 1 });
     editor.focus();
-    pendingRevealJavaTokenRef.current = null;
+    pendingRevealJavaRef.current = null;
   }, [revealJavaTarget, selectedFilePath, editorMountToken]);
 
   const javaMarkerGroups: EditorMarkerGroup[] = useMemo(() => {

@@ -14,8 +14,6 @@ const MOCK_CORS_HEADERS = {
   "access-control-allow-headers": "Content-Type",
 } as const;
 
-const COBOL_EDITOR_LABEL = /COBOL source editor/i;
-
 async function expectReadyWorkbench(page: Page) {
   await page.goto("/");
   await expect(page.getByTestId("studio-workbench-shell")).toBeVisible();
@@ -25,7 +23,36 @@ async function expectReadyWorkbench(page: Page) {
 function topBarStartButton(page: Page) {
   return page
     .getByLabel("Workbench Top Bar")
-    .getByRole("button", { name: "Start Transformation" });
+    .getByRole("button", { name: "Generate & Verify" });
+}
+
+async function enterCobolSource(page: Page, source: string) {
+  await page.waitForFunction(
+    () =>
+      (
+        window as unknown as {
+          __c2cEditorHarnessReady?: boolean;
+        }
+      ).__c2cEditorHarnessReady === true,
+    null,
+    { timeout: 15_000 },
+  );
+  await page.evaluate((sourceText) => {
+    window.dispatchEvent(
+      new CustomEvent("c2c-e2e:load-cobol", {
+        detail: { sourceText, sourceName: "pasted-source.cbl" },
+      }),
+    );
+  }, source);
+  await expect(page.getByTestId("code-editor-standalone")).toBeVisible();
+  const aiAssistToggle = page.getByLabel(
+    "Allow AI assist after deterministic baseline",
+  );
+  if (await aiAssistToggle.isChecked()) {
+    await aiAssistToggle.click();
+  }
+  await expect(aiAssistToggle).not.toBeChecked();
+  await expect(topBarStartButton(page)).toBeEnabled();
 }
 
 test.describe("Studio-IDE-8 stack-trace navigation (#253)", () => {
@@ -317,9 +344,7 @@ test.describe("Studio-IDE-8 stack-trace navigation (#253)", () => {
     // --- UI flow ----------------------------------------------------------
 
     await expectReadyWorkbench(page);
-    await page.getByRole("button", { name: "Start Typing" }).click();
-    const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-    await editor.fill(`       IDENTIFICATION DIVISION.
+    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
        PROGRAM-ID. PROG1.
        PROCEDURE DIVISION.
            DISPLAY 'HELLO'.
@@ -358,12 +383,15 @@ test.describe("Studio-IDE-8 stack-trace navigation (#253)", () => {
       });
     });
 
-    // Click the resolved frame's COBOL link. The button's aria-label
-    // encodes the COBOL target so we can locate it without coupling to
-    // visible text formatting.
-    await view
-      .getByRole("button", { name: /Reveal COBOL line 30 in PROG1\.cbl/ })
-      .click();
+    // Activate the resolved frame's COBOL link by keyboard. The button's
+    // aria-label encodes the COBOL target so we can locate it without
+    // coupling to visible text formatting.
+    const revealCobol = view.getByRole("button", {
+      name: /Reveal COBOL line 30 in PROG1\.cbl/,
+    });
+    await revealCobol.focus();
+    await expect(revealCobol).toBeFocused();
+    await page.keyboard.press("Enter");
 
     const captured = await page.evaluate(() => {
       const w = window as unknown as {
@@ -377,7 +405,10 @@ test.describe("Studio-IDE-8 stack-trace navigation (#253)", () => {
     expect(captured).toEqual([{ cobolFile: "PROG1.cbl", cobolLine: 30 }]);
 
     // AC4: Show raw toggle reveals the unparsed text (incl. native frame).
-    await view.getByRole("button", { name: /Show raw/i }).click();
+    const showRaw = view.getByRole("button", { name: /Show raw/i });
+    await showRaw.focus();
+    await expect(showRaw).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(
       view.getByText(/NativeMethodAccessorImpl\.invoke0/),
     ).toBeVisible();

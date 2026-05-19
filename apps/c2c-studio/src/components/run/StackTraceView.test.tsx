@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { StackTraceView } from "./StackTraceView";
 import { clearTraceCache } from "@/lib/editor/traceParser";
@@ -192,7 +193,7 @@ describe("StackTraceView", () => {
     }
   });
 
-  it("renders unresolved frames with a tooltip and no COBOL link", async () => {
+  it("renders unresolved frames with accessible no-mapping messaging and no COBOL link", async () => {
     const provider = async () => "// no anchors";
     render(
       <StackTraceView
@@ -202,8 +203,9 @@ describe("StackTraceView", () => {
         fetcher={fetcherFor(envelope())}
       />,
     );
+    let rows = screen.queryAllByTestId("stack-frame-row");
     await waitFor(() => {
-      const rows = screen.getAllByTestId("stack-frame-row");
+      rows = screen.getAllByTestId("stack-frame-row");
       expect(rows).toHaveLength(1);
       expect(rows[0].getAttribute("data-resolved")).toBe("false");
     });
@@ -211,11 +213,19 @@ describe("StackTraceView", () => {
     expect(
       screen.queryByRole("button", { name: /Reveal COBOL/ }),
     ).not.toBeInTheDocument();
-    // The tooltip text appears as a `title` attribute on the no-mapping chip.
     const chip = screen.getByText(/no source mapping/i);
     expect(chip.getAttribute("title")).toBe(
       "No source mapping available for this frame",
     );
+    expect(chip.getAttribute("aria-label")).toBe(
+      "No source mapping available for this frame",
+    );
+    expect(rows[0].getAttribute("aria-label")).toContain(
+      "No source mapping available for this frame",
+    );
+    expect(
+      screen.queryByRole("button", { name: /Open Java file/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("toggles the raw trace via the Show/Hide raw button", async () => {
@@ -235,6 +245,10 @@ describe("StackTraceView", () => {
     });
     const toggle = screen.getByRole("button", { name: /Show raw/i });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-controls")).toBe("stack-trace-raw");
+    expect(
+      screen.queryByText(/NativeMethodAccessorImpl\.invoke0/),
+    ).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(toggle.textContent).toMatch(/Hide raw/i);
@@ -242,9 +256,15 @@ describe("StackTraceView", () => {
     // assert the full text round-trips.
     const raw = screen.getByText(/NativeMethodAccessorImpl\.invoke0/);
     expect(raw).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      screen.queryByText(/NativeMethodAccessorImpl\.invoke0/),
+    ).not.toBeInTheDocument();
   });
 
   it("frame buttons are focusable via Tab and activatable via Enter", async () => {
+    const user = userEvent.setup();
     const listener = vi.fn();
     window.addEventListener("c2c:reveal-cobol", listener);
     try {
@@ -260,12 +280,16 @@ describe("StackTraceView", () => {
       const button = await screen.findByRole("button", {
         name: /Reveal COBOL line 30/,
       });
-      button.focus();
+      await user.tab();
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: /Show raw/i }),
+      );
+      await user.tab();
       expect(document.activeElement).toBe(button);
-      // <button> elements activate on click for keyboard Enter/Space.
-      // Use the click event so the test stays runtime-agnostic.
-      fireEvent.click(button);
-      expect(listener).toHaveBeenCalled();
+      await user.keyboard("{Enter}");
+      expect(listener).toHaveBeenCalledTimes(1);
+      await user.keyboard(" ");
+      expect(listener).toHaveBeenCalledTimes(2);
     } finally {
       window.removeEventListener("c2c:reveal-cobol", listener);
     }
