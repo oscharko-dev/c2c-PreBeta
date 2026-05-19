@@ -1,11 +1,13 @@
-// Studio-IDE-12 (#250) CSP contract test: lock the policy emitted by
-// ``next.config.mjs`` so a regression that introduces ``'unsafe-eval'``
-// or removes the Monaco worker source flips this assertion red.
+// Issue #271 / ADR-0005 §6: contract test for the **static-asset
+// fallback CSP** declared in ``next.config.mjs``. The per-request
+// nonce-based CSP that hydrates the App Router is owned by
+// ``src/middleware.ts`` and exercised by ``tests/middleware.test.ts``.
 //
-// The test imports the Next.js config (an ESM module) and exercises
-// its ``headers()`` callback, then validates the
-// ``Content-Security-Policy`` value against the directives Issue #250
-// §CSP prescribes.
+// The fallback is what ships for paths the middleware matcher
+// excludes — ``/_next/static``, ``/_next/image``, ``/favicon``, and
+// ``/api/*``. Those paths don't run inline scripts, so a tight
+// ``script-src 'self'`` (no nonce, no ``'unsafe-eval'``) is correct
+// and removing it would silently widen the fallback.
 
 import { describe, expect, it } from "vitest";
 // next.config.mjs is a plain ESM module without type declarations;
@@ -54,42 +56,24 @@ async function resolveCsp(): Promise<string> {
   return csp.value;
 }
 
-describe("Studio-IDE-12 (#250) Content Security Policy", () => {
+describe("Studio static-asset fallback CSP (ADR-0005 §6)", () => {
   it("declares default-src 'self'", async () => {
     const csp = await resolveCsp();
     expect(csp).toContain("default-src 'self'");
   });
 
-  // ``'unsafe-eval'`` is the load-bearing protection against runtime
-  // code injection. It MUST stay out of the production policy at all
-  // times. The dev policy is allowed to relax this for Fast Refresh,
-  // but vitest runs in NODE_ENV=test which the build treats as
-  // production for the purposes of next.config.mjs.
-  it("forbids 'unsafe-eval' on script-src", async () => {
+  it("declares script-src 'self' (no nonce, no eval) for static assets", async () => {
     const csp = await resolveCsp();
     const scriptDirective = csp.match(/script-src[^;]*/)?.[0] ?? "";
+    expect(scriptDirective).toBe("script-src 'self'");
     expect(scriptDirective).not.toContain("'unsafe-eval'");
-  });
-
-  it("declares script-src 'self' as the primary script source", async () => {
-    const csp = await resolveCsp();
-    expect(csp).toMatch(/script-src 'self'/);
-  });
-
-  // Studio-IDE-12 (#250) follow-up: production fallback CSP MUST NOT
-  // permit ``'unsafe-inline'``. The middleware overrides this header
-  // with a per-request nonce on every HTML response, so the only
-  // routes that fall through to this fallback are static assets
-  // that ship no inline scripts.
-  it("production fallback forbids 'unsafe-inline' on script-src", async () => {
-    const csp = await resolveCsp();
-    const scriptDirective = csp.match(/script-src[^;]*/)?.[0] ?? "";
     expect(scriptDirective).not.toContain("'unsafe-inline'");
   });
 
-  it("allows worker-src 'self' blob: for Monaco web workers", async () => {
+  it("declares worker-src 'self' (ADR-0005 §6 — no blob:)", async () => {
     const csp = await resolveCsp();
-    expect(csp).toContain("worker-src 'self' blob:");
+    const workerDirective = csp.match(/worker-src[^;]*/)?.[0] ?? "";
+    expect(workerDirective).toBe("worker-src 'self'");
   });
 
   it("forbids object embeds and frame ancestors", async () => {
@@ -98,9 +82,26 @@ describe("Studio-IDE-12 (#250) Content Security Policy", () => {
     expect(csp).toContain("frame-ancestors 'none'");
   });
 
-  it("restricts connect-src to same origin (BFF)", async () => {
+  it("restricts connect-src to 'self' on the fallback (BFF override lives in the middleware)", async () => {
     const csp = await resolveCsp();
     expect(csp).toContain("connect-src 'self'");
+  });
+
+  it("declares img-src 'self' data: and font-src 'self' data:", async () => {
+    const csp = await resolveCsp();
+    expect(csp).toContain("img-src 'self' data:");
+    expect(csp).toContain("font-src 'self' data:");
+  });
+
+  it("declares base-uri 'self' and form-action 'self'", async () => {
+    const csp = await resolveCsp();
+    expect(csp).toContain("base-uri 'self'");
+    expect(csp).toContain("form-action 'self'");
+  });
+
+  it("declares the ADR-0005 §6 report-uri verbatim", async () => {
+    const csp = await resolveCsp();
+    expect(csp).toContain("report-uri /api/v0/csp-report");
   });
 
   it("ships X-Frame-Options DENY and X-Content-Type-Options nosniff", async () => {

@@ -102,6 +102,16 @@ import {
   statusForValidationErrorCode,
   validateTelemetryBatch,
 } from "./editorTelemetry";
+// Issue #271 / ADR-0005 §6: receiver for browser CSP violation
+// reports. Parser + PII gate + canonical log shape live in
+// `./cspReport.ts`; the route handler below is intentionally thin.
+import {
+  CSP_REPORT_LOG_SCHEMA_VERSION,
+  CSP_REPORT_MAX_BODY_BYTES,
+  isAcceptedCspReportContentType,
+  parseCspReportPayload,
+  type SanitizedCspReport,
+} from "./cspReport";
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -145,6 +155,12 @@ export interface ServerDeps {
   // contract surgery. ``undefined`` means "discard"; tests pass a
   // capturing array to inspect the entry.
   editorAssistLedgerSink?: (entry: EditorAssistLedgerEntry) => void;
+  // Issue #271 / ADR-0005 §6: sink for sanitized CSP violation
+  // reports. Default writes one ``console.warn`` per report so the
+  // existing log pipeline picks them up without new infra. Tests
+  // pass a capturing array to assert on the canonical log shape and
+  // to prove no PII leaks into the record.
+  cspReportSink?: (report: SanitizedCspReport) => void;
   now?: () => Date;
 }
 
@@ -162,6 +178,7 @@ interface ResolvedDeps {
   editorAssistBudgets: EditorAssistBudgetStore;
   editorAssistSequence: SequenceCounter;
   editorAssistLedgerSink: (entry: EditorAssistLedgerEntry) => void;
+  cspReportSink: (report: SanitizedCspReport) => void;
   now: () => Date;
 }
 
@@ -250,8 +267,26 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
       createEditorAssistBudgetStore({ now: deps.now }),
     editorAssistSequence: deps.editorAssistSequence ?? createSequenceCounter(),
     editorAssistLedgerSink: deps.editorAssistLedgerSink ?? (() => undefined),
+    cspReportSink: deps.cspReportSink ?? defaultCspReportSink,
     now: deps.now ?? (() => new Date()),
   };
+}
+
+// Default CSP-report log shape: one structured ``warn`` per report
+// so existing log shippers can pick the records up without
+// dedicated infra. The shape is intentionally stable — any change
+// requires a ``CSP_REPORT_LOG_SCHEMA_VERSION`` bump in
+// ``./cspReport.ts``. PII has already been stripped at the
+// boundary; this function only formats.
+function defaultCspReportSink(report: SanitizedCspReport): void {
+  // eslint-disable-next-line no-console
+  console.warn(
+    JSON.stringify({
+      kind: "csp_violation",
+      schemaVersion: CSP_REPORT_LOG_SCHEMA_VERSION,
+      report,
+    }),
+  );
 }
 
 function jsonResponse(
@@ -2791,6 +2826,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
     editorAssistBudgets,
     editorAssistSequence,
     editorAssistLedgerSink,
+    cspReportSink,
     now: nowFn,
   } = resolved;
 
@@ -2811,6 +2847,43 @@ export function createApp(deps: ServerDeps): http.RequestListener {
 
       if (pathname === "/api/v0/health" && method === "GET") {
         jsonResponse(res, 200, { status: "ok", service: config.serviceName });
+        return;
+      }
+
+      // Issue #271 / ADR-0005 §6: receiver for browser CSP violation
+      // reports. The endpoint is intentionally unauthenticated — the
+      // browser cannot attach credentials to ``report-uri`` requests —
+      // and intentionally generous on Content-Type so it accepts both
+      // the legacy ``application/csp-report`` and the modern
+      // ``application/reports+json`` payloads. The PII gate lives in
+      // ``./cspReport.ts``.
+      if (pathname === "/api/v0/csp-report" && method === "POST") {
+        const contentType = req.headers["content-type"];
+        if (!isAcceptedCspReportContentType(contentType)) {
+          jsonResponse(res, 415, {
+            error: `unsupported content-type: ${typeof contentType === "string" && contentType.length > 0 ? contentType : "<missing>"}`,
+          });
+          return;
+        }
+        let raw: unknown;
+        try {
+          raw = await readJsonBody(req, CSP_REPORT_MAX_BODY_BYTES);
+        } catch (err) {
+          if (err instanceof Error && /too large/i.test(err.message)) {
+            jsonResponse(res, 413, { error: "csp report body too large" });
+            return;
+          }
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        const parsed = parseCspReportPayload(contentType, raw);
+        if (!parsed.ok) {
+          jsonResponse(res, parsed.status, { error: parsed.error });
+          return;
+        }
+        for (const report of parsed.reports) cspReportSink(report);
+        res.writeHead(204);
+        res.end();
         return;
       }
 

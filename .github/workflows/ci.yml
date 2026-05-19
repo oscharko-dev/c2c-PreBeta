@@ -151,3 +151,19 @@ jobs:
         if: hashFiles('apps/c2c-studio/scripts/verify-monaco-lazy.mjs') != ''
         working-directory: apps/c2c-studio
         run: npm run verify:monaco-lazy
+
+      # Issue #271 / ADR-0005 §6: the BFF carries the CSP-report
+      # receiver (POST /api/v0/csp-report). Run its lint + test suite
+      # so a regression in the parser or PII gate is caught here
+      # instead of in production.
+      - name: Install c2c-bff dependencies
+        if: hashFiles('services/c2c-bff/package.json') != ''
+        working-directory: services/c2c-bff
+        run: npm ci --no-fund --no-audit
+
+      - name: Run c2c-bff lint and tests
+        if: hashFiles('services/c2c-bff/package.json') != ''
+        working-directory: services/c2c-bff
+        run: |
+          npm run lint
+          npm test

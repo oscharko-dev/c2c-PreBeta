@@ -1,0 +1,94 @@
+name: Studio CSP gate
+
+# Issue #271 / ADR-0005 §6 ACs (E2E):
+#   * "Studio hydrates and Monaco mounts under the new CSP without
+#     console violations."
+#   * "E2E acceptance per ADR-0005 §5 'Hover Markdown Sanitization'
+#     runs cleanly under the new CSP (no script execution from any
+#     of the listed payloads)."
+#
+# This workflow is the CI side of that gate. It runs only the @csp
+# Playwright spec against a production Studio build (no BFF, no
+# upstream services) so the CSP contract is enforced on every PR
+# without paying the 10-service local-stack startup cost.
+#
+# The harness exercises the empty workbench shell at ``/`` — that
+# surface mounts Monaco and runs the framework hydration, which is
+# the actual code path the CSP must allow. The hover sanitization
+# payloads are injected client-side and would normally execute under
+# a permissive policy; the assertion that they do NOT execute is the
+# CSP's value proposition.
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  csp:
+    name: Studio CSP (ADR-0005 §6)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/c2c-studio/package-lock.json
+
+      - name: Install Studio dependencies
+        working-directory: apps/c2c-studio
+        run: npm ci --no-fund --no-audit
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('apps/c2c-studio/package-lock.json') }}
+
+      - name: Install Playwright Chromium with system deps
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install --with-deps chromium
+
+      # When the browser cache hits we still need the system deps
+      # (libnss3, libatk1.0, etc.) to be installed on the runner.
+      - name: Install Playwright system deps (browser cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: apps/c2c-studio
+        run: npx playwright install-deps chromium
+
+      - name: Build Studio (production)
+        working-directory: apps/c2c-studio
+        env:
+          # The CSP harness only needs the workbench shell — no BFF
+          # override is configured so the production bundle uses the
+          # same-origin default ``connect-src 'self'`` policy.
+          NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
+        run: npm run build
+
+      - name: Run CSP gate (@csp spec only)
+        working-directory: apps/c2c-studio
+        env:
+          CI: "1"
+        run: npm run test:e2e:csp:ci
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-csp
+          path: apps/c2c-studio/playwright-report/
+          retention-days: 7

@@ -9,12 +9,14 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:ci": "playwright test --grep-invert \"@visual|@perf|@memory\"",
+    "test:e2e:ci": "playwright test --grep-invert \"@visual|@perf|@memory|@csp\"",
     "test:e2e:update-snapshots": "playwright test --grep @visual --update-snapshots",
     "test:e2e:a11y": "playwright test --grep @a11y",
     "test:e2e:a11y:ci": "playwright test --config=playwright.a11y.config.ts",
     "test:e2e:perf": "playwright test --grep @perf",
     "test:e2e:memory": "playwright test --grep @memory",
+    "test:e2e:csp": "playwright test --grep @csp",
+    "test:e2e:csp:ci": "playwright test --config=playwright.csp.config.ts",
     "verify:monaco-lazy": "node scripts/verify-monaco-lazy.mjs"
   },
   "dependencies": {
