@@ -14,10 +14,9 @@ name: Studio a11y gate
 # activity bar, secondary stripe, status bar, etc.) and renders
 # without a connected backend.
 #
-# Companion specs (``@perf`` / ``@memory`` / ``@visual``) stay
-# non-blocking initially per the issue spec; flipping them to required
-# is a separate workflow once their CI infrastructure (browser
-# caching, fixture warm-up, snapshot determinism) is proven stable.
+# Companion specs (``@perf`` / ``@memory`` / ``@visual``) run in their
+# dedicated required workflows because their CI infrastructure is now
+# deterministic enough to block regressions.
 
 on:
   push:

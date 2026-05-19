@@ -14,17 +14,21 @@
 // Hooks installed when active:
 //
 //   * ``window.addEventListener("c2c-perf:load-cobol", ev)`` →
-//     calls ``setSourceFile(detail.sourceText, detail.sourceName)``.
+//     calls ``setSourceFile(detail.sourceText, detail.sourceName)`` without
+//     local-draft restoration so the perf gate measures editor churn rather
+//     than session-bootstrap / IndexedDB noise.
 //   * ``window.addEventListener("c2c-e2e:load-cobol", ev)`` →
-//     calls ``setSourceFile(detail.sourceText, detail.sourceName)``.
+//     calls ``setSourceFile(detail.sourceText, detail.sourceName)`` with the
+//     same draft-restore bypass as the perf event.
 //   * ``window.addEventListener("c2c-perf:clear-editors", ev)`` →
 //     calls ``clearWorkspace()`` to reset to the empty state.
 //   * ``window.__c2cEditorHarnessReady`` → boolean readiness flag for
 //     Playwright helpers so they do not dispatch before the effect mounts.
-//   * ``window.__c2cMonacoEditor`` → the focused
+//   * ``window.__c2cMonacoEditor`` → the latest mounted
 //     ``IStandaloneCodeEditor`` instance, refreshed whenever a Monaco
-//     editor mounts (CodeEditorInner emits a ``c2c:editor-mounted``
-//     event the bridge listens to).
+//     editor mounts.
+//   * ``window.__c2cMonacoModelCount`` / ``__c2cMonacoModelUris`` →
+//     browser-only probes used by the @memory gate to verify model disposal.
 //
 // The hooks deliberately use plain DOM CustomEvents so the perf
 // harness can drive them without importing Studio code.
@@ -59,7 +63,9 @@ export function PerfHarnessBridge() {
       const detail = (event as CustomEvent<LoadCobolDetail>).detail;
       if (!detail || typeof detail.sourceText !== "string") return;
       const sourceName = detail.sourceName ?? "perf-harness.cbl";
-      setSourceFile(detail.sourceText, sourceName, `perf:${sourceName}`);
+      setSourceFile(detail.sourceText, sourceName, `perf:${sourceName}`, {
+        restoreDraft: false,
+      });
     };
     const onClear = () => clearWorkspace();
 

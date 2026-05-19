@@ -932,18 +932,22 @@ function makePersistence(
   }
 
   async function purgeExpired(scope: DraftScope): Promise<ClearResult> {
-    await bootstrapFor(scope);
+    const bootstrap = await bootstrapFor(scope);
     const db = await openDraftDb();
+    const scopeSelector = await deriveScopeSelector(bootstrap);
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const expiryIndex = store.index("by-expiry");
+    const scopeIndex = store.index("by-scope-selector");
     const currentMs = nowMs();
-    const range = IDBKeyRange.upperBound(currentMs);
+    const range = IDBKeyRange.only(scopeSelector);
     let purgedCount = 0;
-    let cursor = await expiryIndex.openKeyCursor(range);
+    let cursor = await scopeIndex.openCursor(range);
     while (cursor) {
-      await store.delete(cursor.primaryKey);
-      purgedCount += 1;
+      const record = cursor.value as DraftRecord;
+      if (record.ttlExpiresAtMs <= currentMs) {
+        await store.delete(record.key);
+        purgedCount += 1;
+      }
       cursor = await cursor.continue();
     }
     await tx.done;

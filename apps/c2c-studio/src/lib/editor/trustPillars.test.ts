@@ -7,6 +7,7 @@ import {
   mergeRegionsForTrustPillars,
   pillarFor,
   TRUST_PILLAR_VISUALS,
+  trustPillarAriaSummary,
   type TrustPillarKey,
 } from "./trustPillars";
 import type {
@@ -230,6 +231,24 @@ describe("buildTrustPillarDecorations", () => {
     expect(flatHover).toContain("oracle_failed");
     expect(flatHover).toContain("agent_originated");
     expect(flatHover).toContain("Repair attempts: 2");
+  });
+});
+
+describe("trustPillarAriaSummary", () => {
+  it("uses the pillar aria labels to summarize provenance for screen readers", () => {
+    const summary = trustPillarAriaSummary([
+      region("deterministic", "oracle_passed", 1, 3),
+      region("manual_edit", "no_oracle", 4, 5),
+      region("manual_edit", "no_oracle", 6, 7),
+    ]);
+
+    expect(summary).toBe(
+      "Trust provenance summary. 1 region: Deterministic region, oracle verified. 2 regions: Manual addition, no COBOL lineage.",
+    );
+  });
+
+  it("returns null when no known provenance regions are present", () => {
+    expect(trustPillarAriaSummary([])).toBeNull();
   });
 });
 

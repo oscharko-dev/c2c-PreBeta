@@ -300,7 +300,7 @@ describe("editorPersistence", () => {
     expect(await p.loadDraft(scopeA, cobolKey)).not.toBeNull();
   });
 
-  it("purgeExpired removes expired records globally without cloning scoped payloads", async () => {
+  it("purgeExpired removes only expired records in the requested scope", async () => {
     let now = 1_700_000_000_000;
     const p = persistenceFor(scopeA, {
       ttlMs: 1_000,
@@ -324,7 +324,7 @@ describe("editorPersistence", () => {
       nowMs: () => now,
     });
     const result = await pA2.purgeExpired(scopeA);
-    expect(result.purgedCount).toBe(2);
+    expect(result.purgedCount).toBe(1);
 
     expect(await pA2.loadDraft(scopeA, cobolKey)).toBeNull();
     const java = await pA2.loadDraft(scopeA, javaKey);
@@ -336,7 +336,7 @@ describe("editorPersistence", () => {
       nowMs: () => now,
     });
     const tenantB = await pB2.loadDraft(scopeB, cobolKey);
-    expect(tenantB).toBeNull();
+    expect(tenantB?.payload.content).toBe("tenant-b-expired");
   });
 
   it("clearAll removes only the requested scope's drafts", async () => {

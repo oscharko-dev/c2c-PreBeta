@@ -4,11 +4,10 @@
 // can be generated and verified against the same deterministic
 // runtime the a11y gate uses.
 //
-// Snapshots are pinned to chromium / macOS per the existing
-// workflow.spec.ts baseline policy. CI runs visual on the same
-// chromium/Linux runner that runs a11y; the per-test ``test.skip``
-// guards keep platform-specific baselines from running on the wrong
-// host.
+// Snapshots are pinned to Chromium/macOS per the existing
+// workflow.spec.ts baseline policy. CI intentionally runs this config
+// on macOS so the committed ``*-chromium-darwin.png`` baselines are
+// actually compared rather than skipped on a Linux host.
 
 import { defineConfig, devices } from "@playwright/test";
 

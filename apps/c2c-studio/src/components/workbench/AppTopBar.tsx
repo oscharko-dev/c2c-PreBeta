@@ -201,9 +201,8 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         setClearDraftsScope(scope);
         setClearDraftsCount(draftCount);
       } catch {
-        setClearDraftsMode("origin");
         setClearDraftsError(
-          "Session unavailable. Clear will remove every local draft saved in this browser.",
+          "Session unavailable. Sign in again to clear local drafts for this workspace.",
         );
       } finally {
         setClearDraftsLoading(false);
@@ -222,9 +221,13 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     setClearDraftsPending(true);
     setClearDraftsError(null);
     try {
-      const result = clearDraftsScope
-        ? await editorPersistence.clearAll(clearDraftsScope)
-        : await editorPersistence.clearLocalOrigin();
+      if (!clearDraftsScope) {
+        setClearDraftsError(
+          "Session unavailable. Sign in again to clear local drafts for this workspace.",
+        );
+        return;
+      }
+      const result = await editorPersistence.clearAll(clearDraftsScope);
       emitTelemetry({
         eventType: "drafts.cleared",
         payload: {
@@ -567,13 +570,15 @@ function ClearDraftsConfirmDialog({
       ? "All local drafts in this browser"
       : "Current signed-in workspace";
   const countLabel =
-    draftCount === null
+    error && scope === null
+      ? "Unavailable without an active session"
+      : draftCount === null
       ? mode === "origin"
         ? "Unavailable without an active session"
         : "Checking local drafts…"
       : `${draftCount} local draft${draftCount === 1 ? "" : "s"}`;
   const canConfirm =
-    !loading && !pending && (scope !== null || mode === "origin");
+    !loading && !pending && scope !== null && mode === "scoped";
 
   return (
     <div

@@ -191,6 +191,26 @@ describe("ManualDriftWorkspace", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("closes the empty shell when Escape is pressed", () => {
+    const onClose = vi.fn();
+    render(
+      <ManualDriftWorkspace
+        filePath="src/App.java"
+        runId="run-current-9999"
+        baselineRunId={null}
+        baselineContent={null}
+        currentContent="public class App {}"
+        manualOverlay={null}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId("manual-drift-workspace-empty"), {
+      key: "Escape",
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("renders Generator Baseline versus current buffer with stable diff URIs", () => {
     render(
       <ManualDriftWorkspace
@@ -259,5 +279,25 @@ describe("ManualDriftWorkspace", () => {
     expect(modifiedEditor.focus).toHaveBeenCalled();
     expect(modifiedCommands).toHaveLength(2);
     expect(originalCommands).toHaveLength(2);
+  });
+
+  it("closes the populated workspace when Escape is pressed", () => {
+    const onClose = vi.fn();
+    render(
+      <ManualDriftWorkspace
+        filePath="src/App.java"
+        runId="run-current-9999"
+        baselineRunId="run-base-1111"
+        baselineContent={"class App {\n  int a;\n}\n"}
+        currentContent={"class App {\n  int b;\n}\n"}
+        manualOverlay={manualOverlay}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId("manual-drift-workspace"), {
+      key: "Escape",
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

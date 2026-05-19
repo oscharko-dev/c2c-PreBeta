@@ -219,6 +219,28 @@ export function buildTrustPillarDecorations(
   return decorations;
 }
 
+export function trustPillarAriaSummary(
+  regions: readonly JavaRegionClassification[],
+): string | null {
+  const counts = new Map<TrustPillarKey, number>();
+  for (const region of regions) {
+    const key = pillarFor(region);
+    if (key === null) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  if (counts.size === 0) {
+    return null;
+  }
+  const parts: string[] = [];
+  for (const key of Object.keys(TRUST_PILLAR_VISUALS) as TrustPillarKey[]) {
+    const count = counts.get(key);
+    if (!count) continue;
+    const noun = count === 1 ? "region" : "regions";
+    parts.push(`${count} ${noun}: ${TRUST_PILLAR_VISUALS[key].ariaLabel}`);
+  }
+  return `Trust provenance summary. ${parts.join(" ")}`;
+}
+
 /**
  * Lineage-Coverage percentage for the active Java file. Counts unique lines
  * covered by `deterministic | agent_proposed | repair_attempted` regions

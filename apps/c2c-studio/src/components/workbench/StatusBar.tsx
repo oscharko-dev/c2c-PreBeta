@@ -98,7 +98,7 @@ export function StatusBar({ apiState }: StatusBarProps) {
         <span data-testid="status-bar-run-label">{runLabel}</span>
         {isSuccess ? (
           <span
-            className="inline-flex items-center gap-1 rounded bg-success px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-bright"
+            className="inline-flex items-center gap-1 rounded bg-success-badge px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-bright"
             data-testid="status-bar-success-badge"
           >
             ✓ Verified
@@ -106,7 +106,7 @@ export function StatusBar({ apiState }: StatusBarProps) {
         ) : null}
         {failureCode ? (
           <span
-            className="inline-flex items-center gap-1 rounded bg-error px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-text-bright"
+            className="inline-flex items-center gap-1 rounded bg-error-badge px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-text-bright"
             data-testid="status-bar-failure-code"
             title={W02_ERROR_LABELS[failureCode]}
           >

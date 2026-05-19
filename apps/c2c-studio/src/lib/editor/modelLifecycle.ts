@@ -128,6 +128,16 @@ export function __resetLifecycleForTests(): void {
   diffViewStates.clear();
 }
 
+export function getLifecycleStateCounts(): {
+  viewStates: number;
+  diffViewStates: number;
+} {
+  return {
+    viewStates: viewStates.size,
+    diffViewStates: diffViewStates.size,
+  };
+}
+
 export function getDisposableBaseline(monaco: MonacoLifecycleSurface): number {
   return monaco.editor.getModels().length;
 }

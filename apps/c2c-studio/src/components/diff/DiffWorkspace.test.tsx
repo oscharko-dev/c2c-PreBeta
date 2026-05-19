@@ -227,6 +227,25 @@ describe("DiffWorkspace", () => {
       fireEvent.click(screen.getByLabelText("Close compare runs"));
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+
+    it("invokes onClose when Escape is pressed in the empty shell", () => {
+      const onClose = vi.fn();
+      render(
+        <DiffWorkspace
+          filePath="src/Foo.java"
+          sourceKey="PRG"
+          runId="run-2-cafefeed"
+          javaHistory={undefined}
+          cobolSnapshotsByRun={undefined}
+          onClose={onClose}
+        />,
+      );
+
+      fireEvent.keyDown(screen.getByTestId("diff-workspace-empty"), {
+        key: "Escape",
+      });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("populated state with lineage", () => {
@@ -314,6 +333,25 @@ describe("DiffWorkspace", () => {
       expect(cobol?.originalModelUri).toBe(
         "inmemory://c2c-studio/diff/cobol/PRG/run-1-deadbeef~original",
       );
+    });
+
+    it("invokes onClose when Escape is pressed in the populated workspace", async () => {
+      const onClose = vi.fn();
+      render(
+        <DiffWorkspace
+          filePath="src/Foo.java"
+          sourceKey="PRG"
+          runId="run-2-cafefeed"
+          javaHistory={javaWithPrevious}
+          cobolSnapshotsByRun={cobolSnapshotsByRun}
+          onClose={onClose}
+        />,
+      );
+
+      fireEvent.keyDown(await screen.findByTestId("diff-workspace"), {
+        key: "Escape",
+      });
+      expect(onClose).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -13,7 +13,11 @@ import {
   LineageCoverageProvider,
   useLineageCoverageApi,
 } from "@/stores/lineageCoverage";
-import { TransformationRunProvider } from "@/stores/transformationRun";
+import {
+  TransformationRunProvider,
+  useTransformationRun,
+} from "@/stores/transformationRun";
+import type { TransformationRunState } from "@/types/run";
 
 const loadingApiState: StudioApiState = {
   health: null,
@@ -38,6 +42,44 @@ function Harness({
   }, [publish, onReady]);
   return null;
 }
+
+function RunStateHarness({ state }: { state: Partial<TransformationRunState> }) {
+  const { setState } = useTransformationRun();
+  React.useEffect(() => {
+    setState((previous) => ({ ...previous, ...state }));
+  }, [setState, state]);
+  return null;
+}
+
+const successState: Partial<TransformationRunState> = {
+  phase: "completed",
+  runId: "run-success",
+  programId: "PAYROLL",
+  summary: {
+    status: "completed",
+    finalClassification: "success",
+  } as TransformationRunState["summary"],
+  generated: {
+    status: "ok",
+  } as TransformationRunState["generated"],
+  buildTest: {
+    status: "ok",
+  } as TransformationRunState["buildTest"],
+  evidence: {
+    status: "complete",
+  } as TransformationRunState["evidence"],
+};
+
+const failureState: Partial<TransformationRunState> = {
+  phase: "failed",
+  runId: "run-failed",
+  programId: "PAYROLL",
+  workflow: {
+    finalClassification: "failed",
+    failureCode: "java_compile_failed",
+    failureMessage: "Java compile failed.",
+  } as TransformationRunState["workflow"],
+};
 
 describe('StatusBar — "Lineage: X%" indicator (Studio-IDE-6 #248)', () => {
   it('renders "Lineage: —" when no file is active', () => {
@@ -91,5 +133,31 @@ describe('StatusBar — "Lineage: X%" indicator (Studio-IDE-6 #248)', () => {
     });
     const chip = screen.getByTestId("status-bar-lineage-coverage");
     expect(chip.textContent).toBe("Lineage: 0%");
+  });
+
+  it("uses AA-safe semantic badge backgrounds for success and failure chips", async () => {
+    const { rerender } = render(
+      <TransformationRunProvider>
+        <LineageCoverageProvider>
+          <RunStateHarness state={successState} />
+          <StatusBar apiState={loadingApiState} />
+        </LineageCoverageProvider>
+      </TransformationRunProvider>,
+    );
+    expect(await screen.findByTestId("status-bar-success-badge")).toHaveClass(
+      "bg-success-badge",
+    );
+
+    rerender(
+      <TransformationRunProvider>
+        <LineageCoverageProvider>
+          <RunStateHarness state={failureState} />
+          <StatusBar apiState={loadingApiState} />
+        </LineageCoverageProvider>
+      </TransformationRunProvider>,
+    );
+    expect(await screen.findByTestId("status-bar-failure-code")).toHaveClass(
+      "bg-error-badge",
+    );
   });
 });
