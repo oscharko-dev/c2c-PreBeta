@@ -68,26 +68,36 @@ async function readyWorkbench(page: import("@playwright/test").Page) {
   await expect(page.getByTestId("studio-workbench-shell")).toBeVisible();
 }
 
+// Hardware-class cushion. Issue #250 §Performance numbers are pinned
+// to M2 / Chromium reference hardware. CI runs on ubuntu-24.04 which
+// is typically 1.5-2× slower per perf benchmarks. A 2× cushion is
+// the tightest gate that still absorbs CI hardware variance without
+// constant flakes; a regression past 2× is a real signal worth
+// blocking on.
+const HARDWARE_CUSHION = 2;
+
 test.describe("@perf editor mount + search", () => {
-  test("5k-line mount lands inside the reference cushion", async ({ page }) => {
+  test("5k-line mount stays inside the reference SLA (with CI hardware cushion)", async ({
+    page,
+  }) => {
     const source = buildSyntheticCobol({ targetLines: 5_000 });
     await readyWorkbench(page);
     const elapsed = await loadCobolAndAwaitMount(page, source);
     console.log(`[perf] 5k mount: ${elapsed} ms (SLA ${MOUNT_SLA_5K_MS} ms)`);
-    expect(elapsed).toBeLessThan(MOUNT_SLA_5K_MS * 5);
+    expect(elapsed).toBeLessThan(MOUNT_SLA_5K_MS * HARDWARE_CUSHION);
   });
 
-  test("10k-line mount lands inside the reference cushion", async ({
+  test("10k-line mount stays inside the reference SLA (with CI hardware cushion)", async ({
     page,
   }) => {
     const source = buildSyntheticCobol({ targetLines: 10_000 });
     await readyWorkbench(page);
     const elapsed = await loadCobolAndAwaitMount(page, source);
     console.log(`[perf] 10k mount: ${elapsed} ms (SLA ${MOUNT_SLA_10K_MS} ms)`);
-    expect(elapsed).toBeLessThan(MOUNT_SLA_10K_MS * 5);
+    expect(elapsed).toBeLessThan(MOUNT_SLA_10K_MS * HARDWARE_CUSHION);
   });
 
-  test("search trigger lands inside the reference cushion", async ({
+  test("search trigger stays inside the reference SLA (with CI hardware cushion)", async ({
     page,
   }) => {
     const source = buildSyntheticCobol({ targetLines: 5_000 });
@@ -107,7 +117,7 @@ test.describe("@perf editor mount + search", () => {
       `[perf] search trigger: ${elapsed.toFixed(0)} ms (SLA ${SEARCH_SLA_MS} ms)`,
     );
     expect(elapsed).toBeGreaterThanOrEqual(0);
-    expect(elapsed).toBeLessThan(SEARCH_SLA_MS * 10);
+    expect(elapsed).toBeLessThan(SEARCH_SLA_MS * HARDWARE_CUSHION);
   });
 
   test("scroll p95 frametime stays under 16.7 ms on a 10k-line buffer", async ({
@@ -157,8 +167,6 @@ test.describe("@perf editor mount + search", () => {
       `[perf] scroll p95 frametime: ${p95.toFixed(2)} ms (SLA ${SCROLL_P95_FRAMETIME_MS} ms)`,
     );
     expect(p95).toBeGreaterThan(0);
-    // 4× cushion absorbs CI hardware variance; a genuine
-    // scroll-smoothness regression past ~67 ms p95 is a real signal.
-    expect(p95).toBeLessThan(SCROLL_P95_FRAMETIME_MS * 4);
+    expect(p95).toBeLessThan(SCROLL_P95_FRAMETIME_MS * HARDWARE_CUSHION);
   });
 });

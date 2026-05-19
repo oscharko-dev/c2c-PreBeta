@@ -29,14 +29,6 @@ test.describe("@a11y workbench shell", () => {
 
     const results = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-      // The Monaco editor surface is owned by an upstream vendor and
-      // ships its own a11y story (announced via ``aria-live`` regions
-      // we don't control). Excluding the editor textarea keeps the
-      // gate focused on the Studio shell — markers, glyphs, and hover
-      // content are covered separately by the
-      // ``hoverMarkdownSanitizer`` and ``diagnosticMarkers`` test
-      // suites.
-      .exclude(".monaco-editor textarea")
       .analyze();
 
     const severe = results.violations.filter((v) =>
