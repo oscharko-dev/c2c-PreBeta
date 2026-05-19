@@ -25,6 +25,15 @@ function readTextFile(file: File): Promise<string> {
   });
 }
 
+function deriveBrowserFileIdentity(file: File): string {
+  const relativePath = (file as File & { webkitRelativePath?: string })
+    .webkitRelativePath;
+  if (relativePath && relativePath.trim().length > 0) {
+    return relativePath.replace(/\\/g, "/");
+  }
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
 export function SecondaryStripe() {
   const { isSecondaryStripeOpen, activeActivityTab } = useWorkbench();
   const { sourceName, sourceText, setSourceFile, clearWorkspace } =
@@ -39,7 +48,7 @@ export function SecondaryStripe() {
     if (!file) return;
 
     const text = await readTextFile(file);
-    setSourceFile(text, file.name);
+    setSourceFile(text, file.name, deriveBrowserFileIdentity(file));
   };
 
   return (

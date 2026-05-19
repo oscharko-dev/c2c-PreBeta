@@ -92,6 +92,12 @@ export interface SaveLocalPayload {
   encrypted: boolean;
 }
 
+export type DraftCountBucket = "zero" | "lt_10" | "lt_100" | "ge_100";
+
+export interface DraftsClearedPayload {
+  purgedCountBucket: DraftCountBucket;
+}
+
 export interface ConflictResolvedPayload {
   kind: "cobol" | "java";
   pick: "backend_sample" | "local_draft" | "last_run_input";
@@ -196,6 +202,7 @@ export type EditorTelemetryEventInput =
   | { eventType: "assist.invoked"; payload: AssistInvokedPayload }
   | { eventType: "assist.result"; payload: AssistResultPayload }
   | { eventType: "save.local"; payload: SaveLocalPayload }
+  | { eventType: "drafts.cleared"; payload: DraftsClearedPayload }
   | { eventType: "conflict.resolved"; payload: ConflictResolvedPayload }
   | { eventType: "generate.invoked"; payload: GenerateInvokedPayload }
   | { eventType: "generate.result"; payload: GenerateResultPayload }
@@ -248,6 +255,7 @@ export const EDITOR_TELEMETRY_EVENT_TYPES: readonly EditorTelemetryEventType[] =
     "assist.invoked",
     "assist.result",
     "save.local",
+    "drafts.cleared",
     "conflict.resolved",
     "generate.invoked",
     "generate.result",

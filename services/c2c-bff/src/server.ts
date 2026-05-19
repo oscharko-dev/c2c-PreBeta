@@ -121,6 +121,7 @@ import {
   createSessionStore,
   validateSessionIdentity,
   SessionIdentifierError,
+  type RedactionPatternAddition,
   type SessionRecord,
   type SessionStore,
 } from "./sessionStore";
@@ -462,10 +463,10 @@ function defaultCspReportSink(report: SanitizedCspReport): void {
 }
 
 // Issue #272 — body size cap for fixture sign-in. The endpoint only
-// reads an optional ``{tenantId, userId}`` override (each capped at
-// 128 chars by the session-store validator), so 1 KiB is more than
-// enough headroom and far below any pathological payload.
-const SESSION_SIGN_IN_MAX_BODY_BYTES = 1024;
+// reads optional ``{tenantId, userId}`` plus reviewed literal
+// redaction additions. 10 KiB covers the bounded addition list while
+// staying far below any pathological payload.
+const SESSION_SIGN_IN_MAX_BODY_BYTES = 10_240;
 
 // Issue #272 — opaque pseudonymous identifier minting for the dev /
 // fixture sign-in path. When the request body omits an override, the
@@ -481,7 +482,11 @@ const SESSION_SIGN_IN_MAX_BODY_BYTES = 1024;
 function resolveFixtureSignInIdentity(
   raw: unknown,
   _store: SessionStore,
-): { tenantId: string; userId: string } {
+): {
+  tenantId: string;
+  userId: string;
+  studioRedactionPatternAdditions?: RedactionPatternAddition[];
+} {
   const body =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
@@ -492,10 +497,27 @@ function resolveFixtureSignInIdentity(
     typeof body.userId === "string" ? body.userId : undefined;
   const tenantId = tenantOverride ?? mintFixtureIdentifier("tenant");
   const userId = userOverride ?? mintFixtureIdentifier("user");
+  const rawAdditions = body.studioRedactionPatternAdditions;
+  if (rawAdditions !== undefined && !Array.isArray(rawAdditions)) {
+    throw new SessionIdentifierError(
+      "studioRedactionPatternAdditions must be an array",
+    );
+  }
+  const additions = rawAdditions
+    ? rawAdditions.map((entry) => entry as RedactionPatternAddition)
+    : undefined;
   // Re-validate even when minted internally so a regression in the
   // mint helper cannot bypass the @ / whitespace rule.
-  validateSessionIdentity({ tenantId, userId });
-  return { tenantId, userId };
+  validateSessionIdentity({
+    tenantId,
+    userId,
+    ...(additions ? { studioRedactionPatternAdditions: additions } : {}),
+  });
+  return {
+    tenantId,
+    userId,
+    ...(additions ? { studioRedactionPatternAdditions: additions } : {}),
+  };
 }
 
 // Mints a ``<prefix>-<16 random hex chars>`` opaque identifier for
@@ -3428,7 +3450,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, err instanceof Error ? err.message : "invalid body");
           return;
         }
-        let identity: { tenantId: string; userId: string };
+        let identity: {
+          tenantId: string;
+          userId: string;
+          studioRedactionPatternAdditions?: RedactionPatternAddition[];
+        };
         try {
           identity = resolveFixtureSignInIdentity(raw, sessionStore);
         } catch (err) {
@@ -3501,6 +3527,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           tenantId: record.tenantId,
           userId: record.userId,
           draftKeyWrappingSecret: record.draftKeyWrappingSecret,
+          studioRedactionPatternAdditions:
+            record.studioRedactionPatternAdditions,
         });
         return;
       }

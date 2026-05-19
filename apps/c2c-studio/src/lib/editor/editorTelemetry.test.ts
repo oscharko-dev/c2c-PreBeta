@@ -220,7 +220,7 @@ describe("editorTelemetry", () => {
     // union enforces "no free-form string fields", and the schema
     // re-enforces it at the boundary. If the count drifts, the
     // contract has drifted — fix both ends.
-    expect(EDITOR_TELEMETRY_EVENT_TYPES.length).toBe(22);
+    expect(EDITOR_TELEMETRY_EVENT_TYPES.length).toBe(23);
   });
 });
 

@@ -50,6 +50,7 @@
     { "$ref": "#/$defs/assistInvoked" },
     { "$ref": "#/$defs/assistResult" },
     { "$ref": "#/$defs/saveLocal" },
+    { "$ref": "#/$defs/draftsCleared" },
     { "$ref": "#/$defs/conflictResolved" },
     { "$ref": "#/$defs/generateInvoked" },
     { "$ref": "#/$defs/generateResult" },
@@ -77,6 +78,7 @@
         "assist.invoked",
         "assist.result",
         "save.local",
+        "drafts.cleared",
         "conflict.resolved",
         "generate.invoked",
         "generate.result",
@@ -102,6 +104,10 @@
       "enum": ["direct", "aggregated", "synthesized", "agent_originated"]
     },
     "nonNegativeInt": { "type": "integer", "minimum": 0 },
+    "draftCountBucket": {
+      "type": "string",
+      "enum": ["zero", "lt_10", "lt_100", "ge_100"]
+    },
     "markerNavigate": {
       "properties": {
         "eventType": { "const": "marker.navigate" },
@@ -251,6 +257,19 @@
           "properties": {
             "kind": { "type": "string", "enum": ["cobol", "java"] },
             "encrypted": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "draftsCleared": {
+      "properties": {
+        "eventType": { "const": "drafts.cleared" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["purgedCountBucket"],
+          "properties": {
+            "purgedCountBucket": { "$ref": "#/$defs/draftCountBucket" }
           }
         }
       }

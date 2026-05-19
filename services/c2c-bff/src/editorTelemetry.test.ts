@@ -132,6 +132,20 @@ test("validateTelemetryEvent accepts assist.invoked with numeric counts", () => 
   assert.equal(result.ok, true);
 });
 
+test("validateTelemetryEvent accepts drafts.cleared with a count bucket", () => {
+  const result = validateTelemetryEvent(
+    event("drafts.cleared", { purgedCountBucket: "lt_10" }),
+  );
+  assert.equal(result.ok, true);
+});
+
+test("validateTelemetryEvent rejects drafts.cleared with a raw count", () => {
+  const result = validateTelemetryEvent(
+    event("drafts.cleared", { purgedCount: 4 }),
+  );
+  assert.equal(result.ok, false);
+});
+
 test("validateTelemetryEvent rejects negative regionLineCount", () => {
   const result = validateTelemetryEvent(
     event("assist.invoked", {
@@ -303,5 +317,5 @@ test("every event type in the closed set has a validator branch (no drift)", () 
     // validators are exercised by the dedicated tests above.
     assert.ok(typeof eventType === "string" && eventType.length > 0);
   }
-  assert.equal(EDITOR_TELEMETRY_EVENT_TYPES.length, 22);
+  assert.equal(EDITOR_TELEMETRY_EVENT_TYPES.length, 23);
 });

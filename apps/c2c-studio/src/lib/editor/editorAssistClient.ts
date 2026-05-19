@@ -14,6 +14,7 @@
 
 import { resolveApiBaseUrl } from "@/lib/apiClient";
 import { emit as emitTelemetry } from "@/lib/editor/editorTelemetry";
+import { clearSessionBootstrap } from "@/lib/editor/sessionBootstrap";
 import {
   EDITOR_ASSIST_ERROR_CODES,
   EDITOR_ASSIST_SCHEMA_VERSION,
@@ -229,6 +230,9 @@ export async function requestExplanation(
   const parsed = safeParseJson(rawBody);
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearSessionBootstrap();
+    }
     if (parsed === null) {
       emitTelemetry({
         eventType: "assist.result",
@@ -316,6 +320,9 @@ export async function getBudget(
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearSessionBootstrap();
+    }
     return {
       ok: false,
       message: `Budget unavailable (HTTP ${response.status})`,

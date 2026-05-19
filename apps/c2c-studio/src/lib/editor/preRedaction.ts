@@ -18,6 +18,14 @@ interface RedactionPattern {
   readonly regex: RegExp;
 }
 
+export interface StudioRedactionPatternAddition {
+  readonly id: string;
+  readonly literal: string;
+}
+
+const TENANT_ADDITION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,96}$/u;
+const MAX_TENANT_ADDITION_LITERAL_CHARS = 256;
+
 // IDs are stable strings shared with the BFF + ledger; keep them sorted
 // alphabetically within each group so a diff is easy to read.
 //
@@ -140,10 +148,16 @@ export interface RedactionResult {
 // list order, which is alphabetical within the BIC/IBAN/PII/SSN block
 // and alphabetical within the field-name block). The pattern list is
 // flattened so the iteration order is deterministic across calls.
-export function redactRegion(rawText: string): RedactionResult {
+export function redactRegion(
+  rawText: string,
+  tenantAdditions: readonly StudioRedactionPatternAddition[] = [],
+): RedactionResult {
   let working = rawText;
   const matched = new Set<string>();
-  for (const pattern of RAW_PATTERNS) {
+  for (const pattern of [
+    ...RAW_PATTERNS,
+    ...buildTenantAdditionPatterns(tenantAdditions),
+  ]) {
     // Reset lastIndex defensively even though each RegExp is its own
     // instance — guards against accidental sharing in future
     // refactors.
@@ -167,6 +181,32 @@ export function redactRegion(rawText: string): RedactionResult {
     matchedPatternIds,
     profileVersion: STUDIO_REDACTION_PROFILE_VERSION,
   };
+}
+
+function buildTenantAdditionPatterns(
+  additions: readonly StudioRedactionPatternAddition[],
+): RedactionPattern[] {
+  const patterns: RedactionPattern[] = [];
+  for (const addition of additions) {
+    const id = addition.id.trim();
+    const literal = addition.literal.trim();
+    if (
+      !TENANT_ADDITION_ID_PATTERN.test(id) ||
+      literal.length === 0 ||
+      literal.length > MAX_TENANT_ADDITION_LITERAL_CHARS
+    ) {
+      continue;
+    }
+    patterns.push({
+      id,
+      regex: new RegExp(escapeRegExp(literal), "g"),
+    });
+  }
+  return patterns;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // Encode the UTF-8 bytes of ``value``. Wrapping the platform API in a

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { WorkbenchProvider } from "@/stores/workbench";
 import { SourceWorkspaceProvider } from "@/stores/sourceWorkspace";
 import { TransformationRunProvider } from "@/stores/transformationRun";
@@ -14,7 +14,10 @@ import { TargetJavaInspector } from "@/components/generated/TargetJavaInspector"
 import { BottomWorkbench } from "@/components/workbench/BottomWorkbench";
 import { StatusBar } from "@/components/workbench/StatusBar";
 import { RightObservabilityStripe } from "@/components/observability/RightObservabilityStripe";
-import { editorPersistence } from "@/lib/editor/editorPersistence";
+import {
+  editorPersistence,
+  getCurrentDraftScope,
+} from "@/lib/editor/editorPersistence";
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
 import { MarkerNavigationProvider } from "@/lib/editor/markerNavigation";
 import { JavaEditorActionsProvider } from "@/stores/javaEditorActions";
@@ -26,15 +29,35 @@ import { PerfHarnessBridge } from "@/components/workbench/PerfHarnessBridge";
 
 export function WorkbenchShell() {
   const apiState = useC2cApi();
+  const [purgeNotice, setPurgeNotice] = useState<string | null>(null);
 
   // Studio-IDE-3 (#247) / ADR-2 §1: purge expired drafts on Studio start.
   // Fire-and-forget; IndexedDB is unavailable in some test environments
   // and the rest of the workbench should keep functioning if the purge
-  // fails.
+  // fails. The purge is scoped to the active session so a shared browser
+  // profile never lets one user delete another user's expired drafts.
   useEffect(() => {
-    void editorPersistence.purgeExpired().catch(() => {
-      // Ignored — see comment above.
-    });
+    let active = true;
+    void (async () => {
+      try {
+        const scope = await getCurrentDraftScope();
+        const result = await editorPersistence.purgeExpired(scope);
+        if (!active || result.purgedCount === 0) return;
+        setPurgeNotice(
+          `Purged ${result.purgedCount} expired local draft${
+            result.purgedCount === 1 ? "" : "s"
+          }.`,
+        );
+        setTimeout(() => {
+          if (active) setPurgeNotice(null);
+        }, 4000);
+      } catch {
+        // Ignored — see comment above.
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
@@ -52,7 +75,10 @@ export function WorkbenchShell() {
                         share a single `(request, result, budget)`
                         slot. */}
                     <EditorAssistProvider>
-                      <WorkbenchShellBody apiState={apiState} />
+                      <WorkbenchShellBody
+                        apiState={apiState}
+                        purgeNotice={purgeNotice}
+                      />
                     </EditorAssistProvider>
                   </JavaEditorActionsProvider>
                 </MarkerNavigationProvider>
@@ -86,8 +112,10 @@ function EditorAssistPanelHost() {
 
 function WorkbenchShellBody({
   apiState,
+  purgeNotice,
 }: {
   apiState: ReturnType<typeof useC2cApi>;
+  purgeNotice: string | null;
 }) {
   // Studio-IDE-5 (#244): install global F8 / Shift+F8 shortcuts inside
   // the MarkerNavigationProvider so the handler can dispatch to the
@@ -106,6 +134,15 @@ function WorkbenchShellBody({
         Skip to transformation workbench
       </a>
       <AppTopBar apiState={apiState} />
+      {purgeNotice ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute right-4 top-14 z-40 rounded border border-line-2 bg-bg-1 px-3 py-1 text-xs text-text shadow"
+        >
+          {purgeNotice}
+        </div>
+      ) : null}
       <PerfHarnessBridge />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <ActivityBar />

@@ -89,7 +89,7 @@ describe("sessionBootstrap", () => {
     expect(a).toBe(b);
   });
 
-  it("clearSessionBootstrap forces the next call to re-fetch (logout / re-auth)", async () => {
+  it("re-fetches after a resolved bootstrap so logout / re-auth rotation is authoritative", async () => {
     const { fetch, calls } = makeFetchStub({
       status: 200,
       body: {
@@ -99,9 +99,37 @@ describe("sessionBootstrap", () => {
       },
     });
     await getSessionBootstrap({ fetch });
-    clearSessionBootstrap();
     await getSessionBootstrap({ fetch });
     expect(calls).toHaveLength(2);
+  });
+
+  it("clearSessionBootstrap drops an in-flight bootstrap before the next call", async () => {
+    const firstHandle: { resolve: ((r: Response) => void) | null } = {
+      resolve: null,
+    };
+    const firstFetch: typeof globalThis.fetch = () =>
+      new Promise<Response>((resolve) => {
+        firstHandle.resolve = resolve;
+      });
+    const { fetch: secondFetch, calls } = makeFetchStub({
+      status: 200,
+      body: {
+        tenantId: "tenant-B",
+        userId: "user-2",
+        draftKeyWrappingSecret: freshSecret(),
+      },
+    });
+
+    const first = getSessionBootstrap({ fetch: firstFetch });
+    clearSessionBootstrap();
+    const second = await getSessionBootstrap({ fetch: secondFetch });
+    expect(second.tenantId).toBe("tenant-B");
+    expect(calls).toHaveLength(1);
+
+    firstHandle.resolve?.(
+      new Response("nope", { status: 500, headers: { "content-type": "text/plain" } }),
+    );
+    await expect(first).rejects.toThrow(SessionBootstrapError);
   });
 
   it("raises SessionBootstrapError(Unauthenticated) on 401", async () => {
@@ -156,6 +184,38 @@ describe("sessionBootstrap", () => {
     const err = await getSessionBootstrap({ fetch }).catch((e) => e);
     expect(err).toBeInstanceOf(SessionBootstrapError);
     expect((err as SessionBootstrapError).kind).toBe("InvalidResponse");
+  });
+
+  it("raises InvalidResponse when userId contains whitespace", async () => {
+    const { fetch } = makeFetchStub({
+      status: 200,
+      body: {
+        tenantId: "tenant-A",
+        userId: "user 1",
+        draftKeyWrappingSecret: freshSecret(),
+      },
+    });
+    const err = await getSessionBootstrap({ fetch }).catch((e) => e);
+    expect(err).toBeInstanceOf(SessionBootstrapError);
+    expect((err as SessionBootstrapError).kind).toBe("InvalidResponse");
+  });
+
+  it("parses session-scoped Studio redaction additions", async () => {
+    const { fetch } = makeFetchStub({
+      status: 200,
+      body: {
+        tenantId: "tenant-A",
+        userId: "user-1",
+        draftKeyWrappingSecret: freshSecret(),
+        studioRedactionPatternAdditions: [
+          { id: "tenant:customer-secret-code", literal: "CUSTOMER-SECRET-CODE" },
+        ],
+      },
+    });
+    const record = await getSessionBootstrap({ fetch });
+    expect(record.studioRedactionPatternAdditions).toEqual([
+      { id: "tenant:customer-secret-code", literal: "CUSTOMER-SECRET-CODE" },
+    ]);
   });
 
   it("does not write the wrapping secret to localStorage", async () => {
@@ -217,19 +277,24 @@ describe("sessionBootstrap", () => {
     aHandle.resolve?.(new Response("nope", { status: 500 }));
     await expect(promiseA).rejects.toThrow();
 
-    // B must still be reachable from the cache — no extra fetch.
-    let extraFetchCount = 0;
-    const probe: typeof globalThis.fetch = async () => {
-      extraFetchCount += 1;
-      return new Response("never", { status: 500 });
+    // Resolved bootstraps are not cached. The next call must re-fetch
+    // through the active dependency instead of reusing B's resolved
+    // secret across a possible logout / re-auth transition.
+    let refetchCount = 0;
+    const refetch: typeof globalThis.fetch = async () => {
+      refetchCount += 1;
+      return new Response(
+        JSON.stringify({
+          tenantId: "tenant-C",
+          userId: "user-3",
+          draftKeyWrappingSecret: freshSecret(),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     };
-    const cached = await getSessionBootstrap({ fetch: fetchB });
-    expect(cached.tenantId).toBe("tenant-A");
-    expect(extraFetchCount).toBe(0);
-    // Sanity: if I call with a different fetch impl, the cache check
-    // does deps-match and re-fetches via the new impl.
-    await expect(getSessionBootstrap({ fetch: probe })).rejects.toThrow();
-    expect(extraFetchCount).toBe(1);
+    const refreshed = await getSessionBootstrap({ fetch: refetch });
+    expect(refreshed.tenantId).toBe("tenant-C");
+    expect(refetchCount).toBe(1);
   });
 
   it("after an error, the next call retries cleanly (rejected promise is not cached)", async () => {

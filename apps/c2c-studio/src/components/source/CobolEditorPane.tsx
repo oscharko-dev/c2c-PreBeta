@@ -48,7 +48,7 @@ import { resolveCobolToJava } from "@/lib/editor/lineageNavigation";
 import { useEditorAssist } from "@/stores/editorAssist";
 import { getOrCreateEditorAssistSessionId } from "@/lib/editor/editorAssistSession";
 import { computeSha256Hex, redactRegion } from "@/lib/editor/preRedaction";
-import { getCurrentDraftScope } from "@/lib/editor/editorPersistence";
+import { getSessionBootstrap } from "@/lib/editor/sessionBootstrap";
 import {
   EDITOR_ASSIST_SCHEMA_VERSION,
   type EditorAssistRequest,
@@ -455,18 +455,21 @@ export function CobolEditorPane() {
             const rawText = isEmptySelection
               ? model.getLineContent(cursorLine)
               : model.getValueInRange(selection);
-            const redaction = redactRegion(rawText);
+            const bootstrap = await getSessionBootstrap();
+            const redaction = redactRegion(
+              rawText,
+              bootstrap.studioRedactionPatternAdditions ?? [],
+            );
             const [sourceHash, byteHash] = await Promise.all([
               computeSha256Hex(rawText),
               computeSha256Hex(redaction.redactedText),
             ]);
-            const scope = await getCurrentDraftScope();
             const runId = stateRunIdRef.current;
             const payload: EditorAssistRequest = {
               schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
               sessionId: getOrCreateEditorAssistSessionId(),
-              tenantId: scope.tenantId,
-              userId: scope.userId,
+              tenantId: bootstrap.tenantId,
+              userId: bootstrap.userId,
               runId: runId ?? null,
               sourceHash,
               region: {

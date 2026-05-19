@@ -156,7 +156,7 @@ export interface EditorPersistence {
     payload: DraftPayload,
   ): Promise<SaveResult>;
   loadDraft(scope: DraftScope, key: DraftKey): Promise<LoadedDraft | null>;
-  purgeExpired(): Promise<ClearResult>;
+  purgeExpired(scope: DraftScope): Promise<ClearResult>;
   clearAll(scope: DraftScope): Promise<ClearResult>;
   listDrafts(scope: DraftScope): Promise<DraftMeta[]>;
 }
@@ -484,10 +484,10 @@ async function decryptPayload(
 // ----- Key serialisation --------------------------------------------------
 
 function serializeKey(scope: DraftScope, key: DraftKey): string {
-  // Tightly scoped composite to prevent collisions. `` (Unit Separator)
+  // Tightly scoped composite to prevent collisions. `\u001f` (Unit Separator)
   // is reserved as the field delimiter so program/source names that contain
   // colons or slashes do not corrupt the key.
-  const sep = "";
+  const sep = "\u001f";
   const head = [
     scope.tenantId,
     scope.userId,
@@ -699,25 +699,40 @@ function makePersistence(
       await db.delete(STORE_NAME, record.key);
       return null;
     }
+    const currentMs = nowMs();
+    const isExpired = record.ttlExpiresAtMs <= currentMs;
+    let ttlExpiresAtMs = record.ttlExpiresAtMs;
+    if (!isExpired) {
+      // ADR-0005 §1: opening a live draft explicitly touches its TTL
+      // without changing savedAt, so expiry reflects recent use while
+      // the content timestamp still means "last written".
+      ttlExpiresAtMs = currentMs + ttlMs;
+      await db.put(STORE_NAME, { ...record, ttlExpiresAtMs });
+    }
     return {
       payload,
-      isExpired: record.ttlExpiresAtMs <= nowMs(),
+      isExpired,
       savedAt: new Date(record.savedAtMs).toISOString(),
-      ttlExpiresAt: new Date(record.ttlExpiresAtMs).toISOString(),
+      ttlExpiresAt: new Date(ttlExpiresAtMs).toISOString(),
     };
   }
 
-  async function purgeExpired(): Promise<ClearResult> {
+  async function purgeExpired(scope: DraftScope): Promise<ClearResult> {
+    await bootstrapFor(scope);
     const db = await getDb();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const expiryIndex = store.index("by-expiry");
-    const cursorRange = IDBKeyRange.upperBound(nowMs());
+    const scopeIndex = store.index("by-scope");
+    const range = IDBKeyRange.only([scope.tenantId, scope.userId]);
+    const currentMs = nowMs();
     let purgedCount = 0;
-    let cursor = await expiryIndex.openCursor(cursorRange);
+    let cursor = await scopeIndex.openCursor(range);
     while (cursor) {
-      await cursor.delete();
-      purgedCount += 1;
+      const record = cursor.value as DraftRecord;
+      if (record.ttlExpiresAtMs <= currentMs) {
+        await cursor.delete();
+        purgedCount += 1;
+      }
       cursor = await cursor.continue();
     }
     await tx.done;
@@ -725,6 +740,7 @@ function makePersistence(
   }
 
   async function clearAll(scope: DraftScope): Promise<ClearResult> {
+    await bootstrapFor(scope);
     const db = await getDb();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
@@ -742,6 +758,7 @@ function makePersistence(
   }
 
   async function listDrafts(scope: DraftScope): Promise<DraftMeta[]> {
+    await bootstrapFor(scope);
     const db = await getDb();
     const tx = db.transaction(STORE_NAME, "readonly");
     const store = tx.objectStore(STORE_NAME);

@@ -206,6 +206,37 @@ describe("redactRegion — ipv4-literal (v1.1.0)", () => {
   });
 });
 
+describe("redactRegion — tenant additions", () => {
+  it("augments the baseline with session-delivered literal additions", () => {
+    const result = redactRegion("MOVE CUSTOMER-SECRET-CODE TO OUT.", [
+      {
+        id: "tenant:customer-secret-code",
+        literal: "CUSTOMER-SECRET-CODE",
+      },
+    ]);
+
+    expect(result.redactedText).not.toContain("CUSTOMER-SECRET-CODE");
+    expect(result.redactedText).toContain(
+      "[REDACTED:tenant:customer-secret-code]",
+    );
+    expect(result.matchedPatternIds).toContain(
+      "tenant:customer-secret-code",
+    );
+  });
+
+  it("treats tenant additions as literals, not browser-supplied regexes", () => {
+    const result = redactRegion("MOVE CUSTOMER-SECRET-CODE TO OUT.", [
+      {
+        id: "tenant:literal-only",
+        literal: "CUSTOMER-.*-CODE",
+      },
+    ]);
+
+    expect(result.redactedText).toContain("CUSTOMER-SECRET-CODE");
+    expect(result.matchedPatternIds).not.toContain("tenant:literal-only");
+  });
+});
+
 describe("redactRegion — ReDoS hygiene", () => {
   it("returns within a hard time budget on a pathological input", () => {
     // Adversarial input that would explode a naive backtracking engine.

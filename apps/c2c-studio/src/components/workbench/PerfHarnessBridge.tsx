@@ -46,7 +46,8 @@ export function PerfHarnessBridge() {
     const onLoad = (event: Event) => {
       const detail = (event as CustomEvent<LoadCobolDetail>).detail;
       if (!detail || typeof detail.sourceText !== "string") return;
-      setSourceFile(detail.sourceText, detail.sourceName ?? "perf-harness.cbl");
+      const sourceName = detail.sourceName ?? "perf-harness.cbl";
+      setSourceFile(detail.sourceText, sourceName, `perf:${sourceName}`);
     };
     const onClear = () => clearWorkspace();
 

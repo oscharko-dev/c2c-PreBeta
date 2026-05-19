@@ -41,6 +41,7 @@ import {
 } from "@/types/api";
 import { TransformRequest } from "@/types/transform-request";
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
+import { clearSessionBootstrap } from "@/lib/editor/sessionBootstrap";
 
 // Re-exported so existing callers that imported `resolveApiBaseUrl`
 // from "@/lib/apiClient" keep working without a churn-y refactor.
@@ -1020,6 +1021,9 @@ async function fetchJson<T>(
     }
 
     if (!response.ok) {
+      if (response.status === 401) {
+        clearSessionBootstrap();
+      }
       const message =
         isRecord(payload) && typeof payload.error === "string"
           ? payload.error

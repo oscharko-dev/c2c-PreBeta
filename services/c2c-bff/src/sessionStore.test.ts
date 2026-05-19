@@ -100,7 +100,40 @@ test("create() mints a session record with a fresh sessionId and secret", () => 
   // base64 of 32 bytes is 44 chars (32/3*4 rounded up + padding).
   const secretBytes = Buffer.from(record.draftKeyWrappingSecret, "base64");
   assert.equal(secretBytes.length, DRAFT_KEY_WRAPPING_SECRET_BYTES);
+  assert.deepEqual(record.studioRedactionPatternAdditions, []);
   assert.match(record.createdAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("create() stores reviewed Studio redaction additions for bootstrap", () => {
+  const store = createSessionStore();
+  const record = store.create({
+    tenantId: "tenant-A",
+    userId: "user-1",
+    studioRedactionPatternAdditions: [
+      { id: "tenant:customer-secret-code", literal: "CUSTOMER-SECRET-CODE" },
+    ],
+  });
+  assert.deepEqual(record.studioRedactionPatternAdditions, [
+    { id: "tenant:customer-secret-code", literal: "CUSTOMER-SECRET-CODE" },
+  ]);
+});
+
+test("validateSessionIdentity rejects redaction additions with extra fields", () => {
+  assert.throws(
+    () =>
+      validateSessionIdentity({
+        tenantId: "tenant-A",
+        userId: "user-1",
+        studioRedactionPatternAdditions: [
+          {
+            id: "tenant:customer-secret-code",
+            literal: "CUSTOMER-SECRET-CODE",
+            source: "unreviewed",
+          } as unknown as { id: string; literal: string },
+        ],
+      }),
+    /entries must contain only id and literal/,
+  );
 });
 
 test("get() returns the same record for the same sessionId (re-fetch returns same secret)", () => {

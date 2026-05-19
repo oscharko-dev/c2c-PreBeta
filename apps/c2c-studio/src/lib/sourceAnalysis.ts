@@ -40,3 +40,61 @@ export async function deriveSourceHash(sourceText: string): Promise<string> {
   }
   return Math.abs(fallback).toString(16).padStart(8, '0').slice(0, 8);
 }
+
+export interface DraftProgramIdInput {
+  parserProgramId?: string | null;
+  detectedProgramId?: string | null;
+  sourceName: string;
+  normalizedPath?: string | null;
+}
+
+function nonEmpty(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+export async function deriveDraftProgramId({
+  parserProgramId,
+  detectedProgramId,
+  sourceName,
+  normalizedPath,
+}: DraftProgramIdInput): Promise<string | null> {
+  const parserId = nonEmpty(parserProgramId);
+  if (parserId) return parserId;
+
+  const localProgramId = nonEmpty(detectedProgramId);
+  if (localProgramId) return localProgramId;
+
+  const path = nonEmpty(normalizedPath);
+  if (!path) return null;
+
+  return (await deriveLengthPrefixedSha256Hex(sourceName, path)).slice(0, 32);
+}
+
+async function deriveLengthPrefixedSha256Hex(
+  sourceName: string,
+  normalizedPath: string,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const sourceBytes = encoder.encode(sourceName);
+  const pathBytes = encoder.encode(normalizedPath);
+  const buffer = new ArrayBuffer(4 + sourceBytes.byteLength + 4 + pathBytes.byteLength);
+  const view = new DataView(buffer);
+  const out = new Uint8Array(buffer);
+  let offset = 0;
+  view.setUint32(offset, sourceBytes.byteLength, false);
+  offset += 4;
+  out.set(sourceBytes, offset);
+  offset += sourceBytes.byteLength;
+  view.setUint32(offset, pathBytes.byteLength, false);
+  offset += 4;
+  out.set(pathBytes, offset);
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error("SubtleCrypto is unavailable; draft SourceKey fallback cannot be derived.");
+  }
+  const digest = await subtle.digest("SHA-256", out);
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
