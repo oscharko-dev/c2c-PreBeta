@@ -17,6 +17,8 @@ import {
   createEditorPersistence,
   EditorPersistenceError,
   __resetEditorPersistenceForTests,
+  __setCurrentDraftScopeProviderForTests,
+  getCurrentDraftScope,
   type DraftKey,
   type DraftPayload,
   type DraftScope,
@@ -460,6 +462,20 @@ describe("editorPersistence", () => {
     const pAfter = persistenceFor(scopeA, { secretSeed: 42 });
     const loaded = await pAfter.loadDraft(scopeA, cobolKey);
     expect(loaded).toBeNull();
+  });
+
+  it("getCurrentDraftScope routes through the injected provider (matches the editorPersistence singleton)", async () => {
+    __setCurrentDraftScopeProviderForTests(async () => ({
+      tenantId: "tenant-Z",
+      userId: "user-9",
+      draftKeyWrappingSecret: bytes32From(7),
+    }));
+    try {
+      const scope = await getCurrentDraftScope();
+      expect(scope).toEqual({ tenantId: "tenant-Z", userId: "user-9" });
+    } finally {
+      __setCurrentDraftScopeProviderForTests(undefined);
+    }
   });
 
   it("EditorPersistenceError carries a discriminated kind", () => {

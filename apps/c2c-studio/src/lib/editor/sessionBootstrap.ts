@@ -92,13 +92,21 @@ export function getSessionBootstrap(
     return cached;
   }
   activeDeps = deps;
-  cached = fetchBootstrap(deps).catch((err) => {
-    // On error, drop the cache so the next call retries cleanly. A
-    // persistent rejected promise would otherwise pin the runtime
-    // to a single failed bootstrap even after the network heals.
-    cached = null;
-    throw err;
-  });
+  const inflight: Promise<SessionBootstrap> = fetchBootstrap(deps).catch(
+    (err) => {
+      // On error, drop the cache so the next call retries cleanly,
+      // but ONLY if our promise is still the cached one. Without the
+      // identity check, a stale rejection could clobber a freshly
+      // assigned (and successful) cache entry from a concurrent
+      // ``clearSessionBootstrap`` + ``getSessionBootstrap`` sequence.
+      if (cached === inflight) {
+        cached = null;
+        activeDeps = null;
+      }
+      throw err;
+    },
+  );
+  cached = inflight;
   return cached;
 }
 

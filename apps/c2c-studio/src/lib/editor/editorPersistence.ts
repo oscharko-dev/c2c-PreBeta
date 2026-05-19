@@ -299,7 +299,12 @@ async function deriveHkdfSalt(
   view.setUint32(offset, user.byteLength, false);
   offset += 4;
   out.set(user, offset);
-  const digest = await subtle.digest("SHA-256", buffer);
+  // ``subtle.digest`` accepts any ``BufferSource`` per the spec,
+  // but the jsdom polyfill that vitest uses in CI only accepts a
+  // concrete typed-array / DataView and rejects a bare
+  // ``ArrayBuffer``. Pass the ``Uint8Array`` view so both Node's
+  // native WebCrypto and jsdom's polyfill agree.
+  const digest = await subtle.digest("SHA-256", out);
   return new Uint8Array(digest) as Bytes;
 }
 
@@ -805,6 +810,13 @@ export async function __resetEditorPersistenceForTests(): Promise<void> {
 
 // ----- Scope helpers ------------------------------------------------------
 
+// Module-level provider for ``getCurrentDraftScope``. Lives in
+// lockstep with the default ``editorPersistence`` singleton so a
+// test that swaps the provider sees the same view of the active
+// session from both surfaces.
+let currentDraftScopeProvider: SessionBootstrapProvider =
+  defaultGetSessionBootstrap;
+
 // Issue #272 / ADR-0005 §2: the Studio reads its draft scope from the
 // BFF session-bootstrap surface. The placeholder
 // ``{ tenantId: "default", userId: "local" }`` that pre-#272 builds
@@ -814,6 +826,18 @@ export async function __resetEditorPersistenceForTests(): Promise<void> {
 // to the session bootstrap so a future identity-layer integration
 // changes nothing else in the call sites.
 export async function getCurrentDraftScope(): Promise<DraftScope> {
-  const bootstrap = await defaultGetSessionBootstrap();
+  const bootstrap = await currentDraftScopeProvider();
   return { tenantId: bootstrap.tenantId, userId: bootstrap.userId };
+}
+
+// Test-only override for ``getCurrentDraftScope``. Mirrors the
+// ``sessionBootstrap`` option on ``createEditorPersistence`` so a
+// vitest suite can drive both the singleton and the standalone
+// helper through one stub. Pass ``undefined`` to restore the
+// default. Not exported through the public API surface beyond
+// tests.
+export function __setCurrentDraftScopeProviderForTests(
+  provider: SessionBootstrapProvider | undefined,
+): void {
+  currentDraftScopeProvider = provider ?? defaultGetSessionBootstrap;
 }

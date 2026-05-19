@@ -128,6 +128,11 @@ import {
   serializeClearedSessionCookie,
   serializeSessionCookie,
 } from "./sessionCookie";
+import {
+  createRateLimiter,
+  resolveClientBucketKey,
+  type RateLimiter,
+} from "./rateLimit";
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -182,6 +187,9 @@ export interface ServerDeps {
   // (seeded ``randomBytes``) to assert on exact secret values
   // without leaking platform randomness into the snapshot.
   sessionStore?: SessionStore;
+  // Issue #272: rate limiter applied to ``POST /api/v0/session/sign-in``.
+  // Tests inject a stub to make limit decisions deterministic.
+  sessionSignInRateLimiter?: RateLimiter;
   now?: () => Date;
 }
 
@@ -201,6 +209,7 @@ interface ResolvedDeps {
   editorAssistLedgerSink: (entry: EditorAssistLedgerEntry) => void;
   cspReportSink: (report: SanitizedCspReport) => void;
   sessionStore: SessionStore;
+  sessionSignInRateLimiter: RateLimiter;
   now: () => Date;
 }
 
@@ -293,6 +302,8 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
     sessionStore:
       deps.sessionStore ??
       createSessionStore({ now: deps.now ?? (() => new Date()) }),
+    sessionSignInRateLimiter:
+      deps.sessionSignInRateLimiter ?? createRateLimiter(),
     now: deps.now ?? (() => new Date()),
   };
 }
@@ -2909,6 +2920,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
     editorAssistLedgerSink,
     cspReportSink,
     sessionStore,
+    sessionSignInRateLimiter,
     now: nowFn,
   } = resolved;
 
@@ -2985,6 +2997,14 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           notFound(res);
           return;
         }
+        // Issue #272: rate-limit fixture sign-in to bound the
+        // in-memory session-store growth under a flood. The
+        // per-IP bucket is itself bounded so a varying-source flood
+        // cannot pin the limiter map either.
+        if (!sessionSignInRateLimiter.consume(resolveClientBucketKey(req))) {
+          jsonResponse(res, 429, { error: "rate limit exceeded" });
+          return;
+        }
         let raw: unknown;
         try {
           raw = await readJsonBody(req, SESSION_SIGN_IN_MAX_BODY_BYTES);
@@ -3052,6 +3072,14 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           jsonResponse(res, 401, { error: "session not found" });
           return;
         }
+        // Issue #272: the bootstrap response varies per cookie. The
+        // ``jsonResponse`` helper already sends ``Cache-Control:
+        // no-store`` (which is strictly stronger than ``Vary``), but
+        // an extra ``Vary: Cookie`` header is cheap defence in depth
+        // against an upstream proxy that ignores ``no-store`` and
+        // would otherwise serve one user's wrapping secret to
+        // another.
+        res.setHeader("vary", "Cookie");
         jsonResponse(res, 200, {
           tenantId: record.tenantId,
           userId: record.userId,

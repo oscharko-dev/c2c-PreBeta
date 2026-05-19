@@ -155,6 +155,62 @@ test("get() returns null for unknown / empty / non-string keys", () => {
   assert.equal(store.get(undefined as unknown as string), null);
 });
 
+test("get() evicts a session that has been idle past the idle-timeout", () => {
+  let now = new Date("2026-05-19T00:00:00Z");
+  const store = createSessionStore({
+    now: () => now,
+    idleTimeoutMs: 60_000, // 60 seconds
+  });
+  const created = store.create({ tenantId: "tenant-A", userId: "user-1" });
+  // 61s later, no intervening access — session has been idle the full
+  // window and the next ``get`` evicts it on the way out.
+  now = new Date(now.getTime() + 61_000);
+  assert.equal(
+    store.get(created.sessionId),
+    null,
+    "session past the idle timeout must be evicted",
+  );
+});
+
+test("get() resets the idle window on access (touch semantics)", () => {
+  let now = new Date("2026-05-19T00:00:00Z");
+  const store = createSessionStore({
+    now: () => now,
+    idleTimeoutMs: 60_000,
+  });
+  const created = store.create({ tenantId: "tenant-A", userId: "user-1" });
+  // Repeatedly poke just before the timeout — the session stays alive.
+  for (let i = 0; i < 5; i += 1) {
+    now = new Date(now.getTime() + 50_000);
+    assert.ok(store.get(created.sessionId), `still alive at iteration ${i}`);
+  }
+});
+
+test("create() enforces the max-sessions cap by evicting the oldest", () => {
+  const store = createSessionStore({ maxSessions: 3 });
+  const first = store.create({ tenantId: "t", userId: "a" });
+  const second = store.create({ tenantId: "t", userId: "b" });
+  const third = store.create({ tenantId: "t", userId: "c" });
+  // 4th create triggers eviction of `first`.
+  const fourth = store.create({ tenantId: "t", userId: "d" });
+  assert.equal(store.get(first.sessionId), null, "oldest session evicted");
+  assert.ok(store.get(second.sessionId));
+  assert.ok(store.get(third.sessionId));
+  assert.ok(store.get(fourth.sessionId));
+});
+
+test("idleTimeoutMs=0 disables idle eviction", () => {
+  let now = new Date("2026-05-19T00:00:00Z");
+  const store = createSessionStore({
+    now: () => now,
+    idleTimeoutMs: 0,
+  });
+  const created = store.create({ tenantId: "t", userId: "a" });
+  // Jump a year — still alive.
+  now = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+  assert.ok(store.get(created.sessionId));
+});
+
 test("randomBytes injection makes the secret + sessionId deterministic for tests", () => {
   // We hand the store a counter-driven byte generator so we can assert
   // on exact secret values. Production uses node:crypto.randomBytes.

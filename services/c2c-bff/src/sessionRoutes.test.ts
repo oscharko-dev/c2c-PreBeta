@@ -131,6 +131,46 @@ async function fetchWithCookies(
   });
 }
 
+interface RawHeadersResult {
+  status: number;
+  headers: Record<string, string>;
+}
+
+async function fetchRawHeaders(
+  url: string,
+  init: { method?: string; cookie?: string } = {},
+): Promise<RawHeadersResult> {
+  const target = new URL(url);
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (init.cookie) headers["cookie"] = init.cookie;
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        method: init.method ?? "GET",
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        headers,
+      },
+      (res) => {
+        const merged: Record<string, string> = {};
+        for (const [key, value] of Object.entries(res.headers)) {
+          if (value === undefined) continue;
+          merged[key.toLowerCase()] = Array.isArray(value)
+            ? value.join(", ")
+            : value;
+        }
+        res.resume();
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, headers: merged }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 function extractSessionCookieValue(setCookie: string[]): string | null {
   for (const header of setCookie) {
     const first = header.split(";")[0] ?? "";
@@ -485,6 +525,62 @@ test("sign-in body cap rejects oversized payloads with 413", async () => {
       },
     );
     assert.equal(result.status, 413);
+  } finally {
+    await server.close();
+  }
+});
+
+test("bootstrap response includes Vary: Cookie so caches do not mix users", async () => {
+  const server = await startTestServer(makeApp());
+  try {
+    const signIn = await fetchWithCookies(
+      `${server.baseUrl}/api/v0/session/sign-in`,
+      { method: "POST", body: { tenantId: "tenant-A", userId: "user-1" } },
+    );
+    const cookieValue = extractSessionCookieValue(signIn.setCookie);
+    const cookieHeader = `${SESSION_COOKIE_NAME}=${cookieValue}`;
+    // Use a raw http.request so we can inspect response headers directly.
+    const rawResponse = await fetchRawHeaders(
+      `${server.baseUrl}/api/v0/session/bootstrap`,
+      { method: "POST", cookie: cookieHeader },
+    );
+    assert.equal(rawResponse.status, 200);
+    // Vary may be set as multiple headers or comma-joined; allow either.
+    const vary = (rawResponse.headers.vary ?? "").toLowerCase();
+    assert.match(
+      vary,
+      /cookie/,
+      `bootstrap response must include 'Vary: Cookie' so a CDN cannot serve one user's wrapping secret to another (got: '${rawResponse.headers.vary ?? "<missing>"}')`,
+    );
+    // The existing jsonResponse helper also stamps Cache-Control: no-store —
+    // assert that too so the contract is observable from one test.
+    assert.match(
+      (rawResponse.headers["cache-control"] ?? "").toLowerCase(),
+      /no-store/,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("sign-in rate limiter rejects the 11th hit per IP within the default window", async () => {
+  const server = await startTestServer(makeApp());
+  try {
+    // The default limiter is 10 hits per minute. Burst 10 sign-ins from
+    // a single peer (the test client is always 127.0.0.1) and the 11th
+    // must come back 429.
+    let allowedCount = 0;
+    let firstRejected = -1;
+    for (let i = 0; i < 11; i += 1) {
+      const result = await fetchWithCookies(
+        `${server.baseUrl}/api/v0/session/sign-in`,
+        { method: "POST", body: {} },
+      );
+      if (result.status === 200) allowedCount += 1;
+      if (result.status === 429 && firstRejected === -1) firstRejected = i;
+    }
+    assert.equal(allowedCount, 10, "first 10 hits must succeed");
+    assert.equal(firstRejected, 10, "11th hit must be 429");
   } finally {
     await server.close();
   }

@@ -181,6 +181,57 @@ describe("sessionBootstrap", () => {
     }
   });
 
+  it("a stale rejection does not clobber a freshly-cached success (concurrent-fetch race)", async () => {
+    // Scenario: call A is in-flight (will reject later). Caller invokes
+    // ``clearSessionBootstrap`` followed by a new ``getSessionBootstrap``
+    // that succeeds. When call A's rejection finally lands, the cache
+    // should still hold the new success — not be nulled out by the
+    // stale rejection.
+    const aHandle: { resolve: ((r: Response) => void) | null } = {
+      resolve: null,
+    };
+    const fetchA: typeof globalThis.fetch = (input, init) => {
+      void input;
+      void init;
+      return new Promise<Response>((resolve) => {
+        aHandle.resolve = resolve;
+      });
+    };
+    const fetchB: typeof globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          tenantId: "tenant-A",
+          userId: "user-1",
+          draftKeyWrappingSecret: freshSecret(),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const promiseA = getSessionBootstrap({ fetch: fetchA });
+    clearSessionBootstrap();
+    const promiseB = await getSessionBootstrap({ fetch: fetchB });
+    expect(promiseB.tenantId).toBe("tenant-A");
+
+    // Now reject A. The race-safe identity check must prevent A's
+    // rejection from clearing B's cached entry.
+    aHandle.resolve?.(new Response("nope", { status: 500 }));
+    await expect(promiseA).rejects.toThrow();
+
+    // B must still be reachable from the cache — no extra fetch.
+    let extraFetchCount = 0;
+    const probe: typeof globalThis.fetch = async () => {
+      extraFetchCount += 1;
+      return new Response("never", { status: 500 });
+    };
+    const cached = await getSessionBootstrap({ fetch: fetchB });
+    expect(cached.tenantId).toBe("tenant-A");
+    expect(extraFetchCount).toBe(0);
+    // Sanity: if I call with a different fetch impl, the cache check
+    // does deps-match and re-fetches via the new impl.
+    await expect(getSessionBootstrap({ fetch: probe })).rejects.toThrow();
+    expect(extraFetchCount).toBe(1);
+  });
+
   it("after an error, the next call retries cleanly (rejected promise is not cached)", async () => {
     let attempt = 0;
     const fetchImpl: typeof globalThis.fetch = async () => {

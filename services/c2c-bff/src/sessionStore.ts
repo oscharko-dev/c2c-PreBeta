@@ -85,8 +85,21 @@ export interface SessionStoreOptions {
   // the store's ID + secret allocation is observable without leaking
   // platform randomness into the assertion.
   randomBytes?: (size: number) => Buffer;
-  // ISO-8601 clock for ``createdAt``. Defaults to ``new Date()``.
+  // ISO-8601 clock for ``createdAt`` + the idle-timeout calculation.
+  // Defaults to ``new Date()``.
   now?: () => Date;
+  // Idle-timeout in milliseconds. A session that has not been
+  // accessed (``get``) within this window is evicted on the next
+  // ``get``/``create`` call. Defaults to 8 hours, matching a
+  // typical interactive session length. Set to ``0`` to disable.
+  idleTimeoutMs?: number;
+  // Hard cap on the number of concurrent sessions held in memory.
+  // When the cap would be exceeded, the oldest record by
+  // ``createdAt`` is evicted first. Defaults to 10 000 — well above
+  // any realistic concurrent-user count for a single BFF replica
+  // and small enough that the Map's memory footprint stays
+  // bounded under a flood (each record is < 200 bytes).
+  maxSessions?: number;
 }
 
 export function validateSessionIdentity(identity: SessionIdentity): void {
@@ -118,16 +131,68 @@ function validateOpaqueIdentifier(field: string, value: string): void {
   }
 }
 
+// Default idle timeout: 8 hours. A user actively editing keeps the
+// session warm via the regular bootstrap re-fetch on each page
+// reload; a session that goes idle this long has effectively been
+// abandoned and should not pin BFF memory.
+const DEFAULT_IDLE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+
+// Default hard cap on concurrent sessions. Each record is < 200
+// bytes, so 10k records ≈ 2 MB — bounded and small. A real
+// deployment with more than 10k concurrent users on a single BFF
+// replica should reach for a shared session backend anyway (see
+// ADR-0005 §2 named follow-ups).
+const DEFAULT_MAX_SESSIONS = 10_000;
+
+interface StoredRecord {
+  record: SessionRecord;
+  lastAccessMs: number;
+  createdAtMs: number;
+}
+
 export function createSessionStore(
   options: SessionStoreOptions = {},
 ): SessionStore {
   const rng = options.randomBytes ?? randomBytes;
   const clock = options.now ?? (() => new Date());
-  const sessions = new Map<string, SessionRecord>();
+  const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+  const sessions = new Map<string, StoredRecord>();
+
+  function nowMs(): number {
+    return clock().getTime();
+  }
+
+  // Sweep idle records on every mutating call. Cheap: the map is
+  // bounded by ``maxSessions`` and a single linear pass over an
+  // already-capped collection is O(n) on n ≤ 10 000.
+  function sweepIdle(currentMs: number): void {
+    if (idleTimeoutMs <= 0) return;
+    for (const [id, entry] of sessions) {
+      if (currentMs - entry.lastAccessMs > idleTimeoutMs) {
+        sessions.delete(id);
+      }
+    }
+  }
+
+  // Enforce the hard cap by evicting the oldest record (by
+  // ``createdAtMs``) first. With ``Map`` iteration order being
+  // insertion order, this is equivalent to a FIFO eviction policy
+  // because ``createdAtMs`` is monotonic in our caller pattern.
+  function evictUntilUnderCap(): void {
+    while (sessions.size >= maxSessions) {
+      const oldest = sessions.keys().next();
+      if (oldest.done) break;
+      sessions.delete(oldest.value);
+    }
+  }
 
   return {
     create(identity: SessionIdentity): SessionRecord {
       validateSessionIdentity(identity);
+      const currentMs = nowMs();
+      sweepIdle(currentMs);
+      evictUntilUnderCap();
       const sessionId = rng(SESSION_ID_BYTES).toString("hex");
       const secretBuf = rng(DRAFT_KEY_WRAPPING_SECRET_BYTES);
       const record: SessionRecord = {
@@ -135,16 +200,31 @@ export function createSessionStore(
         tenantId: identity.tenantId,
         userId: identity.userId,
         draftKeyWrappingSecret: secretBuf.toString("base64"),
-        createdAt: clock().toISOString(),
+        createdAt: new Date(currentMs).toISOString(),
       };
-      sessions.set(sessionId, record);
+      sessions.set(sessionId, {
+        record,
+        lastAccessMs: currentMs,
+        createdAtMs: currentMs,
+      });
       return record;
     },
     get(sessionId: string): SessionRecord | null {
       if (typeof sessionId !== "string" || sessionId.length === 0) {
         return null;
       }
-      return sessions.get(sessionId) ?? null;
+      const entry = sessions.get(sessionId);
+      if (!entry) return null;
+      const currentMs = nowMs();
+      if (idleTimeoutMs > 0 && currentMs - entry.lastAccessMs > idleTimeoutMs) {
+        // Touch-then-delete on the idle path: a request arriving
+        // exactly at the timeout boundary sees a 401 rather than a
+        // half-stale record.
+        sessions.delete(sessionId);
+        return null;
+      }
+      entry.lastAccessMs = currentMs;
+      return entry.record;
     },
     delete(sessionId: string): boolean {
       if (typeof sessionId !== "string" || sessionId.length === 0) {
