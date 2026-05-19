@@ -121,7 +121,7 @@ paths:
         "404":
           description: fixture sessions are disabled in this deployment
         "413":
-          description: request body exceeded the 1 KiB cap
+          description: request body exceeded the 10 KiB cap
 
   /api/v0/session/bootstrap:
     post:
@@ -874,9 +874,10 @@ components:
 
     SessionSignInRequest:
       description: >
-        Optional identity overrides for fixture / dev tooling. Omit
-        to let the BFF mint opaque identifiers itself. Validation:
-        each value matches `[A-Za-z0-9._-]{1,128}` and contains
+        Optional identity overrides and reviewed Studio redaction
+        additions for fixture / dev tooling. Omit identifiers to let
+        the BFF mint opaque identifiers itself. Validation: each
+        identifier matches `[A-Za-z0-9._-]{1,128}` and contains
         neither `@` nor whitespace (ADR-0005 §3).
       type: object
       additionalProperties: false
@@ -891,6 +892,28 @@ components:
           minLength: 1
           maxLength: 128
           pattern: "^[A-Za-z0-9._\\-]+$"
+        studioRedactionPatternAdditions:
+          type: array
+          maxItems: 25
+          items:
+            $ref: "#/components/schemas/StudioRedactionPatternAddition"
+
+    StudioRedactionPatternAddition:
+      type: object
+      required: [id, literal]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: "^[A-Za-z0-9._:-]+$"
+          description: Stable non-PII identifier for the tenant addition.
+        literal:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Literal token added to Studio pre-redaction for this session.
 
     SessionSignInResponse:
       type: object
@@ -924,6 +947,13 @@ components:
             encryption key (ADR-0005 §2). Studio MUST keep this in
             memory only — never logged, never re-sent, never written
             to local storage.
+        studioRedactionPatternAdditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/StudioRedactionPatternAddition"
+          description: >
+            ADR-0005 §4 tenant additions that augment the bundled
+            Studio redaction baseline for this auth session.
 
     Sample:
       description: |

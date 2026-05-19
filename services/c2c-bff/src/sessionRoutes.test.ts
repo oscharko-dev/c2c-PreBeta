@@ -315,6 +315,73 @@ test("POST /api/v0/session/sign-in accepts identity overrides for test fixtures"
   }
 });
 
+test("POST /api/v0/session/bootstrap returns session-scoped Studio redaction additions", async () => {
+  const server = await startTestServer(makeApp());
+  try {
+    const signIn = await fetchWithCookies(
+      `${server.baseUrl}/api/v0/session/sign-in`,
+      {
+        method: "POST",
+        body: {
+          tenantId: "tenant-A",
+          userId: "user-1",
+          studioRedactionPatternAdditions: [
+            {
+              id: "tenant:customer-secret-code",
+              literal: "CUSTOMER-SECRET-CODE",
+            },
+          ],
+        },
+      },
+    );
+    assert.equal(signIn.status, 200);
+    const cookieHeader = `${SESSION_COOKIE_NAME}=${extractSessionCookieValue(
+      signIn.setCookie,
+    )}`;
+
+    const bootstrap = await fetchWithCookies(
+      `${server.baseUrl}/api/v0/session/bootstrap`,
+      { method: "POST", cookie: cookieHeader },
+    );
+    assert.equal(bootstrap.status, 200);
+    const body = bootstrap.body as {
+      studioRedactionPatternAdditions?: unknown;
+    };
+    assert.deepEqual(body.studioRedactionPatternAdditions, [
+      { id: "tenant:customer-secret-code", literal: "CUSTOMER-SECRET-CODE" },
+    ]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/session/sign-in rejects malformed Studio redaction additions", async () => {
+  const server = await startTestServer(makeApp());
+  try {
+    const result = await fetchWithCookies(
+      `${server.baseUrl}/api/v0/session/sign-in`,
+      {
+        method: "POST",
+        body: {
+          tenantId: "tenant-A",
+          userId: "user-1",
+          studioRedactionPatternAdditions: {
+            id: "tenant:customer-secret-code",
+            literal: "CUSTOMER-SECRET-CODE",
+          },
+        },
+      },
+    );
+    assert.equal(result.status, 400);
+    assert.match(
+      (result.body as { error: string }).error,
+      /studioRedactionPatternAdditions must be an array/,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/v0/session/sign-in rejects @ in identifiers (ADR-0005 §3 defense)", async () => {
   const server = await startTestServer(makeApp());
   try {
@@ -542,12 +609,12 @@ test("session cookie gets Secure when forceSecureSessionCookies is set", async (
 test("sign-in body cap rejects oversized payloads with 413", async () => {
   const server = await startTestServer(makeApp());
   try {
-    // 2 KiB payload — well above the 1 KiB cap.
+    // 12 KiB payload — well above the 10 KiB cap.
     const result = await fetchWithCookies(
       `${server.baseUrl}/api/v0/session/sign-in`,
       {
         method: "POST",
-        body: { tenantId: "tenant-A", userId: "u", filler: "x".repeat(2048) },
+        body: { tenantId: "tenant-A", userId: "u", filler: "x".repeat(12_000) },
       },
     );
     assert.equal(result.status, 413);

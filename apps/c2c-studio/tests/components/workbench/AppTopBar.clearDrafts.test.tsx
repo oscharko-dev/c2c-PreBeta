@@ -22,9 +22,12 @@ import React, { type ReactNode } from "react";
 // AppTopBar gets the stub. `vi.hoisted` keeps the mock fns accessible
 // from inside the hoisted `vi.mock` factory while still letting tests
 // reset them between cases.
-const { clearAllMock, purgeExpiredMock } = vi.hoisted(() => ({
+const { clearAllMock, listDraftsMock, purgeExpiredMock, telemetryEmitMock } =
+  vi.hoisted(() => ({
   clearAllMock: vi.fn(),
+  listDraftsMock: vi.fn(),
   purgeExpiredMock: vi.fn(),
+  telemetryEmitMock: vi.fn(),
 }));
 vi.mock("@/lib/editor/editorPersistence", () => {
   return {
@@ -34,14 +37,18 @@ vi.mock("@/lib/editor/editorPersistence", () => {
       loadDraft: vi.fn(async () => null),
       purgeExpired: purgeExpiredMock,
       clearAll: clearAllMock,
-      listDrafts: vi.fn(async () => []),
+      listDrafts: listDraftsMock,
     },
     getCurrentDraftScope: async () => ({
-      tenantId: "default",
-      userId: "local",
+      tenantId: "tenant-A",
+      userId: "user-1",
     }),
   };
 });
+
+vi.mock("@/lib/editor/editorTelemetry", () => ({
+  emit: telemetryEmitMock,
+}));
 
 // Mock keyboard shortcuts hook so it does not install listeners we do
 // not exercise.
@@ -92,7 +99,10 @@ function Wrapper({ children }: { children: ReactNode }) {
 describe("AppTopBar clear-local-drafts", () => {
   beforeEach(() => {
     clearAllMock.mockReset();
+    listDraftsMock.mockReset();
     purgeExpiredMock.mockReset();
+    telemetryEmitMock.mockReset();
+    listDraftsMock.mockResolvedValue([]);
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -139,6 +149,11 @@ describe("AppTopBar clear-local-drafts", () => {
   });
 
   it("invokes editorPersistence.clearAll with the current scope and surfaces the count", async () => {
+    listDraftsMock.mockResolvedValueOnce([
+      { kind: "cobol" },
+      { kind: "java" },
+      { kind: "java" },
+    ]);
     clearAllMock.mockResolvedValueOnce({ purgedCount: 3 });
     renderTopBar();
 
@@ -146,14 +161,20 @@ describe("AppTopBar clear-local-drafts", () => {
     fireEvent.click(
       screen.getByRole("menuitem", { name: /clear local drafts/i }),
     );
+    expect(await screen.findByText(/tenant tenant-a \/ user user-1/i)).toBeInTheDocument();
+    expect(await screen.findByText(/3 local drafts/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clear drafts" }));
 
     await waitFor(() => {
       expect(clearAllMock).toHaveBeenCalledTimes(1);
     });
     expect(clearAllMock).toHaveBeenCalledWith({
-      tenantId: "default",
-      userId: "local",
+      tenantId: "tenant-A",
+      userId: "user-1",
+    });
+    expect(telemetryEmitMock).toHaveBeenCalledWith({
+      eventType: "drafts.cleared",
+      payload: { purgedCountBucket: "lt_10" },
     });
 
     await waitFor(() => {
@@ -169,6 +190,7 @@ describe("AppTopBar clear-local-drafts", () => {
     fireEvent.click(
       screen.getByRole("menuitem", { name: /clear local drafts/i }),
     );
+    expect(await screen.findByText(/0 local drafts/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clear drafts" }));
 
     await waitFor(() => {
@@ -176,6 +198,39 @@ describe("AppTopBar clear-local-drafts", () => {
         screen.getByText(/no local drafts to clear\./i),
       ).toBeInTheDocument();
     });
+  });
+
+  it("keeps the destructive confirm disabled when draft scope lookup fails", async () => {
+    listDraftsMock.mockRejectedValueOnce(new Error("session expired"));
+    renderTopBar();
+
+    fireEvent.click(screen.getByLabelText(/more workbench actions/i));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /clear local drafts/i }),
+    );
+
+    expect(
+      await screen.findByText(/sign in again to clear local drafts/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear drafts" })).toBeDisabled();
+    expect(clearAllMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a recoverable error when clearAll fails", async () => {
+    clearAllMock.mockRejectedValueOnce(new Error("quota"));
+    renderTopBar();
+
+    fireEvent.click(screen.getByLabelText(/more workbench actions/i));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /clear local drafts/i }),
+    );
+    await screen.findByText(/0 local drafts/i);
+    fireEvent.click(screen.getByRole("button", { name: "Clear drafts" }));
+
+    expect(
+      await screen.findByText(/unable to clear local drafts/i),
+    ).toBeInTheDocument();
+    expect(telemetryEmitMock).not.toHaveBeenCalled();
   });
 
   it("dismisses the confirmation dialog when Escape is pressed", () => {

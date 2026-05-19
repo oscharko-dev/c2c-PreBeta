@@ -55,6 +55,12 @@ export class SessionIdentifierError extends Error {
 export interface SessionIdentity {
   tenantId: string;
   userId: string;
+  studioRedactionPatternAdditions?: RedactionPatternAddition[];
+}
+
+export interface RedactionPatternAddition {
+  id: string;
+  literal: string;
 }
 
 export interface SessionRecord {
@@ -64,6 +70,7 @@ export interface SessionRecord {
   // Base64-encoded 32 random bytes. ADR 0005 §2: held in memory only,
   // never logged, never re-sent by the Studio runtime.
   draftKeyWrappingSecret: string;
+  studioRedactionPatternAdditions: RedactionPatternAddition[];
   createdAt: string;
 }
 
@@ -105,6 +112,7 @@ export interface SessionStoreOptions {
 export function validateSessionIdentity(identity: SessionIdentity): void {
   validateOpaqueIdentifier("tenantId", identity.tenantId);
   validateOpaqueIdentifier("userId", identity.userId);
+  validateRedactionAdditions(identity.studioRedactionPatternAdditions ?? []);
 }
 
 function validateOpaqueIdentifier(field: string, value: string): void {
@@ -143,6 +151,9 @@ const DEFAULT_IDLE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 // replica should reach for a shared session backend anyway (see
 // ADR-0005 §2 named follow-ups).
 const DEFAULT_MAX_SESSIONS = 10_000;
+const REDACTION_ADDITION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,96}$/u;
+const MAX_REDACTION_ADDITIONS = 25;
+const MAX_REDACTION_LITERAL_CHARS = 256;
 
 interface StoredRecord {
   record: SessionRecord;
@@ -200,6 +211,9 @@ export function createSessionStore(
         tenantId: identity.tenantId,
         userId: identity.userId,
         draftKeyWrappingSecret: secretBuf.toString("base64"),
+        studioRedactionPatternAdditions: validateRedactionAdditions(
+          identity.studioRedactionPatternAdditions ?? [],
+        ),
         createdAt: new Date(currentMs).toISOString(),
       };
       sessions.set(sessionId, {
@@ -233,4 +247,43 @@ export function createSessionStore(
       return sessions.delete(sessionId);
     },
   };
+}
+
+function validateRedactionAdditions(
+  additions: RedactionPatternAddition[],
+): RedactionPatternAddition[] {
+  if (!Array.isArray(additions) || additions.length > MAX_REDACTION_ADDITIONS) {
+    throw new SessionIdentifierError(
+      "studioRedactionPatternAdditions must be an array of at most 25 entries",
+    );
+  }
+  return additions.map((addition) => {
+    if (!addition || typeof addition !== "object") {
+      throw new SessionIdentifierError(
+        "studioRedactionPatternAdditions entries must be objects",
+      );
+    }
+    const keys = Object.keys(addition).sort();
+    if (keys.length !== 2 || keys[0] !== "id" || keys[1] !== "literal") {
+      throw new SessionIdentifierError(
+        "studioRedactionPatternAdditions entries must contain only id and literal",
+      );
+    }
+    const { id, literal } = addition;
+    if (typeof id !== "string" || !REDACTION_ADDITION_ID_PATTERN.test(id)) {
+      throw new SessionIdentifierError(
+        "studioRedactionPatternAdditions id must match [A-Za-z0-9._:-]{1,96}",
+      );
+    }
+    if (
+      typeof literal !== "string" ||
+      literal.trim().length === 0 ||
+      literal.length > MAX_REDACTION_LITERAL_CHARS
+    ) {
+      throw new SessionIdentifierError(
+        "studioRedactionPatternAdditions literal must be 1-256 characters",
+      );
+    }
+    return { id, literal };
+  });
 }

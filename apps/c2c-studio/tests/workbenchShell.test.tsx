@@ -5,7 +5,7 @@ import {
   within,
   waitFor,
 } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchShell } from "../src/components/workbench/WorkbenchShell";
 
 // Mock useC2cApi to control state
@@ -19,7 +19,35 @@ vi.mock("@/hooks/useC2cApi", () => ({
   useC2cApi: vi.fn(),
 }));
 
+const { getCurrentDraftScopeMock, purgeExpiredMock } = vi.hoisted(() => ({
+  getCurrentDraftScopeMock: vi.fn(),
+  purgeExpiredMock: vi.fn(),
+}));
+
+vi.mock("../src/lib/editor/editorPersistence", () => ({
+  getCurrentDraftScope: getCurrentDraftScopeMock,
+  editorPersistence: {
+    purgeExpired: purgeExpiredMock,
+  },
+}));
+
+vi.mock("@/lib/editor/editorPersistence", () => ({
+  getCurrentDraftScope: getCurrentDraftScopeMock,
+  editorPersistence: {
+    purgeExpired: purgeExpiredMock,
+  },
+}));
+
 describe("WorkbenchShell Layout & Topbar Readiness", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCurrentDraftScopeMock.mockResolvedValue({
+      tenantId: "tenant-A",
+      userId: "user-1",
+    });
+    purgeExpiredMock.mockResolvedValue({ purgedCount: 0 });
+  });
+
   it("renders topbar readiness state when connected", () => {
     vi.mocked(useC2cApi).mockReturnValue({
       health: { status: "ok" },
@@ -60,6 +88,43 @@ describe("WorkbenchShell Layout & Topbar Readiness", () => {
     expect(
       screen.getByRole("button", { name: /generate & verify/i }),
     ).toBeDisabled();
+  });
+
+  it("does not attempt startup draft purge before BFF health succeeds", async () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: null,
+      mode: null,
+      error: "HTTP error 503",
+      errorKind: "backend",
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    await waitFor(() => {
+      expect(purgeExpiredMock).not.toHaveBeenCalled();
+    });
+    expect(getCurrentDraftScopeMock).not.toHaveBeenCalled();
+  });
+
+  it("purges expired drafts after BFF health succeeds", async () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: { status: "ok" },
+      mode: { orchestrator: "live", evidence: "live" },
+      error: null,
+      errorKind: null,
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    await waitFor(() => {
+      expect(getCurrentDraftScopeMock).toHaveBeenCalledTimes(1);
+      expect(purgeExpiredMock).toHaveBeenCalledWith({
+        tenantId: "tenant-A",
+        userId: "user-1",
+      });
+    });
   });
 
   it("verifies layout regions are present with accessible names", () => {

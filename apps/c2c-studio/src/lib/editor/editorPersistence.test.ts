@@ -31,6 +31,7 @@ import type { JavaOriginOverlay } from "../../types/api";
 
 const scopeA: DraftScope = { tenantId: "tenant-A", userId: "user-1" };
 const scopeB: DraftScope = { tenantId: "tenant-B", userId: "user-1" };
+const scopeAOtherUser: DraftScope = { tenantId: "tenant-A", userId: "user-2" };
 
 const cobolKey: DraftKey = {
   kind: "cobol",
@@ -261,7 +262,37 @@ describe("editorPersistence", () => {
     expect(loaded?.isExpired).toBe(true);
   });
 
-  it("purgeExpired removes expired records and leaves live ones intact", async () => {
+  it("uses the ADR default 14-day TTL when no override is provided", async () => {
+    const fixedNow = 1_700_000_000_000;
+    const p = persistenceFor(scopeA, {
+      nowMs: () => fixedNow,
+    });
+
+    const result = await p.saveDraft(scopeA, cobolKey, cobolPayload());
+    expect(result.ttlExpiresAt).toBe(
+      new Date(fixedNow + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    );
+  });
+
+  it("touches the TTL when a live draft is opened without changing savedAt", async () => {
+    let now = 1_700_000_000_000;
+    const p = persistenceFor(scopeA, {
+      ttlMs: 10_000,
+      nowMs: () => now,
+    });
+
+    await p.saveDraft(scopeA, cobolKey, cobolPayload());
+    now += 5_000;
+    const loaded = await p.loadDraft(scopeA, cobolKey);
+    expect(loaded?.isExpired).toBe(false);
+    expect(loaded?.savedAt).toBe(new Date(1_700_000_000_000).toISOString());
+    expect(loaded?.ttlExpiresAt).toBe(new Date(now + 10_000).toISOString());
+
+    now += 11_000;
+    expect(await p.loadDraft(scopeA, cobolKey)).not.toBeNull();
+  });
+
+  it("purgeExpired removes expired records for only the active scope", async () => {
     let now = 1_700_000_000_000;
     const p = persistenceFor(scopeA, {
       ttlMs: 1_000,
@@ -272,12 +303,32 @@ describe("editorPersistence", () => {
     now += 2_000;
     await p.saveDraft(scopeA, javaKey, javaPayload("second"));
 
-    const result = await p.purgeExpired();
+    await __resetEditorPersistenceForTests();
+    const pB = persistenceFor(scopeB, {
+      ttlMs: 1_000,
+      nowMs: () => 1_700_000_000_000,
+    });
+    await pB.saveDraft(scopeB, cobolKey, cobolPayload("tenant-b-expired"));
+
+    await __resetEditorPersistenceForTests();
+    const pA2 = persistenceFor(scopeA, {
+      ttlMs: 1_000,
+      nowMs: () => now,
+    });
+    const result = await pA2.purgeExpired(scopeA);
     expect(result.purgedCount).toBe(1);
 
-    expect(await p.loadDraft(scopeA, cobolKey)).toBeNull();
-    const java = await p.loadDraft(scopeA, javaKey);
+    expect(await pA2.loadDraft(scopeA, cobolKey)).toBeNull();
+    const java = await pA2.loadDraft(scopeA, javaKey);
     expect(java?.payload.content).toBe("second");
+
+    await __resetEditorPersistenceForTests();
+    const pB2 = persistenceFor(scopeB, {
+      ttlMs: 1_000,
+      nowMs: () => now,
+    });
+    const tenantB = await pB2.loadDraft(scopeB, cobolKey);
+    expect(tenantB?.payload.content).toBe("tenant-b-expired");
   });
 
   it("clearAll removes only the requested scope's drafts", async () => {
@@ -315,6 +366,45 @@ describe("editorPersistence", () => {
     expect(java?.javaFilePath).toBe(javaKey.javaFilePath);
     const cobol = drafts.find((d) => d.kind === "cobol");
     expect(cobol?.programId).toBe(cobolKey.programId);
+  });
+
+  it("isolates drafts for users inside the same tenant", async () => {
+    const pA = persistenceFor(scopeA);
+    await pA.saveDraft(scopeA, cobolKey, cobolPayload("user one"));
+
+    await __resetEditorPersistenceForTests();
+    const pOther = persistenceFor(scopeAOtherUser);
+    await pOther.saveDraft(
+      scopeAOtherUser,
+      cobolKey,
+      cobolPayload("user two"),
+    );
+
+    const otherLoaded = await pOther.loadDraft(scopeAOtherUser, cobolKey);
+    expect(otherLoaded?.payload.content).toBe("user two");
+
+    await __resetEditorPersistenceForTests();
+    const pA2 = persistenceFor(scopeA);
+    const userOne = await pA2.loadDraft(scopeA, cobolKey);
+    expect(userOne?.payload.content).toBe("user one");
+  });
+
+  it("isolates Java drafts by javaFilePath within the same program/source", async () => {
+    const p = persistenceFor(scopeA);
+    const otherJavaKey: JavaDraftKey = {
+      ...javaKey,
+      javaFilePath: "src/main/java/com/example/PayrollHelper.java",
+    };
+
+    await p.saveDraft(scopeA, javaKey, javaPayload("primary"));
+    await p.saveDraft(scopeA, otherJavaKey, javaPayload("helper"));
+
+    expect((await p.loadDraft(scopeA, javaKey))?.payload.content).toBe(
+      "primary",
+    );
+    expect((await p.loadDraft(scopeA, otherJavaKey))?.payload.content).toBe(
+      "helper",
+    );
   });
 
   it("rejects a payload.kind/key.kind mismatch with a descriptive error", async () => {
@@ -442,6 +532,31 @@ describe("editorPersistence", () => {
       sessionBootstrap: bootstrapFor(scopeA),
     });
     await expect(p.saveDraft(scopeB, cobolKey, cobolPayload())).rejects.toEqual(
+      expect.objectContaining({
+        name: "EditorPersistenceError",
+        kind: "SessionExpiredDuringEdit",
+      }),
+    );
+  });
+
+  it("rejects purgeExpired, clearAll, and listDrafts when scope does not match the active session", async () => {
+    const p = createEditorPersistence({
+      sessionBootstrap: bootstrapFor(scopeA),
+    });
+
+    await expect(p.purgeExpired(scopeB)).rejects.toEqual(
+      expect.objectContaining({
+        name: "EditorPersistenceError",
+        kind: "SessionExpiredDuringEdit",
+      }),
+    );
+    await expect(p.clearAll(scopeB)).rejects.toEqual(
+      expect.objectContaining({
+        name: "EditorPersistenceError",
+        kind: "SessionExpiredDuringEdit",
+      }),
+    );
+    await expect(p.listDrafts(scopeB)).rejects.toEqual(
       expect.objectContaining({
         name: "EditorPersistenceError",
         kind: "SessionExpiredDuringEdit",

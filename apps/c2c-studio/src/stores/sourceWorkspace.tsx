@@ -13,6 +13,8 @@ import {
   MAX_SOURCE_BYTES,
   getSourceByteSize,
   deriveSourceHash,
+  deriveDetectedProgramId,
+  deriveDraftProgramId,
 } from "../lib/sourceAnalysis";
 import { ApiResult, TransformResponse, GenerateResponse } from "../types/api";
 import { useTransformationRun } from "./transformationRun";
@@ -45,6 +47,7 @@ export interface SourceWorkspaceState {
   sourceText: string;
   isDirty: boolean;
   sourceName: string | null;
+  sourceIdentityPath: string | null;
   expectedOutput: string;
   oracleInput: string;
   allowAiAssist: boolean;
@@ -60,7 +63,11 @@ export interface SourceWorkspaceState {
   saveNoticeAt: number | null;
   programId: string | null;
   setSourceText: (text: string) => void;
-  setSourceFile: (text: string, sourceName: string) => void;
+  setSourceFile: (
+    text: string,
+    sourceName: string,
+    sourceIdentityPath?: string | null,
+  ) => void;
   setExpectedOutput: (text: string) => void;
   setOracleInput: (text: string) => void;
   setAllowAiAssist: (enabled: boolean) => void;
@@ -80,7 +87,11 @@ export interface SourceWorkspaceState {
     choice: "backendSample" | "localDraft" | "lastRunInput",
   ) => void;
   dismissConflict: () => void;
-  loadDraftFor: (programId: string, sourceName: string) => Promise<void>;
+  loadDraftFor: (
+    programId: string,
+    sourceName: string,
+    sourceIdentityPath?: string | null,
+  ) => Promise<void>;
 }
 
 const SourceWorkspaceContext = createContext<SourceWorkspaceState | null>(null);
@@ -89,6 +100,9 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [sourceText, setSourceTextInternal] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [sourceName, setSourceName] = useState<string | null>(null);
+  const [sourceIdentityPath, setSourceIdentityPath] = useState<string | null>(
+    null,
+  );
   const [expectedOutput, setExpectedOutputInternal] = useState("");
   const [oracleInput, setOracleInputInternal] = useState("");
   const [allowAiAssist, setAllowAiAssistInternal] = useState(true);
@@ -97,6 +111,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [lastRunInputHash, setLastRunInputHash] = useState<string | null>(null);
   const [conflict, setConflict] = useState<CobolConflict | null>(null);
   const [saveNoticeAt, setSaveNoticeAt] = useState<number | null>(null);
+  const draftRestoreTokenRef = useRef(0);
 
   const {
     state: runState,
@@ -108,10 +123,10 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const modelGatewayUnavailable =
     allowAiAssist && runState.modelGatewayHealth?.status === "unavailable";
 
-  // The active programId for draft scoping. When no transformation has
-  // run yet (no programId from BFF), drafts attach to the source name as
-  // an interim key — this keeps locally-edited pastes survivable across
-  // reloads even before the user has submitted them.
+  // The active parser/BFF programId for draft scoping. Before the first
+  // successful transform, persistence falls back to a detected PROGRAM-ID
+  // or a path-derived hash; unsourced pastes without either are skipped so
+  // two files with the same display name cannot collide.
   const programId = runState.programId;
 
   // Recompute buffer hash on every text change, debounced to 500 ms per
@@ -144,23 +159,44 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   };
 
   const setSourceText = (text: string) => {
+    draftRestoreTokenRef.current += 1;
     setSourceTextInternal(text);
     setIsDirty(true);
     setTransformError(null);
     if (!sourceName) {
       setSourceName(DEFAULT_SOURCE_NAME);
+      setSourceIdentityPath(null);
     }
   };
 
-  const setSourceFile = (text: string, newSourceName: string) => {
+  const setSourceFile = (
+    text: string,
+    newSourceName: string,
+    newSourceIdentityPath: string | null = null,
+  ) => {
+    const effectiveSourceName = newSourceName || DEFAULT_SOURCE_NAME;
+    const restoreToken = draftRestoreTokenRef.current + 1;
+    draftRestoreTokenRef.current = restoreToken;
     setSourceTextInternal(text);
-    setSourceName(newSourceName || DEFAULT_SOURCE_NAME);
+    setSourceName(effectiveSourceName);
+    setSourceIdentityPath(newSourceIdentityPath);
     setExpectedOutputInternal("");
     setOracleInputInternal("");
     setIsDirty(false);
     setTransformError(null);
     setLastRunInputHash(null);
     lastSeenRunIdRef.current = null;
+    void loadDraftForSource({
+      backendSample: text,
+      nextProgramId: null,
+      nextSourceName: effectiveSourceName,
+      nextSourceIdentityPath: newSourceIdentityPath,
+      nextLastRunInputHash: null,
+      restoreToken,
+    }).catch(() => {
+      // Draft restore is best-effort. File open should not fail just
+      // because the session bootstrap or browser storage is unavailable.
+    });
   };
 
   const setExpectedOutput = (text: string) => {
@@ -179,8 +215,10 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   };
 
   const clearWorkspace = () => {
+    draftRestoreTokenRef.current += 1;
     setSourceTextInternal("");
     setSourceName(null);
+    setSourceIdentityPath(null);
     setExpectedOutputInternal("");
     setOracleInputInternal("");
     setAllowAiAssistInternal(true);
@@ -317,14 +355,30 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
 
   // ----- Persistence integration ---------------------------------------
 
-  function makeCobolKey(currentProgramId: string | null) {
-    const effectiveProgramId =
-      currentProgramId ?? sourceName ?? DEFAULT_SOURCE_NAME;
-    const effectiveSourceName = sourceName ?? DEFAULT_SOURCE_NAME;
+  async function makeCobolKeyFor({
+    currentProgramId,
+    text,
+    currentSourceName,
+    currentSourceIdentityPath,
+  }: {
+    currentProgramId: string | null;
+    text: string;
+    currentSourceName: string;
+    currentSourceIdentityPath: string | null;
+  }) {
+    const effectiveProgramId = await deriveDraftProgramId({
+      parserProgramId: currentProgramId,
+      detectedProgramId: deriveDetectedProgramId(text),
+      sourceName: currentSourceName,
+      normalizedPath: currentSourceIdentityPath,
+    });
+    if (!effectiveProgramId) {
+      return null;
+    }
     return {
       kind: "cobol" as const,
       programId: effectiveProgramId,
-      sourceName: effectiveSourceName,
+      sourceName: currentSourceName,
     };
   }
 
@@ -333,7 +387,15 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       return;
     }
     const scope = await getCurrentDraftScope();
-    const key = makeCobolKey(programId);
+    const key = await makeCobolKeyFor({
+      currentProgramId: programId,
+      text: sourceText,
+      currentSourceName: sourceName ?? DEFAULT_SOURCE_NAME,
+      currentSourceIdentityPath: sourceIdentityPath,
+    });
+    if (!key) {
+      return;
+    }
     const hash = await deriveSourceHash(sourceText);
     const payload: DraftPayload = {
       schemaVersion: "v0",
@@ -352,35 +414,68 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   // content alongside (when relevant) — if the draft disagrees with the
   // backend content, we open the conflict resolver instead of silently
   // applying the draft.
-  const loadDraftFor = async (
-    nextProgramId: string,
-    nextSourceName: string,
-  ): Promise<void> => {
+  const loadDraftForSource = async ({
+    backendSample,
+    nextProgramId,
+    nextSourceName,
+    nextSourceIdentityPath,
+    nextLastRunInputHash,
+    restoreToken,
+  }: {
+    backendSample: string;
+    nextProgramId: string | null;
+    nextSourceName: string;
+    nextSourceIdentityPath: string | null;
+    nextLastRunInputHash: string | null;
+    restoreToken?: number;
+  }): Promise<void> => {
     const scope = await getCurrentDraftScope();
-    const key = {
-      kind: "cobol" as const,
-      programId: nextProgramId,
-      sourceName: nextSourceName,
-    };
+    const key = await makeCobolKeyFor({
+      currentProgramId: nextProgramId,
+      text: backendSample,
+      currentSourceName: nextSourceName,
+      currentSourceIdentityPath: nextSourceIdentityPath,
+    });
+    if (!key) return;
     const loaded = await editorPersistence.loadDraft(scope, key);
+    if (
+      restoreToken !== undefined &&
+      restoreToken !== draftRestoreTokenRef.current
+    ) {
+      return;
+    }
     if (!loaded || loaded.isExpired) {
       return;
     }
-    const backendSample = sourceText;
     if (backendSample && backendSample !== loaded.payload.content) {
       setConflict({
         backendSample,
         localDraft: loaded.payload.content,
-        lastRunInput: lastRunInputHash ? backendSample : "",
+        lastRunInput: nextLastRunInputHash ? backendSample : "",
       });
       return;
     }
     setSourceTextInternal(loaded.payload.content);
     setSourceName(nextSourceName);
+    setSourceIdentityPath(nextSourceIdentityPath);
     setIsDirty(false);
     if (loaded.payload.lastRunInputHash) {
       setLastRunInputHash(loaded.payload.lastRunInputHash);
     }
+  };
+
+  const loadDraftFor = async (
+    nextProgramId: string,
+    nextSourceName: string,
+    nextSourceIdentityPath: string | null = sourceIdentityPath,
+  ): Promise<void> => {
+    await loadDraftForSource({
+      backendSample: sourceText,
+      nextProgramId,
+      nextSourceName,
+      nextSourceIdentityPath,
+      nextLastRunInputHash: lastRunInputHash,
+    });
   };
 
   const resolveConflict = (
@@ -407,6 +502,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         sourceText,
         isDirty,
         sourceName,
+        sourceIdentityPath,
         expectedOutput,
         oracleInput,
         allowAiAssist,

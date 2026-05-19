@@ -50,6 +50,7 @@ export const EDITOR_TELEMETRY_EVENT_TYPES = [
   "assist.invoked",
   "assist.result",
   "save.local",
+  "drafts.cleared",
   "conflict.resolved",
   "generate.invoked",
   "generate.result",
@@ -108,6 +109,7 @@ const CONFLICT_PICKS = [
   "local_draft",
   "last_run_input",
 ] as const;
+const DRAFT_COUNT_BUCKETS = ["zero", "lt_10", "lt_100", "ge_100"] as const;
 const GENERATE_TRIGGERS = [
   "generate",
   "regenerate",
@@ -414,6 +416,18 @@ function validateSaveLocalPayload(
   return true;
 }
 
+function validateDraftsClearedPayload(
+  payload: Record<string, unknown>,
+): true | string {
+  if (!hasOnlyKnownKeys(payload, ["purgedCountBucket"])) {
+    return "drafts.cleared payload contains an unknown property";
+  }
+  if (!isOneOf(payload.purgedCountBucket, DRAFT_COUNT_BUCKETS)) {
+    return "drafts.cleared.purgedCountBucket must be a closed count-bucket enum value";
+  }
+  return true;
+}
+
 function validateConflictResolvedPayload(
   payload: Record<string, unknown>,
 ): true | string {
@@ -633,6 +647,7 @@ const PAYLOAD_VALIDATORS: Record<
   "assist.invoked": validateAssistInvokedPayload,
   "assist.result": validateAssistResultPayload,
   "save.local": validateSaveLocalPayload,
+  "drafts.cleared": validateDraftsClearedPayload,
   "conflict.resolved": validateConflictResolvedPayload,
   "generate.invoked": validateGenerateInvokedPayload,
   "generate.result": validateGenerateResultPayload,

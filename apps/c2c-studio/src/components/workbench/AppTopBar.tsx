@@ -23,8 +23,10 @@ import { AppLogo } from "../icons/AppLogo";
 import {
   editorPersistence,
   getCurrentDraftScope,
+  type DraftScope,
 } from "../../lib/editor/editorPersistence";
 import { useJavaEditorActions } from "../../stores/javaEditorActions";
+import { emit as emitTelemetry } from "../../lib/editor/editorTelemetry";
 
 interface AppTopBarProps {
   apiState: StudioApiState;
@@ -46,6 +48,13 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearDraftsScope, setClearDraftsScope] = useState<DraftScope | null>(
+    null,
+  );
+  const [clearDraftsCount, setClearDraftsCount] = useState<number | null>(null);
+  const [clearDraftsLoading, setClearDraftsLoading] = useState(false);
+  const [clearDraftsPending, setClearDraftsPending] = useState(false);
+  const [clearDraftsError, setClearDraftsError] = useState<string | null>(null);
   // Studio-IDE-13 (#255): Regenerate confirmation modal. The Regenerate
   // toolbar action always confirms first per the issue spec.
   const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);
@@ -142,17 +151,65 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [menuOpen]);
 
-  const onClearDrafts = useCallback(async () => {
-    const scope = await getCurrentDraftScope();
-    const result = await editorPersistence.clearAll(scope);
-    setConfirmOpen(false);
-    setFeedback(
-      result.purgedCount === 0
-        ? "No local drafts to clear."
-        : `Cleared ${result.purgedCount} local draft${result.purgedCount === 1 ? "" : "s"}.`,
-    );
+  const showFeedback = useCallback((message: string) => {
+    setFeedback(message);
     setTimeout(() => setFeedback(null), 4000);
   }, []);
+
+  const openClearDraftsDialog = useCallback(() => {
+    setMenuOpen(false);
+    setConfirmOpen(true);
+    setClearDraftsScope(null);
+    setClearDraftsCount(null);
+    setClearDraftsError(null);
+    setClearDraftsLoading(true);
+    void (async () => {
+      try {
+        const scope = await getCurrentDraftScope();
+        const drafts = await editorPersistence.listDrafts(scope);
+        setClearDraftsScope(scope);
+        setClearDraftsCount(drafts.length);
+      } catch {
+        setClearDraftsError("Sign in again to clear local drafts.");
+      } finally {
+        setClearDraftsLoading(false);
+      }
+    })();
+  }, []);
+
+  const onClearDrafts = useCallback(async () => {
+    if (!clearDraftsScope || clearDraftsLoading || clearDraftsPending) {
+      return;
+    }
+    setClearDraftsPending(true);
+    setClearDraftsError(null);
+    try {
+      const result = await editorPersistence.clearAll(clearDraftsScope);
+      emitTelemetry({
+        eventType: "drafts.cleared",
+        payload: {
+          purgedCountBucket: bucketDraftCount(result.purgedCount),
+        },
+      });
+      setConfirmOpen(false);
+      showFeedback(
+        result.purgedCount === 0
+          ? "No local drafts to clear."
+          : `Cleared ${result.purgedCount} local draft${
+              result.purgedCount === 1 ? "" : "s"
+            }.`,
+      );
+    } catch {
+      setClearDraftsError("Unable to clear local drafts. Sign in again.");
+    } finally {
+      setClearDraftsPending(false);
+    }
+  }, [
+    clearDraftsLoading,
+    clearDraftsPending,
+    clearDraftsScope,
+    showFeedback,
+  ]);
 
   return (
     <header
@@ -310,10 +367,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setConfirmOpen(true);
-                }}
+                onClick={openClearDraftsDialog}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-text hover:bg-bg-2"
               >
                 <Trash2 className="h-3.5 w-3.5 text-text-dim" />
@@ -338,6 +392,11 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         <ClearDraftsConfirmDialog
           onCancel={() => setConfirmOpen(false)}
           onConfirm={onClearDrafts}
+          scope={clearDraftsScope}
+          draftCount={clearDraftsCount}
+          loading={clearDraftsLoading}
+          pending={clearDraftsPending}
+          error={clearDraftsError}
         />
       ) : null}
 
@@ -350,6 +409,13 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
       ) : null}
     </header>
   );
+}
+
+function bucketDraftCount(count: number): "zero" | "lt_10" | "lt_100" | "ge_100" {
+  if (count === 0) return "zero";
+  if (count < 10) return "lt_10";
+  if (count < 100) return "lt_100";
+  return "ge_100";
 }
 
 function RegenerateConfirmDialog({
@@ -422,9 +488,19 @@ function RegenerateConfirmDialog({
 function ClearDraftsConfirmDialog({
   onCancel,
   onConfirm,
+  scope,
+  draftCount,
+  loading,
+  pending,
+  error,
 }: {
   onCancel: () => void;
   onConfirm: () => void;
+  scope: DraftScope | null;
+  draftCount: number | null;
+  loading: boolean;
+  pending: boolean;
+  error: string | null;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -437,6 +513,15 @@ function ClearDraftsConfirmDialog({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onCancel]);
+
+  const scopeLabel = scope
+    ? `Tenant ${scope.tenantId} / User ${scope.userId}`
+    : "Current signed-in workspace";
+  const countLabel =
+    draftCount === null
+      ? "Checking local drafts…"
+      : `${draftCount} local draft${draftCount === 1 ? "" : "s"}`;
+  const canConfirm = !loading && !pending && !error && scope !== null;
 
   return (
     <div
@@ -461,10 +546,20 @@ function ClearDraftsConfirmDialog({
           workspace from your browser. The backend copies and any committed runs
           are not affected. This action cannot be undone.
         </p>
+        <div className="rounded border border-line-2 bg-bg-2 px-3 py-2 text-xs text-text-dim">
+          <div>
+            Scope: <span className="font-medium text-text">{scopeLabel}</span>
+          </div>
+          <div>
+            Drafts: <span className="font-medium text-text">{countLabel}</span>
+          </div>
+          {error ? <div className="mt-2 text-error">{error}</div> : null}
+        </div>
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
+            disabled={pending}
             className="rounded border border-line-2 px-3 py-1 text-xs text-text-dim hover:text-text"
           >
             Cancel
@@ -472,9 +567,10 @@ function ClearDraftsConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded bg-error px-3 py-1 text-xs font-medium text-bg-0 hover:opacity-90"
+            disabled={!canConfirm}
+            className="rounded bg-error px-3 py-1 text-xs font-medium text-bg-0 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Clear drafts
+            {pending ? "Clearing…" : "Clear drafts"}
           </button>
         </div>
       </div>
