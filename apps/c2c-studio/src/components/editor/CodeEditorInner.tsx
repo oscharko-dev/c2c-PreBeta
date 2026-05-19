@@ -18,6 +18,7 @@ import {
   applySanitization,
   type CodeEditorProps,
   type DiffCodeEditorProps,
+  type EditorAction,
   type EditorDecoration,
   type EditorMarker,
   type EditorMarkerGroup,
@@ -96,6 +97,7 @@ function StandaloneEditorView({
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
   const decorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
+  const actionDisposablesRef = useRef<MonacoNs.IDisposable[]>([]);
   // Disposable for the standalone editor's `onDidChangeModel` subscription.
   // We re-apply markers (read from `markersRef` to avoid stale closures) when
   // @monaco-editor/react swaps in a new model because `path` changed.
@@ -178,6 +180,14 @@ function StandaloneEditorView({
     }
   }, [decorations]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    applyActions(editor, actions, actionDisposablesRef);
+  }, [actions]);
+
   // Persist view state per-URI whenever `resolvedUri` is about to change
   // (cleanup captures the old value via closure) and on unmount.
   useEffect(() => {
@@ -208,6 +218,7 @@ function StandaloneEditorView({
         decorationsRef.current.clear();
         decorationsRef.current = null;
       }
+      disposeActionDisposables(actionDisposablesRef);
     };
   }, []);
 
@@ -280,11 +291,7 @@ function StandaloneEditorView({
             decorationsRef.current =
               editor.createDecorationsCollection(decorations);
           }
-          if (actions) {
-            for (const action of actions) {
-              editor.addAction(action);
-            }
-          }
+          applyActions(editor, actions, actionDisposablesRef);
           // When the path prop changes, @monaco-editor/react swaps the
           // underlying Monaco model. The current markers / decorations
           // were attached to the previous model and the saved view state
@@ -372,6 +379,7 @@ function DiffEditorView({
   );
   const decorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
+  const actionDisposablesRef = useRef<MonacoNs.IDisposable[]>([]);
   const contentChangeDisposableRef = useRef<MonacoNs.IDisposable | null>(null);
   // Disposable for the modified editor's `onDidChangeModel` subscription.
   // When @monaco-editor/react swaps the modified model (e.g., because
@@ -463,6 +471,14 @@ function DiffEditorView({
     }
   }, [decorations]);
 
+  useEffect(() => {
+    const modifiedEditor = diffEditorRef.current?.getModifiedEditor();
+    if (!modifiedEditor) {
+      return;
+    }
+    applyActions(modifiedEditor, actions, actionDisposablesRef);
+  }, [actions]);
+
   // Persist diff view state per-URI on URI change (cleanup captures the old
   // value via closure) and on unmount.
   useEffect(() => {
@@ -494,6 +510,7 @@ function DiffEditorView({
         decorationsRef.current.clear();
         decorationsRef.current = null;
       }
+      disposeActionDisposables(actionDisposablesRef);
     };
   }, []);
 
@@ -598,11 +615,7 @@ function DiffEditorView({
           // its view state, markers, and decorations.
           modelChangeDisposableRef.current =
             modifiedEditor.onDidChangeModel(rewireModifiedModel);
-          if (actions) {
-            for (const action of actions) {
-              modifiedEditor.addAction(action);
-            }
-          }
+          applyActions(modifiedEditor, actions, actionDisposablesRef);
           modifiedEditor.updateOptions({
             ariaLabel: ariaLabel ?? `Diff editor (${language})`,
           });
@@ -611,6 +624,30 @@ function DiffEditorView({
       />
     </div>
   );
+}
+
+function applyActions(
+  editor: MonacoNs.editor.IStandaloneCodeEditor,
+  actions: EditorAction[] | undefined,
+  actionDisposablesRef: { current: MonacoNs.IDisposable[] },
+): void {
+  disposeActionDisposables(actionDisposablesRef);
+  for (const action of actions ?? []) {
+    actionDisposablesRef.current.push(editor.addAction(action));
+  }
+}
+
+function disposeActionDisposables(actionDisposablesRef: {
+  current: MonacoNs.IDisposable[];
+}): void {
+  for (const disposable of actionDisposablesRef.current.splice(0)) {
+    try {
+      disposable.dispose();
+    } catch {
+      // Monaco cleanup is best-effort on unmount; one hostile disposable must
+      // not prevent the rest of the editor resources from being released.
+    }
+  }
 }
 
 // Studio-IDE-5 (#244): per-owner marker application. The legacy

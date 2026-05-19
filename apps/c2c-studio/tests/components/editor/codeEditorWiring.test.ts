@@ -23,6 +23,11 @@ const innerSource = readFileSync(INNER_PATH, "utf8");
 const typesSource = readFileSync(TYPES_PATH, "utf8");
 
 describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
+  it("routes diff mode to the DiffEditor view and readonly mode to Monaco readOnly", () => {
+    expect(innerSource).toMatch(/props\.mode === ["']diff["']/);
+    expect(innerSource).toMatch(/readOnly:\s*mode === ["']readonly["']/);
+  });
+
   it("passes the resolved URI to the standalone Editor via `path` so models are URI-scoped", () => {
     // Codex finding: without path, URI-scoped diagnostics / language-service
     // state / undo history would not line up with modelUri.
@@ -179,6 +184,17 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
     );
     expect(swapBlocks).not.toBeNull();
     expect((swapBlocks ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("tracks and disposes Monaco addAction registrations for both editor variants", () => {
+    // Monaco addAction returns an IDisposable. CodeEditor exposes `actions`
+    // as a public prop, so every registration must be paired with cleanup
+    // on action changes and unmount to avoid duplicate commands and leaks.
+    expect(innerSource).toMatch(/actionDisposablesRef/);
+    expect(innerSource).toMatch(/function applyActions/);
+    expect(innerSource).toMatch(/editor\.addAction\(action\)/);
+    expect(innerSource).toMatch(/modifiedEditor,\s*actions,\s*actionDisposablesRef/);
+    expect(innerSource).toMatch(/disposeActionDisposables\(actionDisposablesRef\)/);
   });
 });
 

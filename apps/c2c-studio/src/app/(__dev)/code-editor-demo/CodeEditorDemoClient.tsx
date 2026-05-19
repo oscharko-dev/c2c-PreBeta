@@ -40,7 +40,7 @@ export function CodeEditorDemoClient() {
         </h1>
         <p className="text-xs text-text-faint">
           Mounts the Studio CodeEditor in editable, readonly, and diff modes for
-          visual verification. Not registered in production builds.
+          visual verification. Production requests return 404.
         </p>
       </header>
 

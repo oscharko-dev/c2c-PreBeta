@@ -1,3 +1,4 @@
+import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
@@ -53,5 +54,16 @@ describe("lazyMonaco", () => {
     const a = await getMonaco();
     const b = await getMonaco();
     expect(a).toBe(b);
+  });
+
+  it("useMonacoReady starts empty and updates when the lazy import resolves", async () => {
+    const { useMonacoReady } = await import("@/lib/editor/lazyMonaco");
+    const { result } = renderHook(() => useMonacoReady());
+
+    expect(result.current).toBeNull();
+    await waitFor(() => {
+      expect(result.current).not.toBeNull();
+    });
+    expect(typeof result.current?.editor.defineTheme).toBe("function");
   });
 });
