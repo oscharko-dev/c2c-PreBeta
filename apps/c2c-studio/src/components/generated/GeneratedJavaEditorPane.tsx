@@ -1107,7 +1107,9 @@ export function GeneratedJavaEditorPane() {
 
   // Studio-IDE-14 (#256): the Cmd/Ctrl+Shift+F handler. Reused by the
   // format-on-save path on Cmd/Ctrl+S.
-  const performFormat = useCallback(async (): Promise<{
+  const performFormat = useCallback(async (
+    trigger: "shortcut" | "on_save",
+  ): Promise<{
     filePath: string;
     content: string;
   } | null> => {
@@ -1122,7 +1124,10 @@ export function GeneratedJavaEditorPane() {
     const content = model.getValue();
     formatInFlightRef.current = true;
     try {
-      const result = await formatJava({ content, filePath });
+      const result = await formatJava(
+        { content, filePath },
+        { telemetryTrigger: trigger },
+      );
       if (!result.ok) {
         setFormatNotice({
           tone: result.code === "format_parse_error" ? "warning" : "error",
@@ -1152,48 +1157,54 @@ export function GeneratedJavaEditorPane() {
   const javaActions = useJavaEditorActions();
   const compileCheckPending = javaActions.compileCheckPending;
   const setCompileCheckPending = javaActions.setCompileCheckPending;
-  const performCompileCheck = useCallback(async (): Promise<void> => {
-    const editor = editorInstanceRef.current;
-    const filePath = selectedFilePathRef.current;
-    if (!editor || !filePath) return;
-    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return;
-    const model = editor.getModel();
-    if (!model) return;
-    flushPendingEditRef.current();
-    setCompileCheckPending(true);
-    try {
-      const result = await compileCheck({
-        content: model.getValue(),
-        filePath,
-        ...(state.runId ? { runId: state.runId } : {}),
-      });
-      if (!result.ok) {
-        setFormatNotice({
-          tone: "error",
-          message: `Compile Check unavailable — ${result.message}`,
-        });
-        setCompileCheckDiagnostics([]);
-        return;
+  const performCompileCheck = useCallback(
+    async (trigger: "toolbar" | "shortcut"): Promise<void> => {
+      const editor = editorInstanceRef.current;
+      const filePath = selectedFilePathRef.current;
+      if (!editor || !filePath) return;
+      if (!isEditableLanguage(detectLanguageFromPath(filePath))) return;
+      const model = editor.getModel();
+      if (!model) return;
+      flushPendingEditRef.current();
+      setCompileCheckPending(true);
+      try {
+        const result = await compileCheck(
+          {
+            content: model.getValue(),
+            filePath,
+            ...(state.runId ? { runId: state.runId } : {}),
+          },
+          { telemetryTrigger: trigger },
+        );
+        if (!result.ok) {
+          setFormatNotice({
+            tone: "error",
+            message: `Compile Check unavailable — ${result.message}`,
+          });
+          setCompileCheckDiagnostics([]);
+          return;
+        }
+        setCompileCheckDiagnostics(
+          result.diagnostics.map((d) => ({
+            ...d,
+            // Re-anchor the diagnostic to the current file when the
+            // upstream did not provide one.
+            filePath: d.filePath ?? filePath,
+            sourceKind: d.sourceKind ?? "build",
+          })),
+        );
+        if (result.diagnostics.length === 0) {
+          setFormatNotice({
+            tone: "info",
+            message: "Compile Check passed — no diagnostics reported.",
+          });
+        }
+      } finally {
+        setCompileCheckPending(false);
       }
-      setCompileCheckDiagnostics(
-        result.diagnostics.map((d) => ({
-          ...d,
-          // Re-anchor the diagnostic to the current file when the
-          // upstream did not provide one.
-          filePath: d.filePath ?? filePath,
-          sourceKind: d.sourceKind ?? "build",
-        })),
-      );
-      if (result.diagnostics.length === 0) {
-        setFormatNotice({
-          tone: "info",
-          message: "Compile Check passed — no diagnostics reported.",
-        });
-      }
-    } finally {
-      setCompileCheckPending(false);
-    }
-  }, [setCompileCheckPending, state.runId]);
+    },
+    [setCompileCheckPending, state.runId],
+  );
 
   useRegisterCompileCheckHandler(
     performCompileCheck,
@@ -1272,7 +1283,7 @@ export function GeneratedJavaEditorPane() {
       trackDisposable(
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
           if (formatOnSaveRef.current) {
-            void performFormatRef.current().then((result) => {
+            void performFormatRef.current("on_save").then((result) => {
               if (!result) return;
               void saveCurrentJavaDraftRef.current(
                 result.filePath,
@@ -1295,14 +1306,14 @@ export function GeneratedJavaEditorPane() {
           contextMenuGroupId: "1_modification",
           contextMenuOrder: 1,
           run: () => {
-            void performFormatRef.current();
+            void performFormatRef.current("shortcut");
           },
         }),
       );
       // F5 — Studio-IDE-14 Compile Check (Studio-IDE-13 endpoint).
       trackDisposable(
         editor.addCommand(monaco.KeyCode.F5, () => {
-          void performCompileCheckRef.current();
+          void performCompileCheckRef.current("shortcut");
         }),
       );
       // Studio-IDE-6 (#248): Alt+J — "Reveal in COBOL source". Resolves the
@@ -1644,7 +1655,7 @@ export function GeneratedJavaEditorPane() {
           {isJavaEditable && selectedFilePath ? (
             <button
               type="button"
-              onClick={() => void performFormat()}
+              onClick={() => void performFormat("shortcut")}
               data-testid="java-format-button"
               title="Format Document (Cmd/Ctrl+Shift+F)"
               aria-label="Format Java document"
@@ -1657,7 +1668,7 @@ export function GeneratedJavaEditorPane() {
           {isJavaEditable && selectedFilePath ? (
             <button
               type="button"
-              onClick={() => void performCompileCheck()}
+              onClick={() => void performCompileCheck("toolbar")}
               data-testid="java-compile-check-pane-button"
               title="Compile Check (F5)"
               aria-label="Run Compile Check on the Java buffer"

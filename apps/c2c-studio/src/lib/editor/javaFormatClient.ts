@@ -61,9 +61,10 @@ export interface FormatJavaClientOptions {
   // Test seam — defaults to `globalThis.fetch`.
   fetchImpl?: typeof fetch;
   // Studio-IDE-11 (#251): how the format was triggered. Drives the
-  // closed-enum `format.invoked.trigger` field. Defaults to
-  // `"shortcut"` when the caller does not pass anything.
-  telemetryTrigger?: "shortcut" | "on_save";
+  // closed-enum `format.invoked.trigger` field. Callers must pass the real
+  // activation source so save-driven formatting is not recorded as shortcut
+  // usage.
+  telemetryTrigger: "shortcut" | "on_save";
 }
 
 const DEFAULT_TIMEOUT_MS = 1500;
@@ -92,9 +93,9 @@ function isAbortError(err: unknown): boolean {
 // returned `formattedContent` is byte-identical to the input.
 export async function formatJava(
   payload: FormatJavaRequestPayload,
-  options: FormatJavaClientOptions = {},
+  options: FormatJavaClientOptions,
 ): Promise<FormatJavaResult> {
-  const trigger = options.telemetryTrigger ?? "shortcut";
+  const trigger = options.telemetryTrigger;
   // Studio-IDE-11 (#251): emit format.invoked with the file-line-count
   // bucket derived from the payload. The exact content never leaves
   // the function — only the bucket label.

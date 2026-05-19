@@ -100,7 +100,6 @@ import {
   EDITOR_TELEMETRY_MAX_BODY_BYTES,
   EDITOR_TELEMETRY_SCHEMA_VERSION,
   augmentBatch,
-  extractIdentity,
   statusForValidationErrorCode,
   validateTelemetryBatch,
 } from "./editorTelemetry";
@@ -4016,13 +4015,23 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // when the upstream is offline so the Studio's "drop silently on
       // offline" path stays UI-stable.
       if (pathname === "/api/v0/editor/telemetry" && method === "POST") {
-        const contentType = req.headers["content-type"] ?? "";
-        if (!contentType.toLowerCase().startsWith("application/json")) {
-          jsonResponse(res, 415, {
-            error: "request must use Content-Type: application/json",
-          });
+        if (
+          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins) ||
+          rejectNonJsonContentType(req, res)
+        ) {
           return;
         }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        appendVaryHeader(res, "Cookie");
         let raw: unknown;
         try {
           raw = await readJsonBody(req, EDITOR_TELEMETRY_MAX_BODY_BYTES);
@@ -4043,12 +4052,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const identity = extractIdentity(req.headers);
         let augmented;
         try {
           augmented = augmentBatch(validation.value, {
-            tenantId: identity.tenantId,
-            userId: identity.userId,
+            tenantId: authSession.record.tenantId,
+            userId: authSession.record.userId,
             now: nowFn,
           });
         } catch (err) {

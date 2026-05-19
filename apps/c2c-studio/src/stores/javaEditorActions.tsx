@@ -27,15 +27,17 @@ import {
   useState,
 } from "react";
 
+export type CompileCheckTrigger = "toolbar" | "shortcut";
+
 export interface JavaEditorActionsContextValue {
   canCompileCheck: boolean;
   compileCheckPending: boolean;
-  triggerCompileCheck: () => void;
+  triggerCompileCheck: (trigger: CompileCheckTrigger) => void;
   // Registration helpers. Returns an unregister function so the editor
   // pane can release its handler on unmount; the bus drops back to
   // `canCompileCheck === false` while no pane is mounted.
   registerCompileCheckHandler: (
-    handler: () => Promise<void> | void,
+    handler: (trigger: CompileCheckTrigger) => Promise<void> | void,
   ) => () => void;
   setCompileCheckAvailable: (available: boolean) => void;
   setCompileCheckPending: (pending: boolean) => void;
@@ -49,14 +51,16 @@ export function JavaEditorActionsProvider({
 }: {
   children: ReactNode;
 }) {
-  const handlerRef = useRef<(() => Promise<void> | void) | null>(null);
+  const handlerRef = useRef<
+    ((trigger: CompileCheckTrigger) => Promise<void> | void) | null
+  >(null);
   const [handlerRegistered, setHandlerRegistered] = useState(false);
   const [compileCheckAvailable, setCompileCheckAvailable] = useState(false);
   const [compileCheckPending, setCompileCheckPending] = useState(false);
   const canCompileCheck = handlerRegistered && compileCheckAvailable;
 
   const registerCompileCheckHandler = useCallback(
-    (handler: () => Promise<void> | void) => {
+    (handler: (trigger: CompileCheckTrigger) => Promise<void> | void) => {
       handlerRef.current = handler;
       setHandlerRegistered(true);
       return () => {
@@ -71,7 +75,7 @@ export function JavaEditorActionsProvider({
     [],
   );
 
-  const triggerCompileCheck = useCallback(() => {
+  const triggerCompileCheck = useCallback((trigger: CompileCheckTrigger) => {
     const handler = handlerRef.current;
     if (!canCompileCheck) return;
     if (!handler) return;
@@ -79,7 +83,7 @@ export function JavaEditorActionsProvider({
     // because callers are fire-and-forget. The handler itself is
     // responsible for flipping `compileCheckPending` via
     // `setCompileCheckPending`.
-    void handler();
+    void handler(trigger);
   }, [canCompileCheck]);
 
   const value = useMemo<JavaEditorActionsContextValue>(
@@ -134,7 +138,7 @@ export function useJavaEditorActions(): JavaEditorActionsContextValue {
 // Convenience hook for editor panes — registers the handler for the
 // component lifetime and gates `canCompileCheck` on the active artifact.
 export function useRegisterCompileCheckHandler(
-  handler: () => Promise<void> | void,
+  handler: (trigger: CompileCheckTrigger) => Promise<void> | void,
   available = true,
 ): void {
   const { registerCompileCheckHandler, setCompileCheckAvailable } =
@@ -142,7 +146,7 @@ export function useRegisterCompileCheckHandler(
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
   useEffect(() => {
-    return registerCompileCheckHandler(() => handlerRef.current());
+    return registerCompileCheckHandler((trigger) => handlerRef.current(trigger));
   }, [registerCompileCheckHandler]);
   useEffect(() => {
     setCompileCheckAvailable(available);

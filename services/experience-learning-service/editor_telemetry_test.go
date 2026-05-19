@@ -50,6 +50,7 @@ func TestEditorTelemetry_AcceptsValidBatch(t *testing.T) {
 				"sourceKind": "cobol",
 				"severity":   "error",
 			}),
+			makeValidEvent("drafts.cleared", map[string]any{"purgedCountBucket": "lt_10"}),
 		},
 	}
 	body, _ := json.Marshal(batch)
@@ -64,8 +65,8 @@ func TestEditorTelemetry_AcceptsValidBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list failed: %v", err)
 	}
-	if len(stored) != 2 {
-		t.Fatalf("expected 2 stored events, got %d", len(stored))
+	if len(stored) != 3 {
+		t.Fatalf("expected 3 stored events, got %d", len(stored))
 	}
 }
 
@@ -112,6 +113,70 @@ func TestEditorTelemetry_RejectsUnknownPayloadProperty(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for extra payload field, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestEditorTelemetry_RejectsUnknownBatchProperty(t *testing.T) {
+	service := newTestService(t)
+	batch := map[string]any{
+		"schemaVersion": "v0",
+		"events":        []map[string]any{makeValidEvent("hover.opened", map[string]any{"constructKind": "pic"})},
+		"sourceText":    "IDENTIFICATION DIVISION.",
+	}
+	body, _ := json.Marshal(batch)
+	req := httptest.NewRequest(http.MethodPost, "/v0/editor-telemetry", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	service.editorTelemetryHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown batch property, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestEditorTelemetry_RejectsUnknownEventProperty(t *testing.T) {
+	service := newTestService(t)
+	event := makeValidEvent("hover.opened", map[string]any{"constructKind": "pic"})
+	event["sourceText"] = "IDENTIFICATION DIVISION."
+	batch := map[string]any{
+		"schemaVersion": "v0",
+		"events":        []map[string]any{event},
+	}
+	body, _ := json.Marshal(batch)
+	req := httptest.NewRequest(http.MethodPost, "/v0/editor-telemetry", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	service.editorTelemetryHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown event property, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestEditorTelemetry_RejectsBatchAtomically(t *testing.T) {
+	service := newTestService(t)
+	batch := map[string]any{
+		"schemaVersion": "v0",
+		"events": []map[string]any{
+			makeValidEvent("hover.opened", map[string]any{"constructKind": "pic"}),
+			makeValidEvent("hover.opened", map[string]any{
+				"constructKind": "pic",
+				"sourceText":    "IDENTIFICATION DIVISION.",
+			}),
+		},
+	}
+	body, _ := json.Marshal(batch)
+	req := httptest.NewRequest(http.MethodPost, "/v0/editor-telemetry", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	service.editorTelemetryHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid batch, got %d body=%s", w.Code, w.Body.String())
+	}
+	stored, err := service.editorTelemetryLog.List()
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("expected atomic rejection with 0 stored events, got %d", len(stored))
 	}
 }
 

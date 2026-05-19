@@ -20,7 +20,7 @@ describe("JavaEditorActionsProvider", () => {
     const { result } = renderHook(() => useJavaEditorActions());
     expect(result.current.canCompileCheck).toBe(false);
     // triggerCompileCheck must not throw even without a provider.
-    expect(() => result.current.triggerCompileCheck()).not.toThrow();
+    expect(() => result.current.triggerCompileCheck("toolbar")).not.toThrow();
   });
 
   it("registers and invokes a handler, then unregisters on cleanup", async () => {
@@ -29,7 +29,11 @@ describe("JavaEditorActionsProvider", () => {
       useRegisterCompileCheckHandler(handler);
       return null;
     }
-    function Trigger({ onReady }: { onReady: (cb: () => void) => void }) {
+    function Trigger({
+      onReady,
+    }: {
+      onReady: (cb: (trigger: "toolbar" | "shortcut") => void) => void;
+    }) {
       const actions = useJavaEditorActions();
       onReady(actions.triggerCompileCheck);
       return (
@@ -38,7 +42,7 @@ describe("JavaEditorActionsProvider", () => {
         </span>
       );
     }
-    let trigger: (() => void) | undefined;
+    let trigger: ((trigger: "toolbar" | "shortcut") => void) | undefined;
     const { rerender, unmount } = render(
       <JavaEditorActionsProvider>
         <Probe />
@@ -51,9 +55,10 @@ describe("JavaEditorActionsProvider", () => {
     );
     expect(screen.getByTestId("state").textContent).toBe("ready");
     act(() => {
-      trigger?.();
+      trigger?.("shortcut");
     });
     expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("shortcut");
     // Unmount the probe — handler unregisters and canCompileCheck flips back.
     rerender(
       <JavaEditorActionsProvider>
@@ -66,7 +71,7 @@ describe("JavaEditorActionsProvider", () => {
     );
     expect(screen.getByTestId("state").textContent).toBe("idle");
     act(() => {
-      trigger?.();
+      trigger?.("toolbar");
     });
     expect(handler).toHaveBeenCalledTimes(1);
     unmount();

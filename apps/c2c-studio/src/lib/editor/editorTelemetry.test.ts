@@ -97,6 +97,7 @@ describe("editorTelemetry", () => {
     const call = harness.calls[0]!;
     expect(call.url).toBe("/api/v0/editor/telemetry");
     expect(call.init.method).toBe("POST");
+    expect(call.init.credentials).toBe("include");
     const headers = call.init.headers as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
     const body = JSON.parse(call.init.body as string) as {
@@ -192,6 +193,58 @@ describe("editorTelemetry", () => {
       typeof emit
     >[0]);
     expect(pendingEventCountForTests()).toBe(0);
+    emit({
+      eventType: "hover.opened",
+      payload: { constructKind: "pic", sourceText: "01 CUSTOMER-NAME." },
+    } as unknown as Parameters<typeof emit>[0]);
+    expect(pendingEventCountForTests()).toBe(0);
+  });
+
+  it("drains a full queued batch after an in-flight flush completes", async () => {
+    const calls: FetchCall[] = [];
+    let resolveFirst: ((response: Response) => void) | undefined;
+    __resetEditorTelemetryForTests({
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+      fetchFn: (async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        if (calls.length === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        return { ok: true, status: 202 } as Response;
+      }) as unknown as typeof fetch,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+      resolveBaseUrl: () => ({ ok: true, data: "" }),
+      sessionId: "test-session-id",
+    });
+
+    for (let i = 0; i < EDITOR_TELEMETRY_MAX_BATCH_SIZE; i += 1) {
+      emit({ eventType: "hover.opened", payload: { constructKind: "pic" } });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toHaveLength(1);
+
+    for (let i = 0; i < EDITOR_TELEMETRY_MAX_BATCH_SIZE; i += 1) {
+      emit({ eventType: "hover.expanded", payload: { constructKind: "usage" } });
+    }
+    expect(pendingEventCountForTests()).toBe(EDITOR_TELEMETRY_MAX_BATCH_SIZE);
+
+    if (!resolveFirst) {
+      throw new Error("first telemetry request was not captured");
+    }
+    resolveFirst({ ok: true, status: 202 } as Response);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await flushPendingForTests();
+
+    expect(calls).toHaveLength(2);
+    const body = JSON.parse(calls[1]!.init.body as string) as {
+      events: Array<{ eventType: string }>;
+    };
+    expect(body.events).toHaveLength(EDITOR_TELEMETRY_MAX_BATCH_SIZE);
+    expect(body.events.every((event) => event.eventType === "hover.expanded"))
+      .toBe(true);
   });
 
   it("multiple emits collapse into one batch on flush", async () => {

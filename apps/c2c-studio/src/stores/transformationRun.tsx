@@ -51,6 +51,7 @@ import {
 } from "../lib/editor/diffHistory";
 import {
   bucketGenerateLatency,
+  bucketThreeWayMergeRegionCount,
   emit as emitTelemetry,
 } from "../lib/editor/editorTelemetry";
 
@@ -115,11 +116,27 @@ export interface JavaMergeReview {
   newGeneratorRunId: string;
 }
 
+export type GenerateTelemetryTrigger =
+  | "generate"
+  | "regenerate"
+  | "generate_and_verify";
+
+export interface GenerateTelemetryOptions {
+  trigger: GenerateTelemetryTrigger;
+  hadManualEdits: boolean;
+}
+
+interface PendingGenerateTelemetry {
+  runId: string;
+  startedAt: number;
+}
+
 export interface TransformationRunContextValue {
   state: TransformationRunState;
   productState: StateContext;
   startTransform: (
     request: TransformRequest,
+    telemetry?: GenerateTelemetryOptions,
   ) => Promise<ApiResult<TransformResponse>>;
   // Studio-IDE-13 (#255): generator-only run kickoff. Identical semantics
   // to ``startTransform`` from the Studio's perspective; the BFF tags the
@@ -127,6 +144,7 @@ export interface TransformationRunContextValue {
   // intent.
   startGenerate: (
     request: TransformRequest,
+    telemetry?: GenerateTelemetryOptions,
   ) => Promise<ApiResult<GenerateResponse>>;
   // Studio-IDE-13 (#255): explicit Verify on the supplied javaFiles. The
   // optional ``manualEditOverlay`` is forwarded to the BFF which stamps
@@ -211,7 +229,10 @@ export function TransformationRunProvider({
 }: {
   children: ReactNode;
 }) {
+  const isMountedRef = useRef(true);
   const activeTransformRequestRef = useRef(0);
+  const pendingGenerateTelemetryRef =
+    useRef<PendingGenerateTelemetry | null>(null);
   const [state, setState] = useState<TransformationRunState>({
     phase: "idle",
     runId: null,
@@ -253,6 +274,13 @@ export function TransformationRunProvider({
   const [cobolDiffHistory, setCobolDiffHistory] = useState<
     Record<string, Record<string, CobolSnapshot>>
   >({});
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     return subscribeToDraftPersistenceEvents(() => {
@@ -298,13 +326,69 @@ export function TransformationRunProvider({
 
   const productState = useMemo(() => deriveProductState(state), [state]);
 
+  const emitGenerateResult = useCallback(
+    (
+      outcome: "success" | "merge_required" | "failed" | "cancelled",
+      startedAt: number,
+    ) => {
+      emitTelemetry({
+        eventType: "generate.result",
+        payload: {
+          outcome,
+          latencyBucket: bucketGenerateLatency(Date.now() - startedAt),
+        },
+      });
+    },
+    [],
+  );
+
+  const recordGenerateResultWhenTerminal = useCallback(
+    (runId: string, status: TransformResponse["status"], startedAt: number) => {
+      if (status === "completed" || status === "failed") {
+        emitGenerateResult(
+          status === "completed" ? "success" : "failed",
+          startedAt,
+        );
+        pendingGenerateTelemetryRef.current = null;
+        return;
+      }
+      pendingGenerateTelemetryRef.current = { runId, startedAt };
+    },
+    [emitGenerateResult],
+  );
+
+  useEffect(() => {
+    const pending = pendingGenerateTelemetryRef.current;
+    const summary = state.summary;
+    if (!pending || !summary || summary.runId !== pending.runId) {
+      return;
+    }
+    if (summary.status !== "completed" && summary.status !== "failed") {
+      return;
+    }
+    emitGenerateResult(
+      summary.status === "completed" ? "success" : "failed",
+      pending.startedAt,
+    );
+    pendingGenerateTelemetryRef.current = null;
+  }, [emitGenerateResult, state.summary]);
+
   useRunPolling(state, setState);
   useGlobalObservabilityPolling(setState);
 
   const startTransform = async (
     request: TransformRequest,
+    telemetry: GenerateTelemetryOptions = {
+      trigger: "generate_and_verify",
+      hadManualEdits: false,
+    },
   ): Promise<ApiResult<TransformResponse>> => {
     const requestId = ++activeTransformRequestRef.current;
+    emitTelemetry({
+      eventType: "generate.invoked",
+      payload: telemetry,
+    });
+    const startedAt = Date.now();
 
     setState({
       phase: "starting",
@@ -330,10 +414,12 @@ export function TransformationRunProvider({
     const result = await apiClient.transform(request);
 
     if (requestId !== activeTransformRequestRef.current) {
+      emitGenerateResult("cancelled", startedAt);
       return result;
     }
 
     if (!result.ok) {
+      emitGenerateResult("failed", startedAt);
       setState((prev) => ({
         ...prev,
         phase: "failed",
@@ -344,6 +430,11 @@ export function TransformationRunProvider({
       }));
       return result;
     }
+    recordGenerateResultWhenTerminal(
+      result.data.runId,
+      result.data.status,
+      startedAt,
+    );
 
     setState((prev) => ({
       ...prev,
@@ -396,15 +487,15 @@ export function TransformationRunProvider({
   // one safely.
   const startGenerate = async (
     request: TransformRequest,
+    telemetry: GenerateTelemetryOptions = {
+      trigger: "generate",
+      hadManualEdits: false,
+    },
   ): Promise<ApiResult<GenerateResponse>> => {
     const requestId = ++activeTransformRequestRef.current;
-    // Studio-IDE-11 (#251): closed-enum generate.invoked + result. The
-    // "hadManualEdits" flag is conservative — we cannot detect the
-    // manual-edit overlay state from this seam; the explicit Verify
-    // path (startVerify below) carries the real flag.
     emitTelemetry({
       eventType: "generate.invoked",
-      payload: { trigger: "generate", hadManualEdits: false },
+      payload: telemetry,
     });
     const startedAt = Date.now();
 
@@ -430,21 +521,14 @@ export function TransformationRunProvider({
     });
 
     const result = await apiClient.generate(request);
-    const latencyBucket = bucketGenerateLatency(Date.now() - startedAt);
 
     if (requestId !== activeTransformRequestRef.current) {
-      emitTelemetry({
-        eventType: "generate.result",
-        payload: { outcome: "cancelled", latencyBucket },
-      });
+      emitGenerateResult("cancelled", startedAt);
       return result;
     }
 
     if (!result.ok) {
-      emitTelemetry({
-        eventType: "generate.result",
-        payload: { outcome: "failed", latencyBucket },
-      });
+      emitGenerateResult("failed", startedAt);
       setState((prev) => ({
         ...prev,
         phase: "failed",
@@ -455,22 +539,11 @@ export function TransformationRunProvider({
       }));
       return result;
     }
-    // ``result.data.status`` is the closed enum
-    // ``"starting" | "updating" | "completed" | "failed"`` (see
-    // ``TransformResponse`` in ``types/api.ts``). The generator-run is
-    // already complete by the time the response reaches this code, so
-    // only ``completed`` and ``failed`` are load-bearing. The
-    // ``cancelled`` and ``merge_required`` outcomes from the
-    // editor-telemetry contract are surfaced from other code paths —
-    // ``cancelled`` is emitted above when the request id stale-races,
-    // and ``merge_required`` is owned by the 3-Way Merge workflow.
-    emitTelemetry({
-      eventType: "generate.result",
-      payload: {
-        outcome: result.data.status === "failed" ? "failed" : "success",
-        latencyBucket,
-      },
-    });
+    recordGenerateResultWhenTerminal(
+      result.data.runId,
+      result.data.status,
+      startedAt,
+    );
 
     setState((prev) => ({
       ...prev,
@@ -584,6 +657,17 @@ export function TransformationRunProvider({
         manual: input.manualContent,
         newGenerator: input.newGeneratorContent,
       });
+      const pending = pendingGenerateTelemetryRef.current;
+      if (pending?.runId === input.newGeneratorRunId) {
+        emitGenerateResult("merge_required", pending.startedAt);
+        pendingGenerateTelemetryRef.current = null;
+      }
+      emitTelemetry({
+        eventType: "three_way_merge.opened",
+        payload: {
+          regionCountBucket: bucketThreeWayMergeRegionCount(regions.length),
+        },
+      });
       setJavaMergeReview({
         filePath: input.filePath,
         baselineContent: input.baselineContent,
@@ -593,12 +677,25 @@ export function TransformationRunProvider({
         regions,
       });
     },
-    [],
+    [emitGenerateResult],
   );
 
   const cancelJavaMergeReview = useCallback(() => {
+    if (javaMergeReview) {
+      emitTelemetry({
+        eventType: "three_way_merge.resolved",
+        payload: {
+          regionsPickedPerSource: {
+            manual: 0,
+            new_generator: 0,
+            baseline: 0,
+          },
+          cancelled: true,
+        },
+      });
+    }
     setJavaMergeReview(null);
-  }, []);
+  }, [javaMergeReview]);
 
   // Apply the user's per-region selections by composing a merged buffer
   // (``applyMergeSelections``) and writing it back through the same
@@ -618,6 +715,23 @@ export function TransformationRunProvider({
       const selectionMap = new Map<string, ConflictRegionResolution>(
         Object.entries(selections),
       );
+      const regionsPickedPerSource = {
+        manual: 0,
+        new_generator: 0,
+        baseline: 0,
+      };
+      for (const region of review.regions) {
+        const resolution =
+          selectionMap.get(defaultRegionId(region)) ??
+          region.suggestedResolution;
+        if (resolution === "manual") {
+          regionsPickedPerSource.manual += 1;
+        } else if (resolution === "newGenerator") {
+          regionsPickedPerSource.new_generator += 1;
+        } else if (resolution === "baseline") {
+          regionsPickedPerSource.baseline += 1;
+        }
+      }
       // ``applyMergeSelections`` throws ``UnresolvedMergeConflictError``
       // when a conflict region has no selection AND no suggested
       // resolution. The ThreeWayMergeDialog blocks Apply in that case,
@@ -669,6 +783,13 @@ export function TransformationRunProvider({
       });
 
       setJavaMergeReview(null);
+      emitTelemetry({
+        eventType: "three_way_merge.resolved",
+        payload: {
+          regionsPickedPerSource,
+          cancelled: false,
+        },
+      });
     },
     [javaMergeReview],
   );
@@ -746,6 +867,9 @@ export function TransformationRunProvider({
       });
       // Recompute the buffer hash asynchronously so the chip can react.
       void deriveSourceHash(content).then((hash) => {
+        if (!isMountedRef.current) {
+          return;
+        }
         setJavaBuffers((prev) => {
           const existing = prev[filePath];
           if (!existing || existing.content !== content) {
@@ -763,6 +887,23 @@ export function TransformationRunProvider({
 
   const setJavaManualOverlay = useCallback(
     (filePath: string, overlay: JavaOriginOverlay | null) => {
+      for (const region of overlay?.regions ?? []) {
+        if (
+          region.originClass !== "manual_modified" &&
+          region.originClass !== "manual_edit"
+        ) {
+          continue;
+        }
+        emitTelemetry({
+          eventType: "manual_edit.region_classified",
+          payload: {
+            originClass: region.originClass,
+            ...(region.mappingClass
+              ? { mappingClass: region.mappingClass }
+              : {}),
+          },
+        });
+      }
       setJavaBuffers((prev) => {
         const existing = prev[filePath];
         if (!existing) {
@@ -932,6 +1073,16 @@ export function TransformationRunProvider({
         if (!current) {
           return null;
         }
+        const pick =
+          choice === "backendSample"
+            ? "backend_sample"
+            : choice === "localDraft"
+              ? "local_draft"
+              : "last_run_input";
+        emitTelemetry({
+          eventType: "conflict.resolved",
+          payload: { kind: "java", pick },
+        });
         const chosen = current[choice];
         const manualEditOverlay =
           choice === "localDraft" ? current.manualEditOverlay : null;
@@ -951,6 +1102,9 @@ export function TransformationRunProvider({
           };
         });
         void deriveSourceHash(chosen).then((hash) => {
+          if (!isMountedRef.current) {
+            return;
+          }
           setJavaBuffers((prev) => {
             const existing = prev[current.filePath];
             if (!existing) {
