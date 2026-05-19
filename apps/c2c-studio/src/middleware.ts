@@ -109,6 +109,18 @@ export function middleware(request: NextRequest) {
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("X-Frame-Options", "DENY");
+  // Studio-IDE-12 (#250) §Memory: enabling
+  // ``performance.measureUserAgentSpecificMemory()`` in Chromium
+  // requires the page to be in a cross-origin-isolated context.
+  // ``Cross-Origin-Opener-Policy: same-origin`` +
+  // ``Cross-Origin-Embedder-Policy: credentialless`` produces an
+  // isolated context that allows same-origin embeds (workers, the
+  // BFF) and rejects cross-origin embeds. Studio currently embeds
+  // nothing cross-origin, so this is safe; if a future feature
+  // needs a cross-origin resource it must opt-in via CORP headers
+  // on that resource.
+  response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  response.headers.set("Cross-Origin-Embedder-Policy", "credentialless");
   return response;
 }
 
