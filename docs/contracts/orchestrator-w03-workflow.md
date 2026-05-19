@@ -135,6 +135,10 @@ Both fields are optional on the wire. Consumers reading older
 persisted runs that pre-date ADR 0007 MUST treat absence as `false`
 and `0` respectively (per
 [ADR 0006 §4](../adr/0006-studio-bff-contract-versioning.md)).
+Manual-edit provenance does not by itself make a run fail, but a run
+that reports `manualEditsCarriedOver = true` is evidence-incomplete
+unless the Evidence Pack also carries `artifacts.manualEditOverlay`
+with the matching `regionCount`.
 
 ### Assist-Interaction Rule for Manual Regions
 
@@ -155,8 +159,8 @@ downgrades any subsequent assist activity that targets it:
 
 The five-class origin taxonomy, the per-region metadata schema, and
 the lineage semantics that go with manual regions live in ADR 0007;
-this contract document records only the run-summary shape and the
-agent-interaction rule that consumers of the workflow contract need.
+this contract document records the consumer-facing run-summary,
+evidence, API, and agent-interaction rules that workflow clients need.
 
 ## Parallel-Governed Channels
 

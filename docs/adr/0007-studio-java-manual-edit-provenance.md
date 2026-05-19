@@ -57,22 +57,25 @@ lineage rules that downstream issues
 [Studio-IDE-6 #248](https://github.com/oscharko-dev/c2c-PreBeta/issues/248))
 need before they can start.
 
-Verified current state of the relevant contracts:
+Verified current state of the relevant contracts after ADR adoption:
 
 - The W0.3 run contract (`services/orchestrator-service/src/orchestrator_service/run_contract.py`)
-  exposes assist-decision, budgets, repair attempts, and
-  classification, but has no notion of manual-edit provenance.
+  already exposes assist-decision, budgets, repair attempts, and final
+  classification. ADR 0007 extends that same additive run-summary
+  surface with manual-edit provenance.
 - The Evidence Pack manifest schema
-  (`schemas/evidence-pack-manifest-v0.json`) covers deterministic
-  baseline, agent-proposed, and verification-repair candidates but not
-  manual edits.
+  (`schemas/evidence-pack-manifest-v0.json`) already covers the
+  deterministic baseline, agent-proposed candidates, and
+  verification-repair candidates. ADR 0007 adds the manual-edit overlay
+  reference and cross-field consistency rule.
 - The [W0.3 Workflow Contract](../contracts/orchestrator-w03-workflow.md)
-  documents the existing assist-decision reason codes and the closed
-  enum the gate may emit.
+  documents the assist-decision reason codes, the run-summary fields,
+  and the consumer-visible evidence requirements.
 - [ADR 0006 — Studio-BFF Contract Versioning](0006-studio-bff-contract-versioning.md)
-  already lists `JavaOriginOverlay` as a versioned DTO and names the
-  forward-compat null-fallback rule for `RunSummary.javaRegionClassification`.
-  The fields this ADR introduces extend that surface.
+  governs additive DTO evolution and the null-fallback rule for
+  `RunSummary.javaRegionClassification`. ADR 0007 extends that v0
+  surface with `manualEditsCarriedOver`, `manualDriftRegionCount`, and
+  the `manualEditOverlay` evidence reference.
 
 ## Decision
 
@@ -178,10 +181,10 @@ matches the pre-ADR-0007 run shape.
 
 ### 5. Assist-interaction rule
 
-A region with `originClass` `manual_modified` or `manual_edit`
-downgrades the next `assistDecision.reasonCode` that targets it: the
-Verification/Repair Agent MUST NOT propose changes to the region
-without an explicit caller opt-in.
+A region with `originClass` `manual_modified` or `manual_edit` gates
+subsequent Verification/Repair Agent activity that targets it: the
+agent MUST NOT propose changes to the region without an explicit
+caller opt-in recorded on the run-scoped `assistDecision.reasonCode`.
 
 Concretely:
 

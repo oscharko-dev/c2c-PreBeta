@@ -258,6 +258,87 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "required": ["manualEditsCarriedOver"],
+        "properties": {
+          "manualEditsCarriedOver": { "const": true }
+        }
+      },
+      "then": {
+        "required": ["manualDriftRegionCount"],
+        "properties": {
+          "manualDriftRegionCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "artifacts": {
+            "required": ["manualEditOverlay"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["manualEditsCarriedOver"],
+        "properties": {
+          "manualEditsCarriedOver": { "const": false }
+        }
+      },
+      "then": {
+        "properties": {
+          "manualDriftRegionCount": {
+            "type": "integer",
+            "maximum": 0
+          },
+          "artifacts": {
+            "not": { "required": ["manualEditOverlay"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["manualDriftRegionCount"],
+        "properties": {
+          "manualDriftRegionCount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "then": {
+        "required": ["manualEditsCarriedOver"],
+        "properties": {
+          "manualEditsCarriedOver": { "const": true },
+          "artifacts": {
+            "required": ["manualEditOverlay"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["artifacts"],
+        "properties": {
+          "artifacts": {
+            "required": ["manualEditOverlay"]
+          }
+        }
+      },
+      "then": {
+        "required": ["manualEditsCarriedOver", "manualDriftRegionCount"],
+        "properties": {
+          "manualEditsCarriedOver": { "const": true },
+          "manualDriftRegionCount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": true,
   "$defs": {
     "dataReference": {

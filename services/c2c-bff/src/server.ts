@@ -752,6 +752,16 @@ function runSummary(stored: StoredRun): Record<string, unknown> {
     finalClassification: stored.finalClassification ?? null,
     failureCode: stored.failureCode ?? null,
     failureMessage: stored.failureMessage ?? null,
+    // ADR-0007 (#257): explicit run-summary provenance for manual Java
+    // edits. Defaults preserve ADR-0006 absence semantics for cached
+    // legacy records.
+    manualEditsCarriedOver: stored.manualEditsCarriedOver === true,
+    manualDriftRegionCount:
+      typeof stored.manualDriftRegionCount === "number" &&
+      Number.isInteger(stored.manualDriftRegionCount) &&
+      stored.manualDriftRegionCount >= 0
+        ? stored.manualDriftRegionCount
+        : 0,
     // Studio-IDE-6 (#248): per-file Java region classification cached from
     // the orchestrator's traceability payload. Absent until first traceability
     // fetch; null when unavailable.
@@ -2702,6 +2712,8 @@ export interface WorkflowSnapshot {
   finalClassification: RunFinalClassification | null;
   failureCode: W02UiErrorCode | null;
   failureMessage: string | null;
+  manualEditsCarriedOver: boolean;
+  manualDriftRegionCount: number;
   generatedJavaRef: { sha256: string; byteSize: number; kind: string } | null;
   buildTestResultRef: { sha256: string; byteSize: number; kind: string } | null;
   evidencePackRef: { sha256: string; byteSize: number; kind: string } | null;
@@ -2720,6 +2732,8 @@ const EMPTY_WORKFLOW_SNAPSHOT: WorkflowSnapshot = {
   finalClassification: null,
   failureCode: null,
   failureMessage: null,
+  manualEditsCarriedOver: false,
+  manualDriftRegionCount: 0,
   generatedJavaRef: null,
   buildTestResultRef: null,
   evidencePackRef: null,
@@ -2843,6 +2857,20 @@ function snapshotFromContract(
       defaultMessageFor("internal_error"),
     );
   }
+  const manualDriftRegionCountRaw = asNumber(
+    contract.manualDriftRegionCount,
+  );
+  const manualDriftRegionCount =
+    manualDriftRegionCountRaw !== undefined &&
+    Number.isInteger(manualDriftRegionCountRaw) &&
+    manualDriftRegionCountRaw >= 0
+      ? manualDriftRegionCountRaw
+      : 0;
+  const manualEditsCarriedOver =
+    contract.manualEditsCarriedOver === true && manualDriftRegionCount > 0;
+  const normalizedManualDriftRegionCount = manualEditsCarriedOver
+    ? manualDriftRegionCount
+    : 0;
   return {
     state,
     activeStep,
@@ -2856,6 +2884,8 @@ function snapshotFromContract(
     finalClassification,
     failureCode,
     failureMessage,
+    manualEditsCarriedOver,
+    manualDriftRegionCount: normalizedManualDriftRegionCount,
     generatedJavaRef: safeArtifactRef(contract.generatedJavaRef),
     buildTestResultRef: safeArtifactRef(contract.buildTestResultRef),
     evidencePackRef: safeArtifactRef(contract.evidencePackRef),
@@ -2885,6 +2915,8 @@ function workflowEnvelope(
     finalClassification: snapshot.finalClassification,
     failureCode: snapshot.failureCode,
     failureMessage: snapshot.failureMessage,
+    manualEditsCarriedOver: snapshot.manualEditsCarriedOver,
+    manualDriftRegionCount: snapshot.manualDriftRegionCount,
     generatedJavaRef: snapshot.generatedJavaRef,
     buildTestResultRef: snapshot.buildTestResultRef,
     evidencePackRef: snapshot.evidencePackRef,
@@ -2905,6 +2937,8 @@ function applyWorkflowSnapshotToStore(
     finalClassification: snapshot.finalClassification ?? undefined,
     failureCode: snapshot.failureCode ?? undefined,
     failureMessage: snapshot.failureMessage ?? undefined,
+    manualEditsCarriedOver: snapshot.manualEditsCarriedOver,
+    manualDriftRegionCount: snapshot.manualDriftRegionCount,
   };
   const updated = runStore.update(stored.runId, patch);
   return updated ?? stored;

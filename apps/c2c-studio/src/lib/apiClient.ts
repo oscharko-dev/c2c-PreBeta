@@ -801,6 +801,24 @@ function isModelInvocationBudgetPayload(
   );
 }
 
+function hasManualEditSummaryFields(payload: Record<string, unknown>): boolean {
+  const carried = payload.manualEditsCarriedOver;
+  const count = payload.manualDriftRegionCount;
+  if (carried !== undefined && typeof carried !== "boolean") {
+    return false;
+  }
+  if (count !== undefined && !isNonNegativeInteger(count)) {
+    return false;
+  }
+  if (carried === true) {
+    return count !== undefined && count > 0;
+  }
+  if (carried === false) {
+    return count === undefined || count === 0;
+  }
+  return count === undefined || count === 0;
+}
+
 function isRepairAttemptSummaryPayload(
   payload: unknown,
 ): payload is RepairAttemptSummary {
@@ -974,7 +992,8 @@ function hasW02ContractFields(payload: Record<string, unknown>): boolean {
       isW02UiErrorCode(payload.failureCode)) &&
     (payload.failureMessage === undefined ||
       payload.failureMessage === null ||
-      isString(payload.failureMessage))
+      isString(payload.failureMessage)) &&
+    hasManualEditSummaryFields(payload)
   );
 }
 

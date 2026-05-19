@@ -72,6 +72,10 @@ export interface StoredRun {
   finalClassification?: RunFinalClassification;
   failureCode?: W02UiErrorCode;
   failureMessage?: string;
+  // ADR-0007 (#257): run-summary manual-edit provenance. Optional in the
+  // cache so legacy in-memory records default to false/0 at projection time.
+  manualEditsCarriedOver?: boolean;
+  manualDriftRegionCount?: number;
   // Studio-IDE-6 (#248): per-file Java region classification surfaced from
   // the orchestrator's traceability payload and cached on the run.
   javaRegionClassification?: Record<string, unknown[]> | null;

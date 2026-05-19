@@ -52,8 +52,10 @@ def _extract_manual_overlay_regions(
         return ()
     if isinstance(raw, dict):
         regions_raw = raw.get("regions", [])
+        default_file_path = raw.get("javaFile")
     elif isinstance(raw, list):
         regions_raw = raw
+        default_file_path = None
     else:
         raise ValueError(
             "manualOverlay must be an object or array; got "
@@ -67,7 +69,7 @@ def _extract_manual_overlay_regions(
             raise ValueError(
                 f"manualOverlay.regions[{index}] must be an object"
             )
-        file_path = region.get("filePath")
+        file_path = region.get("filePath") or default_file_path
         origin_class = region.get("originClass")
         if not isinstance(file_path, str) or not file_path:
             raise ValueError(
@@ -79,9 +81,16 @@ def _extract_manual_overlay_regions(
                 f"{sorted(JAVA_REGION_ORIGIN_MANUAL_CLASSES)}, got "
                 f"{origin_class!r}"
             )
+        line_range = region.get("lineRange")
+        if isinstance(line_range, dict):
+            start_raw = line_range.get("startLine")
+            end_raw = line_range.get("endLine")
+        else:
+            start_raw = region.get("startLine")
+            end_raw = region.get("endLine")
         try:
-            start_line = int(region.get("startLine"))
-            end_line = int(region.get("endLine"))
+            start_line = int(start_raw)
+            end_line = int(end_raw)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 f"manualOverlay.regions[{index}] requires integer "
@@ -92,14 +101,22 @@ def _extract_manual_overlay_regions(
                 f"manualOverlay.regions[{index}] has invalid line range "
                 f"[{start_line}, {end_line}]"
             )
-        normalised.append(
-            {
-                "filePath": file_path,
-                "originClass": origin_class,
-                "startLine": start_line,
-                "endLine": end_line,
-            }
-        )
+        entry: dict[str, Any] = {
+            "filePath": file_path,
+            "originClass": origin_class,
+            "startLine": start_line,
+            "endLine": end_line,
+        }
+        for optional_key in (
+            "generatorBaselineRunId",
+            "generatorBaselineRegionHash",
+            "lastModifiedAt",
+            "lastModifiedBy",
+            "manualEditCount",
+        ):
+            if optional_key in region:
+                entry[optional_key] = region[optional_key]
+        normalised.append(entry)
     return tuple(normalised)
 
 

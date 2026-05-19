@@ -59,6 +59,32 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         self.assertEqual(len(regions), 1)
         self.assertEqual(regions[0]["originClass"], "manual_edit")
 
+    def test_studio_overlay_shape_accepted(self) -> None:
+        regions = _extract_manual_overlay_regions(
+            {
+                "schemaVersion": "v0",
+                "runId": "run-1",
+                "javaFile": "src/main/java/com/example/App.java",
+                "regions": [
+                    {
+                        "lineRange": {"startLine": 4, "endLine": 6},
+                        "originClass": "manual_modified",
+                        "generatorBaselineRunId": "run-0",
+                        "generatorBaselineRegionHash": "a" * 64,
+                        "manualEditCount": 2,
+                    }
+                ],
+            }
+        )
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(
+            regions[0]["filePath"], "src/main/java/com/example/App.java"
+        )
+        self.assertEqual(regions[0]["startLine"], 4)
+        self.assertEqual(regions[0]["endLine"], 6)
+        self.assertEqual(regions[0]["generatorBaselineRunId"], "run-0")
+        self.assertEqual(regions[0]["manualEditCount"], 2)
+
     def test_unknown_origin_class_rejected(self) -> None:
         # ADR 0007 §"Rationale" pins the closed enum; non-manual
         # classes MUST NOT silently pass through the manual-overlay

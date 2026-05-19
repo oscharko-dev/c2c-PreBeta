@@ -58,6 +58,7 @@ KIND_REPAIR_AGENT_INPUT = "repair-agent-input"
 KIND_REPAIR_AGENT_DECISION = "repair-agent-decision"
 KIND_REPAIR_AGENT_PROJECT_MANIFEST = "repair-agent-project-manifest"
 KIND_REPAIR_AGENT_JAVA_FILE = "repair-agent-java-file"
+KIND_MANUAL_EDIT_OVERLAY = "manual-edit-overlay"
 
 MIME_JSON = "application/json"
 MIME_COBOL = "text/x-cobol"

@@ -4096,6 +4096,8 @@ test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
           ],
           finalClassification: "blocked",
           failureCode: "java_compile_failed",
+          manualEditsCarriedOver: true,
+          manualDriftRegionCount: 2,
           failureMessage:
             "compile at http://orchestrator.internal:18088/v0/runs/live-run-1 failed at module.fn (/Users/me/repo/file.java:10:5)",
           generatedJavaRef: {
@@ -4162,6 +4164,8 @@ test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
       finalClassification: string;
       failureCode: string;
       failureMessage: string;
+      manualEditsCarriedOver: boolean;
+      manualDriftRegionCount: number;
       generatedJavaRef: {
         sha256: string;
         byteSize: number;
@@ -4199,6 +4203,8 @@ test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
     assert.equal(wfBody.repairAttempts[1]?.repairDecision, "no_change");
     assert.equal(wfBody.finalClassification, "blocked");
     assert.equal(wfBody.failureCode, "java_compile_failed");
+    assert.equal(wfBody.manualEditsCarriedOver, true);
+    assert.equal(wfBody.manualDriftRegionCount, 2);
     assert.ok(
       !wfBody.failureMessage.includes("http://"),
       "failureMessage must not leak orchestrator URL",
@@ -4210,6 +4216,15 @@ test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
     assert.equal(wfBody.generatedJavaRef?.sha256, "b".repeat(64));
     assert.equal(wfBody.buildTestResultRef?.sha256, "c".repeat(64));
     assert.equal(wfBody.evidencePackRef?.sha256, "d".repeat(64));
+    const summary = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+    );
+    const summaryBody = summary.body as {
+      manualEditsCarriedOver: boolean;
+      manualDriftRegionCount: number;
+    };
+    assert.equal(summaryBody.manualEditsCarriedOver, true);
+    assert.equal(summaryBody.manualDriftRegionCount, 2);
     // None of the contract response must carry the raw modelInvocationRef URI.
     const serialised = JSON.stringify(wfBody);
     assert.ok(

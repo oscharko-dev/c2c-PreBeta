@@ -26,6 +26,7 @@ from .artifacts import (
     KIND_GENERATED_PROJECT_FILE,
     KIND_GENERATED_PROJECT_MANIFEST,
     KIND_GENERATION_RESPONSE,
+    KIND_MANUAL_EDIT_OVERLAY,
     KIND_MODEL_INVOCATION_LEDGER,
     KIND_MODEL_POLICY_SKIPPED,
     KIND_PARSE_OUTPUT,
@@ -537,6 +538,7 @@ def _has_non_empty_list(mapping: Mapping[str, JsonValue] | None, key: str) -> bo
 
 GENERATED_PROJECT_DIR = "generated-project"
 GENERATED_PROJECT_MANIFEST_FILE = "generated-project-manifest.json"
+MANUAL_EDIT_OVERLAY_FILE = "manual-edit-overlay.json"
 
 
 def _build_generated_project_manifest(
@@ -1284,10 +1286,9 @@ class W0WorkflowRunner:
         is stamped when the run has no generated Java surface yet (e.g.
         a run blocked before ``STATE_JAVA_CANDIDATE_PERSISTED``).
 
-        The IDE-13 manual-overlay hook is intentionally absent until
-        Studio writes ``ManualEditOverlay`` artifacts; the function is
-        called with ``manual_overlay=None`` so manual classes never
-        appear on orchestrator-derived output.
+        ADR 0007 manual overlays are supplied through the run context.
+        When present, those regions override the orchestrator-derived
+        origin class for the matching generated-Java line range.
         """
         java_files = self._load_generated_java_files(context.run_id)
         if not java_files:
@@ -1299,7 +1300,7 @@ class W0WorkflowRunner:
             repair_attempts=contract.repair_attempts,
             final_classification=final_classification,
             failure_code=failure_code,
-            manual_overlay=None,
+            manual_overlay=self._manual_overlay_by_file(context),
         )
         contract.set_java_region_classification(classification)
 
@@ -1332,6 +1333,118 @@ class W0WorkflowRunner:
             if short.endswith(".java"):
                 result[short] = content_text
         return result
+
+    @staticmethod
+    def _manual_overlay_regions(context: W0RunContext) -> list[JsonObject]:
+        regions: list[JsonObject] = []
+        for raw in context.manual_overlay_regions:
+            file_path = str(raw.get("filePath") or "").strip()
+            origin_class = str(raw.get("originClass") or "").strip()
+            try:
+                start_line = int(raw.get("startLine") or 0)
+                end_line = int(raw.get("endLine") or 0)
+            except (TypeError, ValueError):
+                continue
+            if (
+                not file_path
+                or origin_class not in w02.JAVA_REGION_ORIGIN_MANUAL_CLASSES
+                or start_line < 1
+                or end_line < start_line
+            ):
+                continue
+            region: JsonObject = {
+                "filePath": file_path,
+                "lineRange": {
+                    "startLine": start_line,
+                    "endLine": end_line,
+                },
+                "originClass": origin_class,
+            }
+            for optional_key in (
+                "generatorBaselineRunId",
+                "generatorBaselineRegionHash",
+                "lastModifiedAt",
+                "lastModifiedBy",
+                "manualEditCount",
+            ):
+                value = raw.get(optional_key)
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    if value is not None:
+                        region[optional_key] = value
+                elif isinstance(value, Mapping):
+                    region[optional_key] = dict(value)
+            regions.append(region)
+        return regions
+
+    def _manual_overlay_by_file(
+        self, context: W0RunContext
+    ) -> dict[str, dict[tuple[int, int], str]]:
+        overlay: dict[str, dict[tuple[int, int], str]] = {}
+        for region in self._manual_overlay_regions(context):
+            line_range = region.get("lineRange")
+            if not isinstance(line_range, Mapping):
+                continue
+            file_path = str(region.get("filePath") or "")
+            origin_class = str(region.get("originClass") or "")
+            start_line = int(line_range.get("startLine") or 0)
+            end_line = int(line_range.get("endLine") or 0)
+            overlay.setdefault(file_path, {})[
+                (start_line, end_line)
+            ] = origin_class
+        return overlay
+
+    def _manual_edit_region_count(self, context: W0RunContext) -> int:
+        return len(self._manual_overlay_regions(context))
+
+    def _stamp_manual_edit_summary(
+        self,
+        context: W0RunContext,
+        contract: W02RunContract,
+    ) -> None:
+        region_count = self._manual_edit_region_count(context)
+        contract.set_manual_edit_summary(
+            carried_over=region_count > 0,
+            drift_region_count=region_count,
+        )
+
+    def _manual_edit_overlay_payload(self, context: W0RunContext) -> JsonObject | None:
+        regions = self._manual_overlay_regions(context)
+        if not regions:
+            return None
+        return {
+            "schemaVersion": "v0",
+            "runId": context.run_id,
+            "regions": regions,
+        }
+
+    def _manual_edit_overlay_ref(self, context: W0RunContext) -> JsonObject | None:
+        payload = self._manual_edit_overlay_payload(context)
+        if payload is None:
+            return None
+        existing = self.artifact_store.find_metadata(
+            context.run_id, MANUAL_EDIT_OVERLAY_FILE
+        )
+        if existing is not None:
+            ref = _reference_payload_from_metadata(existing)
+        elif isinstance(self.artifact_store, NullArtifactStore):
+            ref = None
+        else:
+            meta = self.artifact_store.write_json(
+                context.run_id,
+                context.workflow_id,
+                MANUAL_EDIT_OVERLAY_FILE,
+                payload,
+                kind=KIND_MANUAL_EDIT_OVERLAY,
+            )
+            ref = (
+                _reference_payload_from_metadata(meta.to_dict())
+                if meta is not None
+                else None
+            )
+        if ref is not None:
+            ref["schemaVersion"] = "v0"
+            ref["regionCount"] = len(payload["regions"])
+        return ref
 
     @staticmethod
     def _failure_code_for_step_name(
@@ -2880,6 +2993,14 @@ class W0WorkflowRunner:
                     kind=KIND_TRAJECTORY_LEDGER,
                 )
             )
+            self._stamp_manual_edit_summary(context, w02_contract)
+            manual_overlay_ref = self._manual_edit_overlay_ref(context)
+            if manual_overlay_ref is not None:
+                manual_overlay_meta = self.artifact_store.find_metadata(
+                    context.run_id, MANUAL_EDIT_OVERLAY_FILE
+                )
+                if manual_overlay_meta is not None:
+                    _record_artifact(ArtifactMetadata(**manual_overlay_meta))
 
             evidence_payload = self._build_evidence_payload(
                 context=context,
@@ -3344,13 +3465,19 @@ class W0WorkflowRunner:
             #   relaxes the requirement for blocked packs in that case.
             # - budgetSummary is emitted for every W0.2 run, blocked or not,
             #   so the bounded-budget posture is always visible.
+            assist_decision_payload: JsonObject | None = None
             if w02_contract is not None:
                 assist_decision_payload = self._build_assist_decision_lineage(
                     w02_contract
                 )
                 if assist_decision_payload is not None:
                     artifacts["assistDecision"] = assist_decision_payload
-                artifacts["budgetSummary"] = self._build_budget_summary(w02_contract)
+                artifacts["budgetSummary"] = self._build_budget_summary(
+                    w02_contract
+                )
+            manual_overlay_ref = self._manual_edit_overlay_ref(context)
+            if manual_overlay_ref is not None:
+                artifacts["manualEditOverlay"] = manual_overlay_ref
 
         payload: JsonObject = {
             "runId": context.run_id,
@@ -3369,18 +3496,26 @@ class W0WorkflowRunner:
         }
         if is_w02:
             payload["blocked"] = bool(w02_blocked)
-            # ADR 0007 (#257, #279): the orchestrator forwards the run-summary
-            # manual-edit provenance signals ONLY when it can also forward the
-            # overlay artifact reference, because evidence-service rejects a
-            # ``manualEditsCarriedOver=true`` payload that lacks the overlay
-            # (cross-field consistency rule on the v0 manifest schema). The
-            # overlay artifact wiring — Studio overlay → BFF /verify →
-            # orchestrator artifact-store → evidence-pack — is a separate
-            # follow-up. Until that lands, suppressing the signal keeps the
-            # wire shape identical to pre-ADR-0007 packs (consumers default to
-            # ``false`` / ``0`` per ADR 0006 §2 absence semantics) and avoids
-            # a latent failure mode where the very first run with manual edits
-            # would crash write-evidence instead of persisting the pack.
+            manual_count = 0
+            manual_carried_over = False
+            if w02_contract is not None:
+                manual_count = int(
+                    getattr(w02_contract, "manual_drift_region_count", 0) or 0
+                )
+                manual_carried_over = bool(
+                    getattr(w02_contract, "manual_edits_carried_over", False)
+                )
+            if manual_overlay_ref is not None:
+                manual_count = int(
+                    manual_overlay_ref.get("regionCount") or manual_count
+                )
+                manual_carried_over = manual_count > 0
+            if manual_carried_over and manual_overlay_ref is None:
+                raise OrchestratorError(
+                    "manual edit provenance requires artifacts.manualEditOverlay"
+                )
+            payload["manualEditsCarriedOver"] = manual_carried_over
+            payload["manualDriftRegionCount"] = manual_count
         return payload
 
     @staticmethod

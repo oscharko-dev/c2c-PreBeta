@@ -947,12 +947,8 @@ class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):
 
 
 class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
-    """ADR 0007 (#257, Issue #279): the orchestrator suppresses the
-    run-summary manual-edit signals until the overlay-artifact wiring
-    lands. Forwarding the signal alone would cause evidence-service to
-    reject the write-evidence step (the v0 manifest cross-field
-    consistency rule requires the overlay when carried_over=true), so
-    the pre-ADR-0007 wire shape is preserved end-to-end."""
+    """ADR 0007 (#257): the orchestrator emits manual-edit provenance as
+    a consistent run-summary + overlay-artifact pair."""
 
     def _w02_contract(self):
         return new_run_contract(
@@ -962,8 +958,15 @@ class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
             source_ref={"uri": "urn:source/HELLO.cob"},
         )
 
-    def _build_payload(self, contract):
-        context = self._w0_context(use_transformation_agent=True)
+    def _build_payload(self, contract, manual_overlay_regions=()):
+        context = W0RunContext(
+            run_id="run-evidence",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            evidence_refs=[],
+            use_transformation_agent=True,
+            manual_overlay_regions=tuple(manual_overlay_regions),
+        )
         baseline_ref = {
             "uri": "urn:run/baseline",
             "sha256": "1" * 64,
@@ -1007,28 +1010,55 @@ class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
             productive_model_invocations=[transformation_model_ref],
         )
 
-    def test_omits_manual_edit_signals_when_no_drift(self) -> None:
+    def test_emits_default_manual_edit_signals_when_no_drift(self) -> None:
         contract = self._w02_contract()
         payload = self._build_payload(contract)
-        self.assertNotIn("manualEditsCarriedOver", payload)
-        self.assertNotIn("manualDriftRegionCount", payload)
+        self.assertFalse(payload["manualEditsCarriedOver"])
+        self.assertEqual(payload["manualDriftRegionCount"], 0)
+        self.assertNotIn("manualEditOverlay", payload["artifacts"])
 
-    def test_omits_manual_edit_signals_even_when_contract_carries_drift(self) -> None:
-        # Until the overlay-artifact wiring lands, the orchestrator MUST
-        # NOT forward ``manualEditsCarriedOver`` on its own — doing so
-        # without the matching overlay would make evidence-service reject
-        # the write-evidence step.
+    def test_emits_manual_edit_signals_with_overlay_reference(self) -> None:
         contract = self._w02_contract()
         contract.set_manual_edit_summary(
-            carried_over=True, drift_region_count=3
+            carried_over=True, drift_region_count=2
         )
-        payload = self._build_payload(contract)
-        self.assertNotIn("manualEditsCarriedOver", payload)
-        self.assertNotIn("manualDriftRegionCount", payload)
-        # The contract itself still records the drift — only the wire
-        # shape suppresses it pending the overlay wiring.
-        self.assertTrue(contract.manual_edits_carried_over)
-        self.assertEqual(contract.manual_drift_region_count, 3)
+        payload = self._build_payload(
+            contract,
+            manual_overlay_regions=(
+                {
+                    "filePath": "src/main/java/HELLO.java",
+                    "originClass": "manual_modified",
+                    "startLine": 3,
+                    "endLine": 4,
+                },
+                {
+                    "filePath": "src/main/java/HELLO.java",
+                    "originClass": "manual_edit",
+                    "startLine": 8,
+                    "endLine": 8,
+                },
+            ),
+        )
+
+        self.assertTrue(payload["manualEditsCarriedOver"])
+        self.assertEqual(payload["manualDriftRegionCount"], 2)
+        overlay_ref = payload["artifacts"]["manualEditOverlay"]
+        self.assertEqual(overlay_ref["schemaVersion"], "v0")
+        self.assertEqual(overlay_ref["regionCount"], 2)
+        self.assertEqual(overlay_ref["kind"], "manual-edit-overlay")
+        stored = self.runner.artifact_store.read_json(
+            "run-evidence", "manual-edit-overlay.json"
+        )
+        self.assertIsNotNone(stored)
+        self.assertEqual(len(stored["regions"]), 2)
+
+    def test_rejects_manual_summary_without_overlay_reference(self) -> None:
+        contract = self._w02_contract()
+        contract.set_manual_edit_summary(carried_over=True, drift_region_count=1)
+        with self.assertRaisesRegex(
+            Exception, "manual edit provenance requires"
+        ):
+            self._build_payload(contract)
 
 
 if __name__ == "__main__":

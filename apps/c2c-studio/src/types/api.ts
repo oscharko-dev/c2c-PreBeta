@@ -101,6 +101,8 @@ export interface W02RunContractFields {
   finalClassification?: RunFinalClassification | null;
   failureCode?: W02UiErrorCode | null;
   failureMessage?: string | null;
+  manualEditsCarriedOver?: boolean;
+  manualDriftRegionCount?: number;
 }
 
 export interface TransformResponse extends W02RunContractFields {
