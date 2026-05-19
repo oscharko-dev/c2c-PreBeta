@@ -141,11 +141,12 @@ interface RawHeadersResult {
 
 async function fetchRawHeaders(
   url: string,
-  init: { method?: string; cookie?: string } = {},
+  init: { method?: string; cookie?: string; origin?: string } = {},
 ): Promise<RawHeadersResult> {
   const target = new URL(url);
   const headers: Record<string, string> = { accept: "application/json" };
   if (init.cookie) headers["cookie"] = init.cookie;
+  if (init.origin) headers["origin"] = init.origin;
   return await new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -555,7 +556,7 @@ test("sign-in body cap rejects oversized payloads with 413", async () => {
   }
 });
 
-test("bootstrap response includes Vary: Cookie so caches do not mix users", async () => {
+test("bootstrap response preserves Vary: Origin and Cookie for CORS caches", async () => {
   const server = await startTestServer(makeApp());
   try {
     const signIn = await fetchWithCookies(
@@ -567,7 +568,11 @@ test("bootstrap response includes Vary: Cookie so caches do not mix users", asyn
     // Use a raw http.request so we can inspect response headers directly.
     const rawResponse = await fetchRawHeaders(
       `${server.baseUrl}/api/v0/session/bootstrap`,
-      { method: "POST", cookie: cookieHeader },
+      {
+        method: "POST",
+        cookie: cookieHeader,
+        origin: "http://127.0.0.1:3000",
+      },
     );
     assert.equal(rawResponse.status, 200);
     // Vary may be set as multiple headers or comma-joined; allow either.
@@ -576,6 +581,15 @@ test("bootstrap response includes Vary: Cookie so caches do not mix users", asyn
       vary,
       /cookie/,
       `bootstrap response must include 'Vary: Cookie' so a CDN cannot serve one user's wrapping secret to another (got: '${rawResponse.headers.vary ?? "<missing>"}')`,
+    );
+    assert.match(
+      vary,
+      /origin/,
+      `bootstrap response must keep 'Vary: Origin' for credentialed CORS responses (got: '${rawResponse.headers.vary ?? "<missing>"}')`,
+    );
+    assert.equal(
+      rawResponse.headers["access-control-allow-origin"],
+      "http://127.0.0.1:3000",
     );
     // The existing jsonResponse helper also stamps Cache-Control: no-store —
     // assert that too so the contract is observable from one test.

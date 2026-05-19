@@ -572,6 +572,18 @@ function rejectDisallowedBrowserOrigin(
   return true;
 }
 
+function appendVaryHeader(res: http.ServerResponse, fieldName: string): void {
+  const existing = res.getHeader("vary");
+  if (existing === undefined) {
+    res.setHeader("vary", fieldName);
+    return;
+  }
+  const value = Array.isArray(existing) ? existing.join(", ") : String(existing);
+  const fields = value.split(",").map((field) => field.trim().toLowerCase());
+  if (fields.includes("*") || fields.includes(fieldName.toLowerCase())) return;
+  res.setHeader("vary", value.length > 0 ? `${value}, ${fieldName}` : fieldName);
+}
+
 function applyLocalApiCors(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -588,7 +600,7 @@ function applyLocalApiCors(
   // let another local page read and spend a user's editor-assist session.
   res.setHeader("access-control-allow-credentials", "true");
   res.setHeader("access-control-max-age", "600");
-  res.setHeader("vary", "Origin");
+  appendVaryHeader(res, "Origin");
 }
 
 async function readJsonBody(
@@ -3484,7 +3496,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         // against an upstream proxy that ignores ``no-store`` and
         // would otherwise serve one user's wrapping secret to
         // another.
-        res.setHeader("vary", "Cookie");
+        appendVaryHeader(res, "Cookie");
         jsonResponse(res, 200, {
           tenantId: record.tenantId,
           userId: record.userId,
