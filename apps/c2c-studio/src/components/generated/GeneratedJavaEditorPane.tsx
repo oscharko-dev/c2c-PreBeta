@@ -1423,8 +1423,7 @@ export function GeneratedJavaEditorPane() {
     productState.state === "submitting" ||
     productState.state === "awaiting-agent" ||
     productState.state === "repairing" ||
-    productState.state === "verifying" ||
-    productState.state === "generated-pending"
+    productState.state === "verifying"
   ) {
     const inProgressMessage =
       productState.state === "submitting"

@@ -660,9 +660,10 @@ export interface GenerateResponse extends TransformResponse {
 }
 
 // Studio-IDE-13: request payload for POST /api/v0/verify. The
-// ``manualEditOverlay`` field is optional — when present the BFF stamps
-// the run-summary fields ``manualEditsCarriedOver`` and
-// ``manualDriftRegionCount`` from it per ADR-0007 §4.
+// ``manualEditOverlay`` field is retained for the original single-file
+// Studio flow. Multi-file verification should prefer ``manualEditOverlays``
+// so the BFF can stamp the aggregate ``manualEditsCarriedOver`` and
+// ``manualDriftRegionCount`` fields per ADR-0007 §4.
 export interface VerifyRequest {
   runId: string;
   javaFiles: JavaFileInput[];
@@ -672,6 +673,7 @@ export interface VerifyRequest {
   expectedOutput?: string;
   oracleInput?: string;
   manualEditOverlay?: JavaOriginOverlay;
+  manualEditOverlays?: JavaOriginOverlay[];
 }
 
 // Studio-IDE-13: response from POST /api/v0/verify. Carries the

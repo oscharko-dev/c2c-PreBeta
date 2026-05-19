@@ -37,8 +37,13 @@ type ClearDraftsMode = "scoped" | "origin";
 export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
-  const { canSubmitTransform, submitTransform, submitGenerate } =
-    useSourceWorkspace();
+  const {
+    canSubmitTransform,
+    submitTransform,
+    submitGenerate,
+    expectedOutput,
+    oracleInput,
+  } = useSourceWorkspace();
   const { state: runState, javaBuffers, startVerify } = useTransformationRun();
   const canStart = readiness.startEnabled && !loading && canSubmitTransform;
   // Studio-IDE-14 (#256): Compile Check is rendered as a sibling of the
@@ -67,9 +72,8 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Whether *any* generated Java buffer the Studio has hydrated currently
-  // diverges from its captured Generator Baseline. Used to short-circuit
-  // Generate / Regenerate into the confirmation modal so manual edits
-  // never silently disappear (AC3 of #255).
+  // diverges from its captured Generator Baseline. Regenerate uses this to
+  // explain that the post-run 3-Way Merge will preserve manual edits.
   const hasManualEditsAnywhere = Object.values(javaBuffers).some(
     (entry) =>
       entry.generatorBaselineHash.length > 0 &&
@@ -77,16 +81,8 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   );
 
   const handleGenerate = useCallback(() => {
-    if (hasManualEditsAnywhere) {
-      // Per AC3, even "Generate Java" must not silently overwrite manual
-      // edits. We open the confirmation modal so the user explicitly
-      // proceeds; the actual merge UI fires from the editor pane when
-      // the new run lands.
-      setRegenerateConfirmOpen(true);
-      return;
-    }
     void submitGenerate();
-  }, [hasManualEditsAnywhere, submitGenerate]);
+  }, [submitGenerate]);
 
   const handleRegenerate = useCallback(() => {
     // Regenerate always confirms first (AC: "always confirms via modal
@@ -102,7 +98,15 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   const handleVerifyCurrentBuffers = useCallback(async () => {
     const runId = runState.runId;
     if (!runId) return;
-    const entries = Object.entries(javaBuffers);
+    const generatedFilePaths =
+      runState.generatedFiles?.files.map((file) => file.path) ?? [];
+    const entries =
+      generatedFilePaths.length > 0
+        ? generatedFilePaths.flatMap((path) => {
+            const entry = javaBuffers[path];
+            return entry ? ([[path, entry]] as Array<[string, typeof entry]>) : [];
+          })
+        : Object.entries(javaBuffers);
     if (entries.length === 0) return;
     setVerifyPending(true);
     try {
@@ -110,25 +114,40 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         path,
         content: entry.content,
       }));
-      // Pick the first non-null overlay if any buffer has one (single-
-      // file Studio scope today); the BFF only needs aggregate counts
-      // for stamping the run-summary fields.
-      const firstOverlay = entries
-        .map(([, entry]) => entry.manualEditOverlay)
-        .find((overlay) => overlay !== null);
+      const manualEditOverlays = entries.flatMap(([, entry]) =>
+        entry.manualEditOverlay ? [entry.manualEditOverlay] : [],
+      );
+      const verifiedFilePaths = new Set(entries.map(([path]) => path));
+      const generatedEntryFilePath = runState.generatedFiles?.entryFilePath;
+      const entryFilePath =
+        generatedEntryFilePath && verifiedFilePaths.has(generatedEntryFilePath)
+          ? generatedEntryFilePath
+          : undefined;
+      const entryClass = entryFilePath
+        ? runState.generated?.entryClass
+        : undefined;
       await startVerify({
         runId,
+        ...(runState.programId ? { programId: runState.programId } : {}),
+        ...(entryClass ? { entryClass } : {}),
+        ...(entryFilePath ? { entryFilePath } : {}),
         javaFiles,
-        ...(firstOverlay ? { manualEditOverlay: firstOverlay } : {}),
+        ...(expectedOutput.length > 0 ? { expectedOutput } : {}),
+        ...(oracleInput.length > 0 ? { oracleInput } : {}),
+        ...(manualEditOverlays.length === 1
+          ? { manualEditOverlay: manualEditOverlays[0]! }
+          : {}),
+        ...(manualEditOverlays.length > 1 ? { manualEditOverlays } : {}),
       });
     } finally {
       setVerifyPending(false);
     }
-  }, [runState.runId, javaBuffers, startVerify]);
+  }, [runState, javaBuffers, expectedOutput, oracleInput, startVerify]);
 
   const canVerifyCurrentBuffers =
     runState.runId !== null &&
-    Object.keys(javaBuffers).length > 0 &&
+    (runState.generatedFiles?.files.some((file) => javaBuffers[file.path]) ??
+      Object.keys(javaBuffers).length > 0) &&
     !verifyPending;
   const canGenerate = canStart;
   const canRegenerate = canStart;
@@ -266,9 +285,9 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           <Play className="h-4 w-4 text-bg-0 fill-current" />
         </button>
         {/* Studio-IDE-13 (#255): explicit Generate Java toolbar action.
-            Invokes /api/v0/generate; if any Java buffer holds manual
-            edits the confirmation modal opens first so the user can
-            consciously proceed into the 3-Way Merge. */}
+            Invokes /api/v0/generate. If any Java buffer holds manual
+            edits, the generated-pane merge guard opens the 3-Way Merge
+            after the new generator output lands. */}
         <button
           type="button"
           data-testid="topbar-generate-button"
