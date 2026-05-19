@@ -263,6 +263,124 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/editor/explain:
+    post:
+      summary: Explain a selected COBOL or Java editor region
+      description: >
+        ADR 0004 editor-assist channel. The request carries bytes that
+        Studio has already pre-redacted per ADR 0005 §4, plus the SHA-256
+        byteHash over those exact bytes. The BFF verifies the hash, consumes
+        one `editorAssistBudget` unit, calls the Model Gateway `/v0/explain`
+        boundary, and writes a `kind=editor_assist` ledger entry. The channel
+        is non-productive: it never advances an Orchestrator run, never
+        produces an `assistDecision`, and never enters a run evidence pack.
+        Identity is bound to the active `c2c.sid` session cookie; callers
+        must not rely on body-supplied `tenantId` or `userId` for authority.
+      operationId: explainEditorRegion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EditorExplainRequest" }
+      responses:
+        "200":
+          description: explanation returned and ledgered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorExplainResponse" }
+        "400":
+          description: invalid region, malformed payload, empty region, oversized region, or byteHash mismatch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorExplainErrorResponse" }
+        "403":
+          description: Model Gateway policy denied the request, session cookie is unavailable, or optional tenantId/userId does not match the active session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorExplainErrorResponse" }
+        "415":
+          description: request was not sent as application/json
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorExplainErrorResponse" }
+        "429":
+          description: per-session budget or per-tenant-per-day cap exhausted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorExplainErrorResponse" }
+        "503":
+          description: Model Gateway disabled or unavailable, unusable gateway response, or editor-assist ledger sink unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorExplainErrorResponse" }
+        "504":
+          description: Model Gateway timed out
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorExplainErrorResponse" }
+
+  /api/v0/editor/budget:
+    get:
+      summary: Return the current editor-assist budget snapshot
+      description: >
+        Returns the current `editorAssistBudget` snapshot for the active
+        `c2c.sid` session. `sessionId` is the client-issued Studio
+        editor session identifier; it is syntax-validated for request
+        correlation, while the budget scope is always derived from the
+        session cookie. Optional `tenantId` and `userId` query copies must
+        match that active session.
+      operationId: getEditorAssistBudget
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._\\-]+$"
+        - in: query
+          name: tenantId
+          required: false
+          deprecated: true
+          description: Optional legacy echo; when present it must match the active session identity.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._\\-]+$"
+        - in: query
+          name: userId
+          required: false
+          deprecated: true
+          description: Optional legacy echo; when present it must match the active session identity.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._\\-]+$"
+      responses:
+        "200":
+          description: budget snapshot returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EditorAssistBudgetResponse" }
+        "400":
+          description: missing, empty, or malformed query identifier
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: session cookie missing or expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403":
+          description: optional tenantId/userId does not match the active session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/transform:
     post:
       summary: Start a product-mode transform from COBOL source text
@@ -1224,6 +1342,154 @@ components:
         limit: { type: integer, minimum: 1, maximum: 20 }
         used: { type: integer, minimum: 0 }
         remaining: { type: integer, minimum: 0 }
+
+    EditorAssistBudget:
+      description: >
+        ADR 0004 editor-assist budget. Scoped to the BFF-derived
+        `(tenantId, userId, authSessionId)` identity with an additional
+        BFF-enforced per-tenant-per-day cap.
+      type: object
+      required: [limit, used, remaining]
+      additionalProperties: false
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 10, default: 3 }
+        used: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+
+    EditorRegionSourceKind:
+      type: string
+      enum: [cobol, java]
+
+    EditorRegion:
+      type: object
+      required: [filePath, sourceKind, startLine, endLine]
+      additionalProperties: false
+      properties:
+        filePath:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Workspace-relative editor file path for the selected region; absolute paths, drive prefixes, and parent-directory traversal are rejected.
+        sourceKind: { $ref: "#/components/schemas/EditorRegionSourceKind" }
+        startLine: { type: integer, minimum: 1 }
+        endLine: { type: integer, minimum: 1 }
+
+    StudioRedactionMetadata:
+      type: object
+      required: [studioRedactionProfileVersion, matchedPatternIds]
+      additionalProperties: false
+      properties:
+        studioRedactionProfileVersion: { type: string, minLength: 1 }
+        matchedPatternIds:
+          type: array
+          items: { type: string }
+
+    EditorExplainRequest:
+      type: object
+      required:
+        - schemaVersion
+        - sessionId
+        - sourceHash
+        - region
+        - redactedBytes
+        - byteHash
+        - studioRedactionMetadata
+      additionalProperties: false
+      properties:
+        schemaVersion: { type: string, enum: ["v0"] }
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._\\-]+$"
+        tenantId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._\\-]+$"
+          deprecated: true
+          description: Optional legacy echo; when present it must match the active `c2c.sid` session identity. The BFF never trusts this value for budget or ledger attribution.
+        userId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._\\-]+$"
+          deprecated: true
+          description: Optional legacy echo; when present it must match the active `c2c.sid` session identity. The BFF never trusts this value for budget or ledger attribution.
+        runId:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 128
+              pattern: "^[A-Za-z0-9._\\-]+$"
+            - type: "null"
+        sourceHash:
+          type: string
+          pattern: "^[A-Fa-f0-9]{64}$"
+        region: { $ref: "#/components/schemas/EditorRegion" }
+        redactedBytes:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          description: Studio-pre-redacted selected region bytes.
+        byteHash:
+          type: string
+          pattern: "^[A-Fa-f0-9]{64}$"
+          description: SHA-256 hex digest over `redactedBytes`.
+        studioRedactionMetadata:
+          $ref: "#/components/schemas/StudioRedactionMetadata"
+
+    EditorExplainResponse:
+      type: object
+      required:
+        - schemaVersion
+        - explanation
+        - modelInvocationRef
+        - editorAssistRef
+        - ledgerRef
+        - budgetSnapshot
+        - redactionApplied
+      additionalProperties: false
+      properties:
+        schemaVersion: { type: string, enum: ["v0"] }
+        explanation: { type: string, minLength: 1 }
+        modelInvocationRef: { type: string, minLength: 1 }
+        editorAssistRef: { type: string, minLength: 1 }
+        ledgerRef: { type: string, minLength: 1 }
+        budgetSnapshot: { $ref: "#/components/schemas/EditorAssistBudget" }
+        redactionApplied:
+          type: array
+          items: { type: string }
+
+    EditorExplainErrorCode:
+      type: string
+      enum:
+        - budget_exhausted
+        - policy_denied
+        - gateway_unavailable
+        - timeout
+        - invalid_region
+
+    EditorExplainErrorResponse:
+      type: object
+      required: [schemaVersion, errorCode, message, budgetSnapshot]
+      additionalProperties: false
+      properties:
+        schemaVersion: { type: string, enum: ["v0"] }
+        errorCode: { $ref: "#/components/schemas/EditorExplainErrorCode" }
+        message: { type: string }
+        budgetSnapshot:
+          oneOf:
+            - { $ref: "#/components/schemas/EditorAssistBudget" }
+            - type: "null"
+
+    EditorAssistBudgetResponse:
+      type: object
+      required: [schemaVersion, budget]
+      additionalProperties: false
+      properties:
+        schemaVersion: { type: string, enum: ["v0"] }
+        budget: { $ref: "#/components/schemas/EditorAssistBudget" }
 
     RepairAttemptSummary:
       type: object

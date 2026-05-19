@@ -221,7 +221,30 @@ function BudgetExhaustedBody({ message }: { message: string }) {
   );
 }
 
+function isSessionPolicyMessage(message: string): boolean {
+  return (
+    message === "Editor-assist session is unavailable. Sign in again." ||
+    message.includes("active editor-assist session")
+  );
+}
+
 function PolicyDeniedBody({ message }: { message: string }) {
+  if (isSessionPolicyMessage(message)) {
+    return (
+      <div
+        role="alert"
+        className="rounded border border-warn/30 bg-warn-soft p-3 text-sm text-warn"
+        data-testid="editor-assist-error-session"
+      >
+        <p className="font-medium">Editor-Assist session needs attention.</p>
+        <p className="mt-1 text-text">{message}</p>
+        <p className="mt-2 text-xs text-text-dim">
+          Sign in again, then retry the Explain request.
+        </p>
+      </div>
+    );
+  }
+
   // The BFF places the policy id at the start of `message` when the
   // call is denied by an explicit rule (see ADR 0005 §6). We expose
   // it as a copy chip so the user can paste it into a support ticket
@@ -330,8 +353,8 @@ function ExplanationBody({ explanation }: ExplanationBodyProps) {
     <div
       data-testid="editor-assist-explanation"
       className="prose prose-invert max-w-none text-sm leading-relaxed text-text"
-      // eslint-disable-next-line react/no-danger -- html is the output
-      // of renderSanitizedHtml (DOMPurify with closed allow-list).
+      // `html` is the output of renderSanitizedHtml (DOMPurify with
+      // closed allow-list).
       // The whole point of this slice is that we DO render the
       // sanitised string here; routing the markdown around DOMPurify
       // would defeat the boundary.

@@ -79,7 +79,7 @@ describe("requestExplanation — success path", () => {
     }
   });
 
-  it("posts the request body verbatim as JSON to /api/v0/editor/explain", async () => {
+  it("posts redacted payload without client-asserted identity to /api/v0/editor/explain", async () => {
     const mock = stubFetchOnce({ ok: true, body: SUCCESS_BODY });
     const req = makeRequest();
     await requestExplanation(req);
@@ -89,8 +89,18 @@ describe("requestExplanation — success path", () => {
     expect(init).toMatchObject({
       method: "POST",
       headers: expect.objectContaining({ "Content-Type": "application/json" }),
+      credentials: "include",
     });
-    expect(JSON.parse(init.body)).toEqual(req);
+    expect(JSON.parse(init.body)).toEqual({
+      schemaVersion: req.schemaVersion,
+      sessionId: req.sessionId,
+      runId: req.runId,
+      sourceHash: req.sourceHash,
+      region: req.region,
+      redactedBytes: req.redactedBytes,
+      byteHash: req.byteHash,
+      studioRedactionMetadata: req.studioRedactionMetadata,
+    });
   });
 });
 
@@ -256,7 +266,7 @@ describe("getBudget", () => {
     }
   });
 
-  it("encodes sessionId / tenantId / userId in the query string", async () => {
+  it("encodes only sessionId in the query string and includes credentials", async () => {
     const mock = stubFetchOnce({
       ok: true,
       body: {
@@ -269,10 +279,11 @@ describe("getBudget", () => {
       tenantId: "t&t",
       userId: "u+u",
     });
-    const [url] = mock.mock.calls[0];
+    const [url, init] = mock.mock.calls[0];
     expect(url).toContain("sessionId=s%2Fx");
-    expect(url).toContain("tenantId=t%26t");
-    expect(url).toContain("userId=u%2Bu");
+    expect(url).not.toContain("tenantId=");
+    expect(url).not.toContain("userId=");
+    expect(init).toMatchObject({ credentials: "include" });
   });
 
   it("returns ok:false on a malformed response", async () => {

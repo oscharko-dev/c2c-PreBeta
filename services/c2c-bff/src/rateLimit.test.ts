@@ -3,8 +3,9 @@
 
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
+import type * as http from "node:http";
 
-import { createRateLimiter } from "./rateLimit";
+import { createRateLimiter, resolveClientBucketKey } from "./rateLimit";
 
 test("consume() permits hits up to maxHits within the window", () => {
   let now = 1_000_000;
@@ -77,4 +78,13 @@ test("consume() enforces the maxBuckets cap (FIFO eviction)", () => {
   limiter.consume("ip-4");
   // ip-1's eviction means its single-hit budget is fresh again.
   assert.equal(limiter.consume("ip-1"), true);
+});
+
+test("resolveClientBucketKey ignores spoofable X-Forwarded-For headers", () => {
+  const req = {
+    headers: { "x-forwarded-for": "203.0.113.99, 203.0.113.100" },
+    socket: { remoteAddress: "127.0.0.1" },
+  } as unknown as http.IncomingMessage;
+
+  assert.equal(resolveClientBucketKey(req), "127.0.0.1");
 });

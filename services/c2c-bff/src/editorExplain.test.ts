@@ -164,6 +164,44 @@ test("validateExplainRequest rejects region.sourceKind outside cobol|java", () =
   assert.equal(result.errorCode, "invalid_region");
 });
 
+test("validateExplainRequest rejects absolute or parent-traversing filePath", () => {
+  for (const filePath of [
+    "/Users/alice/payroll/SECRET.cbl",
+    "C:/Users/alice/payroll/SECRET.cbl",
+    "../outside.cbl",
+    "src/../outside.cbl",
+  ]) {
+    const payload = validRequest({
+      region: {
+        filePath,
+        sourceKind: "cobol",
+        startLine: 1,
+        endLine: 1,
+      },
+    });
+    const result = validateExplainRequest(payload);
+    assert.equal(result.ok, false, `expected ${filePath} to be rejected`);
+    if (!result.ok) {
+      assert.equal(result.errorCode, "invalid_region");
+      assert.match(result.message, /workspace-relative/);
+    }
+  }
+});
+
+test("validateExplainRequest accepts filePath dots inside a safe segment", () => {
+  const result = validateExplainRequest(
+    validRequest({
+      region: {
+        filePath: "src/copybooks/v1..2/HELLO.cbl",
+        sourceKind: "cobol",
+        startLine: 1,
+        endLine: 1,
+      },
+    }),
+  );
+  assert.equal(result.ok, true);
+});
+
 test("validateExplainRequest rejects startLine < 1 or endLine < startLine", () => {
   const tooLow = validRequest();
   (tooLow as { region: Record<string, unknown> }).region.startLine = 0;
@@ -328,6 +366,34 @@ test("budget store enforces per-(tenant, day) ceiling across sessions", async ()
   assert.equal(r3.errorCode, "budget_exhausted");
 });
 
+test("budget store serialises concurrent per-tenant daily cap across sessions", async () => {
+  const store = createEditorAssistBudgetStore({
+    defaultLimit: 10,
+    tenantDailyCap: 2,
+  });
+  const results = await Promise.all(
+    Array.from({ length: 8 }, (_, index) =>
+      store.consume({
+        tenantId: "t",
+        userId: `u-${index}`,
+        sessionId: `s-${index}`,
+      }),
+    ),
+  );
+  assert.equal(
+    results.filter((result) => result.ok).length,
+    2,
+    "tenant daily cap must allow exactly two successful consumes",
+  );
+  assert.equal(
+    results.filter(
+      (result) => !result.ok && result.errorCode === "budget_exhausted",
+    ).length,
+    6,
+    "all requests after the cap must be rejected",
+  );
+});
+
 test("budget store resets the per-tenant-per-day counter on UTC day rollover", async () => {
   const clock = makeClock("2026-05-18T23:59:00Z");
   const store = createEditorAssistBudgetStore({
@@ -389,13 +455,13 @@ test("buildEditorAssistRef has the eai- prefix and includes the seq", () => {
   assert.equal(ref, "eai-tenant-1-session-1-4");
 });
 
-test("buildLocalLedgerRef has the edit- prefix and includes the seq", () => {
+test("buildLocalLedgerRef returns the documented durable URN shape", () => {
   const ref = buildLocalLedgerRef({
     tenantId: "tenant-1",
     sessionId: "session-1",
     seq: 7,
   });
-  assert.equal(ref, "edit-tenant-1-session-1-7");
+  assert.equal(ref, "urn:c2c/editor-assist/tenant-1/session-1/7");
 });
 
 test("extractLedgerRef returns the gateway value when present and non-empty", () => {
@@ -575,7 +641,7 @@ test("buildLedgerEntry carries the failureCode on failure", () => {
     byteHash: "f".repeat(64),
     redactionApplied: [],
     editorAssistRef: "eai-t-s-2",
-    ledgerRef: "edit-t-s-2",
+    ledgerRef: "urn:c2c/editor-assist/t/s/2",
     invocationId: null,
     budgetSnapshot: { limit: 3, used: 1, remaining: 2 },
     startedAt: "2026-05-18T00:00:00.000Z",

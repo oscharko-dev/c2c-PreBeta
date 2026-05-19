@@ -47,6 +47,16 @@ export interface BffConfig {
   // for every response. Useful when the BFF is reached over a TLS
   // proxy that does not set ``X-Forwarded-Proto``.
   forceSecureSessionCookies: boolean;
+  // Exact browser origins allowed to make credentialed split-server Studio
+  // requests to the BFF. Same-origin requests and non-browser calls without an
+  // Origin header are allowed separately by the route guard.
+  studioCorsOrigins: string[];
+  // Studio-IDE-10 (#249): append-only JSONL sink for editor-assist
+  // trajectory ledger entries. Defaults under var/c2c-local so local
+  // deployments keep a durable audit trail without extra services.
+  // Overrides must resolve under repoRoot so a hostile environment cannot
+  // redirect audit writes to arbitrary host paths.
+  editorAssistLedgerPath?: string;
 }
 
 const SERVICE_NAME = "c2c-bff";
@@ -121,6 +131,76 @@ function resolveStaticRoot(env: NodeJS.ProcessEnv, repoRoot: string): string {
   return path.resolve(repoRoot, "apps", "c2c-ui", "dist");
 }
 
+function resolveEditorAssistLedgerPath(
+  env: NodeJS.ProcessEnv,
+  repoRoot: string,
+): string {
+  const explicit = env.C2C_EDITOR_ASSIST_LEDGER_PATH?.trim();
+  if (explicit) {
+    const resolved = path.isAbsolute(explicit)
+      ? path.resolve(explicit)
+      : path.resolve(repoRoot, explicit);
+    if (!isPathWithin(repoRoot, resolved)) {
+      throw new Error(
+        "C2C_EDITOR_ASSIST_LEDGER_PATH must resolve inside C2C_REPO_ROOT",
+      );
+    }
+    return resolved;
+  }
+  return path.resolve(
+    repoRoot,
+    "var",
+    "c2c-local",
+    "trajectory-ledger",
+    "editor-assist.jsonl",
+  );
+}
+
+function normalizeHttpOrigin(raw: string, envName: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${envName} must contain absolute http(s) origins`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`${envName} origins must use http or https`);
+  }
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error(`${envName} origins must not include path, query, or hash`);
+  }
+  return parsed.origin;
+}
+
+function resolveStudioCorsOrigins(env: NodeJS.ProcessEnv): string[] {
+  const explicit = env.C2C_STUDIO_CORS_ORIGINS?.trim();
+  if (explicit) {
+    const origins = explicit
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0)
+      .map((part) => normalizeHttpOrigin(part, "C2C_STUDIO_CORS_ORIGINS"));
+    return Array.from(new Set(origins));
+  }
+
+  const studioPort = parsePort(env.C2C_LOCAL_STUDIO_PORT, 3000);
+  return [
+    `http://localhost:${studioPort}`,
+    `http://127.0.0.1:${studioPort}`,
+    `http://[::1]:${studioPort}`,
+  ];
+}
+
+function isPathWithin(parent: string, child: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return (
+    relative === "" ||
+    (relative.length > 0 &&
+      !relative.startsWith("..") &&
+      !path.isAbsolute(relative))
+  );
+}
+
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
   packageRoot: string = __dirname,
@@ -175,6 +255,8 @@ export function loadConfig(
       env.C2C_ENABLE_FIXTURE_SESSIONS,
     ),
     forceSecureSessionCookies: parseBoolFlag(env.C2C_FORCE_SECURE_COOKIES),
+    studioCorsOrigins: resolveStudioCorsOrigins(env),
+    editorAssistLedgerPath: resolveEditorAssistLedgerPath(env, repoRoot),
   };
 }
 

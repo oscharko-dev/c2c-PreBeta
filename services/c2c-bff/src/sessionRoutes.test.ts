@@ -39,6 +39,7 @@ const baseConfig: BffConfig = {
   enableDiagnosticFixtures: false,
   enableFixtureSessions: true,
   forceSecureSessionCookies: false,
+  studioCorsOrigins: ["http://127.0.0.1:3000", "http://localhost:3000"],
 };
 
 interface RunningServer {
@@ -74,6 +75,7 @@ async function fetchWithCookies(
     body?: unknown;
     cookie?: string;
     forwardedProto?: string;
+    origin?: string;
   } = {},
 ): Promise<FetchResult> {
   const target = new URL(url);
@@ -88,6 +90,7 @@ async function fetchWithCookies(
   }
   if (init.cookie) headers["cookie"] = init.cookie;
   if (init.forwardedProto) headers["x-forwarded-proto"] = init.forwardedProto;
+  if (init.origin) headers["origin"] = init.origin;
   return await new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -267,6 +270,28 @@ test("POST /api/v0/session/sign-in mints a session and sets HttpOnly + SameSite=
       (body as { draftKeyWrappingSecret?: unknown }).draftKeyWrappingSecret,
       undefined,
     );
+  } finally {
+    await server.close();
+  }
+});
+
+test("session routes reject browser requests from unlisted origins", async () => {
+  const server = await startTestServer(makeApp());
+  try {
+    const signIn = await fetchWithCookies(
+      `${server.baseUrl}/api/v0/session/sign-in`,
+      {
+        method: "POST",
+        body: {},
+        origin: "http://localhost:5173",
+      },
+    );
+    assert.equal(signIn.status, 403);
+    assert.equal(
+      (signIn.body as Record<string, unknown>).error,
+      "origin not allowed",
+    );
+    assert.deepEqual(signIn.setCookie, []);
   } finally {
     await server.close();
   }

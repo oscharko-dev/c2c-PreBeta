@@ -81,6 +81,7 @@ import {
   mapGatewayResponse,
   normaliseGatewayRedactedFields,
   statusForErrorCode,
+  validateEditorAssistIdentifier,
   validateExplainRequest,
   type BudgetSnapshot,
   type EditorAssistBudgetStore,
@@ -120,6 +121,7 @@ import {
   createSessionStore,
   validateSessionIdentity,
   SessionIdentifierError,
+  type SessionRecord,
   type SessionStore,
 } from "./sessionStore";
 import {
@@ -145,8 +147,6 @@ const STATIC_MIME: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-const LOCAL_CORS_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-
 export interface ServerDeps {
   config: BffConfig;
   samples?: SampleRegistry;
@@ -169,13 +169,10 @@ export interface ServerDeps {
   // deterministically.
   editorAssistBudgets?: EditorAssistBudgetStore;
   editorAssistSequence?: SequenceCounter;
-  // Per-request collector for ledger entries the BFF would normally
-  // forward to the trajectory ledger pipeline. V1 keeps the entry
-  // in-process so the audit trail shape is contract-stable today
-  // (asserted by tests) and a future task can wire the sink without
-  // contract surgery. ``undefined`` means "discard"; tests pass a
-  // capturing array to inspect the entry.
-  editorAssistLedgerSink?: (entry: EditorAssistLedgerEntry) => void;
+  // Per-request collector for editor-assist trajectory ledger entries.
+  // Production defaults to an append-only JSONL sink under
+  // var/c2c-local; tests pass a capturing array to inspect the entry.
+  editorAssistLedgerSink?: EditorAssistLedgerSink;
   // Issue #271 / ADR-0005 §6: sink for sanitized CSP violation
   // reports. Default writes one ``console.warn`` per report so the
   // existing log pipeline picks them up without new infra. Tests
@@ -206,7 +203,7 @@ interface ResolvedDeps {
   runStore: RunStore;
   editorAssistBudgets: EditorAssistBudgetStore;
   editorAssistSequence: SequenceCounter;
-  editorAssistLedgerSink: (entry: EditorAssistLedgerEntry) => void;
+  editorAssistLedgerSink: EditorAssistLedgerSink;
   cspReportSink: (report: SanitizedCspReport) => void;
   sessionStore: SessionStore;
   sessionSignInRateLimiter: RateLimiter;
@@ -297,7 +294,13 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
       deps.editorAssistBudgets ??
       createEditorAssistBudgetStore({ now: deps.now }),
     editorAssistSequence: deps.editorAssistSequence ?? createSequenceCounter(),
-    editorAssistLedgerSink: deps.editorAssistLedgerSink ?? (() => undefined),
+    editorAssistLedgerSink:
+      deps.editorAssistLedgerSink ??
+      createJsonlEditorAssistLedgerSink(
+        deps.config.editorAssistLedgerPath ??
+          defaultEditorAssistLedgerPath(deps.config.repoRoot),
+        { allowedRoot: deps.config.repoRoot },
+      ),
     cspReportSink: deps.cspReportSink ?? defaultCspReportSink,
     sessionStore:
       deps.sessionStore ??
@@ -306,6 +309,139 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
       deps.sessionSignInRateLimiter ?? createRateLimiter(),
     now: deps.now ?? (() => new Date()),
   };
+}
+
+function defaultEditorAssistLedgerPath(repoRoot: string): string {
+  return path.resolve(
+    repoRoot,
+    "var",
+    "c2c-local",
+    "trajectory-ledger",
+    "editor-assist.jsonl",
+  );
+}
+
+export interface EditorAssistLedgerSink {
+  (entry: EditorAssistLedgerEntry): void;
+  preflight?: () => void;
+}
+
+export interface JsonlEditorAssistLedgerSinkOptions {
+  allowedRoot?: string;
+}
+
+function isErrnoCode(err: unknown, code: string): boolean {
+  return (
+    err !== null &&
+    typeof err === "object" &&
+    (err as NodeJS.ErrnoException).code === code
+  );
+}
+
+function isPathWithin(parentPath: string, childPath: string): boolean {
+  const relative = path.relative(parentPath, childPath);
+  return (
+    relative === "" ||
+    (relative.length > 0 &&
+      !relative.startsWith("..") &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function ensureEditorAssistLedgerParentDirectory(
+  targetPath: string,
+  allowedRoot?: string,
+): void {
+  const parentPath = path.dirname(targetPath);
+  if (allowedRoot === undefined) {
+    fs.mkdirSync(parentPath, { recursive: true, mode: 0o700 });
+    return;
+  }
+
+  const rootPath = path.resolve(allowedRoot);
+  if (!isPathWithin(rootPath, targetPath)) {
+    throw new Error("editor-assist ledger path escapes the allowed root");
+  }
+
+  const rootRealPath = fs.realpathSync.native(rootPath);
+  const relativeParent = path.relative(rootPath, parentPath);
+  let currentPath = rootPath;
+  for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
+    currentPath = path.join(currentPath, segment);
+    try {
+      const stat = fs.lstatSync(currentPath);
+      if (stat.isSymbolicLink()) {
+        throw new Error(
+          "editor-assist ledger parent path contains a symlink",
+        );
+      }
+      if (!stat.isDirectory()) {
+        throw new Error(
+          "editor-assist ledger parent path is not a directory",
+        );
+      }
+    } catch (err) {
+      if (!isErrnoCode(err, "ENOENT")) {
+        throw err;
+      }
+      fs.mkdirSync(currentPath, { mode: 0o700 });
+    }
+  }
+
+  const parentRealPath = fs.realpathSync.native(parentPath);
+  if (!isPathWithin(rootRealPath, parentRealPath)) {
+    throw new Error("editor-assist ledger parent path escapes the allowed root");
+  }
+}
+
+export function createJsonlEditorAssistLedgerSink(
+  ledgerPath: string,
+  options: JsonlEditorAssistLedgerSinkOptions = {},
+): EditorAssistLedgerSink {
+  const targetPath = path.resolve(ledgerPath);
+  const openFlags =
+    fs.constants.O_WRONLY |
+    fs.constants.O_CREAT |
+    fs.constants.O_APPEND |
+    fs.constants.O_NONBLOCK |
+    (fs.constants.O_NOFOLLOW ?? 0);
+  let fd: number | null = null;
+
+  function openLedgerFile(): number {
+    ensureEditorAssistLedgerParentDirectory(targetPath, options.allowedRoot);
+    try {
+      const stat = fs.lstatSync(targetPath);
+      if (!stat.isFile()) {
+        throw new Error("editor-assist ledger path is not a regular file");
+      }
+    } catch (err) {
+      if (
+        !(
+          err &&
+          typeof err === "object" &&
+          (err as NodeJS.ErrnoException).code === "ENOENT"
+        )
+      ) {
+        throw err;
+      }
+    }
+    const opened = fs.openSync(targetPath, openFlags, 0o600);
+    const stat = fs.fstatSync(opened);
+    if (!stat.isFile()) {
+      fs.closeSync(opened);
+      throw new Error("editor-assist ledger path is not a regular file");
+    }
+    return opened;
+  }
+
+  const sink: EditorAssistLedgerSink = (entry) => {
+    if (fd === null) fd = openLedgerFile();
+    fs.writeSync(fd, `${JSON.stringify(entry)}\n`, null, "utf8");
+  };
+  sink.preflight = () => {
+    if (fd === null) fd = openLedgerFile();
+  };
+  return sink;
 }
 
 // Default CSP-report log shape: one structured ``warn`` per report
@@ -393,36 +529,63 @@ function badRequest(res: http.ServerResponse, message: string): void {
   jsonResponse(res, 400, { error: message });
 }
 
+function parseRequestOrigin(req: http.IncomingMessage): string | null {
+  const origin = req.headers.origin;
+  if (typeof origin !== "string" || origin.length === 0) return null;
+  try {
+    return new URL(origin).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isSameRequestHost(req: http.IncomingMessage, origin: string): boolean {
+  const host = req.headers.host;
+  if (typeof host !== "string" || host.length === 0) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedBrowserOrigin(
+  req: http.IncomingMessage,
+  allowedOrigins: readonly string[],
+): boolean {
+  const rawOrigin = req.headers.origin;
+  if (rawOrigin !== undefined) {
+    if (typeof rawOrigin !== "string" || rawOrigin.length === 0) return false;
+  }
+  const origin = parseRequestOrigin(req);
+  if (origin === null) return rawOrigin === undefined;
+  return isSameRequestHost(req, origin) || allowedOrigins.includes(origin);
+}
+
+function rejectDisallowedBrowserOrigin(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  allowedOrigins: readonly string[],
+): boolean {
+  if (isAllowedBrowserOrigin(req, allowedOrigins)) return false;
+  jsonResponse(res, 403, { error: "origin not allowed" });
+  return true;
+}
+
 function applyLocalApiCors(
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  allowedOrigins: readonly string[],
 ): void {
-  const origin = req.headers.origin;
-  if (typeof origin !== "string" || origin.length === 0) {
-    return;
-  }
-
-  try {
-    const parsed = new URL(origin);
-    if (!LOCAL_CORS_HOSTS.has(parsed.hostname)) {
-      return;
-    }
-  } catch {
-    return;
-  }
+  const origin = parseRequestOrigin(req);
+  if (origin === null || !allowedOrigins.includes(origin)) return;
 
   res.setHeader("access-control-allow-origin", origin);
   res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
   res.setHeader("access-control-allow-headers", "Content-Type");
-  // Issue #272: the Studio session-bootstrap flow uses
-  // ``credentials: "include"`` so the browser attaches the HttpOnly
-  // ``c2c.sid`` cookie. CORS requires the matching
-  // ``Access-Control-Allow-Credentials`` header and a non-``*``
-  // origin echo — both already satisfied here, the credentials flag
-  // is the missing link. The local-CORS gate above means this only
-  // applies to ``localhost`` / ``127.0.0.1`` / ``::1`` origins,
-  // matching the W0 dev posture where Studio (port 3000) talks to
-  // the BFF (port 8090) over the same registrable domain.
+  // Cookie-authenticated routes require credentials, but only for exact
+  // configured Studio origins. Reflecting arbitrary localhost origins would
+  // let another local page read and spend a user's editor-assist session.
   res.setHeader("access-control-allow-credentials", "true");
   res.setHeader("access-control-max-age", "600");
   res.setHeader("vary", "Origin");
@@ -2734,7 +2897,9 @@ interface HandleEditorExplainArgs {
   modelGateway: ModelGatewayClient;
   budgets: EditorAssistBudgetStore;
   sequence: SequenceCounter;
-  ledgerSink: (entry: EditorAssistLedgerEntry) => void;
+  ledgerSink: EditorAssistLedgerSink;
+  sessionStore: SessionStore;
+  forceSecureSessionCookies: boolean;
   now: () => Date;
 }
 
@@ -2753,10 +2918,117 @@ function emitEditorExplainError(
   );
 }
 
+const EDITOR_ASSIST_LEDGER_UNAVAILABLE_MESSAGE =
+  "Editor-assist audit ledger unavailable. Try again shortly.";
+const EDITOR_ASSIST_SESSION_UNAVAILABLE_MESSAGE =
+  "Editor-assist session is unavailable. Sign in again.";
+
+function resolveEditorAssistSession(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  sessionStore: SessionStore,
+  forceSecureSessionCookies = false,
+): { ok: true; record: SessionRecord } | { ok: false; message: string } {
+  const authSessionId = parseSessionCookieFromRequest(req);
+  if (!authSessionId) {
+    return { ok: false, message: "session cookie missing" };
+  }
+  const record = sessionStore.get(authSessionId);
+  if (!record) {
+    const secureCookie = forceSecureSessionCookies || isRequestSecure(req);
+    res.setHeader(
+      "set-cookie",
+      serializeClearedSessionCookie({ secure: secureCookie }),
+    );
+    return { ok: false, message: "session not found" };
+  }
+  return { ok: true, record };
+}
+
+function explicitStringField(
+  raw: unknown,
+  fieldName: string,
+): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = (raw as Record<string, unknown>)[fieldName];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function validateOptionalIdentityMatchesSession(
+  raw: unknown,
+  record: SessionRecord,
+): string | null {
+  const tenantId = explicitStringField(raw, "tenantId");
+  if (tenantId !== null && tenantId !== record.tenantId) {
+    return "tenantId does not match the active editor-assist session";
+  }
+  const userId = explicitStringField(raw, "userId");
+  if (userId !== null && userId !== record.userId) {
+    return "userId does not match the active editor-assist session";
+  }
+  return null;
+}
+
+function logEditorAssistLedgerFailure(event: string, err: unknown): void {
+  // The ledger path may be deployment-specific. Sanitize before logging and
+  // return a fixed user-facing message so filesystem details never leak.
+  console.warn(
+    JSON.stringify({
+      route: "/api/v0/editor/explain",
+      event,
+      errorClass:
+        err != null &&
+        typeof (err as Record<string, unknown>).constructor === "function"
+          ? ((err as { constructor: { name: string } }).constructor.name ??
+            "Unknown")
+          : "Unknown",
+      message: sanitizeUpstreamMessage(
+        err instanceof Error ? err.message : String(err),
+        EDITOR_ASSIST_LEDGER_UNAVAILABLE_MESSAGE,
+      ),
+    }),
+  );
+}
+
+function preflightEditorAssistLedgerSink(
+  ledgerSink: EditorAssistLedgerSink,
+): boolean {
+  try {
+    ledgerSink.preflight?.();
+    return true;
+  } catch (err) {
+    logEditorAssistLedgerFailure("ledger_preflight_failed", err);
+    return false;
+  }
+}
+
+function writeEditorAssistLedgerEntry(
+  ledgerSink: EditorAssistLedgerSink,
+  entry: EditorAssistLedgerEntry,
+): boolean {
+  try {
+    ledgerSink(entry);
+    return true;
+  } catch (err) {
+    logEditorAssistLedgerFailure("ledger_write_failed", err);
+    return false;
+  }
+}
+
 async function handleEditorExplain(
   args: HandleEditorExplainArgs,
 ): Promise<void> {
-  const { req, res, modelGateway, budgets, sequence, ledgerSink, now } = args;
+  const {
+    req,
+    res,
+    modelGateway,
+    budgets,
+    sequence,
+    ledgerSink,
+    sessionStore,
+    forceSecureSessionCookies,
+    now,
+  } = args;
   // Fast-path: gateway disabled means we never consume budget and never
   // write a ledger entry — see ADR 0004 "Required follow-up" and the
   // explicit AC in the issue body.
@@ -2812,11 +3084,47 @@ async function handleEditorExplain(
   }
   const request = validation.value;
 
+  const session = resolveEditorAssistSession(
+    req,
+    res,
+    sessionStore,
+    forceSecureSessionCookies,
+  );
+  if (!session.ok) {
+    emitEditorExplainError(
+      res,
+      "policy_denied",
+      null,
+      EDITOR_ASSIST_SESSION_UNAVAILABLE_MESSAGE,
+    );
+    return;
+  }
+  const identityMismatch = validateOptionalIdentityMatchesSession(
+    raw,
+    session.record,
+  );
+  if (identityMismatch !== null) {
+    emitEditorExplainError(res, "policy_denied", null, identityMismatch);
+    return;
+  }
+
+  const tenantId = session.record.tenantId;
+  const userId = session.record.userId;
+  const studioSessionId = request.sessionId;
   const scope = {
-    tenantId: request.tenantId,
-    userId: request.userId,
-    sessionId: request.sessionId,
+    tenantId,
+    userId,
+    sessionId: session.record.sessionId,
   };
+  if (!preflightEditorAssistLedgerSink(ledgerSink)) {
+    emitEditorExplainError(
+      res,
+      "gateway_unavailable",
+      null,
+      EDITOR_ASSIST_LEDGER_UNAVAILABLE_MESSAGE,
+    );
+    return;
+  }
   const consume = await budgets.consume(scope);
   if (!consume.ok) {
     emitEditorExplainError(res, consume.errorCode, consume.snapshot);
@@ -2829,9 +3137,9 @@ async function handleEditorExplain(
   try {
     gatewayResponse = await modelGateway.explain({
       schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
-      sessionId: request.sessionId,
-      tenantId: request.tenantId,
-      userId: request.userId,
+      sessionId: studioSessionId,
+      tenantId,
+      userId,
       runId: request.runId,
       sourceHash: request.sourceHash,
       region: request.region,
@@ -2888,26 +3196,26 @@ async function handleEditorExplain(
 
   const endedAt = now().toISOString();
   const seq = sequence.next({
-    tenantId: request.tenantId,
-    sessionId: request.sessionId,
+    tenantId,
+    sessionId: studioSessionId,
   });
   const editorAssistRef = buildEditorAssistRef({
-    tenantId: request.tenantId,
-    sessionId: request.sessionId,
+    tenantId,
+    sessionId: studioSessionId,
     seq,
   });
   const localLedgerRef = buildLocalLedgerRef({
-    tenantId: request.tenantId,
-    sessionId: request.sessionId,
+    tenantId,
+    sessionId: studioSessionId,
     seq,
   });
 
   if (mapped.kind === "error") {
     const ledgerEntry = buildLedgerEntry({
       schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
-      tenantId: request.tenantId,
-      userId: request.userId,
-      sessionId: request.sessionId,
+      tenantId,
+      userId,
+      sessionId: studioSessionId,
       region: request.region,
       byteHash: request.byteHash,
       redactionApplied:
@@ -2922,7 +3230,15 @@ async function handleEditorExplain(
       failureCode: mapped.errorCode,
       runIdRef: request.runId,
     });
-    ledgerSink(ledgerEntry);
+    if (!writeEditorAssistLedgerEntry(ledgerSink, ledgerEntry)) {
+      emitEditorExplainError(
+        res,
+        "gateway_unavailable",
+        consume.snapshot,
+        EDITOR_ASSIST_LEDGER_UNAVAILABLE_MESSAGE,
+      );
+      return;
+    }
     emitEditorExplainError(res, mapped.errorCode, consume.snapshot);
     return;
   }
@@ -2941,9 +3257,9 @@ async function handleEditorExplain(
 
   const ledgerEntry = buildLedgerEntry({
     schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
-    tenantId: request.tenantId,
-    userId: request.userId,
-    sessionId: request.sessionId,
+    tenantId,
+    userId,
+    sessionId: studioSessionId,
     region: request.region,
     byteHash: request.byteHash,
     redactionApplied,
@@ -2957,7 +3273,15 @@ async function handleEditorExplain(
     failureCode: null,
     runIdRef: request.runId,
   });
-  ledgerSink(ledgerEntry);
+  if (!writeEditorAssistLedgerEntry(ledgerSink, ledgerEntry)) {
+    emitEditorExplainError(
+      res,
+      "gateway_unavailable",
+      consume.snapshot,
+      EDITOR_ASSIST_LEDGER_UNAVAILABLE_MESSAGE,
+    );
+    return;
+  }
 
   jsonResponse(
     res,
@@ -3002,7 +3326,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       const method = (req.method ?? "GET").toUpperCase();
 
       if (pathname.startsWith("/api/")) {
-        applyLocalApiCors(req, res);
+        applyLocalApiCors(req, res, config.studioCorsOrigins);
         if (method === "OPTIONS") {
           res.writeHead(204);
           res.end();
@@ -3064,6 +3388,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // — because the wrapping secret is the bootstrap response's
       // contract, not the sign-in's.
       if (pathname === "/api/v0/session/sign-in" && method === "POST") {
+        if (
+          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
+        ) {
+          return;
+        }
         if (!config.enableFixtureSessions) {
           notFound(res);
           return;
@@ -3122,6 +3451,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // user's device — but is treated with the same hygiene
       // (no logging, no echoing in error paths).
       if (pathname === "/api/v0/session/bootstrap" && method === "POST") {
+        if (
+          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
+        ) {
+          return;
+        }
         const sessionId = parseSessionCookieFromRequest(req);
         if (!sessionId) {
           jsonResponse(res, 401, { error: "session cookie missing" });
@@ -3165,6 +3499,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // unreadable per ADR-0005 §2 "Rotation". Idempotent: returns
       // 204 whether or not the cookie / record existed.
       if (pathname === "/api/v0/session/logout" && method === "POST") {
+        if (
+          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
+        ) {
+          return;
+        }
         const sessionId = parseSessionCookieFromRequest(req);
         if (sessionId) sessionStore.delete(sessionId);
         const secureCookie =
@@ -3302,6 +3641,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // 0005 §4 (BFF receives already-redacted bytes + matching
       // byteHash). All model calls go through the Model Gateway.
       if (pathname === "/api/v0/editor/explain" && method === "POST") {
+        if (
+          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
+        ) {
+          return;
+        }
         await handleEditorExplain({
           req,
           res,
@@ -3309,6 +3653,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           budgets: editorAssistBudgets,
           sequence: editorAssistSequence,
           ledgerSink: editorAssistLedgerSink,
+          sessionStore,
+          forceSecureSessionCookies: config.forceSecureSessionCookies,
           now: nowFn,
         });
         return;
@@ -3319,23 +3665,77 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // primary action button when the per-session budget is already
       // exhausted (AC8 in the issue body).
       if (pathname === "/api/v0/editor/budget" && method === "GET") {
+        if (
+          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
+        ) {
+          return;
+        }
         const sessionIdRaw = requestUrl.searchParams.get("sessionId");
         if (!sessionIdRaw || sessionIdRaw.trim().length === 0) {
           badRequest(res, "sessionId must be a non-empty string");
           return;
         }
+        const sessionIdErr = validateEditorAssistIdentifier(
+          sessionIdRaw,
+          "sessionId",
+        );
+        if (sessionIdErr) {
+          badRequest(res, sessionIdErr.message);
+          return;
+        }
         const tenantIdRaw = requestUrl.searchParams.get("tenantId");
         const userIdRaw = requestUrl.searchParams.get("userId");
-        const tenantId =
-          tenantIdRaw && tenantIdRaw.trim().length > 0
-            ? tenantIdRaw
-            : "default";
-        const userId =
-          userIdRaw && userIdRaw.trim().length > 0 ? userIdRaw : "local";
+        if (tenantIdRaw !== null && tenantIdRaw.trim().length > 0) {
+          const tenantIdErr = validateEditorAssistIdentifier(
+            tenantIdRaw,
+            "tenantId",
+          );
+          if (tenantIdErr) {
+            badRequest(res, tenantIdErr.message);
+            return;
+          }
+        }
+        if (userIdRaw !== null && userIdRaw.trim().length > 0) {
+          const userIdErr = validateEditorAssistIdentifier(userIdRaw, "userId");
+          if (userIdErr) {
+            badRequest(res, userIdErr.message);
+            return;
+          }
+        }
+        const session = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!session.ok) {
+          jsonResponse(res, 401, { error: session.message });
+          return;
+        }
+        if (
+          tenantIdRaw !== null &&
+          tenantIdRaw.trim().length > 0 &&
+          tenantIdRaw !== session.record.tenantId
+        ) {
+          jsonResponse(res, 403, {
+            error: "tenantId does not match the active editor-assist session",
+          });
+          return;
+        }
+        if (
+          userIdRaw !== null &&
+          userIdRaw.trim().length > 0 &&
+          userIdRaw !== session.record.userId
+        ) {
+          jsonResponse(res, 403, {
+            error: "userId does not match the active editor-assist session",
+          });
+          return;
+        }
         const snapshot = editorAssistBudgets.snapshot({
-          tenantId,
-          userId,
-          sessionId: sessionIdRaw,
+          tenantId: session.record.tenantId,
+          userId: session.record.userId,
+          sessionId: session.record.sessionId,
         });
         jsonResponse(res, 200, {
           schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
