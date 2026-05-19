@@ -31,6 +31,17 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1600, height: 1000 },
+        // Studio-IDE-12 (#250) §Memory: enable Chrome's
+        // ``performance.measureUserAgentSpecificMemory()`` API so
+        // the memory harness can actually assert the ≤ 10% heap
+        // growth SLA against the COOP/COEP-isolated context the
+        // middleware ships.
+        launchOptions: {
+          args: [
+            "--enable-blink-features=ForceEagerMeasureMemory",
+            "--enable-features=PerformanceMeasureMemory",
+          ],
+        },
       },
     },
   ],

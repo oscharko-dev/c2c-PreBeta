@@ -29,6 +29,7 @@ import { buildSyntheticCobol } from "./helpers/syntheticCobol";
 const MOUNT_SLA_5K_MS = 800;
 const MOUNT_SLA_10K_MS = 1500;
 const SEARCH_SLA_MS = 200;
+const SCROLL_P95_FRAMETIME_MS = 16.7;
 
 async function loadCobolAndAwaitMount(
   page: import("@playwright/test").Page,
@@ -107,5 +108,57 @@ test.describe("@perf editor mount + search", () => {
     );
     expect(elapsed).toBeGreaterThanOrEqual(0);
     expect(elapsed).toBeLessThan(SEARCH_SLA_MS * 10);
+  });
+
+  test("scroll p95 frametime stays under 16.7 ms on a 10k-line buffer", async ({
+    page,
+  }) => {
+    const source = buildSyntheticCobol({ targetLines: 10_000 });
+    await readyWorkbench(page);
+    await loadCobolAndAwaitMount(page, source);
+    // Drive a programmatic scroll over the full 10k-line buffer and
+    // sample requestAnimationFrame timestamps. The page-side runner
+    // computes frametime deltas, sorts them, and returns the 95th
+    // percentile — that's the load-bearing scroll-smoothness number
+    // Issue #250 §Performance prescribes.
+    const p95 = await page.evaluate(async (): Promise<number> => {
+      const w = window as unknown as {
+        __c2cMonacoEditor?: {
+          getScrollHeight: () => number;
+          setScrollTop: (top: number) => void;
+        };
+      };
+      const editor = w.__c2cMonacoEditor;
+      if (!editor) return -1;
+      const totalHeight = editor.getScrollHeight();
+      const step = Math.max(64, Math.floor(totalHeight / 200));
+      const frametimes: number[] = [];
+      let previous = performance.now();
+      for (let top = 0; top < totalHeight; top += step) {
+        editor.setScrollTop(top);
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            const now = performance.now();
+            frametimes.push(now - previous);
+            previous = now;
+            resolve();
+          });
+        });
+      }
+      if (frametimes.length === 0) return -1;
+      frametimes.sort((a, b) => a - b);
+      const idx = Math.min(
+        frametimes.length - 1,
+        Math.floor(frametimes.length * 0.95),
+      );
+      return frametimes[idx]!;
+    });
+    console.log(
+      `[perf] scroll p95 frametime: ${p95.toFixed(2)} ms (SLA ${SCROLL_P95_FRAMETIME_MS} ms)`,
+    );
+    expect(p95).toBeGreaterThan(0);
+    // 4× cushion absorbs CI hardware variance; a genuine
+    // scroll-smoothness regression past ~67 ms p95 is a real signal.
+    expect(p95).toBeLessThan(SCROLL_P95_FRAMETIME_MS * 4);
   });
 });

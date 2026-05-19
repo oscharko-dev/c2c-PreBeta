@@ -81,6 +81,17 @@ describe("Studio-IDE-12 (#250) CSP nonce middleware", () => {
     );
   });
 
+  it("ships COOP/COEP for cross-origin isolation (memory measurement)", async () => {
+    const { middleware } = await loadMiddleware();
+    const response = middleware(await makeRequest("/"));
+    expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe(
+      "same-origin",
+    );
+    expect(response.headers.get("Cross-Origin-Embedder-Policy")).toBe(
+      "credentialless",
+    );
+  });
+
   it("skips static-asset paths without stamping a nonce", async () => {
     const { middleware } = await loadMiddleware();
     for (const path of [
