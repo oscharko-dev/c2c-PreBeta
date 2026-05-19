@@ -42,7 +42,7 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
     expect(flags.pendingReRun).toBe(false);
   });
 
-  it("on a subsequent run with different BFF content, displayedArtifactSourceHash advances while lastRunInputHash is preserved — file becomes stale", async () => {
+  it("on a subsequent clean run, lastRunInputHash advances with the displayed artifact so the file is not stale", async () => {
     const { result } = renderHook(() => useTransformationRun(), { wrapper });
 
     await act(async () => {
@@ -52,8 +52,6 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
         "run-1",
       );
     });
-    const firstLastRunInput =
-      result.current.javaBuffers["src/App.java"].lastRunInputHash;
     const firstDisplayed =
       result.current.javaBuffers["src/App.java"].displayedArtifactSourceHash;
 
@@ -68,15 +66,16 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
     });
     const entry = result.current.javaBuffers["src/App.java"];
 
-    // Regression invariant — lastRunInputHash sticks to the first hydration;
-    // displayedArtifactSourceHash tracks the latest BFF payload.
-    expect(entry.lastRunInputHash).toBe(firstLastRunInput);
+    // Expanded Issue #245 invariant — a clean buffer accepts the latest
+    // generated artifact as the current run input. Preserving the old hash
+    // would leave the badge stuck on "Stale" after a successful follow-up run.
+    expect(entry.lastRunInputHash).toBe(entry.displayedArtifactSourceHash);
     expect(entry.displayedArtifactSourceHash).not.toBe(firstDisplayed);
     expect(entry.generatorBaselineRunId).toBe("run-2");
 
     const flags = result.current.javaStatusFlags("src/App.java");
-    expect(flags.staleJava).toBe(true);
-    expect(flags.clean).toBe(false);
+    expect(flags.staleJava).toBe(false);
+    expect(flags.clean).toBe(true);
   });
 
   it("keeps a dirty user-edit buffer when a new run lands; refreshes only the baseline metadata", async () => {
@@ -242,6 +241,7 @@ describe("transformationRun: 3-Way Merge state (IDE-13)", () => {
     expect(entry.content).toBe("a\nGEN\nc\n");
     expect(entry.generatorBaselineContent).toBe("a\nGEN\nc\n");
     expect(entry.generatorBaselineRunId).toBe("run-2");
+    expect(entry.lastRunInputHash).toBe(entry.displayedArtifactSourceHash);
     expect(entry.isDirty).toBe(false);
   });
 

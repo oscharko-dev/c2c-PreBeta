@@ -64,7 +64,7 @@ import {
 // Studio-IDE-13 (#255): manual-edit overlay computation and 3-Way Merge
 // dialog wiring. The overlay is recomputed on every debounced buffer
 // change so trust-pillar decorations and the manual-edits chip stay in
-// sync within the 500 ms AC budget.
+// sync within the expanded 250 ms AC budget.
 import { computeManualEditOverlay } from "@/lib/editor/manualEditOverlay";
 import {
   defaultRegionId,
@@ -115,10 +115,10 @@ const REVEAL_JAVA_EVENT = "c2c:reveal-java";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
 const FORMAT_NOTICE_VISIBLE_MS = 4000;
-// Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. 500 ms matches
-// the COBOL editor cadence (Studio-IDE-2) so the chip / status derivation
-// has identical responsiveness across the two editors.
-const JAVA_BUFFER_DEBOUNCE_MS = 500;
+// Studio-IDE-4 (#245): keystroke-to-buffer-model debounce. The expanded
+// Epic V2 acceptance criteria require provenance/manual-edit overlays to
+// update within 250 ms, and those overlays are derived from this buffer model.
+const JAVA_BUFFER_DEBOUNCE_MS = 250;
 // Studio-IDE-14 (#256): lint cadence. 300 ms matches the slice contract;
 // shorter intervals risk flooding the Problems panel mid-keystroke.
 const JAVA_LINT_DEBOUNCE_MS = 300;
@@ -332,7 +332,7 @@ export function GeneratedJavaEditorPane() {
   ]);
 
   // Studio-IDE-13 (#255) AC8: recompute the manual-edit overlay on
-  // every buffer change. The 500 ms debounce on ``setJavaBufferContent``
+  // every buffer change. The 250 ms debounce on ``setJavaBufferContent``
   // already gates this effect, so trust-pillar decorations and the
   // overlay propagation stay within the AC budget. The overlay is
   // persisted on the buffer entry (so editorPersistence round-trips it
@@ -1004,6 +1004,7 @@ export function GeneratedJavaEditorPane() {
     if (!model) return false;
     const filePath = selectedFilePathRef.current;
     if (!filePath) return false;
+    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return false;
     flushPendingEditRef.current();
     const content = model.getValue();
     formatInFlightRef.current = true;
@@ -1040,6 +1041,7 @@ export function GeneratedJavaEditorPane() {
     const editor = editorInstanceRef.current;
     const filePath = selectedFilePathRef.current;
     if (!editor || !filePath) return;
+    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return;
     const model = editor.getModel();
     if (!model) return;
     flushPendingEditRef.current();
@@ -1083,6 +1085,28 @@ export function GeneratedJavaEditorPane() {
   const performCompileCheckRef = useRef(performCompileCheck);
   performCompileCheckRef.current = performCompileCheck;
 
+  const saveCurrentJavaDraft = useCallback(async (): Promise<void> => {
+    const filePath = selectedFilePathRef.current;
+    if (!filePath) return;
+    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return;
+
+    const editor = editorInstanceRef.current;
+    const modelValue = editor?.getModel()?.getValue();
+    const pending = pendingEditRef.current;
+    const content =
+      modelValue ??
+      (pending?.filePath === filePath ? pending.content : undefined);
+
+    flushPendingEditRef.current();
+    await saveJavaDraftRef.current(
+      filePath,
+      content === undefined ? undefined : { content },
+    );
+  }, []);
+
+  const saveCurrentJavaDraftRef = useRef(saveCurrentJavaDraft);
+  saveCurrentJavaDraftRef.current = saveCurrentJavaDraft;
+
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
       editorInstanceRef.current = editor;
@@ -1122,15 +1146,12 @@ export function GeneratedJavaEditorPane() {
       // Cmd/Ctrl+S — local save, with opt-in format-on-save.
       trackDisposable(
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-          flushPendingEditRef.current();
-          const filePath = selectedFilePathRef.current;
-          if (!filePath) return;
           if (formatOnSaveRef.current) {
             void performFormatRef.current().then(() => {
-              void saveJavaDraftRef.current(filePath);
+              void saveCurrentJavaDraftRef.current();
             });
           } else {
-            void saveJavaDraftRef.current(filePath);
+            void saveCurrentJavaDraftRef.current();
           }
         }),
       );
@@ -1685,7 +1706,7 @@ export function GeneratedJavaEditorPane() {
             language={detectedLanguage}
             value={displayedContent}
             onChange={isJavaEditable ? handleEditorChange : undefined}
-            onMount={isJavaEditable ? handleEditorMount : undefined}
+            onMount={handleEditorMount}
             modelUri={modelUri}
             ariaLabel={`Generated Java source for ${selectedFilePath}`}
             markerGroups={javaMarkerGroups}

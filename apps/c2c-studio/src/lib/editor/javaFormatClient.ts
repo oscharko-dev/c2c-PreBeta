@@ -154,6 +154,7 @@ export async function formatJava(
     response = await fetchImpl(`${baseUrlResult.data}/api/v0/format/java`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

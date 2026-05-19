@@ -9,7 +9,10 @@ import {
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { GeneratedJavaEditorPane } from "@/components/generated/GeneratedJavaEditorPane";
-import { GeneratedArtifactsProvider } from "@/hooks/useGeneratedArtifacts";
+import {
+  GeneratedArtifactsProvider,
+  useGeneratedArtifacts,
+} from "@/hooks/useGeneratedArtifacts";
 // Studio-IDE-6 (#248): the Java pane now consumes the OriginOverlay and
 // LineageCoverage providers (for trust-pillar overlays and the status-bar
 // coverage chip). Both providers are pure context wrappers — the test
@@ -27,11 +30,32 @@ import type { ApiResult, GeneratedFileContent } from "@/types/api";
 type EditorMockProps = {
   value: string;
   onChange?: (next: string) => void;
+  onMount?: (args: { editor: FakeEditor; monaco: typeof fakeMonaco }) => void;
   ariaLabel?: string;
   language: string;
   mode: string;
   modelUri?: string;
   className?: string;
+};
+
+type FakeEditor = {
+  addCommand: (keybinding: number, callback: () => void) => string;
+  addAction: (descriptor: {
+    id: string;
+    run: (editor: FakeEditor) => unknown;
+  }) => { dispose: () => void };
+  getModel: () => {
+    getValue: () => string;
+    getLineCount: () => number;
+    getLineContent: (line: number) => string;
+    getValueInRange: () => string;
+  };
+  getPosition: () => { lineNumber: number; column: number };
+  getSelection: () => { isEmpty: () => boolean } | null;
+  onDidFocusEditorText: (callback: () => void) => { dispose: () => void };
+  revealLineInCenterIfOutsideViewport: () => void;
+  setPosition: () => void;
+  focus: () => void;
 };
 
 const editorMounts: Array<{
@@ -42,9 +66,44 @@ const editorMounts: Array<{
   value: string;
 }> = [];
 
+const editorCommands: Array<{ keybinding: number; callback: () => void }> = [];
+const editorActions: string[] = [];
+let latestEditorValue = "";
+
+const fakeMonaco = {
+  KeyMod: { CtrlCmd: 1 << 11, Shift: 1 << 10, Alt: 1 << 9 },
+  KeyCode: { KeyS: 49, KeyF: 36, KeyJ: 41, KeyE: 35, F5: 66 },
+  MarkerSeverity: { Info: 2 },
+  editor: { setModelMarkers: vi.fn() },
+};
+
+const fakeEditor: FakeEditor = {
+  addCommand: (keybinding, callback) => {
+    editorCommands.push({ keybinding, callback });
+    return `command-${editorCommands.length}`;
+  },
+  addAction: (descriptor) => {
+    editorActions.push(descriptor.id);
+    return { dispose: vi.fn() };
+  },
+  getModel: () => ({
+    getValue: () => latestEditorValue,
+    getLineCount: () => Math.max(1, latestEditorValue.split("\n").length),
+    getLineContent: (line) => latestEditorValue.split("\n")[line - 1] ?? "",
+    getValueInRange: () => latestEditorValue,
+  }),
+  getPosition: () => ({ lineNumber: 1, column: 1 }),
+  getSelection: () => null,
+  onDidFocusEditorText: () => ({ dispose: vi.fn() }),
+  revealLineInCenterIfOutsideViewport: vi.fn(),
+  setPosition: vi.fn(),
+  focus: vi.fn(),
+};
+
 vi.mock("@/components/editor/CodeEditor", async () => {
   const reactNs = await import("react");
   const CodeEditor = (props: EditorMockProps) => {
+    latestEditorValue = props.value;
     reactNs.useEffect(() => {
       editorMounts.push({
         language: props.language,
@@ -53,6 +112,7 @@ vi.mock("@/components/editor/CodeEditor", async () => {
         ariaLabel: props.ariaLabel,
         value: props.value,
       });
+      props.onMount?.({ editor: fakeEditor, monaco: fakeMonaco });
       // Mount-time only — re-firing on every prop change would inflate the
       // mount count and break assertions.
     }, []);
@@ -65,8 +125,10 @@ vi.mock("@/components/editor/CodeEditor", async () => {
       className: props.className,
       readOnly: props.mode === "readonly",
       value: props.value,
-      onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) =>
-        props.onChange?.(event.currentTarget.value),
+      onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+        latestEditorValue = event.currentTarget.value;
+        props.onChange?.(event.currentTarget.value);
+      },
       spellCheck: false,
     });
   };
@@ -162,6 +224,28 @@ function renderPane() {
   );
 }
 
+function SelectGeneratedFileButton({ path }: { path: string }) {
+  const { selectFile } = useGeneratedArtifacts();
+  return (
+    <button type="button" onClick={() => selectFile(path)}>
+      Select {path}
+    </button>
+  );
+}
+
+function renderPaneWithSelector(path: string) {
+  return render(
+    <OriginOverlayProvider>
+      <LineageCoverageProvider>
+        <GeneratedArtifactsProvider>
+          <SelectGeneratedFileButton path={path} />
+          <GeneratedJavaEditorPane />
+        </GeneratedArtifactsProvider>
+      </LineageCoverageProvider>
+    </OriginOverlayProvider>,
+  );
+}
+
 const FILE_SHA = "1122334455667788aabbccddeeff0011" + "00".repeat(16);
 
 const completedRunWith = (files: string[], entry?: string) => ({
@@ -183,6 +267,9 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     editorMounts.length = 0;
+    editorCommands.length = 0;
+    editorActions.length = 0;
+    latestEditorValue = "";
     setJavaBufferContentSpy.mockClear();
     ensureJavaBaselineSpy.mockClear();
     loadJavaDraftForSpy.mockClear();
@@ -234,7 +321,7 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     },
   );
 
-  it("debounces editor onChange to setJavaBufferContent after 500ms", async () => {
+  it("debounces editor onChange to setJavaBufferContent within 250ms", async () => {
     vi.useFakeTimers();
     try {
       mockTransformationState.mockReturnValue(
@@ -248,7 +335,7 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
         screen.getByTestId("code-editor-mock"),
       )) as HTMLTextAreaElement;
 
-      // Three keystrokes within 500ms — only the last one should land.
+      // Three keystrokes within 250ms — only the last one should land.
       fireEvent.change(editor, {
         target: { value: "public class App { void a(){} }" },
       });
@@ -269,7 +356,7 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       expect(setJavaBufferContentSpy).not.toHaveBeenCalled();
 
       act(() => {
-        vi.advanceTimersByTime(500);
+        vi.advanceTimersByTime(250);
       });
 
       expect(setJavaBufferContentSpy).toHaveBeenCalledTimes(1);
@@ -280,6 +367,57 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps Cmd/Ctrl+S registered after mounting on a read-only artifact and saves the live Java model", async () => {
+    mockTransformationState.mockReturnValue(
+      completedRunWith(["pom.xml", "src/App.java"], "pom.xml"),
+    );
+    mockGeneratedFileContents({
+      "pom.xml": "<project />",
+      "src/App.java": "public class App {}",
+    });
+
+    renderPaneWithSelector("src/App.java");
+
+    const readonlyEditor = (await screen.findByTestId(
+      "code-editor-mock",
+    )) as HTMLTextAreaElement;
+    expect(readonlyEditor).toHaveAttribute("data-mode", "readonly");
+
+    const saveKeybinding = fakeMonaco.KeyMod.CtrlCmd | fakeMonaco.KeyCode.KeyS;
+    const saveCommand = editorCommands.find(
+      (command) => command.keybinding === saveKeybinding,
+    );
+    expect(saveCommand).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: /select src\/app\.java/i }));
+
+    const editor = (await screen.findByTestId(
+      "code-editor-mock",
+    )) as HTMLTextAreaElement;
+    await waitFor(() => {
+      expect(editor).toHaveAttribute("data-mode", "editable");
+      expect(editor).toHaveDisplayValue("public class App {}");
+    });
+
+    fireEvent.change(editor, {
+      target: { value: "public class App { int saved; }" },
+    });
+
+    act(() => {
+      saveCommand!.callback();
+    });
+
+    expect(setJavaBufferContentSpy).toHaveBeenCalledWith(
+      "src/App.java",
+      "public class App { int saved; }",
+    );
+    await waitFor(() => {
+      expect(saveJavaDraftSpy).toHaveBeenCalledWith("src/App.java", {
+        content: "public class App { int saved; }",
+      });
+    });
   });
 
   it("does not call setJavaBufferContent for read-only artifacts", async () => {

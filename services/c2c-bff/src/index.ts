@@ -11,7 +11,7 @@ function main(): void {
   ].join(' ');
   // eslint-disable-next-line no-console
   console.log(
-    `[c2c-bff] listening on http://localhost:${config.port} (${upstreamSummary}, repoRoot=${config.repoRoot}, staticRoot=${config.staticRoot})`,
+    `[c2c-bff] listening on http://${config.host}:${config.port} (${upstreamSummary}, repoRoot=${config.repoRoot}, staticRoot=${config.staticRoot})`,
   );
 }
 

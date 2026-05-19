@@ -41,7 +41,9 @@ describe("formatJava client", () => {
 
   it("forwards filePath in the request body", async () => {
     let captured: unknown = null;
+    let capturedInit: RequestInit | undefined;
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedInit = init;
       captured = init?.body ? JSON.parse(String(init.body)) : null;
       return makeResponse(200, {
         schemaVersion: "v0",
@@ -53,6 +55,7 @@ describe("formatJava client", () => {
       { fetchImpl },
     );
     expect(captured).toEqual({ content: "class A{}", filePath: "src/A.java" });
+    expect(capturedInit).toMatchObject({ credentials: "include" });
   });
 
   it("maps a 422 parse error to format_parse_error with line/column", async () => {

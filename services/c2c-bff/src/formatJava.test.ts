@@ -18,6 +18,8 @@ import type {
   UpstreamResponse,
 } from "./upstream";
 import type { SampleRegistry } from "./samples";
+import { createSessionStore, type SessionStore } from "./sessionStore";
+import { SESSION_COOKIE_NAME } from "./sessionCookie";
 
 function emptySamples(): SampleRegistry {
   return {
@@ -33,6 +35,7 @@ function emptySamples(): SampleRegistry {
 const baseConfig: BffConfig = {
   serviceName: "c2c-bff",
   port: 0,
+  host: "127.0.0.1",
   repoRoot: "/tmp/c2c-test-root",
   staticRoot: "/tmp/c2c-test-static-does-not-exist",
   orchestratorUrl: "",
@@ -172,6 +175,7 @@ async function startTestServer(
 async function postJson(
   url: string,
   body: unknown,
+  headers: Record<string, string> = {},
 ): Promise<{ status: number; body: unknown }> {
   const target = new URL(url);
   const bodyBytes =
@@ -185,6 +189,7 @@ async function postJson(
         path: `${target.pathname}${target.search}`,
         headers: {
           accept: "application/json",
+          ...headers,
           ...(bodyBytes
             ? {
                 "content-type": "application/json",
@@ -215,6 +220,24 @@ async function postJson(
     if (bodyBytes) req.write(bodyBytes);
     req.end();
   });
+}
+
+function createRouteAuth(): {
+  sessionStore: SessionStore;
+  headers: Record<string, string>;
+} {
+  const sessionStore = createSessionStore({ idleTimeoutMs: 0 });
+  const record = sessionStore.create({
+    tenantId: "tenant-a",
+    userId: "user-a",
+  });
+  return {
+    sessionStore,
+    headers: {
+      origin: "http://127.0.0.1:3000",
+      cookie: `${SESSION_COOKIE_NAME}=${record.sessionId}`,
+    },
+  };
 }
 
 test("loadConfig surfaces format-java defaults and overrides", () => {
@@ -340,6 +363,7 @@ test("normaliseUpstreamResponse coerces unexpected payloads to format_upstream_e
 });
 
 test("POST /api/v0/format/java returns 503 when build-test-runner is disabled", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: emptySamples(),
@@ -347,12 +371,15 @@ test("POST /api/v0/format/java returns 503 when build-test-runner is disabled", 
     evidence: disabledEvidence(),
     buildTestRunner: disabledBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const result = await postJson(`${server.baseUrl}/api/v0/format/java`, {
-      content: "public class A {}",
-    });
+    const result = await postJson(
+      `${server.baseUrl}/api/v0/format/java`,
+      { content: "public class A {}" },
+      auth.headers,
+    );
     assert.equal(result.status, 503);
     const body = result.body as Record<string, unknown>;
     assert.equal(body.status, "failed");
@@ -363,6 +390,7 @@ test("POST /api/v0/format/java returns 503 when build-test-runner is disabled", 
 });
 
 test("POST /api/v0/format/java rejects malformed JSON with 400", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: emptySamples(),
@@ -370,6 +398,7 @@ test("POST /api/v0/format/java rejects malformed JSON with 400", async () => {
     evidence: disabledEvidence(),
     buildTestRunner: fakeBuildTestRunner({}),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -383,6 +412,7 @@ test("POST /api/v0/format/java rejects malformed JSON with 400", async () => {
             port: target.port,
             path: target.pathname,
             headers: {
+              ...auth.headers,
               "content-type": "application/json",
               "content-length": "5",
             },
@@ -413,6 +443,7 @@ test("POST /api/v0/format/java rejects malformed JSON with 400", async () => {
 });
 
 test("POST /api/v0/format/java rejects oversize body with 413", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, formatJavaSourceMaxBytes: 32 },
     samples: emptySamples(),
@@ -420,12 +451,15 @@ test("POST /api/v0/format/java rejects oversize body with 413", async () => {
     evidence: disabledEvidence(),
     buildTestRunner: fakeBuildTestRunner({}),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const result = await postJson(`${server.baseUrl}/api/v0/format/java`, {
-      content: "x".repeat(64),
-    });
+    const result = await postJson(
+      `${server.baseUrl}/api/v0/format/java`,
+      { content: "x".repeat(64) },
+      auth.headers,
+    );
     assert.equal(result.status, 413);
     const body = result.body as Record<string, unknown>;
     assert.equal(body.code, "format_unavailable");
@@ -435,6 +469,7 @@ test("POST /api/v0/format/java rejects oversize body with 413", async () => {
 });
 
 test("POST /api/v0/format/java rejects non-string content with 400", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: emptySamples(),
@@ -442,12 +477,15 @@ test("POST /api/v0/format/java rejects non-string content with 400", async () =>
     evidence: disabledEvidence(),
     buildTestRunner: fakeBuildTestRunner({}),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const result = await postJson(`${server.baseUrl}/api/v0/format/java`, {
-      content: 42,
-    });
+    const result = await postJson(
+      `${server.baseUrl}/api/v0/format/java`,
+      { content: 42 },
+      auth.headers,
+    );
     assert.equal(result.status, 400);
     const body = result.body as Record<string, unknown>;
     assert.equal(body.code, "format_input_invalid");
@@ -457,6 +495,7 @@ test("POST /api/v0/format/java rejects non-string content with 400", async () =>
 });
 
 test("POST /api/v0/format/java proxies a successful upstream response", async () => {
+  const auth = createRouteAuth();
   const captured: Array<{ content: string; filePath?: string }> = [];
   const handler = createApp({
     config: baseConfig,
@@ -474,13 +513,18 @@ test("POST /api/v0/format/java proxies a successful upstream response", async ()
       },
     }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const result = await postJson(`${server.baseUrl}/api/v0/format/java`, {
-      content: "public class A{}",
-      filePath: "src/A.java",
-    });
+    const result = await postJson(
+      `${server.baseUrl}/api/v0/format/java`,
+      {
+        content: "public class A{}",
+        filePath: "src/A.java",
+      },
+      auth.headers,
+    );
     assert.equal(result.status, 200);
     const body = result.body as Record<string, unknown>;
     assert.equal(body.formattedContent, "public class A {}\n");
@@ -492,6 +536,7 @@ test("POST /api/v0/format/java proxies a successful upstream response", async ()
 });
 
 test("POST /api/v0/format/java surfaces upstream 422 parse errors", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: emptySamples(),
@@ -510,12 +555,15 @@ test("POST /api/v0/format/java surfaces upstream 422 parse errors", async () => 
       },
     }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const result = await postJson(`${server.baseUrl}/api/v0/format/java`, {
-      content: "public class A {",
-    });
+    const result = await postJson(
+      `${server.baseUrl}/api/v0/format/java`,
+      { content: "public class A {" },
+      auth.headers,
+    );
     assert.equal(result.status, 422);
     const body = result.body as Record<string, unknown>;
     assert.equal(body.code, "format_parse_error");
@@ -527,6 +575,7 @@ test("POST /api/v0/format/java surfaces upstream 422 parse errors", async () => 
 });
 
 test("POST /api/v0/format/java surfaces upstream throw as 503", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: emptySamples(),
@@ -536,12 +585,15 @@ test("POST /api/v0/format/java surfaces upstream throw as 503", async () => {
       error: new Error("connect ECONNREFUSED"),
     }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const result = await postJson(`${server.baseUrl}/api/v0/format/java`, {
-      content: "public class A {}",
-    });
+    const result = await postJson(
+      `${server.baseUrl}/api/v0/format/java`,
+      { content: "public class A {}" },
+      auth.headers,
+    );
     assert.equal(result.status, 503);
     const body = result.body as Record<string, unknown>;
     assert.equal(body.code, "format_unavailable");

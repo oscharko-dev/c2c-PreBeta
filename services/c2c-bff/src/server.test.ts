@@ -399,6 +399,7 @@ const baseRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "c2c-bff-test-root-")
 const baseConfig: BffConfig = {
   serviceName: "c2c-bff",
   port: 0,
+  host: "127.0.0.1",
   repoRoot: baseRepoRoot,
   staticRoot: path.join(baseRepoRoot, "static-does-not-exist"),
   orchestratorUrl: "",
@@ -487,6 +488,7 @@ test("loadConfig surfaces exact Studio CORS origins", () => {
     { C2C_REPO_ROOT: "/tmp/c2c-test-root" } as NodeJS.ProcessEnv,
     __dirname,
   );
+  assert.equal(defaults.host, "127.0.0.1");
   assert.deepEqual(defaults.studioCorsOrigins, [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -518,6 +520,15 @@ test("loadConfig surfaces exact Studio CORS origins", () => {
     "http://localhost:5173",
     "http://127.0.0.1:5174",
   ]);
+
+  const explicitHost = loadConfig(
+    {
+      C2C_REPO_ROOT: "/tmp/c2c-test-root",
+      C2C_BFF_HOST: "0.0.0.0",
+    } as NodeJS.ProcessEnv,
+    __dirname,
+  );
+  assert.equal(explicitHost.host, "0.0.0.0");
 
   assert.throws(
     () =>
@@ -601,6 +612,32 @@ async function fetchJson(
     if (bodyBytes) req.write(bodyBytes);
     req.end();
   });
+}
+
+function createRouteAuth(): {
+  sessionStore: SessionStore;
+  post: (
+    body: unknown,
+    headers?: Record<string, string>,
+  ) => { method: "POST"; body: unknown; headers: Record<string, string> };
+} {
+  const sessionStore = createSessionStore({ idleTimeoutMs: 0 });
+  const record = sessionStore.create({
+    tenantId: "tenant-a",
+    userId: "user-a",
+  });
+  return {
+    sessionStore,
+    post: (body, headers = {}) => ({
+      method: "POST",
+      headers: {
+        origin: "http://127.0.0.1:3000",
+        cookie: `${SESSION_COOKIE_NAME}=${record.sessionId}`,
+        ...headers,
+      },
+      body,
+    }),
+  };
 }
 
 test("placeholder marker list is non-empty and exposes the documented W0 stubs", () => {
@@ -6014,7 +6051,73 @@ test("POST /api/v0/generate returns 503 when orchestrator is not configured", as
 // Studio-IDE-13 (#255): POST /api/v0/compile-check
 // ---------------------------------------------------------------------------
 
+test("Java editor execution routes reject unauthenticated or cross-origin requests before upstream work", async () => {
+  let upstreamCalls = 0;
+  const auth = createRouteAuth();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: {
+      enabled: true,
+      async formatJava() {
+        upstreamCalls += 1;
+        return {
+          status: 200,
+          body: { schemaVersion: "v0", formattedContent: "class Pwn {}" },
+        };
+      },
+      async runVerification() {
+        upstreamCalls += 1;
+        return {
+          status: 200,
+          body: { status: "success", classification: "success", diagnostics: [] },
+        };
+      },
+    },
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const noCookie = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
+      method: "POST",
+      headers: { origin: "http://127.0.0.1:3000" },
+      body: {
+        runId: "run-1",
+        javaFiles: [{ path: "Pwn.java", content: "class Pwn {}" }],
+      },
+    });
+    assert.equal(noCookie.status, 401);
+
+    const badOrigin = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post(
+        { javaFiles: [{ path: "Pwn.java", content: "class Pwn {}" }] },
+        { origin: "http://evil.example" },
+      ),
+    );
+    assert.equal(badOrigin.status, 403);
+
+    const textPlain = await fetch(`${server.baseUrl}/api/v0/format/java`, {
+      method: "POST",
+      headers: {
+        origin: "http://127.0.0.1:3000",
+        cookie: auth.post({}).headers.cookie ?? "",
+        "content-type": "text/plain",
+      },
+      body: JSON.stringify({ content: "class Pwn {}" }),
+    });
+    assert.equal(textPlain.status, 415);
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/v0/compile-check returns 400 when javaFiles is missing", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6022,13 +6125,14 @@ test("POST /api/v0/compile-check returns 400 when javaFiles is missing", async (
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
-      method: "POST",
-      body: { runId: "r1" },
-    });
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({ runId: "r1" }),
+    );
     assert.equal(response.status, 400);
     assert.ok((response.body as { error: string }).error.includes("javaFiles"));
   } finally {
@@ -6037,6 +6141,7 @@ test("POST /api/v0/compile-check returns 400 when javaFiles is missing", async (
 });
 
 test("POST /api/v0/compile-check returns 400 when javaFiles is empty array", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6044,13 +6149,14 @@ test("POST /api/v0/compile-check returns 400 when javaFiles is empty array", asy
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
-      method: "POST",
-      body: { javaFiles: [] },
-    });
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({ javaFiles: [] }),
+    );
     assert.equal(response.status, 400);
     assert.ok((response.body as { error: string }).error.includes("javaFiles"));
   } finally {
@@ -6059,6 +6165,7 @@ test("POST /api/v0/compile-check returns 400 when javaFiles is empty array", asy
 });
 
 test("POST /api/v0/compile-check returns 400 when javaFiles entry has no path", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6066,13 +6173,14 @@ test("POST /api/v0/compile-check returns 400 when javaFiles entry has no path", 
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
-      method: "POST",
-      body: { javaFiles: [{ path: "", content: "class Foo {}" }] },
-    });
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({ javaFiles: [{ path: "", content: "class Foo {}" }] }),
+    );
     assert.equal(response.status, 400);
     assert.ok((response.body as { error: string }).error.includes("path"));
   } finally {
@@ -6081,6 +6189,7 @@ test("POST /api/v0/compile-check returns 400 when javaFiles entry has no path", 
 });
 
 test("POST /api/v0/compile-check returns 413 when total content exceeds cap", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, transformSourceMaxBytes: 10 },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6088,17 +6197,18 @@ test("POST /api/v0/compile-check returns 413 when total content exceeds cap", as
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({
         javaFiles: [
           { path: "Foo.java", content: "class Foo { /* large content */ }" },
         ],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 413);
   } finally {
     await server.close();
@@ -6106,6 +6216,7 @@ test("POST /api/v0/compile-check returns 413 when total content exceeds cap", as
 });
 
 test("POST /api/v0/compile-check happy path returns 200 with diagnostics", async () => {
+  const auth = createRouteAuth();
   const upstreamBody = {
     status: "build_failed",
     diagnostics: [
@@ -6127,15 +6238,16 @@ test("POST /api/v0/compile-check happy path returns 200 with diagnostics", async
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner({ status: 200, body: upstreamBody }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({
         javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 200);
     const body = response.body as {
       schemaVersion: string;
@@ -6156,6 +6268,7 @@ test("POST /api/v0/compile-check happy path returns 200 with diagnostics", async
 });
 
 test("POST /api/v0/compile-check returns 503 when build-test-runner is not configured", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6163,15 +6276,16 @@ test("POST /api/v0/compile-check returns 503 when build-test-runner is not confi
     evidence: disabledEvidence(),
     buildTestRunner: disabledBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({
         javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 503);
     assert.ok(
       (response.body as { error: string }).error.includes(
@@ -6184,6 +6298,7 @@ test("POST /api/v0/compile-check returns 503 when build-test-runner is not confi
 });
 
 test("POST /api/v0/compile-check returns 503 when build-test-runner returns 5xx", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6194,15 +6309,16 @@ test("POST /api/v0/compile-check returns 503 when build-test-runner returns 5xx"
       body: { error: "internal error" },
     }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/compile-check`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({
         javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 503);
     assert.equal(
       (response.body as { failureCode: string }).failureCode,
@@ -6218,6 +6334,7 @@ test("POST /api/v0/compile-check returns 503 when build-test-runner returns 5xx"
 // ---------------------------------------------------------------------------
 
 test("POST /api/v0/verify returns 400 when runId is missing", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6225,13 +6342,14 @@ test("POST /api/v0/verify returns 400 when runId is missing", async () => {
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
-      method: "POST",
-      body: { javaFiles: [{ path: "Foo.java", content: "class Foo {}" }] },
-    });
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({ javaFiles: [{ path: "Foo.java", content: "class Foo {}" }] }),
+    );
     assert.equal(response.status, 400);
     assert.ok((response.body as { error: string }).error.includes("runId"));
   } finally {
@@ -6240,6 +6358,7 @@ test("POST /api/v0/verify returns 400 when runId is missing", async () => {
 });
 
 test("POST /api/v0/verify returns 400 when javaFiles is missing", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6247,13 +6366,14 @@ test("POST /api/v0/verify returns 400 when javaFiles is missing", async () => {
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
-      method: "POST",
-      body: { runId: "run-1" },
-    });
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({ runId: "run-1" }),
+    );
     assert.equal(response.status, 400);
     assert.ok((response.body as { error: string }).error.includes("javaFiles"));
   } finally {
@@ -6262,6 +6382,7 @@ test("POST /api/v0/verify returns 400 when javaFiles is missing", async () => {
 });
 
 test("POST /api/v0/verify returns 413 when total content exceeds cap", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, transformSourceMaxBytes: 10 },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6269,18 +6390,19 @@ test("POST /api/v0/verify returns 413 when total content exceeds cap", async () 
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
         runId: "run-1",
         javaFiles: [
           { path: "Foo.java", content: "class Foo { /* lots of content */ }" },
         ],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 413);
   } finally {
     await server.close();
@@ -6288,6 +6410,7 @@ test("POST /api/v0/verify returns 413 when total content exceeds cap", async () 
 });
 
 test("POST /api/v0/verify happy path returns 200 with verify response shape", async () => {
+  const auth = createRouteAuth();
   const upstreamBody = {
     status: "success",
     classification: "success",
@@ -6306,16 +6429,17 @@ test("POST /api/v0/verify happy path returns 200 with verify response shape", as
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner({ status: 200, body: upstreamBody }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
         runId: "run-abc",
         javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 200);
     const body = response.body as {
       schemaVersion: string;
@@ -6341,6 +6465,7 @@ test("POST /api/v0/verify happy path returns 200 with verify response shape", as
 });
 
 test("POST /api/v0/verify returns 503 when build-test-runner is not configured", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6348,16 +6473,17 @@ test("POST /api/v0/verify returns 503 when build-test-runner is not configured",
     evidence: disabledEvidence(),
     buildTestRunner: disabledBuildTestRunner(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
         runId: "run-1",
         javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 503);
   } finally {
     await server.close();
@@ -6365,6 +6491,7 @@ test("POST /api/v0/verify returns 503 when build-test-runner is not configured",
 });
 
 test("POST /api/v0/verify returns 503 when build-test-runner returns 5xx", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6375,16 +6502,17 @@ test("POST /api/v0/verify returns 503 when build-test-runner returns 5xx", async
       body: { error: "service down" },
     }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
         runId: "run-1",
         javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 503);
     assert.equal(
       (response.body as { failureCode: string }).failureCode,
@@ -6396,6 +6524,7 @@ test("POST /api/v0/verify returns 503 when build-test-runner returns 5xx", async
 });
 
 test("POST /api/v0/verify stamps manualEditsCarriedOver and manualDriftRegionCount from overlay", async () => {
+  const auth = createRouteAuth();
   const upstreamBody = {
     status: "success",
     classification: "success",
@@ -6408,12 +6537,13 @@ test("POST /api/v0/verify stamps manualEditsCarriedOver and manualDriftRegionCou
     evidence: disabledEvidence(),
     buildTestRunner: stubBuildTestRunner({ status: 200, body: upstreamBody }),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/verify`, {
-      method: "POST",
-      body: {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
         runId: "run-xyz",
         javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
         manualEditOverlay: {
@@ -6435,8 +6565,8 @@ test("POST /api/v0/verify stamps manualEditsCarriedOver and manualDriftRegionCou
             },
           ],
         },
-      },
-    });
+      }),
+    );
     assert.equal(response.status, 200);
     const body = response.body as {
       manualEditsCarriedOver: boolean;
