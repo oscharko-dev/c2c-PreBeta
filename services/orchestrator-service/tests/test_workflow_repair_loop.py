@@ -447,6 +447,22 @@ class RepairLoopManualRegionGuardTests(_BaseRepairLoopFixture):
             manual_overlay_regions=regions,
         )
 
+    @staticmethod
+    def _manual_region(**overrides) -> dict[str, JsonValue]:
+        region: dict[str, JsonValue] = {
+            "filePath": "src/main/java/com/c2c/generated/Hello.java",
+            "originClass": "manual_modified",
+            "startLine": 1,
+            "endLine": 3,
+            "generatorBaselineRunId": "run-baseline",
+            "generatorBaselineRegionHash": "c" * 64,
+            "lastModifiedAt": "2026-05-18T09:14:33Z",
+            "lastModifiedBy": {"userId": "user-1", "tenantId": "tenant-A"},
+            "manualEditCount": 1,
+        }
+        region.update(overrides)
+        return region
+
     def test_manual_region_blocks_repair_without_caller_opt_in(self):
         """The guard fires when manual regions exist and the assist
         decision is anything other than ``caller_explicit_opt_in``. The
@@ -468,12 +484,11 @@ class RepairLoopManualRegionGuardTests(_BaseRepairLoopFixture):
         )
         runner, _tmp = self._runner(gateway, invoker, repair_budget_max=3)
         regions = (
-            {
-                "filePath": "src/main/java/com/c2c/generated/CASE01.java",
-                "originClass": "manual_modified",
-                "startLine": 3,
-                "endLine": 5,
-            },
+            self._manual_region(
+                filePath="src/main/java/com/c2c/generated/CASE01.java",
+                startLine=3,
+                endLine=5,
+            ),
         )
         # ``use_transformation_agent=False`` → reasonCode
         # ``caller_did_not_opt_in``; the guard fires.
@@ -586,12 +601,10 @@ class RepairLoopManualRegionGuardTests(_BaseRepairLoopFixture):
             repair_agent_invoker=repair_invoker,
         )
         regions = (
-            {
-                "filePath": "src/main/java/com/c2c/generated/Hello.java",
-                "originClass": "manual_edit",
-                "startLine": 1,
-                "endLine": 3,
-            },
+            self._manual_region(
+                originClass="manual_edit",
+                generatorBaselineRegionHash=None,
+            ),
         )
         # ``use_transformation_agent=True`` with no baseline uncertainty
         # markers → reasonCode ``caller_explicit_opt_in``; the guard MUST

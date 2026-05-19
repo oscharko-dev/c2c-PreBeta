@@ -14,6 +14,22 @@ import unittest
 from orchestrator_service.server import _extract_manual_overlay_regions
 
 
+def _manual_region(**overrides):
+    region = {
+        "filePath": "src/main/java/com/c2c/generated/Hello.java",
+        "originClass": "manual_modified",
+        "startLine": 3,
+        "endLine": 5,
+        "generatorBaselineRunId": "run-0",
+        "generatorBaselineRegionHash": "a" * 64,
+        "lastModifiedAt": "2026-05-18T09:14:33Z",
+        "lastModifiedBy": {"userId": "user-1", "tenantId": "tenant-A"},
+        "manualEditCount": 1,
+    }
+    region.update(overrides)
+    return region
+
+
 class ExtractManualOverlayRegionsTests(unittest.TestCase):
     def test_none_returns_empty_tuple(self) -> None:
         self.assertEqual(_extract_manual_overlay_regions(None), ())
@@ -29,12 +45,7 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         # envelope form mirrors the evidence-pack artifact shape.
         regions = _extract_manual_overlay_regions(
             [
-                {
-                    "filePath": "src/main/java/com/c2c/generated/Hello.java",
-                    "originClass": "manual_modified",
-                    "startLine": 3,
-                    "endLine": 5,
-                },
+                _manual_region(),
             ]
         )
         self.assertEqual(len(regions), 1)
@@ -52,6 +63,13 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
                         "originClass": "manual_edit",
                         "startLine": 10,
                         "endLine": 12,
+                        "generatorBaselineRunId": "run-0",
+                        "lastModifiedAt": "2026-05-18T09:14:33Z",
+                        "lastModifiedBy": {
+                            "userId": "user-1",
+                            "tenantId": "tenant-A",
+                        },
+                        "manualEditCount": 1,
                     }
                 ],
             }
@@ -71,6 +89,11 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
                         "originClass": "manual_modified",
                         "generatorBaselineRunId": "run-0",
                         "generatorBaselineRegionHash": "a" * 64,
+                        "lastModifiedAt": "2026-05-18T09:14:33Z",
+                        "lastModifiedBy": {
+                            "userId": "user-1",
+                            "tenantId": "tenant-A",
+                        },
                         "manualEditCount": 2,
                     }
                 ],
@@ -85,6 +108,19 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         self.assertEqual(regions[0]["generatorBaselineRunId"], "run-0")
         self.assertEqual(regions[0]["manualEditCount"], 2)
 
+    def test_manual_edit_region_does_not_require_baseline_hash(self) -> None:
+        regions = _extract_manual_overlay_regions(
+            [
+                _manual_region(
+                    originClass="manual_edit",
+                    generatorBaselineRegionHash=None,
+                ),
+            ]
+        )
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0]["originClass"], "manual_edit")
+        self.assertNotIn("generatorBaselineRegionHash", regions[0])
+
     def test_unknown_origin_class_rejected(self) -> None:
         # ADR 0007 §"Rationale" pins the closed enum; non-manual
         # classes MUST NOT silently pass through the manual-overlay
@@ -92,12 +128,7 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             _extract_manual_overlay_regions(
                 [
-                    {
-                        "filePath": "Hello.java",
-                        "originClass": "deterministic",
-                        "startLine": 1,
-                        "endLine": 3,
-                    },
+                    _manual_region(originClass="deterministic"),
                 ]
             )
         self.assertIn("originClass", str(ctx.exception))
@@ -106,12 +137,30 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _extract_manual_overlay_regions(
                 [
-                    {
-                        "filePath": "",
-                        "originClass": "manual_modified",
-                        "startLine": 1,
-                        "endLine": 3,
-                    },
+                    _manual_region(filePath=""),
+                ]
+            )
+
+    def test_missing_common_provenance_rejected(self) -> None:
+        region = _manual_region()
+        del region["lastModifiedBy"]
+        with self.assertRaisesRegex(ValueError, "lastModifiedBy"):
+            _extract_manual_overlay_regions([region])
+
+    def test_manual_modified_missing_region_hash_rejected(self) -> None:
+        region = _manual_region()
+        del region["generatorBaselineRegionHash"]
+        with self.assertRaisesRegex(ValueError, "generatorBaselineRegionHash"):
+            _extract_manual_overlay_regions([region])
+
+    def test_manual_edit_region_hash_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be omitted"):
+            _extract_manual_overlay_regions(
+                [
+                    _manual_region(
+                        originClass="manual_edit",
+                        generatorBaselineRegionHash="b" * 64,
+                    )
                 ]
             )
 
@@ -120,23 +169,13 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _extract_manual_overlay_regions(
                 [
-                    {
-                        "filePath": "Hello.java",
-                        "originClass": "manual_modified",
-                        "startLine": 0,
-                        "endLine": 3,
-                    },
+                    _manual_region(startLine=0),
                 ]
             )
         with self.assertRaises(ValueError):
             _extract_manual_overlay_regions(
                 [
-                    {
-                        "filePath": "Hello.java",
-                        "originClass": "manual_modified",
-                        "startLine": 5,
-                        "endLine": 3,
-                    },
+                    _manual_region(startLine=5, endLine=3),
                 ]
             )
 
@@ -144,12 +183,7 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _extract_manual_overlay_regions(
                 [
-                    {
-                        "filePath": "Hello.java",
-                        "originClass": "manual_modified",
-                        "startLine": "first",
-                        "endLine": 3,
-                    },
+                    _manual_region(startLine="first"),
                 ]
             )
 

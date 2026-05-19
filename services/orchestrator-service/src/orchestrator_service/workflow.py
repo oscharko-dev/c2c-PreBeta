@@ -134,6 +134,160 @@ class OrchestratorError(Exception):
     """Base class for orchestrator execution failures."""
 
 
+_SHA256_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def _manual_overlay_field(prefix: str, index: int, field: str) -> str:
+    return f"{prefix}[{index}].{field}"
+
+
+def _required_manual_overlay_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise OrchestratorError(f"{field} is required")
+    return value.strip()
+
+
+def _required_manual_overlay_timestamp(value: Any, field: str) -> str:
+    text = _required_manual_overlay_string(value, field)
+    if "T" not in text:
+        raise OrchestratorError(f"{field} must be an ISO8601 timestamp")
+    try:
+        datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise OrchestratorError(
+            f"{field} must be an ISO8601 timestamp"
+        ) from exc
+    return text
+
+
+def _required_manual_overlay_count(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise OrchestratorError(f"{field} must be an integer")
+    if value < 1:
+        raise OrchestratorError(f"{field} must be >= 1")
+    return value
+
+
+def _required_manual_overlay_author(value: Any, field: str) -> JsonObject:
+    if not isinstance(value, Mapping):
+        raise OrchestratorError(f"{field} must be an object")
+    return {
+        "userId": _required_manual_overlay_string(
+            value.get("userId"), f"{field}.userId"
+        ),
+        "tenantId": _required_manual_overlay_string(
+            value.get("tenantId"), f"{field}.tenantId"
+        ),
+    }
+
+
+def _required_manual_overlay_line(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise OrchestratorError(f"{field} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    raise OrchestratorError(f"{field} must be an integer")
+
+
+def _required_manual_overlay_hash(value: Any, field: str) -> str:
+    text = _required_manual_overlay_string(value, field)
+    if len(text) != 64 or any(char not in _SHA256_HEX_CHARS for char in text):
+        raise OrchestratorError(f"{field} must be a SHA-256 hex digest")
+    return text
+
+
+def normalise_manual_edit_overlay_region(
+    raw: Mapping[str, Any],
+    *,
+    index: int,
+    default_file_path: Any = None,
+    field_prefix: str = "manualOverlay.regions",
+) -> JsonObject:
+    """Return the Evidence-Pack body shape for one manual-edit overlay region.
+
+    ADR 0007 §3 makes the provenance metadata part of the audit contract,
+    not an optional decoration. The orchestrator therefore rejects incomplete
+    regions before writing ``manual-edit-overlay.json``.
+    """
+    file_path_value = raw.get("filePath") or default_file_path
+    file_path = _required_manual_overlay_string(
+        file_path_value,
+        _manual_overlay_field(field_prefix, index, "filePath"),
+    )
+    origin_class = _required_manual_overlay_string(
+        raw.get("originClass"),
+        _manual_overlay_field(field_prefix, index, "originClass"),
+    )
+    if origin_class not in w02.JAVA_REGION_ORIGIN_MANUAL_CLASSES:
+        raise OrchestratorError(
+            f"{_manual_overlay_field(field_prefix, index, 'originClass')} "
+            f"must be one of {sorted(w02.JAVA_REGION_ORIGIN_MANUAL_CLASSES)}, "
+            f"got {origin_class!r}"
+        )
+
+    line_range = raw.get("lineRange")
+    if isinstance(line_range, Mapping):
+        start_raw = line_range.get("startLine")
+        end_raw = line_range.get("endLine")
+    else:
+        start_raw = raw.get("startLine")
+        end_raw = raw.get("endLine")
+    start_line = _required_manual_overlay_line(
+        start_raw,
+        _manual_overlay_field(field_prefix, index, "lineRange.startLine"),
+    )
+    end_line = _required_manual_overlay_line(
+        end_raw,
+        _manual_overlay_field(field_prefix, index, "lineRange.endLine"),
+    )
+    if start_line < 1 or end_line < start_line:
+        raise OrchestratorError(
+            f"{field_prefix}[{index}] has invalid line range "
+            f"[{start_line}, {end_line}]"
+        )
+
+    region: JsonObject = {
+        "filePath": file_path,
+        "lineRange": {
+            "startLine": start_line,
+            "endLine": end_line,
+        },
+        "originClass": origin_class,
+        "generatorBaselineRunId": _required_manual_overlay_string(
+            raw.get("generatorBaselineRunId"),
+            _manual_overlay_field(field_prefix, index, "generatorBaselineRunId"),
+        ),
+        "lastModifiedAt": _required_manual_overlay_timestamp(
+            raw.get("lastModifiedAt"),
+            _manual_overlay_field(field_prefix, index, "lastModifiedAt"),
+        ),
+        "lastModifiedBy": _required_manual_overlay_author(
+            raw.get("lastModifiedBy"),
+            _manual_overlay_field(field_prefix, index, "lastModifiedBy"),
+        ),
+        "manualEditCount": _required_manual_overlay_count(
+            raw.get("manualEditCount"),
+            _manual_overlay_field(field_prefix, index, "manualEditCount"),
+        ),
+    }
+
+    if origin_class == w02.JAVA_REGION_ORIGIN_MANUAL_MODIFIED:
+        region["generatorBaselineRegionHash"] = _required_manual_overlay_hash(
+            raw.get("generatorBaselineRegionHash"),
+            _manual_overlay_field(
+                field_prefix, index, "generatorBaselineRegionHash"
+            ),
+        )
+    elif raw.get("generatorBaselineRegionHash") not in (None, ""):
+        raise OrchestratorError(
+            f"{_manual_overlay_field(field_prefix, index, 'generatorBaselineRegionHash')} "
+            "must be omitted for manual_edit regions"
+        )
+    return region
+
+
 class CapabilityMissingError(OrchestratorError):
     """Raised when a required capability is unavailable."""
 
@@ -225,10 +379,11 @@ class W0RunContext:
     # ADR 0007 §5 / Issue #280: per-region manual-edit overlay submitted
     # with the run. Each entry is a region record with ``filePath``,
     # ``originClass`` (``manual_modified`` or ``manual_edit``),
-    # ``startLine``, and ``endLine``. The orchestrator forwards these to
-    # every Verification/Repair Agent iteration; combined with the run's
-    # ``assistDecision.reasonCode``, they gate whether the agent can
-    # propose changes to a manual region (caller opt-in required per the
+    # ``startLine``/``endLine`` (or ``lineRange``), and the required ADR
+    # 0007 provenance metadata. The orchestrator forwards these to every
+    # Verification/Repair Agent iteration; combined with the run's
+    # ``assistDecision.reasonCode``, they gate whether the agent can propose
+    # changes to a manual region (caller opt-in required per the
     # assist-interaction rule). The default empty tuple matches runs that
     # carry no manual-edit overlay (the common case for greenfield runs).
     manual_overlay_regions: tuple[Mapping[str, JsonValue], ...] = ()
@@ -1337,43 +1492,14 @@ class W0WorkflowRunner:
     @staticmethod
     def _manual_overlay_regions(context: W0RunContext) -> list[JsonObject]:
         regions: list[JsonObject] = []
-        for raw in context.manual_overlay_regions:
-            file_path = str(raw.get("filePath") or "").strip()
-            origin_class = str(raw.get("originClass") or "").strip()
-            try:
-                start_line = int(raw.get("startLine") or 0)
-                end_line = int(raw.get("endLine") or 0)
-            except (TypeError, ValueError):
-                continue
-            if (
-                not file_path
-                or origin_class not in w02.JAVA_REGION_ORIGIN_MANUAL_CLASSES
-                or start_line < 1
-                or end_line < start_line
-            ):
-                continue
-            region: JsonObject = {
-                "filePath": file_path,
-                "lineRange": {
-                    "startLine": start_line,
-                    "endLine": end_line,
-                },
-                "originClass": origin_class,
-            }
-            for optional_key in (
-                "generatorBaselineRunId",
-                "generatorBaselineRegionHash",
-                "lastModifiedAt",
-                "lastModifiedBy",
-                "manualEditCount",
-            ):
-                value = raw.get(optional_key)
-                if isinstance(value, (str, int, float, bool)) or value is None:
-                    if value is not None:
-                        region[optional_key] = value
-                elif isinstance(value, Mapping):
-                    region[optional_key] = dict(value)
-            regions.append(region)
+        for index, raw in enumerate(context.manual_overlay_regions):
+            if not isinstance(raw, Mapping):
+                raise OrchestratorError(
+                    f"manualOverlay.regions[{index}] must be an object"
+                )
+            regions.append(
+                normalise_manual_edit_overlay_region(raw, index=index)
+            )
         return regions
 
     def _manual_overlay_by_file(

@@ -10,7 +10,6 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import PurePosixPath
 from typing import Any
-from .run_contract import JAVA_REGION_ORIGIN_MANUAL_CLASSES
 from .artifacts import (
     KIND_BUILD_TEST_RESULT,
     KIND_EVIDENCE_PACK_MANIFEST,
@@ -27,7 +26,12 @@ from .client import HttpClientError
 from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import HarnessFailure, HarnessGateway
 from . import region_classification
-from .workflow import W0RunContext, W0WorkflowRunner
+from .workflow import (
+    OrchestratorError,
+    W0RunContext,
+    W0WorkflowRunner,
+    normalise_manual_edit_overlay_region,
+)
 
 
 class UpstreamServiceError(Exception):
@@ -43,10 +47,10 @@ def _extract_manual_overlay_regions(
     overlay as either an envelope ``{"schemaVersion": "v0", "regions": [...]}``
     or a bare ``regions`` array. ``None`` and empty payloads return an
     empty tuple — the default for greenfield runs. Each region MUST
-    carry ``filePath``, ``originClass`` (one of the closed manual
-    classes), ``startLine``, and ``endLine``; anything else raises
+    carry the full ADR 0007 provenance metadata required by the
+    ``manual-edit-overlay.json`` artifact; anything else raises
     ``ValueError`` so the orchestrator never commits to a run with a
-    malformed overlay.
+    malformed or audit-incomplete overlay.
     """
     if raw is None:
         return ()
@@ -69,53 +73,30 @@ def _extract_manual_overlay_regions(
             raise ValueError(
                 f"manualOverlay.regions[{index}] must be an object"
             )
-        file_path = region.get("filePath") or default_file_path
-        origin_class = region.get("originClass")
-        if not isinstance(file_path, str) or not file_path:
-            raise ValueError(
-                f"manualOverlay.regions[{index}].filePath is required"
-            )
-        if origin_class not in JAVA_REGION_ORIGIN_MANUAL_CLASSES:
-            raise ValueError(
-                f"manualOverlay.regions[{index}].originClass must be one of "
-                f"{sorted(JAVA_REGION_ORIGIN_MANUAL_CLASSES)}, got "
-                f"{origin_class!r}"
-            )
-        line_range = region.get("lineRange")
-        if isinstance(line_range, dict):
-            start_raw = line_range.get("startLine")
-            end_raw = line_range.get("endLine")
-        else:
-            start_raw = region.get("startLine")
-            end_raw = region.get("endLine")
         try:
-            start_line = int(start_raw)
-            end_line = int(end_raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"manualOverlay.regions[{index}] requires integer "
-                "startLine and endLine"
-            ) from exc
-        if start_line < 1 or end_line < start_line:
-            raise ValueError(
-                f"manualOverlay.regions[{index}] has invalid line range "
-                f"[{start_line}, {end_line}]"
+            body_region = normalise_manual_edit_overlay_region(
+                region,
+                index=index,
+                default_file_path=default_file_path,
             )
+        except OrchestratorError as exc:
+            raise ValueError(str(exc)) from exc
+        line_range = body_region["lineRange"]
+        assert isinstance(line_range, dict)
         entry: dict[str, Any] = {
-            "filePath": file_path,
-            "originClass": origin_class,
-            "startLine": start_line,
-            "endLine": end_line,
+            "filePath": body_region["filePath"],
+            "originClass": body_region["originClass"],
+            "startLine": line_range["startLine"],
+            "endLine": line_range["endLine"],
+            "generatorBaselineRunId": body_region["generatorBaselineRunId"],
+            "lastModifiedAt": body_region["lastModifiedAt"],
+            "lastModifiedBy": body_region["lastModifiedBy"],
+            "manualEditCount": body_region["manualEditCount"],
         }
-        for optional_key in (
-            "generatorBaselineRunId",
-            "generatorBaselineRegionHash",
-            "lastModifiedAt",
-            "lastModifiedBy",
-            "manualEditCount",
-        ):
-            if optional_key in region:
-                entry[optional_key] = region[optional_key]
+        if "generatorBaselineRegionHash" in body_region:
+            entry["generatorBaselineRegionHash"] = body_region[
+                "generatorBaselineRegionHash"
+            ]
         normalised.append(entry)
     return tuple(normalised)
 

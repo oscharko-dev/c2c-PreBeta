@@ -950,6 +950,21 @@ class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
     """ADR 0007 (#257): the orchestrator emits manual-edit provenance as
     a consistent run-summary + overlay-artifact pair."""
 
+    def _manual_region(self, **overrides):
+        region = {
+            "filePath": "src/main/java/HELLO.java",
+            "originClass": "manual_modified",
+            "startLine": 3,
+            "endLine": 4,
+            "generatorBaselineRunId": "run-baseline",
+            "generatorBaselineRegionHash": "b" * 64,
+            "lastModifiedAt": "2026-05-18T09:14:33Z",
+            "lastModifiedBy": {"userId": "user-1", "tenantId": "tenant-A"},
+            "manualEditCount": 1,
+        }
+        region.update(overrides)
+        return region
+
     def _w02_contract(self):
         return new_run_contract(
             run_id="run-evidence",
@@ -1025,18 +1040,14 @@ class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
         payload = self._build_payload(
             contract,
             manual_overlay_regions=(
-                {
-                    "filePath": "src/main/java/HELLO.java",
-                    "originClass": "manual_modified",
-                    "startLine": 3,
-                    "endLine": 4,
-                },
-                {
-                    "filePath": "src/main/java/HELLO.java",
-                    "originClass": "manual_edit",
-                    "startLine": 8,
-                    "endLine": 8,
-                },
+                self._manual_region(),
+                self._manual_region(
+                    originClass="manual_edit",
+                    startLine=8,
+                    endLine=8,
+                    generatorBaselineRegionHash=None,
+                    manualEditCount=2,
+                ),
             ),
         )
 
@@ -1051,6 +1062,12 @@ class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
         )
         self.assertIsNotNone(stored)
         self.assertEqual(len(stored["regions"]), 2)
+        self.assertEqual(
+            stored["regions"][0]["generatorBaselineRunId"], "run-baseline"
+        )
+        self.assertEqual(stored["regions"][0]["lastModifiedBy"]["userId"], "user-1")
+        self.assertEqual(stored["regions"][0]["manualEditCount"], 1)
+        self.assertNotIn("generatorBaselineRegionHash", stored["regions"][1])
 
     def test_rejects_manual_summary_without_overlay_reference(self) -> None:
         contract = self._w02_contract()
@@ -1059,6 +1076,21 @@ class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
             Exception, "manual edit provenance requires"
         ):
             self._build_payload(contract)
+
+    def test_rejects_incomplete_manual_overlay_metadata(self) -> None:
+        contract = self._w02_contract()
+        with self.assertRaisesRegex(Exception, "generatorBaselineRunId"):
+            self._build_payload(
+                contract,
+                manual_overlay_regions=(
+                    {
+                        "filePath": "src/main/java/HELLO.java",
+                        "originClass": "manual_modified",
+                        "startLine": 3,
+                        "endLine": 4,
+                    },
+                ),
+            )
 
 
 if __name__ == "__main__":
