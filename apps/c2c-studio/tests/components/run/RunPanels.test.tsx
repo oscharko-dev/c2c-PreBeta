@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BuildTestPanel } from '../../../src/components/run/BuildTestPanel';
 import { EvidencePackPanel } from '../../../src/components/run/EvidencePackPanel';
@@ -27,8 +27,16 @@ const mockState = {
   workflow: null,
 };
 
+const navigateToDiagnosticMock = vi.hoisted(() => vi.fn());
+
 vi.mock('../../../src/stores/transformationRun', () => ({
   useTransformationRun: vi.fn(() => ({ state: mockState })),
+}));
+
+vi.mock('@/lib/editor/markerNavigation', () => ({
+  useMarkerNavigation: () => ({
+    navigateToDiagnostic: navigateToDiagnosticMock,
+  }),
 }));
 
 describe('Run Panels', () => {
@@ -438,6 +446,59 @@ describe('Run Panels', () => {
       expect(screen.getByText('The evidence pack is missing required artifacts')).toBeDefined();
       expect(screen.getByText('artifact endpoint failed')).toBeDefined();
       expect(screen.getByText('Generated Java, build/test, and evidence do not reference the same artifact hash')).toBeDefined();
+    });
+
+    it('navigates only diagnostics with a concrete editor target', () => {
+      const jumpableDiagnostic = {
+        severity: 'error',
+        code: 'JUMP',
+        message: 'jumpable diagnostic',
+        line: 9,
+        column: 3,
+        filePath: 'src/main/java/App.java',
+        sourceKind: 'generated_java',
+      };
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          generated: {
+            status: 'generated',
+            diagnostics: [
+              jumpableDiagnostic,
+              {
+                severity: 'warning',
+                code: 'RUN',
+                message: 'run-level diagnostic',
+                line: 3,
+                sourceKind: 'build',
+              },
+            ],
+          },
+          buildTest: null,
+        },
+      });
+
+      render(<ProblemsPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      const jumpableRow = screen.getByLabelText(
+        'error JUMP at src/main/java/App.java:9',
+      );
+      const runLevelRow = screen.getByLabelText('warning RUN at —:3');
+
+      expect(jumpableRow).toHaveAttribute('tabindex', '0');
+      expect(runLevelRow).toHaveAttribute('tabindex', '-1');
+
+      fireEvent.click(jumpableRow);
+      fireEvent.keyDown(jumpableRow, { key: 'Enter' });
+      fireEvent.keyDown(jumpableRow, { key: ' ' });
+      expect(navigateToDiagnosticMock).toHaveBeenCalledTimes(3);
+      expect(navigateToDiagnosticMock).toHaveBeenCalledWith(jumpableDiagnostic);
+
+      fireEvent.click(runLevelRow);
+      fireEvent.keyDown(runLevelRow, { key: 'Enter' });
+      fireEvent.keyDown(runLevelRow, { key: ' ' });
+      expect(navigateToDiagnosticMock).toHaveBeenCalledTimes(3);
     });
   });
 

@@ -10,6 +10,8 @@
 // `schemaVersion` field is always emitted as "v0" until a breaking
 // change is required, per ADR 0006 Decision 1.
 
+import { sanitizeUpstreamMessage } from "./error-codes";
+
 export const DIAGNOSTIC_SCHEMA_VERSION = "v0" as const;
 
 // Studio-IDE-5 (#244 review): javac emits absolute filenames via
@@ -19,20 +21,46 @@ export const DIAGNOSTIC_SCHEMA_VERSION = "v0" as const;
 // so its file-segment matching does not pick the wrong file and the
 // content endpoint can resolve. We strip everything before the
 // canonical `src/main/java` (or `src/main/resources`) segment when
-// the input is absolute.
-function normalizeFilePath(raw: string): string {
-  if (raw.length === 0) return raw;
+// the input is absolute. If no project-relative anchor can be recovered from
+// an absolute path or URL, omit filePath rather than collapsing to a basename:
+// duplicate generated class names would make basename-only navigation
+// ambiguous.
+function anchoredProjectPath(forward: string): string | undefined {
+  const match = forward.match(
+    /(?:^|\/)(src\/(?:main|test)\/(?:java|resources)\/.*)$/,
+  );
+  return match?.[1];
+}
+
+function isSafeRelativePath(forward: string): boolean {
+  if (forward.length === 0 || forward.includes("\0")) return false;
+  if (forward.startsWith("/") || /^[A-Za-z]:\//.test(forward)) return false;
+  for (const segment of forward.split("/")) {
+    if (segment === "" || segment === "." || segment === "..") return false;
+  }
+  return true;
+}
+
+function normalizeFilePath(raw: string): string | undefined {
+  const trimmed = raw.trim().split(/[?#]/, 1)[0] ?? "";
+  if (trimmed.length === 0) return undefined;
+  const forward = trimmed.replace(/\\/g, "/");
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(forward)) {
+    try {
+      const parsed = new URL(forward);
+      return anchoredProjectPath(parsed.pathname);
+    } catch {
+      return undefined;
+    }
+  }
   // Only re-anchor when the path looks absolute (POSIX or Windows).
-  const isAbsolute = raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw);
-  if (!isAbsolute) return raw;
-  // Normalize backslashes to forward slashes for the lookup; keep
-  // the original separator style otherwise.
-  const forward = raw.replace(/\\/g, "/");
+  const isAbsolute = forward.startsWith("/") || /^[A-Za-z]:\//.test(forward);
+  if (!isAbsolute) {
+    return isSafeRelativePath(forward) ? forward : undefined;
+  }
   // Anchor at the first `src/main/<x>` segment if present; this
   // covers the standard Maven/Gradle layout the generator emits.
-  const match = forward.match(/(src\/main\/(?:java|resources)\/.*)$/);
-  if (match) return match[1] ?? raw;
-  return raw;
+  return anchoredProjectPath(forward);
 }
 
 
@@ -222,6 +250,10 @@ function normalizeOne(raw: unknown): Diagnostic | undefined {
   // Without a message the entry conveys nothing the Studio can render,
   // so drop it rather than emit a "" marker.
   if (message.length === 0) return undefined;
+  const safeMessage = sanitizeUpstreamMessage(
+    message,
+    "Diagnostic unavailable",
+  );
 
   // Upstream services historically use either `severity` or `level`.
   const severityRaw =
@@ -232,7 +264,7 @@ function normalizeOne(raw: unknown): Diagnostic | undefined {
     schemaVersion: DIAGNOSTIC_SCHEMA_VERSION,
     severity,
     code: asString(record.code),
-    message,
+    message: safeMessage,
   };
 
   for (const key of ["line", "column", "endLine", "endColumn"] as const) {
@@ -245,7 +277,10 @@ function normalizeOne(raw: unknown): Diagnostic | undefined {
     asString(record.filePath).length > 0
       ? asString(record.filePath)
       : asString(record.source);
-  if (rawFilePath.length > 0) diagnostic.filePath = normalizeFilePath(rawFilePath);
+  if (rawFilePath.length > 0) {
+    const normalizedPath = normalizeFilePath(rawFilePath);
+    if (normalizedPath !== undefined) diagnostic.filePath = normalizedPath;
+  }
 
   const sourceKind = normalizeSourceKind(record.sourceKind);
   if (sourceKind !== undefined) diagnostic.sourceKind = sourceKind;

@@ -10,6 +10,7 @@
 
 import type { Diagnostic } from "@/types/api";
 import type { TransformationRunState } from "@/types/run";
+import { DEFAULT_MARKER_LIMIT, sourceKindToOwner } from "@/lib/editor/diagnosticMarkers";
 
 // "scope" describes the upstream step the diagnostic flowed from, used
 // for the panel's secondary chip and for grouping when sorted by source.
@@ -162,4 +163,87 @@ export function summarize(entries: DiagnosticEntry[]): AggregateSummary {
     }
   }
   return summary;
+}
+
+type MarkerSurface = "cobol" | "generated-java";
+
+function markerSurfaceFor(diagnostic: Diagnostic): MarkerSurface | null {
+  switch (sourceKindToOwner(diagnostic.sourceKind)) {
+    case "c2c-cobol":
+    case "c2c-ir":
+      return "cobol";
+    case "c2c-generated-java":
+    case "c2c-build":
+    case "c2c-test":
+      return "generated-java";
+    default:
+      return null;
+  }
+}
+
+function normalizedFilePath(filePath: string): string {
+  return filePath.replace(/\\/g, "/").replace(/\/+/g, "/").trim();
+}
+
+function pathSegments(filePath: string): string[] {
+  return normalizedFilePath(filePath).split("/").filter(Boolean);
+}
+
+function pathSegmentsMatch(left: string[], right: string[]): boolean {
+  if (left.length === 0 || right.length === 0) return false;
+  const short = left.length < right.length ? left : right;
+  const long = left.length < right.length ? right : left;
+  for (let i = 0; i < short.length; i += 1) {
+    if (short[short.length - 1 - i] !== long[long.length - 1 - i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+interface MarkerOverflowBucket {
+  surface: MarkerSurface;
+  filePathParts: string[];
+  count: number;
+}
+
+// Count diagnostics that will be dropped from editor marker surfaces while
+// still appearing in the Problems panel. The cap is shared by all marker
+// owners attached to the same editor surface and file, matching the COBOL
+// and generated-Java pane marker application order.
+export function countEditorMarkerOverflow(
+  entries: DiagnosticEntry[],
+  limit = DEFAULT_MARKER_LIMIT,
+): number {
+  const buckets: MarkerOverflowBucket[] = [];
+
+  for (const { diagnostic } of entries) {
+    if (diagnostic.line === undefined || diagnostic.filePath === undefined) {
+      continue;
+    }
+    const surface = markerSurfaceFor(diagnostic);
+    if (surface === null) {
+      continue;
+    }
+    const filePathParts = pathSegments(diagnostic.filePath);
+    if (filePathParts.length === 0) {
+      continue;
+    }
+    const bucket = buckets.find(
+      (candidate) =>
+        candidate.surface === surface &&
+        pathSegmentsMatch(candidate.filePathParts, filePathParts),
+    );
+    if (bucket) {
+      bucket.count += 1;
+    } else {
+      buckets.push({ surface, filePathParts, count: 1 });
+    }
+  }
+
+  let overflow = 0;
+  for (const bucket of buckets) {
+    overflow += Math.max(0, bucket.count - limit);
+  }
+  return overflow;
 }

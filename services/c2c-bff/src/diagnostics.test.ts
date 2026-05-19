@@ -434,3 +434,30 @@ test("normalizeDiagnostics rewrites absolute javac source paths to relative ones
   assert.equal(result[1]?.filePath, "src/main/java/c2c/Bar.java");
   assert.equal(result[2]?.filePath, undefined);
 });
+
+test("normalizeDiagnostics redacts upstream diagnostic messages and omits ambiguous absolute file paths", () => {
+  const result = normalizeDiagnostics([
+    {
+      severity: "error",
+      code: "SECRET",
+      message:
+        "Bearer eyJabc.def.ghi failed at https://internal.example/build /home/buildsvc/private/Foo.java sk-test12345678901234567890",
+      line: 1,
+      filePath: "/home/buildsvc/private/Foo.java",
+    },
+    {
+      severity: "warning",
+      code: "URLPATH",
+      message: "compiler warning",
+      line: 2,
+      filePath: "https://internal.example/generated/Bar.java?token=secret",
+    },
+  ]);
+
+  assert.equal(result[0]?.message.includes("Bearer"), false);
+  assert.equal(result[0]?.message.includes("https://internal.example"), false);
+  assert.equal(result[0]?.message.includes("/home/buildsvc"), false);
+  assert.equal(result[0]?.message.includes("sk-test"), false);
+  assert.equal(result[0]?.filePath, undefined);
+  assert.equal(result[1]?.filePath, undefined);
+});

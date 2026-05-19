@@ -4,8 +4,13 @@ import React from "react";
 
 import { CobolEditorPane } from "@/components/source/CobolEditorPane";
 import { SourceWorkspaceProvider } from "@/stores/sourceWorkspace";
-import { TransformationRunProvider } from "@/stores/transformationRun";
+import {
+  TransformationRunProvider,
+  useTransformationRun,
+} from "@/stores/transformationRun";
 import { WorkbenchProvider } from "@/stores/workbench";
+import type { Diagnostic } from "@/types/api";
+import type { EditorMarkerGroup } from "@/components/editor/codeEditorTypes";
 
 // Capture mount/options calls so the tests can assert that CobolEditorPane
 // drives Monaco through the documented CodeEditor surface (language id,
@@ -22,6 +27,7 @@ type EditorMockProps = {
   beforeMount?: (args: { monaco: unknown }) => void;
   onMount?: (args: {
     editor: {
+      getModel: () => null;
       updateOptions: (options: unknown) => void;
       addCommand: (
         keybinding: number,
@@ -34,6 +40,7 @@ type EditorMockProps = {
     };
     monaco: unknown;
   }) => void;
+  markerGroups?: EditorMarkerGroup[];
   className?: string;
 };
 
@@ -49,10 +56,18 @@ const actionRegistrations: Array<{
   id?: string;
   keybindings?: number[];
 }> = [];
+let latestMarkerGroups: EditorMarkerGroup[] | undefined;
+
+const fakeMonaco = {
+  KeyMod: { CtrlCmd: 1 << 11, Alt: 1 << 9, Shift: 1 << 10 },
+  KeyCode: { KeyS: 49, KeyC: 33, KeyE: 35 },
+  MarkerSeverity: { Error: 8, Warning: 4, Info: 2, Hint: 1 },
+};
 
 vi.mock("@/components/editor/CodeEditor", async () => {
   const reactNs = await import("react");
   const CodeEditor = (props: EditorMockProps) => {
+    latestMarkerGroups = props.markerGroups;
     reactNs.useEffect(() => {
       mountCalls.push({
         language: props.language,
@@ -60,13 +75,10 @@ vi.mock("@/components/editor/CodeEditor", async () => {
         modelUri: props.modelUri,
         ariaLabel: props.ariaLabel,
       });
-      const monaco = {
-        KeyMod: { CtrlCmd: 1 << 11, Alt: 1 << 9, Shift: 1 << 10 },
-        KeyCode: { KeyS: 49, KeyC: 33, KeyE: 35 },
-      };
-      props.beforeMount?.({ monaco });
+      props.beforeMount?.({ monaco: fakeMonaco });
       props.onMount?.({
         editor: {
+          getModel: () => null,
           updateOptions: (options) => {
             updateOptionsCalls.push(options as Record<string, unknown>);
           },
@@ -87,7 +99,7 @@ vi.mock("@/components/editor/CodeEditor", async () => {
             return { dispose: () => undefined };
           },
         },
-        monaco,
+        monaco: fakeMonaco,
       });
       // Effect intentionally runs only on mount — matching Monaco's real
       // onMount lifecycle. Including `props` in deps would re-fire on every
@@ -127,7 +139,7 @@ vi.mock("@/lib/editor/cobolMonarch", async () => {
 vi.mock("@/lib/editor/lazyMonaco", () => ({
   getMonaco: () => Promise.resolve({ languages: { getLanguages: () => [] } }),
   getMonacoSync: () => null,
-  useMonacoReady: () => null,
+  useMonacoReady: () => fakeMonaco,
   __resetMonacoForTests: () => undefined,
 }));
 
@@ -182,6 +194,41 @@ function renderPane() {
   );
 }
 
+function SeedRunState({ diagnostics }: { diagnostics: Diagnostic[] }) {
+  const { setState } = useTransformationRun();
+  React.useEffect(() => {
+    setState((current) => ({
+      ...current,
+      phase: "completed",
+      runId: "run-244",
+      generated: {
+        runId: "run-244",
+        programId: "ISSUE244",
+        mode: "live",
+        productMode: "live",
+        status: "generated",
+        artifactRef: null,
+        diagnostics,
+      },
+      buildTest: null,
+    }));
+  }, [diagnostics, setState]);
+  return null;
+}
+
+function renderPaneWithDiagnostics(diagnostics: Diagnostic[]) {
+  return render(
+    <WorkbenchProvider>
+      <TransformationRunProvider>
+        <SourceWorkspaceProvider>
+          <SeedRunState diagnostics={diagnostics} />
+          <CobolEditorPane />
+        </SourceWorkspaceProvider>
+      </TransformationRunProvider>
+    </WorkbenchProvider>,
+  );
+}
+
 describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
   beforeEach(() => {
     mountCalls.length = 0;
@@ -190,6 +237,7 @@ describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
     actionRegistrations.length = 0;
     registerCalls.length = 0;
     hoverRegistrationCalls.length = 0;
+    latestMarkerGroups = undefined;
   });
 
   it("renders the empty state until the user starts typing", () => {
@@ -315,6 +363,43 @@ describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
       rulers: number[];
     };
     expect(lastCall.rulers).toEqual([]);
+  });
+
+  it("shares the 2000-marker editor budget across COBOL and IR owners", async () => {
+    const diagnostics: Diagnostic[] = [
+      ...Array.from({ length: 1500 }, (_, index) => ({
+        schemaVersion: "v0" as const,
+        severity: "error" as const,
+        code: "COBOL",
+        message: `cobol-${index}`,
+        line: 1,
+        filePath: "pasted-source.cbl",
+        sourceKind: "cobol" as const,
+      })),
+      ...Array.from({ length: 1500 }, (_, index) => ({
+        schemaVersion: "v0" as const,
+        severity: "warning" as const,
+        code: "IR",
+        message: `ir-${index}`,
+        line: 1,
+        filePath: "pasted-source.cbl",
+        sourceKind: "ir" as const,
+      })),
+    ];
+
+    renderPaneWithDiagnostics(diagnostics);
+    fireEvent.click(screen.getByText("Start Typing"));
+
+    await vi.waitFor(() => {
+      const cobolGroup = latestMarkerGroups?.find(
+        (group) => group.owner === "c2c-cobol",
+      );
+      const irGroup = latestMarkerGroups?.find(
+        (group) => group.owner === "c2c-ir",
+      );
+      expect(cobolGroup?.markers).toHaveLength(1500);
+      expect(irGroup?.markers).toHaveLength(500);
+    });
   });
 
   // The full submit-path contract (verb body forwarding, AI-assist gating,

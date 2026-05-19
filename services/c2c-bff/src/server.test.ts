@@ -6188,6 +6188,67 @@ test("POST /api/v0/compile-check returns 400 when javaFiles entry has no path", 
   }
 });
 
+test("POST /api/v0/compile-check rejects unsafe javaFiles paths before upstream work", async () => {
+  const auth = createRouteAuth();
+  let upstreamCalls = 0;
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: {
+      enabled: true,
+      async formatJava() {
+        return undefined;
+      },
+      async runVerification() {
+        upstreamCalls += 1;
+        return { status: 200, body: { status: "success", diagnostics: [] } };
+      },
+    },
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    for (const path of [
+      "../Pwn.java",
+      "/tmp/Pwn.java",
+      String.raw`\tmp\Pwn.java`,
+      "C:\\tmp\\Pwn.java",
+      String.raw`\\server\share\Foo.java`,
+      String.raw`\\?\C:\tmp\Foo.java`,
+      "file:/tmp/Pwn.java",
+      "https://internal.example/Pwn.java",
+    ]) {
+      const response = await fetchJson(
+        `${server.baseUrl}/api/v0/compile-check`,
+        auth.post({ javaFiles: [{ path, content: "class Pwn {}" }] }),
+      );
+      assert.equal(response.status, 400);
+      assert.ok(
+        (response.body as { error: string }).error.includes("safe relative"),
+      );
+    }
+    for (const entryFilePath of ["../Pwn.java", "Missing.java"]) {
+      const response = await fetchJson(
+        `${server.baseUrl}/api/v0/compile-check`,
+        auth.post({
+          javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+          entryFilePath,
+        }),
+      );
+      assert.equal(response.status, 400);
+      assert.ok(
+        (response.body as { error: string }).error.includes("entryFilePath"),
+      );
+    }
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/v0/compile-check returns 413 when total content exceeds cap", async () => {
   const auth = createRouteAuth();
   const handler = createApp({
@@ -6376,6 +6437,79 @@ test("POST /api/v0/verify returns 400 when javaFiles is missing", async () => {
     );
     assert.equal(response.status, 400);
     assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify rejects unsafe javaFiles paths before upstream work", async () => {
+  const auth = createRouteAuth();
+  let upstreamCalls = 0;
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: {
+      enabled: true,
+      async formatJava() {
+        return undefined;
+      },
+      async runVerification() {
+        upstreamCalls += 1;
+        return { status: 200, body: { status: "success", diagnostics: [] } };
+      },
+    },
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    for (const body of [
+      {
+        runId: "run-1",
+        javaFiles: [{ path: "../../Pwn.java", content: "class Pwn {}" }],
+        expectedError: "safe relative",
+      },
+      {
+        runId: "run-1",
+        javaFiles: [
+          {
+            path: String.raw`\\server\share\Foo.java`,
+            content: "class Foo {}",
+          },
+        ],
+        expectedError: "safe relative",
+      },
+      {
+        runId: "run-1",
+        javaFiles: [{ path: "file:/tmp/Pwn.java", content: "class Pwn {}" }],
+        expectedError: "safe relative",
+      },
+      {
+        runId: "run-1",
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+        entryFilePath: "/tmp/Foo.java",
+        expectedError: "entryFilePath",
+      },
+      {
+        runId: "run-1",
+        javaFiles: [{ path: "Foo.java", content: "class Foo {}" }],
+        entryFilePath: "Missing.java",
+        expectedError: "entryFilePath",
+      },
+    ]) {
+      const { expectedError, ...requestBody } = body;
+      const response = await fetchJson(
+        `${server.baseUrl}/api/v0/verify`,
+        auth.post(requestBody),
+      );
+      assert.equal(response.status, 400);
+      assert.ok(
+        (response.body as { error: string }).error.includes(expectedError),
+      );
+    }
+    assert.equal(upstreamCalls, 0);
   } finally {
     await server.close();
   }

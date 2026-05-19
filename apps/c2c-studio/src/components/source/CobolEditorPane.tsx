@@ -194,20 +194,20 @@ export function CobolEditorPane() {
     };
     const cobolGroup = buckets["c2c-cobol"].filter(filterForCurrentFile);
     const irGroup = buckets["c2c-ir"].filter(filterForCurrentFile);
-    // We do not have a stable handle to the live Monaco model here so
-    // the marker mapper receives null; that degrades the whole-line
-    // fallback to a single-character marker which the editor renders
-    // safely. The CodeEditor re-applies markers after each model swap
-    // so the next render with a model attached refines the geometry.
+    // Share the editor-surface cap across COBOL and IR owners. Monaco still
+    // receives isolated owner namespaces, but the total marker count for the
+    // open COBOL model stays inside the documented 2000-marker budget.
+    let remaining = DEFAULT_MARKER_LIMIT;
     const cobolMarkers = diagnosticsToMarkers(cobolGroup, {
       monaco,
       model: editorRef.current?.getModel() ?? null,
-      limit: DEFAULT_MARKER_LIMIT,
+      limit: remaining,
     });
+    remaining = Math.max(0, remaining - cobolMarkers.markers.length);
     const irMarkers = diagnosticsToMarkers(irGroup, {
       monaco,
       model: editorRef.current?.getModel() ?? null,
-      limit: DEFAULT_MARKER_LIMIT,
+      limit: remaining,
     });
     return [
       { owner: "c2c-cobol", markers: cobolMarkers.markers },

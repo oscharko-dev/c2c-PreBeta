@@ -510,7 +510,10 @@ export function GeneratedJavaEditorPane() {
   // focus jump AFTER the file becomes selected (the editor model has
   // to be attached to the new file before revealLineInCenter is
   // useful).
-  const pendingTokenRef = useRef<number | null>(null);
+  const pendingNavigationRef = useRef<{
+    token: number;
+    resolvedFilePath: string;
+  } | null>(null);
   useEffect(() => {
     if (!navigationTarget) return;
     const targetPath = navigationTarget.filePath;
@@ -539,7 +542,10 @@ export function GeneratedJavaEditorPane() {
       return true;
     });
     if (!matched) return;
-    pendingTokenRef.current = navigationTarget.token;
+    pendingNavigationRef.current = {
+      token: navigationTarget.token,
+      resolvedFilePath: matched.path,
+    };
     selectFile(matched.path);
   }, [
     navigationTarget,
@@ -554,8 +560,9 @@ export function GeneratedJavaEditorPane() {
   // current selection.
   useEffect(() => {
     if (!navigationTarget) return;
-    if (pendingTokenRef.current !== navigationTarget.token) return;
-    if (navigationTarget.filePath !== selectedFilePath) return;
+    const pending = pendingNavigationRef.current;
+    if (!pending || pending.token !== navigationTarget.token) return;
+    if (pending.resolvedFilePath !== selectedFilePath) return;
     if (!editorInstanceRef.current) return;
     const targetLine = Math.max(1, navigationTarget.line);
     const targetColumn = Math.max(1, navigationTarget.column ?? 1);
@@ -565,7 +572,7 @@ export function GeneratedJavaEditorPane() {
       column: targetColumn,
     });
     editorInstanceRef.current.focus();
-    pendingTokenRef.current = null;
+    pendingNavigationRef.current = null;
   }, [navigationTarget, selectedFilePath, editorMountToken]);
 
   // Studio-IDE-8 (#253): listen for `c2c:reveal-java` events emitted

@@ -24,6 +24,7 @@ import { useMarkerNavigation } from "@/lib/editor/markerNavigation";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
   DEFAULT_SORT,
+  countEditorMarkerOverflow,
   type DiagnosticSortKey,
   type DiagnosticSortOrder,
   collectDiagnostics,
@@ -31,12 +32,16 @@ import {
   summarize,
 } from "@/lib/runDiagnostics";
 import { deriveRunProblems } from "@/components/run/runPanelUtils";
-import { DEFAULT_MARKER_LIMIT, partitionByOwner } from "@/lib/editor/diagnosticMarkers";
 import type { Diagnostic } from "@/types/api";
 
 interface SeverityBadgeProps {
   severity: Diagnostic["severity"];
 }
+
+const DIAGNOSTIC_VIRTUALIZATION_THRESHOLD = 500;
+const DIAGNOSTIC_ROW_HEIGHT_PX = 32;
+const DIAGNOSTIC_WINDOW_ROWS = 90;
+const DIAGNOSTIC_WINDOW_OVERSCAN = 12;
 
 function SeverityBadge({ severity }: SeverityBadgeProps) {
   const styles: Record<Diagnostic["severity"], string> = {
@@ -86,6 +91,7 @@ export function ProblemsPanel({
   const { state } = useTransformationRun();
   const { navigateToDiagnostic } = useMarkerNavigation();
   const [sortOrder, setSortOrder] = useState<DiagnosticSortOrder>(DEFAULT_SORT);
+  const [scrollTop, setScrollTop] = useState(0);
 
   const diagnostics = useMemo(() => collectDiagnostics(state), [state]);
   const sorted = useMemo(
@@ -93,31 +99,39 @@ export function ProblemsPanel({
     [diagnostics, sortOrder],
   );
   const summary = useMemo(() => summarize(diagnostics), [diagnostics]);
-  // Studio-IDE-5 (#244 review): the editor surface caps markers
-  // per-owner. A 1500-COBOL + 1500-build run does not trigger the cap
-  // on any single owner, so the aggregation chip must compute the
-  // truncation count per owner and sum those. We compute it via
-  // `partitionByOwner` to mirror what the editors will do.
-  const aggregatedOverflow = useMemo(() => {
-    const byOwner = partitionByOwner(
-      diagnostics.map((entry) => entry.diagnostic),
-    );
-    let overflow = 0;
-    for (const owner of Object.keys(byOwner) as Array<
-      keyof typeof byOwner
-    >) {
-      const renderableInEditor = byOwner[owner].filter(
-        (d) => d.line !== undefined && d.filePath !== undefined,
-      );
-      overflow += Math.max(
-        0,
-        renderableInEditor.length - DEFAULT_MARKER_LIMIT,
-      );
-    }
-    return overflow;
-  }, [diagnostics]);
+  const aggregatedOverflow = useMemo(
+    () => countEditorMarkerOverflow(diagnostics),
+    [diagnostics],
+  );
 
   const legacyProblems = useMemo(() => deriveRunProblems(state), [state]);
+  const virtualWindow = useMemo(() => {
+    if (sorted.length <= DIAGNOSTIC_VIRTUALIZATION_THRESHOLD) {
+      return {
+        enabled: false,
+        start: 0,
+        end: sorted.length,
+        topPadding: 0,
+        bottomPadding: 0,
+      };
+    }
+    const estimatedStart = Math.floor(scrollTop / DIAGNOSTIC_ROW_HEIGHT_PX);
+    const start = Math.max(0, estimatedStart - DIAGNOSTIC_WINDOW_OVERSCAN);
+    const end = Math.min(
+      sorted.length,
+      start + DIAGNOSTIC_WINDOW_ROWS + DIAGNOSTIC_WINDOW_OVERSCAN * 2,
+    );
+    return {
+      enabled: true,
+      start,
+      end,
+      topPadding: start * DIAGNOSTIC_ROW_HEIGHT_PX,
+      bottomPadding: (sorted.length - end) * DIAGNOSTIC_ROW_HEIGHT_PX,
+    };
+  }, [scrollTop, sorted.length]);
+  const visibleDiagnostics = virtualWindow.enabled
+    ? sorted.slice(virtualWindow.start, virtualWindow.end)
+    : sorted;
 
   if (state.phase === "idle") {
     return (
@@ -141,7 +155,14 @@ export function ProblemsPanel({
   };
 
   return (
-    <div className="p-4 h-full overflow-auto bg-bg-0 text-sm">
+    <div
+      className="p-4 h-full overflow-auto bg-bg-0 text-sm"
+      onScroll={(event) => {
+        if (sorted.length > DIAGNOSTIC_VIRTUALIZATION_THRESHOLD) {
+          setScrollTop(event.currentTarget.scrollTop);
+        }
+      }}
+    >
       <header className="mb-3 flex flex-wrap items-baseline gap-3">
         <h3 className="font-medium text-text">Diagnostics & Issues</h3>
         <ul
@@ -180,9 +201,17 @@ export function ProblemsPanel({
 
       {sorted.length > 0 ? (
         <table
-          className="w-full text-left"
+          className="w-full table-fixed text-left"
           data-testid="problems-diagnostic-table"
         >
+          <colgroup>
+            <col className="w-28" />
+            <col className="w-56" />
+            <col className="w-16" />
+            <col className="w-32" />
+            <col className="w-24" />
+            <col />
+          </colgroup>
           <thead>
             <tr className="border-b border-line-2 text-text-faint">
               <th className="py-1 pr-3" aria-sort={sortOrder.key === "severity" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
@@ -236,7 +265,17 @@ export function ProblemsPanel({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((entry, index) => {
+            {virtualWindow.topPadding > 0 ? (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={6}
+                  className="border-0 p-0"
+                  style={{ height: virtualWindow.topPadding }}
+                />
+              </tr>
+            ) : null}
+            {visibleDiagnostics.map((entry, visibleIndex) => {
+              const index = virtualWindow.start + visibleIndex;
               const { diagnostic, scope } = entry;
               const sourceLabel =
                 diagnostic.sourceKind ?? (scope === "build-test" ? "build" : "run");
@@ -254,6 +293,7 @@ export function ProblemsPanel({
                   key={`${scope}-${index}-${codeLabel}-${diagnostic.message}`}
                   className={`border-b border-line-2/50 ${hasJump ? "cursor-pointer hover:bg-bg-1" : ""}`}
                   data-testid={`problems-row-${diagnostic.severity}`}
+                  style={{ height: DIAGNOSTIC_ROW_HEIGHT_PX }}
                   onClick={() => {
                     if (hasJump) {
                       navigateToDiagnostic(diagnostic);
@@ -272,32 +312,54 @@ export function ProblemsPanel({
                   title={`${codeLabel} — ${diagnostic.message}`}
                   aria-label={`${diagnostic.severity} ${codeLabel} at ${fileLabel}${diagnostic.line ? `:${diagnostic.line}` : ""}`}
                 >
-                  <td className="py-1 pr-3 align-top">
+                  <td className="h-8 overflow-hidden py-0 pr-3 align-middle">
                     <SeverityBadge severity={diagnostic.severity} />
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-xs text-text-dim">
+                  <td
+                    className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-xs text-text-dim"
+                    title={fileLabel}
+                  >
                     {fileLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-xs text-text-dim">
+                  <td className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-xs text-text-dim">
                     {lineLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-xs text-text">
+                  <td
+                    className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-xs text-text"
+                    title={codeLabel}
+                  >
                     {codeLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-[10px] uppercase text-text-faint">
+                  <td
+                    className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-[10px] uppercase text-text-faint"
+                    title={sourceLabel}
+                  >
                     {sourceLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top text-text">
-                    {diagnostic.message}
-                    {diagnostic.originStep ? (
-                      <span className="ml-2 rounded bg-bg-2 px-1.5 py-0.5 text-[10px] text-text-faint">
-                        step {diagnostic.originStep}
+                  <td className="h-8 overflow-hidden py-0 pr-3 align-middle text-text">
+                    <div className="flex w-full min-w-0 items-center">
+                      <span className="min-w-0 truncate">
+                        {diagnostic.message}
                       </span>
-                    ) : null}
+                      {diagnostic.originStep ? (
+                        <span className="ml-2 shrink-0 rounded bg-bg-2 px-1.5 py-0.5 text-[10px] text-text-faint">
+                          step {diagnostic.originStep}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               );
             })}
+            {virtualWindow.bottomPadding > 0 ? (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={6}
+                  className="border-0 p-0"
+                  style={{ height: virtualWindow.bottomPadding }}
+                />
+              </tr>
+            ) : null}
           </tbody>
         </table>
       ) : null}
