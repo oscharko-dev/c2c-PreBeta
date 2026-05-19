@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:perf": "NEXT_PUBLIC_C2C_PERF_HARNESS=1 next build",
     "start": "next start",
+    "start:perf": "NEXT_PUBLIC_C2C_PERF_HARNESS=1 next start",
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -13,8 +15,8 @@
     "test:e2e:update-snapshots": "playwright test --grep @visual --update-snapshots",
     "test:e2e:a11y": "playwright test --grep @a11y",
     "test:e2e:a11y:ci": "playwright test --config=playwright.a11y.config.ts",
-    "test:e2e:perf": "playwright test --grep @perf",
-    "test:e2e:memory": "playwright test --grep @memory",
+    "test:e2e:perf": "npm run build:perf && playwright test --config=playwright.studio-only.config.ts --grep @perf",
+    "test:e2e:memory": "npm run build && playwright test --config=playwright.studio-only.config.ts --grep @memory",
     "test:e2e:csp": "playwright test --grep @csp",
     "test:e2e:csp:ci": "playwright test --config=playwright.csp.config.ts",
     "verify:monaco-lazy": "node scripts/verify-monaco-lazy.mjs"

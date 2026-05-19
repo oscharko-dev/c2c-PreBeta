@@ -3,14 +3,9 @@
 import type * as MonacoNs from "monaco-editor";
 
 import type { Monaco } from "./lazyMonaco";
+export { FIXED_FORMAT_RULER_COLUMNS } from "./cobolFixedFormat";
 
 export const COBOL_LANGUAGE_ID = "cobol";
-
-// Fixed-format column boundaries. Used by both the editor's vertical rulers
-// (Monaco's `rulers` option) and the legend in FixedFormatRuler.tsx.
-// 1-6 sequence number area, 7 indicator, 8-11 area A, 12-72 area B,
-// 73-80 identification area.
-export const FIXED_FORMAT_RULER_COLUMNS = [6, 7, 11, 72, 80] as const;
 
 // W0 subset reserved words. The grammar treats these as the primary keyword
 // vocabulary, but a broader set of common COBOL constructs is included so
@@ -322,14 +317,24 @@ export const COBOL_MONARCH_LANGUAGE: MonacoNs.languages.IMonarchLanguage = {
     // Picture clause body. The @picture state is entered after matching the
     // PIC or PICTURE keyword in @root. We skip the optional `IS` preposition,
     // emit picture-character runs as a single `type.picture` token, and pop
-    // back to @root on whitespace followed by a non-picture char, on the
-    // statement-terminating period, or on end-of-line so subsequent tokens
-    // (USAGE, VALUE, period) are tokenized by the normal rules.
+    // back to @root as soon as the body is consumed. That keeps same-line
+    // clauses like USAGE/VALUE and the next physical line tokenized normally
+    // even when the PIC clause omits a trailing period.
     picture: [
       // Optional IS preposition between PIC and the body.
       [/\s*\bIS\b/, "type"],
-      // Whitespace between PIC/IS and the picture body — keep in state.
-      [/\s+/, "white"],
+      // Whitespace between PIC/IS and the picture body — keep in state, but
+      // pop at end-of-line so a malformed/incomplete PIC clause cannot leak
+      // picture tokenization into the next physical line.
+      [
+        /\s+/,
+        {
+          cases: {
+            "@eos": { token: "white", next: "@pop" },
+            "@default": "white",
+          },
+        },
+      ],
       // Picture-character run. Includes the full 0-9 digit range so the
       // repetition count inside `9(03)` does not fragment the picture body.
       // Excludes `.` because a trailing `.` is the statement terminator and
@@ -338,7 +343,10 @@ export const COBOL_MONARCH_LANGUAGE: MonacoNs.languages.IMonarchLanguage = {
       // for implied decimal) fall back to number/delimiter tokenization
       // downstream — visually correct, not unified, but never breaks the
       // rest of the line.
-      [/[X9AVSPZBN0-9$+\-,/()*]+/, "type.picture"],
+      [
+        /[X9AVSPZBN0-9$+\-,/()*]+/,
+        { token: "type.picture", next: "@pop" },
+      ],
       // Anything else pops back to @root and is re-tokenized there.
       [/./, { token: "@rematch", next: "@pop" }],
     ],

@@ -26,7 +26,7 @@ import {
   FixedFormatRuler,
   FixedFormatRulerToggle,
 } from "@/components/editor/FixedFormatRuler";
-import { getMonaco, useMonacoReady } from "@/lib/editor/lazyMonaco";
+import { useMonacoReady, type Monaco } from "@/lib/editor/lazyMonaco";
 import {
   COBOL_LANGUAGE_ID,
   FIXED_FORMAT_RULER_COLUMNS,
@@ -70,17 +70,18 @@ interface RevealJavaDetail {
 }
 
 // View-state preservation in Monaco is keyed by model URI. Re-using the same
-// URI per source name keeps cursor / scroll / selection stable when the user
-// switches between the COBOL editor and other panes; switching to a different
-// file changes the URI so each file gets its own view state. The `inmemory://`
-// scheme matches the convention used elsewhere in the studio (CodeEditorInner
-// derives the same scheme for its fallback URIs).
-function deriveModelUri(sourceName: string | null): string {
-  const safeName = (sourceName || DEFAULT_SOURCE_NAME).replace(
-    /[^a-zA-Z0-9_.\-]/g,
-    "_",
-  );
-  return `inmemory://cobol-editor/${safeName}`;
+// URI per source identity keeps cursor / scroll / selection stable when the
+// user switches between the COBOL editor and other panes; switching to a
+// different file changes the URI so each file gets its own view state. The
+// `inmemory://` scheme matches the convention used elsewhere in the studio
+// (CodeEditorInner derives the same scheme for its fallback URIs).
+function deriveModelUri(
+  sourceIdentityPath: string | null,
+  sourceName: string | null,
+): string {
+  const identity = sourceIdentityPath || sourceName || DEFAULT_SOURCE_NAME;
+  const normalized = identity.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `inmemory://cobol-editor/${encodeURIComponent(normalized)}`;
 }
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
@@ -97,6 +98,7 @@ export function CobolEditorPane() {
     setAllowAiAssist,
     isDirty,
     sourceName,
+    sourceIdentityPath,
     transformError,
     isTransforming,
     canSubmitTransform,
@@ -135,16 +137,21 @@ export function CobolEditorPane() {
   const [cobolEditorMountToken, setCobolEditorMountToken] = useState(0);
   const detectedProgramId = deriveDetectedProgramId(sourceText);
   const lineEnding = deriveDisplayedLineEnding(sourceText);
-  const modelUri = useMemo(() => deriveModelUri(sourceName), [sourceName]);
+  const modelUri = useMemo(
+    () => deriveModelUri(sourceIdentityPath, sourceName),
+    [sourceIdentityPath, sourceName],
+  );
 
   // Studio-IDE-5 (#244): collect typed diagnostics that target the
   // COBOL source — `sourceKind: "cobol"` and the IR step (which still
   // points at COBOL line numbers via `sourceLine`). The build/test and
   // generated-Java diagnostics are routed to the Java pane.
+  const activeCobolFile =
+    sourceIdentityPath ?? sourceName ?? DEFAULT_SOURCE_NAME;
   const { registerOnMount: registerMarkerEditor } = useEditorMarkerRegistration(
     {
       id: "cobol-editor",
-      filePath: sourceName ?? DEFAULT_SOURCE_NAME,
+      filePath: activeCobolFile,
     },
   );
   // Studio-IDE-5 (#244 review): the marker memo depends on Monaco
@@ -152,7 +159,12 @@ export function CobolEditorPane() {
   // loader completes, then re-renders so the memo recomputes with the
   // real instance. Without this, a cold mount with diagnostics already
   // in state would cache an empty marker group permanently.
-  const monaco = useMonacoReady();
+  const hasActiveSource =
+    sourceIdentityPath !== null ||
+    sourceName !== null ||
+    sourceText.length > 0 ||
+    isDirty;
+  const monaco = useMonacoReady(hasActiveSource);
   const cobolMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
     if (!monaco) return [];
     const diagnostics = [
@@ -160,7 +172,7 @@ export function CobolEditorPane() {
       ...(runState.buildTest?.diagnostics ?? []),
     ];
     const buckets = partitionByOwner(diagnostics);
-    const currentFile = sourceName ?? DEFAULT_SOURCE_NAME;
+    const currentFile = activeCobolFile;
     // Fix #244-review: only render diagnostics whose filePath
     // resolves to the open COBOL source. Path-segment matching
     // avoids cross-file misattribution (e.g. "Foo.cbl" matching
@@ -207,7 +219,7 @@ export function CobolEditorPane() {
     monaco,
     runState.generated,
     runState.buildTest,
-    sourceName,
+    activeCobolFile,
     cobolEditorMountToken,
   ]);
 
@@ -223,34 +235,6 @@ export function CobolEditorPane() {
     );
     return () => clearTimeout(handle);
   }, [saveNoticeAt]);
-
-  // Register the COBOL language as soon as Monaco resolves. This runs in
-  // parallel with CodeEditorInner's own getMonaco() resolution so the
-  // language is typically registered before the initial model is created —
-  // avoiding a brief plaintext flash on first render. The registration is
-  // idempotent (see registerCobolLanguage) so the late onMount fallback
-  // below is safe even when this effect wins the race.
-  useEffect(() => {
-    let cancelled = false;
-    getMonaco()
-      .then((monaco) => {
-        if (cancelled) {
-          return;
-        }
-        registerCobolLanguage(monaco);
-        // Studio-IDE-9 (#254): register the deterministic hover
-        // provider once the language is known. Registration is
-        // idempotent so the onMount fallback below can re-call safely.
-        registerCobolHoverProvider(monaco);
-      })
-      .catch(() => {
-        // CodeEditor surfaces the load failure via its own error UI; nothing
-        // useful to do here beyond not crashing.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Apply / clear Monaco's vertical ruler guides when the fixed-format toggle
   // flips. Monaco's `rulers` option draws thin vertical lines at the given
@@ -275,7 +259,6 @@ export function CobolEditorPane() {
   useEffect(() => {
     stateRunIdRef.current = runState.runId ?? null;
   }, [runState.runId]);
-  const activeCobolFile = sourceName ?? DEFAULT_SOURCE_NAME;
   const cobolFileRef = useRef<string>(activeCobolFile);
   useEffect(() => {
     cobolFileRef.current = activeCobolFile;
@@ -325,14 +308,21 @@ export function CobolEditorPane() {
     };
   }, []);
 
+  const handleEditorBeforeMount = useCallback(
+    ({ monaco }: { monaco: Monaco }) => {
+      registerCobolLanguage(monaco);
+      registerCobolHoverProvider(monaco);
+    },
+    [],
+  );
+
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
       editorRef.current = editor;
       registerMarkerEditor(editor);
       setCobolEditorMountToken((value) => value + 1);
-      // Late-registration fallback in case the early effect lost the race
-      // against CodeEditorInner's monaco resolution. Both registrations
-      // are idempotent.
+      // Late-registration fallback in case @monaco-editor/react changes the
+      // beforeMount ordering. Both registrations are idempotent.
       registerCobolLanguage(monaco);
       registerCobolHoverProvider(monaco);
       // Apply the initial ruler state. The dedicated effect above handles
@@ -724,6 +714,7 @@ export function CobolEditorPane() {
           onChange={setSourceText}
           modelUri={modelUri}
           ariaLabel={`${sourceName || DEFAULT_SOURCE_NAME} COBOL source editor`}
+          beforeMount={handleEditorBeforeMount}
           onMount={handleEditorMount}
           markerGroups={cobolMarkerGroups}
           className="flex-1 min-h-0"

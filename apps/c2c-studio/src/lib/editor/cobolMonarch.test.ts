@@ -126,10 +126,10 @@ function pushState(stack: StackFrame[], stateName: string): void {
   stack.push({ stateName, rules: compileRules(stateName) });
 }
 
-function tokenizeLine(
+function tokenizeLineWithState(
   line: string,
   initialStack: string[] = ["root"],
-): Token[] {
+): { tokens: Token[]; finalStack: string[] } {
   const tokens: Token[] = [];
   const stack: StackFrame[] = [];
   for (const state of initialStack) {
@@ -219,7 +219,14 @@ function tokenizeLine(
       position += 1;
     }
   }
-  return tokens;
+  return { tokens, finalStack: stack.map((frame) => frame.stateName) };
+}
+
+function tokenizeLine(
+  line: string,
+  initialStack: string[] = ["root"],
+): Token[] {
+  return tokenizeLineWithState(line, initialStack).tokens;
 }
 
 function tokensExcludingWhitespace(tokens: Token[]): Token[] {
@@ -424,6 +431,20 @@ describe("COBOL Monarch grammar — tokenization edge cases", () => {
     const tokens = tokensExcludingWhitespace(tokenizeLine(line));
     expect(tokenAtText(tokens, "USAGE")?.token).toBe("keyword.cobol");
     expect(tokenAtText(tokens, "COMP-3")?.token).toBe("type.cobol");
+  });
+
+  it("snippet 14b: PIC state does not leak into the next physical line without a period", () => {
+    const first = tokenizeLineWithState("       05  RATE PIC 9(5)");
+    expect(first.finalStack).toEqual(["root"]);
+
+    const secondTokens = tokensExcludingWhitespace(
+      tokenizeLine("       05  RATE-FLAG VALUE 1.", first.finalStack),
+    );
+    expect(tokenAtText(secondTokens, "05")?.token).toBe("number.cobol");
+    expect(tokenAtText(secondTokens, "RATE-FLAG")?.token).toBe(
+      "identifier.cobol",
+    );
+    expect(tokenAtText(secondTokens, "VALUE")?.token).toBe("type.cobol");
   });
 
   it("snippet 15: continuation indicator `-` at column 7 is not mistaken for a comment", () => {

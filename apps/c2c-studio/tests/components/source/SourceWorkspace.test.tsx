@@ -167,6 +167,30 @@ function FileOpenRaceHarness() {
   );
 }
 
+function SameBasenameHarness() {
+  const { setSourceFile } = useSourceWorkspace();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          setSourceFile("A source", "DUPLICATE.cbl", "src/a/DUPLICATE.cbl")
+        }
+      >
+        Open Duplicate A
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setSourceFile("B source", "DUPLICATE.cbl", "src/b/DUPLICATE.cbl")
+        }
+      >
+        Open Duplicate B
+      </button>
+    </>
+  );
+}
+
 describe("COBOL source input", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -365,6 +389,30 @@ describe("COBOL source input", () => {
         oracleInput: undefined,
         useTransformationAgent: true,
       });
+    });
+  });
+
+  it("uses source identity path, not basename alone, for the COBOL Monaco model URI", async () => {
+    renderSourceWorkbench(
+      <>
+        <SameBasenameHarness />
+        <CobolEditorPane />
+      </>,
+    );
+
+    fireEvent.click(screen.getByText("Open Duplicate A"));
+    const editor = await screen.findByTestId("code-editor-mock");
+    expect(editor).toHaveAttribute(
+      "data-model-uri",
+      `inmemory://cobol-editor/${encodeURIComponent("src/a/DUPLICATE.cbl")}`,
+    );
+
+    fireEvent.click(screen.getByText("Open Duplicate B"));
+    await waitFor(() => {
+      expect(screen.getByTestId("code-editor-mock")).toHaveAttribute(
+        "data-model-uri",
+        `inmemory://cobol-editor/${encodeURIComponent("src/b/DUPLICATE.cbl")}`,
+      );
     });
   });
 

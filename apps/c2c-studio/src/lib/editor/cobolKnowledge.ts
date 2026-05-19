@@ -7,6 +7,7 @@
 // side panel — keeping both surfaces in lock-step so a hover never
 // disagrees with what the dictionary lists.
 
+import { COBOL_FIXED_FORMAT_ZONES } from "./cobolFixedFormat";
 import { escapeMarkdownContent } from "./hoverMarkdownSanitizer";
 
 // A structured hover description used by both the hover provider and
@@ -497,52 +498,15 @@ export interface FixedFormatZone {
 }
 
 export const FIXED_FORMAT_ZONES: readonly FixedFormatZone[] = [
-  {
-    startColumn: 1,
-    endColumn: 6,
+  ...COBOL_FIXED_FORMAT_ZONES.map((zone) => ({
+    startColumn: zone.startColumn,
+    endColumn: zone.endColumn,
     entry: {
-      title: "Sequence number area (cols 1–6)",
-      explanation:
-        "Fixed-format sequence numbers. Carried over from punched-card source. Ignored by every compiler we target.",
+      title: zone.hoverTitle,
+      explanation: zone.hoverExplanation,
     },
-  },
-  {
-    startColumn: 7,
-    endColumn: 7,
-    entry: {
-      title: "Indicator area (col 7)",
-      explanation:
-        "Single-character indicator: `*` or `/` marks a comment line, `-` continues the previous literal, `D` marks a debug line, blank is normal code.",
-    },
-  },
-  {
-    startColumn: 8,
-    endColumn: 11,
-    entry: {
-      title: "Area A (cols 8–11)",
-      explanation:
-        "Reserved for division headers, section headers, paragraph names, and level numbers `01` / `77`. Verbs must start in Area B.",
-    },
-  },
-  {
-    startColumn: 12,
-    endColumn: 72,
-    entry: {
-      title: "Area B (cols 12–72)",
-      explanation:
-        "Procedural statements, verbs, and continuation of data declarations. The main body of every fixed-format program lives here.",
-    },
-  },
-  {
-    startColumn: 73,
-    endColumn: 80,
-    entry: {
-      title: "Identification area (cols 73–80)",
-      explanation:
-        "Identification / sequence area carried over from punched-card source. Ignored by the compilers we target.",
-    },
-  },
-] as const;
+  })),
+];
 
 export function explainFixedFormatZone(column: number): HoverEntry | null {
   for (const zone of FIXED_FORMAT_ZONES) {

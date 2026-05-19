@@ -2,8 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page, type Response } from "@playwright/test";
 
-const COBOL_EDITOR_LABEL = /COBOL source editor/i;
-const GENERATED_JAVA_LABEL = /Generated Java source for/i;
 const PRODUCT_PATH_COBOL = readFileSync(
   path.resolve(
     __dirname,
@@ -50,27 +48,40 @@ async function expectReadyWorkbench(page: Page) {
 function topBarStartButton(page: Page) {
   return page
     .getByLabel("Workbench Top Bar")
-    .getByRole("button", { name: "Start Transformation" });
+    .getByRole("button", { name: "Generate & Verify" });
 }
 
-// Monaco's accessibility textarea forwards input events to the model but does
-// not mirror the full document into its `value` attribute (Monaco resets the
-// textarea contents to a small window around the cursor after each edit).
-// The existing `fill()` flow still drives the model — Monaco listens to the
-// emitted input events — but assertions that previously read `editor.value`
-// now read the rendered `.view-line` DOM, which Monaco keeps in sync with
-// the model content for the visible viewport. Issue #246.
-async function enterProductPathCobol(page: Page) {
-  await page.getByRole("button", { name: "Start Typing" }).click();
+async function enterCobolSource(page: Page, source: string) {
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        (window as unknown as { __c2cEditorHarnessReady?: boolean })
+          .__c2cEditorHarnessReady,
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.evaluate((sourceText) => {
+    window.dispatchEvent(
+      new CustomEvent("c2c-e2e:load-cobol", {
+        detail: { sourceText, sourceName: "pasted-source.cbl" },
+      }),
+    );
+  }, source);
+  const editorSurface = page.getByTestId("code-editor-standalone");
+  await expect(editorSurface).toBeVisible();
+  const aiAssistToggle = page.getByLabel(
+    "Allow AI assist after deterministic baseline",
+  );
+  if (await aiAssistToggle.isChecked()) {
+    await aiAssistToggle.click();
+  }
+  await expect(aiAssistToggle).not.toBeChecked();
+  await expect(topBarStartButton(page)).toBeEnabled();
+}
 
-  const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-  await editor.fill(PRODUCT_PATH_COBOL);
-  await expect(
-    page
-      .locator(".view-line")
-      .filter({ hasText: /PROGRAM-ID\. BRNCH01\./ })
-      .first(),
-  ).toBeVisible();
+async function enterProductPathCobol(page: Page) {
+  await enterCobolSource(page, PRODUCT_PATH_COBOL);
 }
 
 async function waitForJsonResponse(
@@ -164,6 +175,12 @@ test.describe("c2c Studio browser acceptance", () => {
     await topBarStartButton(page).click();
 
     const transformResponse = await transformResponsePromise;
+    const transformRequestBody = transformResponse.request().postDataJSON();
+    expect(transformRequestBody).toEqual(
+      expect.objectContaining({
+        sourceText: PRODUCT_PATH_COBOL,
+      }),
+    );
     const transformBody = await transformResponse.json();
     expect(transformBody.runId).toBeTruthy();
     const runId = String(transformBody.runId);
@@ -292,8 +309,9 @@ test.describe("c2c Studio browser acceptance", () => {
       generatedArtifactSha,
     );
 
-    const generatedJavaPane = page.getByLabel(GENERATED_JAVA_LABEL);
+    const generatedJavaPane = page.getByTestId("generated-java-editor-surface");
     await expect(generatedJavaPane).toBeVisible();
+    await expect(generatedJavaPane.locator(".monaco-editor")).toBeVisible();
     await expect(generatedJavaPane).toHaveAttribute(
       "data-file-path",
       String(entryFilePath),
@@ -576,10 +594,7 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await page.getByRole("button", { name: "Start Typing" }).click();
-
-    const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-    await editor.fill(`       IDENTIFICATION DIVISION.
+    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
        PROGRAM-ID. UNSUPPORTED01.
        PROCEDURE DIVISION.
            COPY TESTLIB REPLACING ==X== BY ==Y==.
@@ -854,10 +869,7 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await page.getByRole("button", { name: "Start Typing" }).click();
-
-    const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-    await editor.fill(`       IDENTIFICATION DIVISION.
+    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
        PROGRAM-ID. EVIDENCE01.
        PROCEDURE DIVISION.
            DISPLAY 'EVIDENCE'.
@@ -865,9 +877,9 @@ test.describe("c2c Studio browser acceptance", () => {
 
     await topBarStartButton(page).click();
 
-    await expect(page.getByLabel(GENERATED_JAVA_LABEL)).toContainText(
-      "public class EvidenceGate",
-    );
+    await expect(
+      page.getByTestId("generated-java-editor-surface"),
+    ).toContainText("public class EvidenceGate");
     await expect(
       page.getByText("Evidence Incomplete", { exact: true }),
     ).toBeVisible();
@@ -1175,10 +1187,7 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await page.getByRole("button", { name: "Start Typing" }).click();
-
-    const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-    await editor.fill(`       IDENTIFICATION DIVISION.
+    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
        PROGRAM-ID. MISMATCH01.
        PROCEDURE DIVISION.
            DISPLAY 'MISMATCH'.
@@ -1186,9 +1195,9 @@ test.describe("c2c Studio browser acceptance", () => {
 
     await topBarStartButton(page).click();
 
-    await expect(page.getByLabel(GENERATED_JAVA_LABEL)).toContainText(
-      "public final class MismatchGate",
-    );
+    await expect(
+      page.getByTestId("generated-java-editor-surface"),
+    ).toContainText("public final class MismatchGate");
     await expect(
       page.getByText("Artifact Mismatch", { exact: true }),
     ).toBeVisible();
@@ -1478,10 +1487,7 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await page.getByRole("button", { name: "Start Typing" }).click();
-
-    const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-    await editor.fill(`       IDENTIFICATION DIVISION.
+    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
        PROGRAM-ID. AGENT01.
        PROCEDURE DIVISION.
            DISPLAY 'AGENT'.

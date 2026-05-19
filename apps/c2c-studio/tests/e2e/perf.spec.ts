@@ -50,12 +50,30 @@ async function loadCobolAndAwaitMount(
   await page.waitForFunction(
     () => {
       const w = window as unknown as {
-        __c2cMonacoEditor?: { getModel: () => unknown };
+        __c2cMonacoEditor?: {
+          getDomNode: () => HTMLElement | null;
+          getModel: () => unknown;
+          getVisibleRanges: () => Array<{
+            startLineNumber: number;
+            endLineNumber: number;
+          }>;
+        };
       };
       const editor = w.__c2cMonacoEditor;
       if (!editor) return false;
       const model = editor.getModel();
-      return Boolean(model);
+      const domNode = editor.getDomNode();
+      const hasRenderedViewport = Boolean(
+        domNode?.querySelector(".view-lines"),
+      );
+      const visibleRanges = editor.getVisibleRanges();
+      return Boolean(
+        model &&
+          hasRenderedViewport &&
+          visibleRanges.some(
+            (range) => range.endLineNumber >= range.startLineNumber,
+          ),
+      );
     },
     null,
     { timeout: 30_000 },
@@ -97,27 +115,137 @@ test.describe("@perf editor mount + search", () => {
     expect(elapsed).toBeLessThan(MOUNT_SLA_10K_MS * HARDWARE_CUSHION);
   });
 
-  test("search trigger stays inside the reference SLA (with CI hardware cushion)", async ({
+  test("search first match stays inside the reference SLA (with CI hardware cushion)", async ({
     page,
   }) => {
     const source = buildSyntheticCobol({ targetLines: 5_000 });
     await readyWorkbench(page);
     await loadCobolAndAwaitMount(page, source);
-    const elapsed = await page.evaluate(() => {
+    const result = await page.evaluate(() => {
       const w = window as unknown as {
-        __c2cMonacoEditor?: { trigger: (s: string, a: string) => void };
+        __c2cMonacoEditor?: {
+          getModel: () => {
+            findMatches: (
+              searchString: string,
+              searchOnlyEditableRange: boolean,
+              isRegex: boolean,
+              matchCase: boolean,
+              wordSeparators: string | null,
+              captureMatches: boolean,
+              limitResultCount: number,
+            ) => unknown[];
+          } | null;
+        };
       };
       const editor = w.__c2cMonacoEditor;
       if (!editor) return -1;
+      const model = editor.getModel();
+      if (!model) return -1;
       const t0 = performance.now();
-      editor.trigger("perf-harness", "actions.find");
-      return performance.now() - t0;
+      const matches = model.findMatches(
+        "DISPLAY",
+        false,
+        false,
+        false,
+        null,
+        true,
+        1,
+      );
+      return {
+        elapsed: performance.now() - t0,
+        matchCount: matches.length,
+      };
     });
     console.log(
-      `[perf] search trigger: ${elapsed.toFixed(0)} ms (SLA ${SEARCH_SLA_MS} ms)`,
+      `[perf] search first match: ${typeof result === "number" ? result : result.elapsed.toFixed(0)} ms (SLA ${SEARCH_SLA_MS} ms)`,
     );
-    expect(elapsed).toBeGreaterThanOrEqual(0);
-    expect(elapsed).toBeLessThan(SEARCH_SLA_MS * HARDWARE_CUSHION);
+    expect(result).not.toBe(-1);
+    expect(typeof result).toBe("object");
+    expect((result as { matchCount: number }).matchCount).toBeGreaterThan(0);
+    expect((result as { elapsed: number }).elapsed).toBeLessThan(
+      SEARCH_SLA_MS * HARDWARE_CUSHION,
+    );
+  });
+
+  test("10k-line controlled edit preserves cursor line and scroll locality", async ({
+    page,
+  }) => {
+    const source = buildSyntheticCobol({ targetLines: 10_000 });
+    await readyWorkbench(page);
+    await loadCobolAndAwaitMount(page, source);
+
+    const probe = await page.evaluate(async () => {
+      const w = window as unknown as {
+        __c2cMonacoEditor?: {
+          focus: () => void;
+          getPosition: () => { lineNumber: number; column: number } | null;
+          getScrollTop: () => number;
+          getVisibleRanges: () => Array<{
+            startLineNumber: number;
+            endLineNumber: number;
+          }>;
+          revealLineInCenter: (lineNumber: number) => void;
+          setPosition: (position: {
+            lineNumber: number;
+            column: number;
+          }) => void;
+          trigger: (
+            source: string,
+            handlerId: string,
+            payload?: { text: string },
+          ) => void;
+        };
+      };
+      const editor = w.__c2cMonacoEditor;
+      if (!editor) return null;
+      const target = { lineNumber: 5_005, column: 12 };
+      editor.revealLineInCenter(target.lineNumber);
+      editor.setPosition(target);
+      editor.focus();
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(resolve));
+        if (
+          editor
+            .getVisibleRanges()
+            .some(
+              (range) =>
+                target.lineNumber >= range.startLineNumber &&
+                target.lineNumber <= range.endLineNumber,
+            )
+        ) {
+          break;
+        }
+      }
+      const before = {
+        position: editor.getPosition(),
+        scrollTop: editor.getScrollTop(),
+      };
+      const t0 = performance.now();
+      editor.trigger("perf-harness", "type", { text: "X" });
+      await new Promise<void>((resolve) => requestAnimationFrame(resolve));
+      return {
+        elapsed: performance.now() - t0,
+        before,
+        after: {
+          position: editor.getPosition(),
+          scrollTop: editor.getScrollTop(),
+        },
+      };
+    });
+
+    expect(probe).not.toBeNull();
+    expect(probe?.after.position?.lineNumber).toBe(
+      probe?.before.position?.lineNumber,
+    );
+    expect(probe?.after.position?.column).toBe(
+      (probe?.before.position?.column ?? 0) + 1,
+    );
+    expect(
+      Math.abs((probe?.after.scrollTop ?? 0) - (probe?.before.scrollTop ?? 0)),
+    ).toBeLessThanOrEqual(500);
+    console.log(
+      `[perf] 10k controlled edit: ${probe?.elapsed.toFixed(0)} ms`,
+    );
   });
 
   test("scroll p95 frametime stays under 16.7 ms on a 10k-line buffer", async ({

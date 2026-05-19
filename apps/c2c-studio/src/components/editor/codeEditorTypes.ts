@@ -39,6 +39,10 @@ export interface StandaloneEditorMountArgs {
   monaco: Monaco;
 }
 
+export interface CodeEditorBeforeMountArgs {
+  monaco: Monaco;
+}
+
 interface CodeEditorBaseProps {
   language: string;
   markers?: EditorMarker[];
@@ -57,6 +61,7 @@ interface CodeEditorBaseProps {
    * Defaults to `inmemory://model/<language>` if omitted.
    */
   modelUri?: string;
+  beforeMount?: (args: CodeEditorBeforeMountArgs) => void;
 }
 
 export interface StandaloneCodeEditorProps extends CodeEditorBaseProps {
