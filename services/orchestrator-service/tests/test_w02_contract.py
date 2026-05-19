@@ -1644,6 +1644,37 @@ class ManualEditProvenanceContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             contract.set_manual_edit_summary(carried_over=False, drift_region_count=-1)
 
+    def test_constructor_rejects_inconsistent_manual_edit_summary(self) -> None:
+        from orchestrator_service.run_contract import (
+            DEFAULT_REPAIR_BUDGET,
+            RepairBudget,
+            W02RunContract,
+            WorkflowStateMachine,
+        )
+
+        base = {
+            "workflow_id": "w0-migration-v0",
+            "requester": "orchestrator",
+            "source_ref": {"uri": "urn:src"},
+            "repair_budget": RepairBudget(limit=DEFAULT_REPAIR_BUDGET),
+        }
+        with self.assertRaises(ValueError):
+            W02RunContract(
+                run_id="run-invalid-manual-1",
+                state_machine=WorkflowStateMachine(),
+                manual_edits_carried_over=True,
+                manual_drift_region_count=0,
+                **base,
+            )
+        with self.assertRaises(ValueError):
+            W02RunContract(
+                run_id="run-invalid-manual-2",
+                state_machine=WorkflowStateMachine(),
+                manual_edits_carried_over=False,
+                manual_drift_region_count=-1,
+                **base,
+            )
+
     def test_set_manual_edit_summary_idempotent_when_run_finalises_cleanly(self) -> None:
         from orchestrator_service.run_contract import new_run_contract
 

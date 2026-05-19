@@ -191,6 +191,26 @@ class DeriveOriginClassTests(unittest.TestCase):
         )
         self.assertEqual(cls, "manual_modified")
 
+    def test_manual_overlay_subrange_overlap_wins(self) -> None:
+        cls = rc.derive_origin_class(
+            line_range=(1, 3),
+            assist_decision=_assist_required(),
+            repair_attempts=[
+                {"attemptNumber": 1, "repairDecision": "propose_candidate"},
+            ],
+            manual_overlay={(2, 2): "manual_modified"},
+        )
+        self.assertEqual(cls, "manual_modified")
+
+    def test_manual_modified_wins_when_multiple_manual_overlaps(self) -> None:
+        cls = rc.derive_origin_class(
+            line_range=(1, 4),
+            assist_decision=_assist_not_required(),
+            repair_attempts=[],
+            manual_overlay={(1, 1): "manual_edit", (3, 3): "manual_modified"},
+        )
+        self.assertEqual(cls, "manual_modified")
+
     def test_manual_edit_from_overlay(self) -> None:
         cls = rc.derive_origin_class(
             line_range=(1, 3),
@@ -427,6 +447,25 @@ class ComputeJavaRegionClassificationTests(unittest.TestCase):
                     "schemaVersion",
                 },
             )
+
+    def test_manual_overlay_subrange_marks_derived_region_manual(self) -> None:
+        java_text = "\n".join(
+            [
+                "// display [s1 line 1] D 'A'",  # 1
+                "System.out.println(\"A\");",  # 2
+            ]
+        )
+        classification = rc.compute_java_region_classification(
+            java_files={"F.java": java_text},
+            assist_decision=None,
+            repair_attempts=[],
+            final_classification="success",
+            failure_code=None,
+            manual_overlay={"F.java": {(2, 2): "manual_modified"}},
+        )
+        regions = classification["F.java"]
+        self.assertEqual(regions[0]["lineRange"], {"startLine": 1, "endLine": 2})
+        self.assertEqual(regions[0]["originClass"], "manual_modified")
 
     def test_all_five_origin_classes_are_producible(self) -> None:
         # Acceptance criterion (issue #248 AC2): the helper must be able to

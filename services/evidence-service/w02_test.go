@@ -1432,6 +1432,26 @@ func TestManifestSchemaCarriesManualEditOverlayContract(t *testing.T) {
 	if _, ok := defs["manualEditOverlayRef"]; !ok {
 		t.Fatalf("schema $defs/manualEditOverlayRef missing")
 	}
+	allOf, ok := doc["allOf"].([]any)
+	if !ok || len(allOf) < 4 {
+		t.Fatalf("schema must carry manual edit cross-field conditionals")
+	}
+	encoded, err := json.Marshal(allOf)
+	if err != nil {
+		t.Fatalf("marshal allOf: %v", err)
+	}
+	conditionals := string(encoded)
+	for _, want := range []string{
+		"manualEditsCarriedOver",
+		"manualDriftRegionCount",
+		"manualEditOverlay",
+		`"minimum":1`,
+		`"maximum":0`,
+	} {
+		if !strings.Contains(conditionals, want) {
+			t.Fatalf("schema allOf missing %q in %s", want, conditionals)
+		}
+	}
 }
 
 func TestOpenAPICarriesManualEditOverlayContract(t *testing.T) {
