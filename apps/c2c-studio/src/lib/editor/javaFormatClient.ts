@@ -150,6 +150,7 @@ export async function formatJava(
     controller.abort();
   }, timeoutMs);
   let response: Response;
+  let rawBody: string;
   try {
     response = await fetchImpl(`${baseUrlResult.data}/api/v0/format/java`, {
       method: "POST",
@@ -158,6 +159,7 @@ export async function formatJava(
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
+    rawBody = await response.text();
   } catch (err) {
     if (timeoutFired) {
       emitResult("timeout");
@@ -183,7 +185,6 @@ export async function formatJava(
       externalSignal.removeEventListener("abort", externalAbortHandler);
     }
   }
-  const rawBody = await response.text();
   let parsed: unknown = null;
   if (rawBody.length > 0) {
     try {

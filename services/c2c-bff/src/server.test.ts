@@ -6249,6 +6249,64 @@ test("POST /api/v0/compile-check rejects unsafe javaFiles paths before upstream 
   }
 });
 
+test("POST /api/v0/compile-check rejects non-Java, duplicate, and excessive file lists before upstream work", async () => {
+  const auth = createRouteAuth();
+  let upstreamCalls = 0;
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: {
+      enabled: true,
+      async formatJava() {
+        return undefined;
+      },
+      async runVerification() {
+        upstreamCalls += 1;
+        return { status: 200, body: { status: "success", diagnostics: [] } };
+      },
+    },
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const nonJava = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({ javaFiles: [{ path: "pom.xml", content: "<project />" }] }),
+    );
+    assert.equal(nonJava.status, 400);
+    assert.match((nonJava.body as { error: string }).error, /\.java/);
+
+    const duplicate = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({
+        javaFiles: [
+          { path: "Foo.java", content: "class Foo {}" },
+          { path: "Foo.java", content: "class Foo {}" },
+        ],
+      }),
+    );
+    assert.equal(duplicate.status, 400);
+    assert.match((duplicate.body as { error: string }).error, /unique/);
+
+    const tooMany = await fetchJson(
+      `${server.baseUrl}/api/v0/compile-check`,
+      auth.post({
+        javaFiles: Array.from({ length: 513 }, (_, idx) => ({
+          path: `Foo${idx}.java`,
+          content: "",
+        })),
+      }),
+    );
+    assert.equal(tooMany.status, 413);
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/v0/compile-check returns 413 when total content exceeds cap", async () => {
   const auth = createRouteAuth();
   const handler = createApp({
@@ -6509,6 +6567,69 @@ test("POST /api/v0/verify rejects unsafe javaFiles paths before upstream work", 
         (response.body as { error: string }).error.includes(expectedError),
       );
     }
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify rejects non-Java, duplicate, and excessive file lists before upstream work", async () => {
+  const auth = createRouteAuth();
+  let upstreamCalls = 0;
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: {
+      enabled: true,
+      async formatJava() {
+        return undefined;
+      },
+      async runVerification() {
+        upstreamCalls += 1;
+        return { status: 200, body: { status: "success", diagnostics: [] } };
+      },
+    },
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const nonJava = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
+        runId: "run-1",
+        javaFiles: [{ path: "manifest.json", content: "{}" }],
+      }),
+    );
+    assert.equal(nonJava.status, 400);
+    assert.match((nonJava.body as { error: string }).error, /\.java/);
+
+    const duplicate = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
+        runId: "run-1",
+        javaFiles: [
+          { path: "Foo.java", content: "class Foo {}" },
+          { path: "Foo.java", content: "class Foo {}" },
+        ],
+      }),
+    );
+    assert.equal(duplicate.status, 400);
+    assert.match((duplicate.body as { error: string }).error, /unique/);
+
+    const tooMany = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
+        runId: "run-1",
+        javaFiles: Array.from({ length: 513 }, (_, idx) => ({
+          path: `Foo${idx}.java`,
+          content: "",
+        })),
+      }),
+    );
+    assert.equal(tooMany.status, 413);
     assert.equal(upstreamCalls, 0);
   } finally {
     await server.close();

@@ -526,6 +526,14 @@ start_model_gateway() {
 
 start_java_services() {
   local jar
+  local -a google_java_format_exports=(
+    --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
+    --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
+    --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+    --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED
+    --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED
+    --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED
+  )
   # The Java services accept a port, :port, or host:port; pass host:port
   # explicitly so the launcher's listen-address convention is unambiguous.
   jar="$(shaded_jar cobol-parser-service)"
@@ -561,8 +569,9 @@ start_java_services() {
     HARNESS_EVENT_ENDPOINT="$HARNESS_URL" \
     HARNESS_EVENT_TOKEN="$HARNESS_TOKEN" \
     EXPERIENCE_EVENT_ENDPOINT="$EXPERIENCE_URL" \
+    BUILD_TEST_RUNNER_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
     -- \
-    java -jar "$jar"
+    java "${google_java_format_exports[@]}" -jar "$jar"
   wait_http build-test-runner "$BUILD_TEST_RUNNER_URL/health"
 }
 
@@ -604,6 +613,8 @@ start_bff() {
     C2C_EVIDENCE_URL="$EVIDENCE_URL" \
     C2C_EXPERIENCE_LEARNING_URL="$EXPERIENCE_URL" \
     C2C_MODEL_GATEWAY_URL="$bff_model_gateway_url" \
+    C2C_BUILD_TEST_RUNNER_URL="$BUILD_TEST_RUNNER_URL" \
+    C2C_BUILD_TEST_RUNNER_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
     C2C_HARNESS_URL="$HARNESS_URL" \
     C2C_STUDIO_CORS_ORIGINS="$STUDIO_URL,http://localhost:${STUDIO_PORT}" \
     -- \

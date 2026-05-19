@@ -274,6 +274,108 @@ function scanBracketsAndStrings(
   return out;
 }
 
+function maskCommentsAndLiterals(source: string): string {
+  const masked: string[] = [];
+  let inLineComment = false;
+  let inBlockComment = false;
+  let inString = false;
+  let inChar = false;
+  let escapeNext = false;
+  let i = 0;
+
+  while (i < source.length) {
+    const ch = source[i] ?? "";
+    const next = i + 1 < source.length ? (source[i + 1] ?? "") : "";
+
+    if (ch === "\n") {
+      masked.push("\n");
+      inLineComment = false;
+      if (inString) inString = false;
+      if (inChar) inChar = false;
+      escapeNext = false;
+      i += 1;
+      continue;
+    }
+
+    if (inLineComment) {
+      masked.push(" ");
+      i += 1;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        masked.push(" ", " ");
+        inBlockComment = false;
+        i += 2;
+        continue;
+      }
+      masked.push(" ");
+      i += 1;
+      continue;
+    }
+
+    if (inString) {
+      if (escapeNext) {
+        escapeNext = false;
+      } else if (ch === "\\") {
+        escapeNext = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      masked.push(" ");
+      i += 1;
+      continue;
+    }
+
+    if (inChar) {
+      if (escapeNext) {
+        escapeNext = false;
+      } else if (ch === "\\") {
+        escapeNext = true;
+      } else if (ch === "'") {
+        inChar = false;
+      }
+      masked.push(" ");
+      i += 1;
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      masked.push(" ", " ");
+      inLineComment = true;
+      i += 2;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      masked.push(" ", " ");
+      inBlockComment = true;
+      i += 2;
+      continue;
+    }
+
+    if (ch === '"') {
+      masked.push(" ");
+      inString = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "'") {
+      masked.push(" ");
+      inChar = true;
+      i += 1;
+      continue;
+    }
+
+    masked.push(ch);
+    i += 1;
+  }
+
+  return masked.join("");
+}
+
 // Per-line checks: mixed indentation, suspicious `=` in conditionals,
 // trailing whitespace. Each rule emits at most one diagnostic per
 // matching line so the Problems panel stays readable.
@@ -284,6 +386,7 @@ function scanLineLevelRules(
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const lines = source.split("\n");
+  const lexicalLines = maskCommentsAndLiterals(source).split("\n");
   // Suspicious-assignment matcher: detects `if (NAME = EXPR)` / `while
   // (NAME = EXPR)` where the `=` is not part of `==`, `<=`, `>=`, `!=`.
   // The pattern is intentionally narrow — it only fires when the left
@@ -314,7 +417,7 @@ function scanLineLevelRules(
       budget.remaining -= 1;
       if (budget.remaining <= 0) break;
     }
-    const assignMatch = suspiciousAssignRe.exec(text);
+    const assignMatch = suspiciousAssignRe.exec(lexicalLines[idx] ?? "");
     if (assignMatch && assignMatch.index !== undefined) {
       out.push(
         makeDiagnostic({

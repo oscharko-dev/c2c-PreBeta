@@ -60,6 +60,7 @@ import { normalizeDiagnostics, type Diagnostic } from "./diagnostics";
 // Studio-IDE-14 (#256): typed request validation + upstream response
 // normalisation for the Java formatter route.
 import {
+  formatInputTooLarge,
   formatUnavailable,
   normaliseUpstreamResponse,
   validateFormatJavaRequest,
@@ -147,6 +148,17 @@ const STATIC_MIME: Record<string, string> = {
   ".ico": "image/x-icon",
   ".txt": "text/plain; charset=utf-8",
 };
+
+const FORMAT_JAVA_JSON_ENVELOPE_BYTES = 8192;
+const JAVA_EXECUTION_MAX_FILES = 512;
+
+function formatJavaRawBodyMaxBytes(maxContentBytes: number): number {
+  return maxContentBytes * 2 + FORMAT_JAVA_JSON_ENVELOPE_BYTES;
+}
+
+function isJavaSourceFilePath(filePath: string): boolean {
+  return normalizeRequestJavaFilePath(filePath).toLowerCase().endsWith(".java");
+}
 
 export interface ServerDeps {
   config: BffConfig;
@@ -3783,10 +3795,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
         let raw: unknown;
         try {
-          raw = await readJsonBody(req, config.formatJavaSourceMaxBytes);
+          raw = await readJsonBody(
+            req,
+            formatJavaRawBodyMaxBytes(config.formatJavaSourceMaxBytes),
+          );
         } catch (err) {
           if (err instanceof Error && /too large/i.test(err.message)) {
-            jsonResponse(res, 413, formatUnavailable("request body too large"));
+            jsonResponse(
+              res,
+              413,
+              formatInputTooLarge(config.formatJavaSourceMaxBytes),
+            );
             return;
           }
           jsonResponse(
@@ -3811,7 +3830,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             ...(validation.value.filePath
               ? { filePath: validation.value.filePath }
               : {}),
-          });
+          }, config.formatJavaTimeoutMs, config.artifactContentMaxBytes);
           if (!upstream) {
             jsonResponse(
               res,
@@ -4566,6 +4585,12 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "javaFiles must be a non-empty array");
           return;
         }
+        if (ccJavaFiles.length > JAVA_EXECUTION_MAX_FILES) {
+          jsonResponse(res, 413, {
+            error: `javaFiles must contain at most ${JAVA_EXECUTION_MAX_FILES} files`,
+          });
+          return;
+        }
         const ccFilePaths = new Set<string>();
         for (let i = 0; i < ccJavaFiles.length; i += 1) {
           const entry = ccJavaFiles[i];
@@ -4585,7 +4610,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
             return;
           }
-          ccFilePaths.add(normalizeRequestJavaFilePath(entryRecord.path));
+          if (!isJavaSourceFilePath(entryRecord.path)) {
+            badRequest(res, `javaFiles[${i}].path must end with .java`);
+            return;
+          }
+          const normalizedPath = normalizeRequestJavaFilePath(entryRecord.path);
+          if (ccFilePaths.has(normalizedPath)) {
+            badRequest(res, `javaFiles[${i}].path must be unique`);
+            return;
+          }
+          ccFilePaths.add(normalizedPath);
           if (typeof entryRecord.content !== "string") {
             badRequest(res, `javaFiles[${i}].content must be a string`);
             return;
@@ -4744,6 +4778,12 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "javaFiles must be a non-empty array");
           return;
         }
+        if (vJavaFiles.length > JAVA_EXECUTION_MAX_FILES) {
+          jsonResponse(res, 413, {
+            error: `javaFiles must contain at most ${JAVA_EXECUTION_MAX_FILES} files`,
+          });
+          return;
+        }
         const vFilePaths = new Set<string>();
         for (let i = 0; i < vJavaFiles.length; i += 1) {
           const entry = vJavaFiles[i];
@@ -4763,7 +4803,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
             return;
           }
-          vFilePaths.add(normalizeRequestJavaFilePath(entryRecord.path));
+          if (!isJavaSourceFilePath(entryRecord.path)) {
+            badRequest(res, `javaFiles[${i}].path must end with .java`);
+            return;
+          }
+          const normalizedPath = normalizeRequestJavaFilePath(entryRecord.path);
+          if (vFilePaths.has(normalizedPath)) {
+            badRequest(res, `javaFiles[${i}].path must be unique`);
+            return;
+          }
+          vFilePaths.add(normalizedPath);
           if (typeof entryRecord.content !== "string") {
             badRequest(res, `javaFiles[${i}].content must be a string`);
             return;

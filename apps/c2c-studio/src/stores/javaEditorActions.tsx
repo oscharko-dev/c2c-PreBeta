@@ -37,6 +37,7 @@ export interface JavaEditorActionsContextValue {
   registerCompileCheckHandler: (
     handler: () => Promise<void> | void,
   ) => () => void;
+  setCompileCheckAvailable: (available: boolean) => void;
   setCompileCheckPending: (pending: boolean) => void;
 }
 
@@ -49,17 +50,20 @@ export function JavaEditorActionsProvider({
   children: ReactNode;
 }) {
   const handlerRef = useRef<(() => Promise<void> | void) | null>(null);
-  const [canCompileCheck, setCanCompileCheck] = useState(false);
+  const [handlerRegistered, setHandlerRegistered] = useState(false);
+  const [compileCheckAvailable, setCompileCheckAvailable] = useState(false);
   const [compileCheckPending, setCompileCheckPending] = useState(false);
+  const canCompileCheck = handlerRegistered && compileCheckAvailable;
 
   const registerCompileCheckHandler = useCallback(
     (handler: () => Promise<void> | void) => {
       handlerRef.current = handler;
-      setCanCompileCheck(true);
+      setHandlerRegistered(true);
       return () => {
         if (handlerRef.current === handler) {
           handlerRef.current = null;
-          setCanCompileCheck(false);
+          setHandlerRegistered(false);
+          setCompileCheckAvailable(false);
           setCompileCheckPending(false);
         }
       };
@@ -69,13 +73,14 @@ export function JavaEditorActionsProvider({
 
   const triggerCompileCheck = useCallback(() => {
     const handler = handlerRef.current;
+    if (!canCompileCheck) return;
     if (!handler) return;
     // The handler returns a Promise (or void); we don't await it here
     // because callers are fire-and-forget. The handler itself is
     // responsible for flipping `compileCheckPending` via
     // `setCompileCheckPending`.
     void handler();
-  }, []);
+  }, [canCompileCheck]);
 
   const value = useMemo<JavaEditorActionsContextValue>(
     () => ({
@@ -83,6 +88,7 @@ export function JavaEditorActionsProvider({
       compileCheckPending,
       triggerCompileCheck,
       registerCompileCheckHandler,
+      setCompileCheckAvailable,
       setCompileCheckPending,
     }),
     [
@@ -90,6 +96,7 @@ export function JavaEditorActionsProvider({
       compileCheckPending,
       triggerCompileCheck,
       registerCompileCheckHandler,
+      setCompileCheckAvailable,
     ],
   );
 
@@ -110,6 +117,7 @@ const DISABLED_VALUE: JavaEditorActionsContextValue = {
   compileCheckPending: false,
   triggerCompileCheck: () => {},
   registerCompileCheckHandler: () => () => {},
+  setCompileCheckAvailable: () => {},
   setCompileCheckPending: () => {},
 };
 
@@ -124,15 +132,20 @@ export function useJavaEditorActions(): JavaEditorActionsContextValue {
 }
 
 // Convenience hook for editor panes — registers the handler for the
-// lifetime of the component, flipping `canCompileCheck` to true while
-// mounted and dropping it back to false on unmount.
+// component lifetime and gates `canCompileCheck` on the active artifact.
 export function useRegisterCompileCheckHandler(
   handler: () => Promise<void> | void,
+  available = true,
 ): void {
-  const { registerCompileCheckHandler } = useJavaEditorActions();
+  const { registerCompileCheckHandler, setCompileCheckAvailable } =
+    useJavaEditorActions();
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
   useEffect(() => {
     return registerCompileCheckHandler(() => handlerRef.current());
   }, [registerCompileCheckHandler]);
+  useEffect(() => {
+    setCompileCheckAvailable(available);
+    return () => setCompileCheckAvailable(false);
+  }, [available, setCompileCheckAvailable]);
 }

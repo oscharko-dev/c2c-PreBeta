@@ -763,6 +763,50 @@ export function GeneratedJavaEditorPane() {
   const pendingEditRef = useRef<{ filePath: string; content: string } | null>(
     null,
   );
+  const lintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestLintRequestRef = useRef<{
+    filePath: string;
+    content: string;
+  } | null>(null);
+  const latestLintCompletedRef = useRef<{
+    filePath: string;
+    content: string;
+  } | null>(null);
+
+  const clearLintTimer = useCallback(() => {
+    if (lintTimerRef.current !== null) {
+      clearTimeout(lintTimerRef.current);
+      lintTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleJavaLint = useCallback(
+    (filePath: string, content: string) => {
+      const requested = latestLintRequestRef.current;
+      const completed = latestLintCompletedRef.current;
+      const alreadyRequested =
+        requested?.filePath === filePath && requested.content === content;
+      const alreadyCompleted =
+        completed?.filePath === filePath && completed.content === content;
+      if (alreadyRequested && (lintTimerRef.current !== null || alreadyCompleted)) {
+        return;
+      }
+
+      latestLintRequestRef.current = { filePath, content };
+      clearLintTimer();
+      lintTimerRef.current = setTimeout(() => {
+        lintTimerRef.current = null;
+        const nextRequest = latestLintRequestRef.current;
+        if (!nextRequest) return;
+        latestLintCompletedRef.current = nextRequest;
+        const next = lintJava(nextRequest.content, {
+          filePath: nextRequest.filePath,
+        });
+        setLintDiagnostics(next);
+      }, JAVA_LINT_DEBOUNCE_MS);
+    },
+    [clearLintTimer],
+  );
 
   const flushPendingEdit = useCallback(() => {
     if (debounceTimerRef.current !== null) {
@@ -792,6 +836,7 @@ export function GeneratedJavaEditorPane() {
       if (!selectedFilePath || !isJavaEditable) {
         return;
       }
+      scheduleJavaLint(selectedFilePath, next);
       pendingEditRef.current = { filePath: selectedFilePath, content: next };
       if (debounceTimerRef.current !== null) {
         clearTimeout(debounceTimerRef.current);
@@ -805,7 +850,7 @@ export function GeneratedJavaEditorPane() {
         }
       }, JAVA_BUFFER_DEBOUNCE_MS);
     },
-    [selectedFilePath, isJavaEditable, setJavaBufferContent],
+    [selectedFilePath, isJavaEditable, scheduleJavaLint, setJavaBufferContent],
   );
 
   // Save current draft on Cmd/Ctrl+S inside the editor surface. Monaco
@@ -831,35 +876,27 @@ export function GeneratedJavaEditorPane() {
   const editorAssist = useEditorAssist();
   const runExplainRef = useRef(editorAssist.runExplain);
   runExplainRef.current = editorAssist.runExplain;
-  const lintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const formatInFlightRef = useRef(false);
 
-  // Studio-IDE-14 (#256): debounced lint. 300 ms after the last keystroke
-  // we re-run the static rules; the markers refresh under the
-  // `c2c-java-lint` owner via the marker memo above. Lint never mutates
-  // the buffer.
+  // Studio-IDE-14 (#256): debounced lint. The change handler schedules from
+  // raw editor text so marker latency is one 300 ms window, not buffer debounce
+  // plus lint debounce. This effect handles initial content/file switches.
   useEffect(() => {
     if (!selectedFilePath || displayedContent === null) {
+      latestLintRequestRef.current = null;
+      latestLintCompletedRef.current = null;
+      clearLintTimer();
       setLintDiagnostics([]);
       return;
     }
-    if (lintTimerRef.current !== null) {
-      clearTimeout(lintTimerRef.current);
-    }
-    const filePath = selectedFilePath;
-    const content = displayedContent;
-    lintTimerRef.current = setTimeout(() => {
-      lintTimerRef.current = null;
-      const next = lintJava(content, { filePath });
-      setLintDiagnostics(next);
-    }, JAVA_LINT_DEBOUNCE_MS);
+    scheduleJavaLint(selectedFilePath, displayedContent);
+  }, [selectedFilePath, displayedContent, scheduleJavaLint, clearLintTimer]);
+
+  useEffect(() => {
     return () => {
-      if (lintTimerRef.current !== null) {
-        clearTimeout(lintTimerRef.current);
-        lintTimerRef.current = null;
-      }
+      clearLintTimer();
     };
-  }, [selectedFilePath, displayedContent]);
+  }, [clearLintTimer]);
 
   // Studio-IDE-6 (#248): fetch the BFF traceability envelope when the
   // active run or selected Java file changes, then publish the regions
@@ -974,15 +1011,20 @@ export function GeneratedJavaEditorPane() {
   // so the provenance overlay recomputes per ADR-4 (a format is a manual
   // edit unless the content is byte-identical).
   const applyFormattedContent = useCallback(
-    (filePath: string, formatted: string) => {
+    (
+      filePath: string,
+      formatted: string,
+      expectedModel: import("monaco-editor").editor.ITextModel,
+    ): boolean => {
+      if (selectedFilePathRef.current !== filePath) return false;
       const editor = editorInstanceRef.current;
-      if (!editor) return;
+      if (!editor) return false;
       const model = editor.getModel();
-      if (!model) return;
+      if (!model || model !== expectedModel) return false;
       const current = model.getValue();
       if (current === formatted) {
         // Idempotent — nothing to apply, no provenance recompute needed.
-        return;
+        return true;
       }
       const fullRange = model.getFullModelRange();
       editor.executeEdits("c2c.format-java", [
@@ -998,20 +1040,24 @@ export function GeneratedJavaEditorPane() {
         debounceTimerRef.current = null;
       }
       setJavaBufferContent(filePath, formatted);
+      return true;
     },
     [setJavaBufferContent],
   );
 
   // Studio-IDE-14 (#256): the Cmd/Ctrl+Shift+F handler. Reused by the
   // format-on-save path on Cmd/Ctrl+S.
-  const performFormat = useCallback(async (): Promise<boolean> => {
+  const performFormat = useCallback(async (): Promise<{
+    filePath: string;
+    content: string;
+  } | null> => {
     const editor = editorInstanceRef.current;
-    if (!editor || formatInFlightRef.current) return false;
+    if (!editor || formatInFlightRef.current) return null;
     const model = editor.getModel();
-    if (!model) return false;
+    if (!model) return null;
     const filePath = selectedFilePathRef.current;
-    if (!filePath) return false;
-    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return false;
+    if (!filePath) return null;
+    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return null;
     flushPendingEditRef.current();
     const content = model.getValue();
     formatInFlightRef.current = true;
@@ -1025,10 +1071,12 @@ export function GeneratedJavaEditorPane() {
               ? `Could not format: ${result.message}`
               : `Formatter unavailable — buffer unchanged. ${result.message}`,
         });
-        return false;
+        return { filePath, content };
       }
-      applyFormattedContent(filePath, result.formattedContent);
-      return true;
+      if (!applyFormattedContent(filePath, result.formattedContent, model)) {
+        return null;
+      }
+      return { filePath, content: result.formattedContent };
     } finally {
       formatInFlightRef.current = false;
     }
@@ -1087,18 +1135,28 @@ export function GeneratedJavaEditorPane() {
     }
   }, [setCompileCheckPending, state.runId]);
 
-  useRegisterCompileCheckHandler(performCompileCheck);
+  useRegisterCompileCheckHandler(
+    performCompileCheck,
+    Boolean(selectedFilePath && isJavaEditable),
+  );
 
   const performCompileCheckRef = useRef(performCompileCheck);
   performCompileCheckRef.current = performCompileCheck;
 
-  const saveCurrentJavaDraft = useCallback(async (): Promise<void> => {
-    const filePath = selectedFilePathRef.current;
+  const saveCurrentJavaDraft = useCallback(async (
+    requestedFilePath?: string,
+    contentOverride?: string,
+  ): Promise<void> => {
+    const filePath = requestedFilePath ?? selectedFilePathRef.current;
     if (!filePath) return;
     if (!isEditableLanguage(detectLanguageFromPath(filePath))) return;
 
     const editor = editorInstanceRef.current;
-    const modelValue = editor?.getModel()?.getValue();
+    const modelValue =
+      contentOverride ??
+      (filePath === selectedFilePathRef.current
+        ? editor?.getModel()?.getValue()
+        : undefined);
     const pending = pendingEditRef.current;
     const content =
       modelValue ??
@@ -1154,8 +1212,12 @@ export function GeneratedJavaEditorPane() {
       trackDisposable(
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
           if (formatOnSaveRef.current) {
-            void performFormatRef.current().then(() => {
-              void saveCurrentJavaDraftRef.current();
+            void performFormatRef.current().then((result) => {
+              if (!result) return;
+              void saveCurrentJavaDraftRef.current(
+                result.filePath,
+                result.content,
+              );
             });
           } else {
             void saveCurrentJavaDraftRef.current();

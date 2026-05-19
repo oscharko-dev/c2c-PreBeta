@@ -24,8 +24,10 @@ function makeResponse(
 describe("compileCheck client", () => {
   it("parses diagnostics from `{ diagnostics: [...] }`", async () => {
     let capturedInit: RequestInit | undefined;
+    let capturedBody: unknown;
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       capturedInit = init;
+      capturedBody = init?.body ? JSON.parse(String(init.body)) : undefined;
       return makeResponse(200, {
         diagnostics: [
           {
@@ -43,11 +45,34 @@ describe("compileCheck client", () => {
     const result = await compileCheck({ content: "x" }, { fetchImpl });
     expect(result.ok).toBe(true);
     expect(capturedInit).toMatchObject({ credentials: "include" });
+    expect(capturedBody).toEqual({
+      javaFiles: [{ path: "Main.java", content: "x" }],
+      entryFilePath: "Main.java",
+    });
     if (result.ok) {
       expect(result.diagnostics).toHaveLength(1);
       expect(result.diagnostics[0]?.message).toBe("missing semicolon");
       expect(result.diagnostics[0]?.sourceKind).toBe("build");
     }
+  });
+
+  it("wraps the current file path and run id in the BFF compile-check shape", async () => {
+    let capturedBody: unknown;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedBody = init?.body ? JSON.parse(String(init.body)) : undefined;
+      return makeResponse(200, { diagnostics: [] });
+    }) as unknown as FetchFn;
+
+    await compileCheck(
+      { content: "class Foo {}", filePath: "src/Foo.java", runId: "run-1" },
+      { fetchImpl },
+    );
+
+    expect(capturedBody).toEqual({
+      runId: "run-1",
+      javaFiles: [{ path: "src/Foo.java", content: "class Foo {}" }],
+      entryFilePath: "src/Foo.java",
+    });
   });
 
   it("accepts a bare array body and defaults sourceKind to build", async () => {
@@ -101,6 +126,56 @@ describe("compileCheck client", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("compile_check_unavailable");
+    }
+  });
+
+  it("keeps the timeout active while reading the response body", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      return {
+        ok: true,
+        status: 200,
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              const err = new Error("aborted");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      } as unknown as Response;
+    }) as unknown as FetchFn;
+
+    const result = await compileCheck(
+      { content: "class A{}" },
+      { fetchImpl, timeoutMs: 10 },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("compile_check_unavailable");
+      expect(result.message).toMatch(/exceeded 10 ms/);
+    }
+  });
+
+  it("returns compile_check_upstream_error on malformed JSON", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          async text() {
+            return "not-json";
+          },
+        }) as unknown as Response,
+    ) as unknown as FetchFn;
+
+    const result = await compileCheck({ content: "x" }, { fetchImpl });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("compile_check_upstream_error");
+      expect(result.status).toBe(200);
     }
   });
 

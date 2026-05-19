@@ -106,6 +106,33 @@ describe("lintJava", () => {
     ).toBe(false);
   });
 
+  it("does not flag suspicious assignment text inside comments or strings", () => {
+    const source = [
+      "public class A {",
+      "  // if (x = y) is only documentation",
+      '  String text = "while (x = y) is not code";',
+      "  /* if (z = y) is inside a block comment */",
+      "  void m() {}",
+      "}",
+    ].join("\n");
+    const diagnostics = lintJava(source, { filePath: FILE });
+    expect(
+      diagnostics.some((d) => d.code === JAVA_LINT_CODES.suspiciousAssign),
+    ).toBe(false);
+  });
+
+  it("flags unclosed string literals at end of file", () => {
+    const diagnostics = lintJava('public class A {\n  String s = "oops', {
+      filePath: FILE,
+    });
+    const unclosed = diagnostics.find(
+      (d) => d.code === JAVA_LINT_CODES.unclosedString,
+    );
+    expect(unclosed).toBeDefined();
+    expect(unclosed?.line).toBe(2);
+    expect(unclosed?.column).toBe(14);
+  });
+
   it("flags mixed-indentation lines", () => {
     const source = "public class A {\n \tint x = 0;\n}\n";
     const diagnostics = lintJava(source, { filePath: FILE });
