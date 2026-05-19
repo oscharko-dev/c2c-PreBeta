@@ -71,13 +71,13 @@ const (
 	// AssistReason* are the closed set of W0.3 assist-decision reason codes
 	// (Issues #214, #215, #216, #217). Anything outside this set is rejected
 	// by evidence-service so reviewers never see an unrecognised reason.
-	AssistReasonSemanticIRBoundedAmbiguity         = "semantic_ir_bounded_ambiguity"
-	AssistReasonTranslationUnsupportedRepairable   = "translation_unsupported_repairable"
-	AssistReasonBaselineOpenAssumptions            = "baseline_open_assumptions"
+	AssistReasonSemanticIRBoundedAmbiguity          = "semantic_ir_bounded_ambiguity"
+	AssistReasonTranslationUnsupportedRepairable    = "translation_unsupported_repairable"
+	AssistReasonBaselineOpenAssumptions             = "baseline_open_assumptions"
 	AssistReasonDeterministicCandidateLowConfidence = "deterministic_candidate_low_confidence"
-	AssistReasonCallerExplicitOptIn                = "caller_explicit_opt_in"
-	AssistReasonCallerDidNotOptIn                  = "caller_did_not_opt_in"
-	AssistReasonAssistBudgetExhausted              = "assist_budget_exhausted"
+	AssistReasonCallerExplicitOptIn                 = "caller_explicit_opt_in"
+	AssistReasonCallerDidNotOptIn                   = "caller_did_not_opt_in"
+	AssistReasonAssistBudgetExhausted               = "assist_budget_exhausted"
 
 	// AssistAgentRoleTransformation is the only agent role the assist-decision
 	// gate may select in W0.3 (Issue #214). The Verification/Repair Agent runs
@@ -641,6 +641,72 @@ type Artifacts struct {
 	// required for every W0.2 run (including blocked ones).
 	AssistDecision *AssistDecisionLineage `json:"assistDecision,omitempty"`
 	BudgetSummary  *BudgetSummary         `json:"budgetSummary,omitempty"`
+	// ADR 0007 (#257, Issue #279): reference to the per-region manual-edit
+	// overlay JSON. Present iff the run-summary
+	// ``manualEditsCarriedOver`` flag is true; omitted when false. The
+	// completeness validator enforces the cross-field consistency in
+	// EvaluateValidationForWave; structural validation lives on the ref
+	// type itself.
+	ManualEditOverlay *ManualEditOverlayRef `json:"manualEditOverlay,omitempty"`
+}
+
+// ManualEditOverlayRef (ADR 0007 #257, Issue #279) references the per-region
+// manual-edit overlay JSON artifact persisted alongside a W0.2 run's Java
+// candidate history. Required when the run-summary
+// “manualEditsCarriedOver“ flag is true; absent when the flag is false.
+// The overlay body itself is content-addressed JSON of the shape
+// “{ schemaVersion: "v0", regions: ManualEditRegion[] }“ documented in
+// ADR 0007 §3 — evidence-service does not dereference or re-validate the
+// inner body, but enforces the structural envelope (URI, sha256, byte size,
+// schema version, region count) and the cross-field consistency rule.
+type ManualEditOverlayRef struct {
+	URI           string `json:"uri"`
+	SHA256        string `json:"sha256"`
+	ByteSize      int64  `json:"byteSize"`
+	MIMEType      string `json:"mimeType,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	SchemaVersion string `json:"schemaVersion,omitempty"`
+	RegionCount   int    `json:"regionCount"`
+}
+
+func (r *ManualEditOverlayRef) IsZero() bool {
+	if r == nil {
+		return true
+	}
+	return r.URI == "" && r.SHA256 == "" && r.ByteSize == 0 && r.RegionCount == 0
+}
+
+func (r *ManualEditOverlayRef) AsDataReference() DataReference {
+	if r == nil {
+		return DataReference{}
+	}
+	return DataReference{
+		URI:      r.URI,
+		SHA256:   r.SHA256,
+		ByteSize: r.ByteSize,
+		MIMEType: r.MIMEType,
+		Kind:     r.Kind,
+	}
+}
+
+func (r *ManualEditOverlayRef) Validate(path string) error {
+	if r == nil {
+		return fieldError(path, "manualEditOverlay is required")
+	}
+	if err := r.AsDataReference().Validate(path); err != nil {
+		return err
+	}
+	if r.SchemaVersion != "" && r.SchemaVersion != SchemaVersionV0 {
+		return fieldError(path+".schemaVersion", "schemaVersion must be v0 when set")
+	}
+	// regionCount mirrors the run-summary manualDriftRegionCount and MUST
+	// be > 0 on a persisted overlay. An overlay with zero regions is
+	// indistinguishable from "no manual edits" and MUST be omitted entirely
+	// (the orchestrator drops it before persistence).
+	if r.RegionCount <= 0 {
+		return fieldError(path+".regionCount", "regionCount must be > 0 when the overlay is persisted")
+	}
+	return nil
 }
 
 type OpenAssumption struct {
@@ -675,24 +741,32 @@ type ExportRecord struct {
 // schemas/evidence-pack-manifest-v0.json. The "wave" field is "w0" or
 // "w0.2"; the latter activates the W0.2 completeness rules (Issue #171).
 type EvidencePackManifest struct {
-	SchemaVersion       string               `json:"schemaVersion"`
-	Capability          string               `json:"capability"`
-	Service             string               `json:"service"`
-	PackID              string               `json:"packId"`
-	RunID               string               `json:"runId"`
-	WorkflowID          string               `json:"workflowId,omitempty"`
-	Wave                string               `json:"wave"`
-	Status              string               `json:"status"`
-	CompletenessStatus  string               `json:"completenessStatus"`
-	Classification      string               `json:"classification"`
-	Summary             string               `json:"summary,omitempty"`
-	CreatedAt           time.Time            `json:"createdAt"`
-	CreatedBy           string               `json:"createdBy,omitempty"`
-	Artifacts           Artifacts            `json:"artifacts"`
-	OpenAssumptions     []OpenAssumption     `json:"openAssumptions,omitempty"`
-	UnsupportedFeatures []UnsupportedFeature `json:"unsupportedFeatures,omitempty"`
-	Validation          ValidationResult     `json:"validation"`
-	Exports             []ExportRecord       `json:"exports,omitempty"`
+	SchemaVersion      string `json:"schemaVersion"`
+	Capability         string `json:"capability"`
+	Service            string `json:"service"`
+	PackID             string `json:"packId"`
+	RunID              string `json:"runId"`
+	WorkflowID         string `json:"workflowId,omitempty"`
+	Wave               string `json:"wave"`
+	Status             string `json:"status"`
+	CompletenessStatus string `json:"completenessStatus"`
+	Classification     string `json:"classification"`
+	Summary            string `json:"summary,omitempty"`
+	// ADR 0007 (#257, Issue #279): manual-edit provenance mirrors of
+	// W02RunContract.manual_edits_carried_over and
+	// W02RunContract.manual_drift_region_count. ``omitempty`` keeps the
+	// pre-ADR-0007 wire shape unchanged for runs that never carried
+	// manual edits; consumers MUST treat absence as false / 0 per
+	// ADR 0006 §2.
+	ManualEditsCarriedOver bool                 `json:"manualEditsCarriedOver,omitempty"`
+	ManualDriftRegionCount int                  `json:"manualDriftRegionCount,omitempty"`
+	CreatedAt              time.Time            `json:"createdAt"`
+	CreatedBy              string               `json:"createdBy,omitempty"`
+	Artifacts              Artifacts            `json:"artifacts"`
+	OpenAssumptions        []OpenAssumption     `json:"openAssumptions,omitempty"`
+	UnsupportedFeatures    []UnsupportedFeature `json:"unsupportedFeatures,omitempty"`
+	Validation             ValidationResult     `json:"validation"`
+	Exports                []ExportRecord       `json:"exports,omitempty"`
 }
 
 func fieldError(path, reason string) error {
@@ -775,7 +849,61 @@ func (m *EvidencePackManifest) Validate() error {
 	if m.CreatedAt.IsZero() {
 		return fieldError("createdAt", "createdAt is required")
 	}
+	if err := validateManualEditConsistency(
+		m.ManualEditsCarriedOver,
+		m.ManualDriftRegionCount,
+		m.Artifacts.ManualEditOverlay,
+	); err != nil {
+		return err
+	}
 	return validateArtifactsShape(&m.Artifacts)
+}
+
+// validateManualEditConsistency (ADR 0007 #257, Issue #279) enforces the
+// cross-field contract between the run-summary signals
+// (“manualEditsCarriedOver“ / “manualDriftRegionCount“) and the
+// “artifacts.manualEditOverlay“ reference. The orchestrator owns both
+// inputs; evidence-service fails closed when they disagree so a reviewer
+// never sees a pack that claims manual edits without an overlay (or vice
+// versa).
+func validateManualEditConsistency(
+	carriedOver bool,
+	driftRegionCount int,
+	overlay *ManualEditOverlayRef,
+) error {
+	if driftRegionCount < 0 {
+		return fieldError("manualDriftRegionCount", "manualDriftRegionCount must be non-negative")
+	}
+	overlayPresent := overlay != nil && !overlay.IsZero()
+	switch {
+	case carriedOver && driftRegionCount == 0:
+		return fieldError(
+			"manualDriftRegionCount",
+			"manualEditsCarriedOver=true requires manualDriftRegionCount > 0",
+		)
+	case !carriedOver && driftRegionCount > 0:
+		return fieldError(
+			"manualDriftRegionCount",
+			"manualDriftRegionCount > 0 requires manualEditsCarriedOver=true",
+		)
+	case carriedOver && !overlayPresent:
+		return fieldError(
+			"artifacts.manualEditOverlay",
+			"manualEditsCarriedOver=true requires artifacts.manualEditOverlay",
+		)
+	case !carriedOver && overlayPresent:
+		return fieldError(
+			"artifacts.manualEditOverlay",
+			"manualEditsCarriedOver=false forbids artifacts.manualEditOverlay",
+		)
+	}
+	if overlayPresent && overlay.RegionCount != driftRegionCount {
+		return fieldError(
+			"artifacts.manualEditOverlay.regionCount",
+			"manualEditOverlay.regionCount must equal manualDriftRegionCount",
+		)
+	}
+	return nil
 }
 
 // validateArtifactsShape enforces structural rules on individual references
@@ -894,6 +1022,11 @@ func validateArtifactsShape(a *Artifacts) error {
 	}
 	if a.BudgetSummary != nil && !a.BudgetSummary.IsZero() {
 		if err := a.BudgetSummary.Validate("artifacts.budgetSummary"); err != nil {
+			return err
+		}
+	}
+	if a.ManualEditOverlay != nil && !a.ManualEditOverlay.IsZero() {
+		if err := a.ManualEditOverlay.Validate("artifacts.manualEditOverlay"); err != nil {
 			return err
 		}
 	}
@@ -1016,6 +1149,44 @@ func EvaluateValidationForWave(a *Artifacts, wave string) ValidationResult {
 		Messages:           messages,
 		CompletenessStatus: completenessStatus,
 	}
+}
+
+// EvaluateValidationForManifest (ADR 0007 #257, Issue #279) augments
+// EvaluateValidationForWave with the run-summary signals stamped on the
+// manifest. Today it folds the manual-edit overlay completeness rule into
+// the validation result: when “manualEditsCarriedOver“ is true and
+// “artifacts.manualEditOverlay“ is absent, "manualEditOverlay" surfaces
+// in MissingArtifacts so a reviewer can see exactly why the pack flips to
+// “evidence_incomplete“.
+//
+// The strict cross-field contract (signal ↔ overlay, regionCount tally)
+// is enforced separately in manifest.Validate via
+// validateManualEditConsistency; the validator's job here is to report
+// missing artifacts, not to police signal/overlay agreement.
+func EvaluateValidationForManifest(m *EvidencePackManifest) ValidationResult {
+	if m == nil {
+		return ValidationResult{
+			OK:                 false,
+			RequiredArtifacts:  nil,
+			MissingArtifacts:   nil,
+			Messages:           []string{"manifest is required"},
+			CompletenessStatus: CompletenessStatusEvidenceIncomplete,
+		}
+	}
+	result := EvaluateValidationForWave(&m.Artifacts, m.Wave)
+	if m.ManualEditsCarriedOver {
+		overlay := m.Artifacts.ManualEditOverlay
+		if overlay == nil || overlay.IsZero() {
+			result.MissingArtifacts = append(result.MissingArtifacts, "manualEditOverlay")
+			result.OK = false
+			result.CompletenessStatus = CompletenessStatusEvidenceIncomplete
+			result.Messages = append(
+				result.Messages,
+				"manualEditsCarriedOver=true requires the manualEditOverlay artifact",
+			)
+		}
+	}
+	return result
 }
 
 func validateW02ReferentialIntegrity(a *Artifacts) []string {

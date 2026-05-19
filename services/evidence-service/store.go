@@ -29,16 +29,24 @@ func NewPackStore() *PackStore {
 // rules apply (Issue #171). Blocked=true lets the orchestrator signal a
 // known-failed run so classification becomes "blocked" rather than
 // "evidence_incomplete".
+//
+// ADR 0007 (#257, Issue #279): ManualEditsCarriedOver and
+// ManualDriftRegionCount mirror the orchestrator's W02RunContract
+// manual-edit summary. Both default to false / 0 when omitted, matching
+// the pre-ADR-0007 wire shape; the store validates the cross-field
+// consistency with Artifacts.ManualEditOverlay.
 type CreateInput struct {
-	RunID               string               `json:"runId"`
-	WorkflowID          string               `json:"workflowId,omitempty"`
-	Wave                string               `json:"wave,omitempty"`
-	Blocked             bool                 `json:"blocked,omitempty"`
-	Summary             string               `json:"summary,omitempty"`
-	CreatedBy           string               `json:"createdBy,omitempty"`
-	Artifacts           Artifacts            `json:"artifacts"`
-	OpenAssumptions     []OpenAssumption     `json:"openAssumptions,omitempty"`
-	UnsupportedFeatures []UnsupportedFeature `json:"unsupportedFeatures,omitempty"`
+	RunID                  string               `json:"runId"`
+	WorkflowID             string               `json:"workflowId,omitempty"`
+	Wave                   string               `json:"wave,omitempty"`
+	Blocked                bool                 `json:"blocked,omitempty"`
+	Summary                string               `json:"summary,omitempty"`
+	CreatedBy              string               `json:"createdBy,omitempty"`
+	Artifacts              Artifacts            `json:"artifacts"`
+	OpenAssumptions        []OpenAssumption     `json:"openAssumptions,omitempty"`
+	UnsupportedFeatures    []UnsupportedFeature `json:"unsupportedFeatures,omitempty"`
+	ManualEditsCarriedOver bool                 `json:"manualEditsCarriedOver,omitempty"`
+	ManualDriftRegionCount int                  `json:"manualDriftRegionCount,omitempty"`
 }
 
 func (s *PackStore) Create(input CreateInput) (*EvidencePackManifest, error) {
@@ -59,21 +67,23 @@ func (s *PackStore) Create(input CreateInput) (*EvidencePackManifest, error) {
 	id := s.seq.Add(1)
 	packID := fmt.Sprintf("epk-%s-%04d", input.RunID, id)
 	manifest := &EvidencePackManifest{
-		SchemaVersion:       SchemaVersionV0,
-		Capability:          CapabilityEvidence,
-		Service:             ServiceName,
-		PackID:              packID,
-		RunID:               input.RunID,
-		WorkflowID:          input.WorkflowID,
-		Wave:                wave,
-		Summary:             input.Summary,
-		CreatedAt:           s.clock(),
-		CreatedBy:           input.CreatedBy,
-		Artifacts:           input.Artifacts,
-		OpenAssumptions:     input.OpenAssumptions,
-		UnsupportedFeatures: input.UnsupportedFeatures,
+		SchemaVersion:          SchemaVersionV0,
+		Capability:             CapabilityEvidence,
+		Service:                ServiceName,
+		PackID:                 packID,
+		RunID:                  input.RunID,
+		WorkflowID:             input.WorkflowID,
+		Wave:                   wave,
+		Summary:                input.Summary,
+		ManualEditsCarriedOver: input.ManualEditsCarriedOver,
+		ManualDriftRegionCount: input.ManualDriftRegionCount,
+		CreatedAt:              s.clock(),
+		CreatedBy:              input.CreatedBy,
+		Artifacts:              input.Artifacts,
+		OpenAssumptions:        input.OpenAssumptions,
+		UnsupportedFeatures:    input.UnsupportedFeatures,
 	}
-	manifest.Validation = EvaluateValidationForWave(&manifest.Artifacts, wave)
+	manifest.Validation = EvaluateValidationForManifest(manifest)
 	if input.Blocked && wave == WaveW02 {
 		manifest.Validation = relaxBlockedW02Validation(manifest.Validation, manifest.Artifacts)
 	}
@@ -98,12 +108,22 @@ func (s *PackStore) Create(input CreateInput) (*EvidencePackManifest, error) {
 // Blocked is a tri-state hint from the orchestrator: nil means "leave the
 // existing blocked classification untouched", non-nil overrides it
 // (Issue #171).
+//
+// ADR 0007 (#257, Issue #279): ManualEditsCarriedOver and
+// ManualDriftRegionCount are tri-state in the same way — nil leaves the
+// existing run-summary stamping alone, non-nil overrides it. Setting
+// ManualEditsCarriedOver to false also clears the persisted overlay (the
+// orchestrator's "no manual edits after all" path); setting it to true
+// REQUIRES the patch to either include the overlay reference in Artifacts
+// or rely on a previously-patched overlay still being on the manifest.
 type PatchInput struct {
-	Summary             *string              `json:"summary,omitempty"`
-	Blocked             *bool                `json:"blocked,omitempty"`
-	Artifacts           *Artifacts           `json:"artifacts,omitempty"`
-	OpenAssumptions     []OpenAssumption     `json:"openAssumptions,omitempty"`
-	UnsupportedFeatures []UnsupportedFeature `json:"unsupportedFeatures,omitempty"`
+	Summary                *string              `json:"summary,omitempty"`
+	Blocked                *bool                `json:"blocked,omitempty"`
+	Artifacts              *Artifacts           `json:"artifacts,omitempty"`
+	OpenAssumptions        []OpenAssumption     `json:"openAssumptions,omitempty"`
+	UnsupportedFeatures    []UnsupportedFeature `json:"unsupportedFeatures,omitempty"`
+	ManualEditsCarriedOver *bool                `json:"manualEditsCarriedOver,omitempty"`
+	ManualDriftRegionCount *int                 `json:"manualDriftRegionCount,omitempty"`
 }
 
 func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManifest, error) {
@@ -126,6 +146,20 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 	if len(patch.UnsupportedFeatures) > 0 {
 		manifest.UnsupportedFeatures = append(manifest.UnsupportedFeatures, patch.UnsupportedFeatures...)
 	}
+	if patch.ManualEditsCarriedOver != nil {
+		manifest.ManualEditsCarriedOver = *patch.ManualEditsCarriedOver
+		// ADR 0007 (Issue #279): flipping the flag back to false also
+		// clears the persisted overlay. The orchestrator's "no manual
+		// edits after all" recompute path otherwise leaves a stale
+		// overlay ref pointing at deleted content.
+		if !manifest.ManualEditsCarriedOver {
+			manifest.ManualDriftRegionCount = 0
+			manifest.Artifacts.ManualEditOverlay = nil
+		}
+	}
+	if patch.ManualDriftRegionCount != nil {
+		manifest.ManualDriftRegionCount = *patch.ManualDriftRegionCount
+	}
 	blocked := manifest.Classification == ClassificationBlocked
 	if patch.Blocked != nil {
 		blocked = *patch.Blocked
@@ -133,7 +167,7 @@ func (s *PackStore) Update(packID string, patch PatchInput) (*EvidencePackManife
 	if patch.Blocked != nil && *patch.Blocked && manifest.Wave == WaveW02 {
 		normalizeBlockedW02Artifacts(&manifest.Artifacts)
 	}
-	manifest.Validation = EvaluateValidationForWave(&manifest.Artifacts, manifest.Wave)
+	manifest.Validation = EvaluateValidationForManifest(manifest)
 	if blocked && manifest.Wave == WaveW02 {
 		manifest.Validation = relaxBlockedW02Validation(manifest.Validation, manifest.Artifacts)
 	}
@@ -304,6 +338,10 @@ func mergeArtifacts(dst, src *Artifacts) {
 	if src.BudgetSummary != nil {
 		summary := *src.BudgetSummary
 		dst.BudgetSummary = &summary
+	}
+	if src.ManualEditOverlay != nil {
+		overlay := *src.ManualEditOverlay
+		dst.ManualEditOverlay = &overlay
 	}
 }
 
@@ -546,6 +584,10 @@ func cloneArtifacts(a Artifacts) Artifacts {
 	if a.BudgetSummary != nil {
 		summary := *a.BudgetSummary
 		out.BudgetSummary = &summary
+	}
+	if a.ManualEditOverlay != nil {
+		overlay := *a.ManualEditOverlay
+		out.ManualEditOverlay = &overlay
 	}
 	return out
 }

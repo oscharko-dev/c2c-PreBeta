@@ -63,6 +63,15 @@
     "summary": {
       "type": "string"
     },
+    "manualEditsCarriedOver": {
+      "type": "boolean",
+      "description": "ADR 0007 (#257, #279) — Orchestrator-stamped flag mirroring W02RunContract.manual_edits_carried_over. True iff the verified Java buffer contained at least one ``manual_modified`` or ``manual_edit`` region. Absent on legacy packs and on packs that finalised before ADR 0007; consumers MUST treat absence as ``false`` per ADR 0006 §2. When true, ``artifacts.manualEditOverlay`` MUST be present; when false, it MUST be absent."
+    },
+    "manualDriftRegionCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "ADR 0007 (#257, #279) — Orchestrator-stamped count mirroring W02RunContract.manual_drift_region_count. Number of regions whose ``originClass`` is ``manual_modified`` or ``manual_edit``. Absent on legacy packs; consumers MUST treat absence as ``0`` per ADR 0006 §2. When ``artifacts.manualEditOverlay`` is present its ``regionCount`` MUST equal this value."
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time"

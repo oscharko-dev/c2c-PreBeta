@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -107,11 +109,11 @@ func completeW02Artifacts(t *testing.T) Artifacts {
 	// iterations available with one used, six model invocations available
 	// with two used (one transformation + one repair).
 	base.AssistDecision = &AssistDecisionLineage{
-		Outcome:           AssistOutcomeRequired,
-		ReasonCode:        AssistReasonBaselineOpenAssumptions,
-		DecidedAt:         "2026-05-17T00:00:00Z",
-		SelectedAgentRole: AssistAgentRoleTransformation,
-		Rationale:         "deterministic baseline emitted openAssumptions; assist required",
+		Outcome:                       AssistOutcomeRequired,
+		ReasonCode:                    AssistReasonBaselineOpenAssumptions,
+		DecidedAt:                     "2026-05-17T00:00:00Z",
+		SelectedAgentRole:             AssistAgentRoleTransformation,
+		Rationale:                     "deterministic baseline emitted openAssumptions; assist required",
 		AssistBudgetSnapshot:          &BudgetSnapshot{Limit: 1, Used: 1, Remaining: 0},
 		RepairBudgetSnapshot:          &BudgetSnapshot{Limit: 2, Used: 0, Remaining: 2},
 		ModelInvocationBudgetSnapshot: &BudgetSnapshot{Limit: 6, Used: 1, Remaining: 5},
@@ -996,6 +998,411 @@ func TestCreatePackW02BlockedRunStillRequiresBudgetSummary(t *testing.T) {
 	_ = res.Body.Close()
 	if !containsString(manifest.Validation.MissingArtifacts, "budgetSummary") {
 		t.Fatalf("blocked pack without budgetSummary must still flag it; got %v", manifest.Validation.MissingArtifacts)
+	}
+}
+
+// --- ADR 0007 (Issue #279) — manualEditOverlay ----------------------------
+
+// mustManualEditOverlay builds a content-addressed overlay reference for tests.
+// The payload mirrors the ADR 0007 §3 shape; evidence-service does not crack
+// the JSON body apart so the helper keeps it minimal.
+func mustManualEditOverlay(t *testing.T, runID string, regionCount int) ManualEditOverlayRef {
+	t.Helper()
+	overlay := map[string]any{
+		"schemaVersion": SchemaVersionV0,
+		"regions":       []any{},
+	}
+	ref, err := NewDataReference(
+		"urn:c2c/manual-edit-overlay/"+runID,
+		overlay,
+		"application/json",
+		"manual-edit-overlay",
+	)
+	if err != nil {
+		t.Fatalf("build overlay reference: %v", err)
+	}
+	return ManualEditOverlayRef{
+		URI:           ref.URI,
+		SHA256:        ref.SHA256,
+		ByteSize:      ref.ByteSize,
+		MIMEType:      ref.MIMEType,
+		Kind:          ref.Kind,
+		SchemaVersion: SchemaVersionV0,
+		RegionCount:   regionCount,
+	}
+}
+
+func TestManualEditOverlayRefValidateRejectsZeroRegionCount(t *testing.T) {
+	overlay := mustManualEditOverlay(t, "run-mer-1", 0)
+	if err := overlay.Validate("artifacts.manualEditOverlay"); err == nil {
+		t.Fatalf("expected validation to reject overlay with regionCount=0")
+	} else if !strings.Contains(err.Error(), "regionCount") {
+		t.Fatalf("expected regionCount-targeted error; got %v", err)
+	}
+}
+
+func TestManualEditOverlayRefValidateRejectsForeignSchemaVersion(t *testing.T) {
+	overlay := mustManualEditOverlay(t, "run-mer-2", 1)
+	overlay.SchemaVersion = "v1"
+	if err := overlay.Validate("artifacts.manualEditOverlay"); err == nil {
+		t.Fatalf("expected validation to reject non-v0 schemaVersion")
+	} else if !strings.Contains(err.Error(), "schemaVersion") {
+		t.Fatalf("expected schemaVersion-targeted error; got %v", err)
+	}
+}
+
+func TestManualEditOverlayRefValidateRejectsSecretBearingURI(t *testing.T) {
+	overlay := mustManualEditOverlay(t, "run-mer-3", 1)
+	overlay.URI = "https://artifacts.example/overlay?token=" + "s" + "k-" + strings.Repeat("A", 20)
+	err := overlay.Validate("artifacts.manualEditOverlay")
+	if err == nil {
+		t.Fatalf("expected validation to reject secret-bearing overlay URI")
+	}
+	if !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected secret rejection; got %v", err)
+	}
+}
+
+func TestCreatePackW02PersistsManualEditOverlayWhenCarriedOver(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	overlay := mustManualEditOverlay(t, "run-w02-overlay-1", 3)
+	artifacts.ManualEditOverlay = &overlay
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:                  "run-w02-overlay-1",
+		Wave:                   WaveW02,
+		CreatedBy:              "orchestrator",
+		Artifacts:              artifacts,
+		ManualEditsCarriedOver: true,
+		ManualDriftRegionCount: 3,
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201; got %d", res.StatusCode)
+	}
+	var manifest EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = res.Body.Close()
+	if !manifest.ManualEditsCarriedOver {
+		t.Fatalf("expected manifest to record manualEditsCarriedOver=true")
+	}
+	if manifest.ManualDriftRegionCount != 3 {
+		t.Fatalf("expected manualDriftRegionCount=3; got %d", manifest.ManualDriftRegionCount)
+	}
+	if manifest.Artifacts.ManualEditOverlay == nil {
+		t.Fatalf("expected artifacts.manualEditOverlay to be persisted")
+	}
+	if manifest.Artifacts.ManualEditOverlay.RegionCount != 3 {
+		t.Fatalf("expected persisted overlay.regionCount=3; got %d", manifest.Artifacts.ManualEditOverlay.RegionCount)
+	}
+	if manifest.Artifacts.ManualEditOverlay.SHA256 != overlay.SHA256 {
+		t.Fatalf("expected persisted overlay sha256 to match submitted ref")
+	}
+	if manifest.Classification != ClassificationSuccess {
+		t.Fatalf("expected classification=success on complete run; got %s", manifest.Classification)
+	}
+	if manifest.CompletenessStatus != CompletenessStatusComplete {
+		t.Fatalf("expected completenessStatus=complete; got %s", manifest.CompletenessStatus)
+	}
+}
+
+func TestCreatePackW02RejectsCarriedOverWithoutOverlay(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:                  "run-w02-overlay-missing",
+		Wave:                   WaveW02,
+		Artifacts:              artifacts,
+		ManualEditsCarriedOver: true,
+		ManualDriftRegionCount: 2,
+	})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when carried_over=true and overlay missing; got %d", res.StatusCode)
+	}
+	var body map[string]string
+	_ = json.NewDecoder(res.Body).Decode(&body)
+	_ = res.Body.Close()
+	if !strings.Contains(body["error"], "manualEditOverlay") {
+		t.Fatalf("expected error to call out manualEditOverlay; got %q", body["error"])
+	}
+}
+
+func TestCreatePackW02RejectsOverlayWithoutCarriedOver(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	overlay := mustManualEditOverlay(t, "run-w02-overlay-orphan", 1)
+	artifacts.ManualEditOverlay = &overlay
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-overlay-orphan",
+		Wave:      WaveW02,
+		Artifacts: artifacts,
+		// ManualEditsCarriedOver intentionally false / unset.
+	})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when overlay present but carried_over=false; got %d", res.StatusCode)
+	}
+	var body map[string]string
+	_ = json.NewDecoder(res.Body).Decode(&body)
+	_ = res.Body.Close()
+	if !strings.Contains(body["error"], "manualEditOverlay") {
+		t.Fatalf("expected error to call out manualEditOverlay; got %q", body["error"])
+	}
+}
+
+func TestCreatePackW02RejectsRegionCountMismatch(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	overlay := mustManualEditOverlay(t, "run-w02-overlay-mismatch", 5)
+	artifacts.ManualEditOverlay = &overlay
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:                  "run-w02-overlay-mismatch",
+		Wave:                   WaveW02,
+		Artifacts:              artifacts,
+		ManualEditsCarriedOver: true,
+		ManualDriftRegionCount: 2, // overlay claims 5
+	})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 on regionCount mismatch; got %d", res.StatusCode)
+	}
+	var body map[string]string
+	_ = json.NewDecoder(res.Body).Decode(&body)
+	_ = res.Body.Close()
+	if !strings.Contains(body["error"], "regionCount") {
+		t.Fatalf("expected error to call out regionCount; got %q", body["error"])
+	}
+}
+
+func TestCreatePackW02RejectsCarriedOverWithZeroDrift(t *testing.T) {
+	srv, _ := newTestServer(t)
+	artifacts := completeW02Artifacts(t)
+	overlay := mustManualEditOverlay(t, "run-w02-overlay-empty", 1)
+	artifacts.ManualEditOverlay = &overlay
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:                  "run-w02-overlay-empty",
+		Wave:                   WaveW02,
+		Artifacts:              artifacts,
+		ManualEditsCarriedOver: true,
+		ManualDriftRegionCount: 0,
+	})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when carried_over=true and drift=0; got %d", res.StatusCode)
+	}
+	_ = res.Body.Close()
+}
+
+func TestEvaluateValidationForManifestFlagsMissingOverlayWhenCarriedOver(t *testing.T) {
+	m := &EvidencePackManifest{
+		Wave:                   WaveW02,
+		Artifacts:              completeW02Artifacts(t),
+		ManualEditsCarriedOver: true,
+		ManualDriftRegionCount: 4,
+	}
+	result := EvaluateValidationForManifest(m)
+	if result.OK {
+		t.Fatalf("expected validation to fail when carried_over=true but overlay missing")
+	}
+	if !containsString(result.MissingArtifacts, "manualEditOverlay") {
+		t.Fatalf("missingArtifacts must call out manualEditOverlay; got %v", result.MissingArtifacts)
+	}
+	if result.CompletenessStatus != CompletenessStatusEvidenceIncomplete {
+		t.Fatalf("expected completenessStatus=evidence_incomplete; got %s", result.CompletenessStatus)
+	}
+}
+
+func TestEvaluateValidationForManifestPassesWhenOverlayOmittedAndNotCarriedOver(t *testing.T) {
+	m := &EvidencePackManifest{
+		Wave:                   WaveW02,
+		Artifacts:              completeW02Artifacts(t),
+		ManualEditsCarriedOver: false,
+		ManualDriftRegionCount: 0,
+	}
+	result := EvaluateValidationForManifest(m)
+	if !result.OK {
+		t.Fatalf("expected validation to pass when no manual edits; got missing=%v", result.MissingArtifacts)
+	}
+	if containsString(result.MissingArtifacts, "manualEditOverlay") {
+		t.Fatalf("missingArtifacts must not list manualEditOverlay; got %v", result.MissingArtifacts)
+	}
+}
+
+func TestPatchPackW02CanAddManualEditOverlay(t *testing.T) {
+	srv, _ := newTestServer(t)
+	// Create a complete W0.2 pack with no manual edits.
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-patch-overlay",
+		Wave:      WaveW02,
+		Artifacts: completeW02Artifacts(t),
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201; got %d", res.StatusCode)
+	}
+	var created EvidencePackManifest
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if created.ManualEditsCarriedOver {
+		t.Fatalf("baseline must start with carried_over=false")
+	}
+
+	// PATCH adds the overlay and the carried-over signal.
+	overlay := mustManualEditOverlay(t, "run-w02-patch-overlay", 2)
+	carriedTrue := true
+	driftTwo := 2
+	patchRes := patchJSON(t, srv.URL+"/v0/packs/"+created.PackID, PatchInput{
+		Artifacts:              &Artifacts{ManualEditOverlay: &overlay},
+		ManualEditsCarriedOver: &carriedTrue,
+		ManualDriftRegionCount: &driftTwo,
+	})
+	if patchRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200; got %d", patchRes.StatusCode)
+	}
+	var patched EvidencePackManifest
+	if err := json.NewDecoder(patchRes.Body).Decode(&patched); err != nil {
+		t.Fatalf("decode patch: %v", err)
+	}
+	_ = patchRes.Body.Close()
+	if !patched.ManualEditsCarriedOver {
+		t.Fatalf("expected patched.ManualEditsCarriedOver=true")
+	}
+	if patched.ManualDriftRegionCount != 2 {
+		t.Fatalf("expected patched.ManualDriftRegionCount=2; got %d", patched.ManualDriftRegionCount)
+	}
+	if patched.Artifacts.ManualEditOverlay == nil {
+		t.Fatalf("expected overlay to be persisted via PATCH")
+	}
+	if patched.Artifacts.ManualEditOverlay.RegionCount != 2 {
+		t.Fatalf("expected persisted overlay.regionCount=2; got %d", patched.Artifacts.ManualEditOverlay.RegionCount)
+	}
+	if patched.Classification != ClassificationSuccess {
+		t.Fatalf("expected classification=success after PATCH; got %s", patched.Classification)
+	}
+}
+
+func TestPatchPackW02ClearsOverlayWhenCarriedOverFlippedToFalse(t *testing.T) {
+	srv, _ := newTestServer(t)
+	// Create a complete W0.2 pack WITH manual edits.
+	artifacts := completeW02Artifacts(t)
+	overlay := mustManualEditOverlay(t, "run-w02-overlay-flip", 1)
+	artifacts.ManualEditOverlay = &overlay
+
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:                  "run-w02-overlay-flip",
+		Wave:                   WaveW02,
+		Artifacts:              artifacts,
+		ManualEditsCarriedOver: true,
+		ManualDriftRegionCount: 1,
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201; got %d", res.StatusCode)
+	}
+	var created EvidencePackManifest
+	_ = json.NewDecoder(res.Body).Decode(&created)
+	_ = res.Body.Close()
+	if created.Artifacts.ManualEditOverlay == nil {
+		t.Fatalf("baseline must carry overlay")
+	}
+
+	// PATCH flips carried_over back to false; overlay must be cleared.
+	carriedFalse := false
+	patchRes := patchJSON(t, srv.URL+"/v0/packs/"+created.PackID, PatchInput{
+		ManualEditsCarriedOver: &carriedFalse,
+	})
+	if patchRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200; got %d", patchRes.StatusCode)
+	}
+	var patched EvidencePackManifest
+	_ = json.NewDecoder(patchRes.Body).Decode(&patched)
+	_ = patchRes.Body.Close()
+	if patched.ManualEditsCarriedOver {
+		t.Fatalf("expected ManualEditsCarriedOver=false after PATCH")
+	}
+	if patched.ManualDriftRegionCount != 0 {
+		t.Fatalf("expected ManualDriftRegionCount=0 after PATCH; got %d", patched.ManualDriftRegionCount)
+	}
+	if patched.Artifacts.ManualEditOverlay != nil {
+		t.Fatalf("expected overlay to be cleared after PATCH; still present")
+	}
+}
+
+func TestValidatePackEndpointSurfacesMissingOverlayWhenCarriedOver(t *testing.T) {
+	srv, _ := newTestServer(t)
+	// Create a complete W0.2 pack with no manual edits.
+	res := postJSON(t, srv.URL+"/v0/packs", CreateInput{
+		RunID:     "run-w02-validate-overlay",
+		Wave:      WaveW02,
+		Artifacts: completeW02Artifacts(t),
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201; got %d", res.StatusCode)
+	}
+	var created EvidencePackManifest
+	_ = json.NewDecoder(res.Body).Decode(&created)
+	_ = res.Body.Close()
+
+	// Flip carried_over true via PATCH WITHOUT the overlay — the store must
+	// refuse. (Adding only the signal without the artifact violates the
+	// consistency contract.)
+	carriedTrue := true
+	driftOne := 1
+	patchRes := patchJSON(t, srv.URL+"/v0/packs/"+created.PackID, PatchInput{
+		ManualEditsCarriedOver: &carriedTrue,
+		ManualDriftRegionCount: &driftOne,
+	})
+	if patchRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when PATCH adds carried_over without overlay; got %d", patchRes.StatusCode)
+	}
+	_ = patchRes.Body.Close()
+}
+
+func TestManifestSchemaCarriesManualEditOverlayContract(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "schemas", "evidence-pack-manifest-v0.json"))
+	if err != nil {
+		t.Fatalf("read manifest schema: %v", err)
+	}
+	doc := map[string]any{}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("parse manifest schema: %v", err)
+	}
+	properties, _ := doc["properties"].(map[string]any)
+	if _, ok := properties["manualEditsCarriedOver"]; !ok {
+		t.Fatalf("schema must expose manualEditsCarriedOver at top level")
+	}
+	if _, ok := properties["manualDriftRegionCount"]; !ok {
+		t.Fatalf("schema must expose manualDriftRegionCount at top level")
+	}
+	artifacts, _ := properties["artifacts"].(map[string]any)
+	artifactsProps, _ := artifacts["properties"].(map[string]any)
+	if _, ok := artifactsProps["manualEditOverlay"]; !ok {
+		t.Fatalf("schema artifacts.manualEditOverlay missing")
+	}
+	defs, _ := doc["$defs"].(map[string]any)
+	if _, ok := defs["manualEditOverlayRef"]; !ok {
+		t.Fatalf("schema $defs/manualEditOverlayRef missing")
+	}
+}
+
+func TestOpenAPICarriesManualEditOverlayContract(t *testing.T) {
+	body, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatalf("read openapi.yaml: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"manualEditsCarriedOver",
+		"manualDriftRegionCount",
+		"ManualEditOverlayRef",
+		"manualEditOverlay:",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("openapi.yaml missing %q", want)
+		}
 	}
 }
 

@@ -172,6 +172,13 @@ components:
         artifacts: { $ref: "#/components/schemas/Artifacts" }
         openAssumptions: { type: array, items: { $ref: "#/components/schemas/OpenAssumption" } }
         unsupportedFeatures: { type: array, items: { $ref: "#/components/schemas/UnsupportedFeature" } }
+        # ADR 0007 (#257, #279) — Orchestrator-stamped run-summary signals
+        # for manual-edit provenance. When ``manualEditsCarriedOver`` is
+        # true, ``artifacts.manualEditOverlay`` MUST be present and its
+        # ``regionCount`` MUST equal ``manualDriftRegionCount``. Default
+        # false / 0 per ADR 0006 §2 absence semantics.
+        manualEditsCarriedOver: { type: boolean }
+        manualDriftRegionCount: { type: integer, minimum: 0 }
 
     PatchInput:
       type: object
@@ -181,6 +188,13 @@ components:
         artifacts: { $ref: "#/components/schemas/Artifacts" }
         openAssumptions: { type: array, items: { $ref: "#/components/schemas/OpenAssumption" } }
         unsupportedFeatures: { type: array, items: { $ref: "#/components/schemas/UnsupportedFeature" } }
+        # ADR 0007 (#257, #279) — Tri-state signals for manual-edit
+        # provenance. Sending ``manualEditsCarriedOver`` flips the run's
+        # stamped value (and clears the overlay when set to false); sending
+        # ``manualDriftRegionCount`` overrides the region tally. Both fields
+        # are optional; omitting them leaves the existing values untouched.
+        manualEditsCarriedOver: { type: boolean }
+        manualDriftRegionCount: { type: integer, minimum: 0 }
 
     Artifacts:
       type: object
@@ -210,6 +224,12 @@ components:
         # is required for every W0.2 run (including blocked ones).
         assistDecision: { $ref: "#/components/schemas/AssistDecisionLineage" }
         budgetSummary: { $ref: "#/components/schemas/BudgetSummary" }
+        # ADR 0007 (#257, #279) — Reference to the per-region manual-edit
+        # overlay JSON artifact. Required when the top-level
+        # ``manualEditsCarriedOver`` flag is true; MUST be absent when the
+        # flag is false. Consumers MUST treat absence as "no manual edits"
+        # per ADR 0006 §2.
+        manualEditOverlay: { $ref: "#/components/schemas/ManualEditOverlayRef" }
 
     TransformationPass:
       type: object
@@ -355,6 +375,30 @@ components:
         assist: { $ref: "#/components/schemas/BudgetSnapshot" }
         modelInvocation: { $ref: "#/components/schemas/BudgetSnapshot" }
 
+    # ADR 0007 (#257, #279) — Per-region manual-edit overlay reference.
+    # The referenced artifact body is a JSON document of the shape
+    # ``{ schemaVersion: "v0", regions: ManualEditRegion[] }`` where each
+    # ManualEditRegion carries lineRange, originClass ∈ {"manual_modified",
+    # "manual_edit"}, generatorBaselineRunId, lastModifiedAt, lastModifiedBy,
+    # manualEditCount, and (for manual_modified) generatorBaselineRegionHash.
+    ManualEditOverlayRef:
+      type: object
+      required: [uri, sha256, byteSize]
+      properties:
+        uri: { type: string }
+        sha256: { type: string, pattern: "^[0-9a-fA-F]{64}$" }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+        schemaVersion: { type: string, enum: [v0] }
+        regionCount:
+          type: integer
+          minimum: 0
+          description: |
+            Number of regions enumerated in the referenced overlay. MUST
+            equal the run-summary ``manualDriftRegionCount`` and MUST be
+            > 0 (an overlay with no regions is omitted entirely).
+
     AssistDecisionLineage:
       type: object
       required: [outcome, reasonCode, decidedAt]
@@ -427,6 +471,12 @@ components:
           type: string
           enum: [success, evidence_incomplete, blocked, failed]
         summary: { type: string }
+        # ADR 0007 (#257, #279) — Manual-edit provenance run-summary
+        # mirrors of W02RunContract.manual_edits_carried_over and
+        # W02RunContract.manual_drift_region_count. See CreateInput for
+        # the consistency contract with ``artifacts.manualEditOverlay``.
+        manualEditsCarriedOver: { type: boolean }
+        manualDriftRegionCount: { type: integer, minimum: 0 }
         createdAt: { type: string, format: date-time }
         createdBy: { type: string }
         artifacts: { $ref: "#/components/schemas/Artifacts" }
