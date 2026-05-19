@@ -197,7 +197,7 @@ const HEX64 = /^[a-fA-F0-9]{64}$/;
 // L3: allow-lists for identifier fields echoed into the ledger / forwarded
 // to the gateway. Unicode property escapes require the `u` flag.
 const SAFE_ID_PATTERN = /^[A-Za-z0-9._\-]+$/u;
-const SAFE_REDACTION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/u;
+const SAFE_REDACTION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_:-]{0,127}$/u;
 const SAFE_GATEWAY_REF_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/u;
 const SAFE_GATEWAY_LEDGER_REF_PATTERN =
   /^urn:[A-Za-z0-9][A-Za-z0-9._:/+\-=]{0,511}$/u;
@@ -269,6 +269,7 @@ function normaliseGatewayInvocationId(value: unknown): string | null {
 
 function normaliseGatewayLedgerRef(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0) return null;
+  if (value.includes("://")) return null;
   return SAFE_GATEWAY_LEDGER_REF_PATTERN.test(value) ? value : null;
 }
 

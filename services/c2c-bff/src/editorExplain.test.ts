@@ -541,6 +541,10 @@ test("extractLedgerRef returns the gateway value when present and non-empty", ()
     }),
     null,
   );
+  assert.equal(
+    extractLedgerRef({ ledgerRef: "urn:https://internal.example/run" }),
+    null,
+  );
   assert.equal(extractLedgerRef({}), null);
   assert.equal(extractLedgerRef(null), null);
   assert.equal(extractLedgerRef("not an object"), null);
@@ -586,6 +590,7 @@ test("normaliseGatewayRedactedFields drops unsafe gateway entries", () => {
     studioMatchedPatternIds: ["field-name-class:email", "ssn-us"],
     gatewayRedactedFields: [
       "customerName",
+      "internal.example",
       "alice@example.invalid",
       "https://internal.example/redaction/1",
     ],
@@ -630,8 +635,12 @@ test("mapGatewayResponse drops unsafe gateway metadata", () => {
     body: {
       explanation: "MOVE moves bytes from A to B",
       invocationId: "https://internal.example/inv/123",
-      ledgerRef: "https://internal.example/run?token=opaque",
-      redactedFields: ["field-name-class:email", "alice@example.invalid"],
+      ledgerRef: "urn:https://internal.example/run?token=opaque",
+      redactedFields: [
+        "field-name-class:email",
+        "internal.example",
+        "alice@example.invalid",
+      ],
     },
   });
   assert.equal(result.kind, "ok");

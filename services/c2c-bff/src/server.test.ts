@@ -8030,9 +8030,10 @@ test("POST /api/v0/editor/explain drops unsafe gateway metadata before respondin
     body: {
       explanation: "ok",
       invocationId: "https://internal.example/inv/123",
-      ledgerRef: "https://internal.example/run?token=opaque",
+      ledgerRef: "urn:https://internal.example/run?token=opaque",
       redactedFields: [
         "field-name-class:email",
+        "internal.example",
         "alice@example.invalid",
         "https://internal.example/redaction/1",
       ],
