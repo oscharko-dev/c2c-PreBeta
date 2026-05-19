@@ -128,7 +128,7 @@ export interface TransformResponse extends W02RunContractFields {
 // when absent, the generated-Java buffer renders without trust-pillar
 // decoration. Studio MUST NOT infer regions from filename or content.
 export interface RunSummary extends W02RunContractFields {
-  schemaVersion?: "v0";
+  schemaVersion?: string;
   runId: string;
   programId: string;
   status: "starting" | "updating" | "completed" | "failed";
@@ -139,7 +139,7 @@ export interface RunSummary extends W02RunContractFields {
   policyDecision?: string;
   createdAt: string;
   updatedAt: string;
-  javaRegionClassification?: JavaOriginOverlay | null;
+  javaRegionClassification?: JavaRegionClassificationMap | null;
 }
 
 export interface GeneratedFileRef {
@@ -157,7 +157,7 @@ export interface GeneratedFileRef {
 // whole DTO is absent on ``GeneratedView``, the lineage UI renders
 // "Lineage unavailable" — Studio MUST NOT infer the value.
 export interface GeneratedTraceability {
-  schemaVersion?: "v0";
+  schemaVersion?: string;
   programId: string;
   irId: string;
   sourceHash: string;
@@ -205,7 +205,7 @@ export type DiagnosticSourceKind =
   | "test";
 
 export interface Diagnostic {
-  schemaVersion?: "v0";
+  schemaVersion?: string;
   severity: DiagnosticSeverity;
   code: string;
   message: string;
@@ -597,12 +597,17 @@ export interface JavaOriginOverlay {
 // the authoritative source for IDE-6 trust-pillar painting — missing
 // fields would force a fallback colour we explicitly do not want.
 export interface JavaRegionClassification {
-  schemaVersion: "v0";
+  schemaVersion: string;
   lineRange: { startLine: number; endLine: number };
   originClass: JavaOriginClass;
   verificationOutcome: JavaVerificationOutcome;
   mappingClass: JavaMappingClass;
 }
+
+export type JavaRegionClassificationMap = Record<
+  string,
+  JavaRegionClassification[]
+>;
 
 // Studio-IDE-6 (#248): anchor an IR symbol back to its originating COBOL
 // source line. Used by the inline IR-comment → COBOL lineage resolver.
@@ -620,7 +625,7 @@ export interface IrSymbolAnchor {
 //           ``javaRegionClassification`` keyed by generated Java file path
 //           (e.g. ``src/main/java/...``).
 export interface TraceabilityEnvelope {
-  schemaVersion: "v0";
+  schemaVersion: string;
   runId: string;
   programId: string;
   trace: Record<string, unknown> | null;
@@ -629,7 +634,7 @@ export interface TraceabilityEnvelope {
   // the orchestrator-upstream-error fallback both return ``null`` here per
   // ADR-0006 §4). Consumers MUST treat ``null`` as "no classification
   // available" and fall back to the unclassified rendering path.
-  javaRegionClassification: Record<string, JavaRegionClassification[]> | null;
+  javaRegionClassification: JavaRegionClassificationMap | null;
 }
 
 // Studio-IDE-13 (#255): explicit generator-run + verification request /

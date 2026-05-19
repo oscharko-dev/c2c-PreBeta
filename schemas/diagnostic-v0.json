@@ -28,36 +28,36 @@
       "description": "Human-readable description. Required. Entries without a message are dropped by the BFF normalizer because they have nothing to render."
     },
     "line": {
-      "type": "integer",
+      "type": ["integer", "null"],
       "minimum": 1,
       "description": "1-indexed source line. Absent → no in-editor marker; the diagnostic remains visible in the Problems panel with no source jump (ADR 0006 Decision 4)."
     },
     "column": {
-      "type": "integer",
+      "type": ["integer", "null"],
       "minimum": 1,
       "description": "1-indexed source column. Absent → marker spans the whole line."
     },
     "endLine": {
-      "type": "integer",
+      "type": ["integer", "null"],
       "minimum": 1,
       "description": "1-indexed last line of the marker range. Absent → point marker at (line, column)."
     },
     "endColumn": {
-      "type": "integer",
+      "type": ["integer", "null"],
       "minimum": 1,
       "description": "1-indexed last column of the marker range. Absent → point marker at (line, column)."
     },
     "filePath": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Source file the diagnostic attaches to. Absent → diagnostic is run-level: it stays in the Problems panel only and is never rendered as an editor marker (ADR 0006 Decision 4)."
     },
     "sourceKind": {
-      "type": "string",
-      "enum": ["cobol", "ir", "generated_java", "build", "test"],
+      "type": ["string", "null"],
+      "enum": ["cobol", "ir", "generated_java", "build", "test", null],
       "description": "Pipeline stage that produced the diagnostic. Routes markers to the correct editor pane and the matching Monaco marker owner namespace."
     },
     "originStep": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Orchestrator state name (e.g. \"parse-cobol\", \"compile-test-java\"). Renders an originated-step pill in the Problems panel."
     },
     "artifactRef": {

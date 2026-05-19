@@ -6,6 +6,14 @@ interface ArtifactMetadataPanelProps {
 }
 
 export function ArtifactMetadataPanel({ details }: ArtifactMetadataPanelProps) {
+  const traceability =
+    details.traceability &&
+    details.traceability.irId.length > 0 &&
+    details.traceability.programId.length > 0 &&
+    details.traceability.sourceHash.length > 0
+      ? details.traceability
+      : null;
+
   return (
     <div className="flex flex-col gap-2 p-4 text-sm text-text border-b border-line-2 bg-bg-1">
       <div className="font-medium mb-1">Artifact Details</div>
@@ -45,10 +53,10 @@ export function ArtifactMetadataPanel({ details }: ArtifactMetadataPanelProps) {
         </div>
       )}
       
-      {details.traceability && (
+      {traceability && (
         <div className="flex justify-between gap-4">
           <span className="text-text-dim">Traceability:</span>
-          <span className="truncate">IR {details.traceability.irId}</span>
+          <span className="truncate">IR {traceability.irId}</span>
         </div>
       )}
       

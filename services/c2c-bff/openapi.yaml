@@ -1256,13 +1256,13 @@ components:
             - type: 'null'
         javaRegionClassification:
           description: >
-            Optional trust-pillar overlay used by Studio-IDE-13 to
-            colour the generated-Java buffer. Absent for runs older
-            than W0.3 or for runs where overlay computation was
-            skipped. Studio renders no decoration when absent per
-            ADR 0006 Decision 4.
+            Optional per-file trust-pillar region map used by
+            Studio-IDE-13 to colour generated-Java buffers. Absent
+            for runs older than W0.3 or for runs where overlay
+            computation was skipped. Studio renders no decoration
+            when absent per ADR 0006 Decision 4.
           oneOf:
-            - $ref: "#/components/schemas/JavaOriginOverlay"
+            - $ref: "#/components/schemas/JavaRegionClassificationMap"
             - type: 'null'
 
     JavaOriginOverlay:
@@ -1881,13 +1881,15 @@ components:
         severity: { type: string }
         code: { type: string }
         message: { type: string }
-        line: { type: integer, minimum: 1 }
-        column: { type: integer, minimum: 1 }
-        endLine: { type: integer, minimum: 1 }
-        endColumn: { type: integer, minimum: 1 }
-        filePath: { type: string }
-        sourceKind: { type: string }
-        originStep: { type: string }
+        line: { type: [integer, "null"], minimum: 1 }
+        column: { type: [integer, "null"], minimum: 1 }
+        endLine: { type: [integer, "null"], minimum: 1 }
+        endColumn: { type: [integer, "null"], minimum: 1 }
+        filePath: { type: [string, "null"] }
+        sourceKind:
+          type: [string, "null"]
+          enum: [cobol, ir, generated_java, build, test, null]
+        originStep: { type: [string, "null"] }
         artifactRef:
           description: >
             Optional reference to the artifact this diagnostic
@@ -2251,6 +2253,16 @@ components:
         mappingClass:
           type: string
           enum: [direct, aggregated, synthesized, agent_originated]
+    JavaRegionClassificationMap:
+      type: object
+      description: >
+        Per-file trust-pillar classification map keyed by generated
+        Java file path. This is the shape returned in
+        RunSummary.javaRegionClassification and
+        TraceabilityEnvelope.javaRegionClassification.
+      additionalProperties:
+        type: array
+        items: { $ref: "#/components/schemas/JavaRegionClassification" }
     IrSymbolAnchor:
       type: object
       required: [cobolFile, cobolLine]
@@ -2273,10 +2285,7 @@ components:
           additionalProperties: { $ref: "#/components/schemas/IrSymbolAnchor" }
         javaRegionClassification:
           oneOf:
-            - type: object
-              additionalProperties:
-                type: array
-                items: { $ref: "#/components/schemas/JavaRegionClassification" }
+            - $ref: "#/components/schemas/JavaRegionClassificationMap"
             - { type: "null" }
         note: { type: string }
 

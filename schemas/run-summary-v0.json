@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/run-summary-v0.json",
+  "title": "RunSummary v0",
+  "description": "BFF run summary envelope consumed by Studio polling and listing views. Governed by ADR 0006 (Studio-BFF Contract Versioning). schemaVersion is optional on the wire; absence means v0. New fields are additive and unknown fields are preserved by Studio as opaque pass-through.",
+  "type": "object",
+  "required": [
+    "runId",
+    "programId",
+    "status",
+    "mode",
+    "productMode",
+    "createdAt",
+    "updatedAt"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v0"],
+      "default": "v0",
+      "description": "DTO version per ADR 0006. Optional on the wire; absence means v0. Bumped only for non-additive changes."
+    },
+    "runId": { "type": "string", "minLength": 1 },
+    "programId": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["starting", "updating", "completed", "failed"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["live", "diagnostic-fixture"]
+    },
+    "productMode": {
+      "type": "string",
+      "enum": ["live", "unavailable"]
+    },
+    "message": { "type": "string" },
+    "evidenceRefs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "policyDecision": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" },
+    "javaRegionClassification": {
+      "description": "Optional per-file trust-pillar classification map. Absent or null means Studio renders no trust-pillar decorations and must not infer regions.",
+      "oneOf": [
+        { "$ref": "#/$defs/JavaRegionClassificationMap" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "$defs": {
+    "JavaRegionClassificationMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/JavaRegionClassification" }
+      }
+    },
+    "JavaRegionClassification": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "lineRange",
+        "originClass",
+        "verificationOutcome",
+        "mappingClass"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "enum": ["v0"]
+        },
+        "lineRange": {
+          "type": "object",
+          "required": ["startLine", "endLine"],
+          "additionalProperties": true,
+          "properties": {
+            "startLine": { "type": "integer", "minimum": 1 },
+            "endLine": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "originClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "agent_proposed",
+            "repair_attempted",
+            "manual_modified",
+            "manual_edit"
+          ]
+        },
+        "verificationOutcome": {
+          "type": "string",
+          "enum": ["oracle_passed", "oracle_failed", "no_oracle"]
+        },
+        "mappingClass": {
+          "type": "string",
+          "enum": ["direct", "aggregated", "synthesized", "agent_originated"]
+        }
+      }
+    }
+  }
+}
