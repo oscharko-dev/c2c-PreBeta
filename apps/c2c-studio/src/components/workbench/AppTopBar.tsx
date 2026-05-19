@@ -114,9 +114,9 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
         path,
         content: entry.content,
       }));
-      const manualEditOverlays = entries
-        .map(([, entry]) => entry.manualEditOverlay)
-        .filter((overlay) => overlay !== null);
+      const manualEditOverlays = entries.flatMap(([, entry]) =>
+        entry.manualEditOverlay ? [entry.manualEditOverlay] : [],
+      );
       const entryFilePath =
         runState.generatedFiles?.entryFilePath ?? generatedFilePaths[0];
       await startVerify({

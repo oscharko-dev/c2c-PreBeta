@@ -698,6 +698,7 @@ export function TransformationRunProvider({
               ...existing,
               lastRunInputHash: hash,
               lastRunInputContent: backendContent,
+              bufferHash: hash,
               generatorBaselineContent: backendContent,
               generatorBaselineHash: hash,
               generatorBaselineRunId: runId,

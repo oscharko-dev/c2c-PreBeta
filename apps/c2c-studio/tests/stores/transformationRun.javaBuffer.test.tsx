@@ -178,6 +178,7 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
     expect(entry.generatorBaselineContent).toBe(
       "public class App { /* user edit */ }",
     );
+    expect(entry.bufferHash).toBe(entry.generatorBaselineHash);
     expect(entry.isDirty).toBe(false);
   });
 
