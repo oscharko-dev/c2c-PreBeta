@@ -11,15 +11,15 @@
 import { fetchTraceability, type ParsedTrace } from "./traceParser";
 import { resolveJavaToCobol } from "./lineageNavigation";
 
-// JVM stack-frame regex per Studio-IDE-8 issue body.
-//   Group 1: fully-qualified class (supports inner classes via `$` and
-//            lambda hosts like `Foo$Bar`)
-//   Group 2: method name (supports `<init>`, `<clinit>`, and
-//            `lambda$method$0`)
-//   Group 3: source file (typically `Foo.java`; the JVM may also emit
+// JVM stack-frame regex per Studio-IDE-8 issue body, extended for Java 9+
+// module/class-loader prefixes (`java.base/com.Foo.run(...)` and
+// `loader//com.Foo.run(...)`). The target is normalized below so the
+// public ParsedStackFrame still carries the real fully-qualified class.
+//   Group 1: frame target before the source-location tuple
+//   Group 2: source file (typically `Foo.java`; the JVM may also emit
 //            `Foo.kt`, `Foo$Inner.java`, etc.)
-//   Group 4: 1-based line number
-const FRAME_REGEX = /^\s*at\s+([\w.$]+)\.([\w$<>]+)\(([\w$.]+):(\d+)\)/;
+//   Group 3: 1-based line number
+const FRAME_REGEX = /^\s*at\s+([^\s(]+)\(([\w$.]+):(\d+)\)/;
 
 export interface ParsedStackFrame {
   /** The raw line as it appeared in the trace (whitespace preserved). */
@@ -64,6 +64,24 @@ export type JavaSourceProvider = (
   javaFilePath: string,
 ) => Promise<string | null>;
 
+function parseFrameTarget(
+  target: string,
+): Pick<ParsedStackFrame, "className" | "methodName"> | null {
+  const normalized = target.includes("/")
+    ? target.slice(target.lastIndexOf("/") + 1)
+    : target;
+  const methodSeparator = normalized.lastIndexOf(".");
+  if (methodSeparator <= 0 || methodSeparator === normalized.length - 1) {
+    return null;
+  }
+  const className = normalized.slice(0, methodSeparator);
+  const methodName = normalized.slice(methodSeparator + 1);
+  if (!/^[\w.$]+$/.test(className) || !/^[\w$<>]+$/.test(methodName)) {
+    return null;
+  }
+  return { className, methodName };
+}
+
 /**
  * Parse a raw JVM stack trace into one ParsedStackFrame per matching
  * `at` line. Non-frame lines (header text, native-method frames,
@@ -79,13 +97,15 @@ export function parseStackTrace(raw: string): ParsedStackFrame[] {
   for (const line of lines) {
     const match = FRAME_REGEX.exec(line);
     if (!match) continue;
-    const javaLine = Number.parseInt(match[4], 10);
+    const parsedTarget = parseFrameTarget(match[1]);
+    if (!parsedTarget) continue;
+    const javaLine = Number.parseInt(match[3], 10);
     if (!Number.isFinite(javaLine) || javaLine < 1) continue;
     frames.push({
       frameRaw: line,
-      className: match[1],
-      methodName: match[2],
-      javaFile: match[3],
+      className: parsedTarget.className,
+      methodName: parsedTarget.methodName,
+      javaFile: match[2],
       javaLine,
     });
   }
@@ -112,15 +132,32 @@ function pathSuffixMatches(short: string, full: string): boolean {
   return true;
 }
 
+function expectedJavaPathSuffix(frame: ParsedStackFrame): string {
+  const classParts = frame.className.split(".");
+  if (classParts.length <= 1) return frame.javaFile;
+  return `${classParts.slice(0, -1).join("/")}/${frame.javaFile}`;
+}
+
+function framePathCacheKey(frame: ParsedStackFrame): string {
+  return `${frame.className}\u0000${frame.javaFile}`;
+}
+
 function findJavaFilePath(
   parsed: ParsedTrace,
-  shortFile: string,
+  frame: ParsedStackFrame,
 ): string | null {
   const keys = [...parsed.javaRegionClassification.keys()];
   if (keys.length === 0) return null;
-  if (keys.includes(shortFile)) return shortFile;
-  for (const key of keys) {
-    if (pathSuffixMatches(shortFile, key)) return key;
+  const candidates = keys.filter((key) => pathSuffixMatches(frame.javaFile, key));
+  if (candidates.length === 0) return null;
+  const expectedSuffix = expectedJavaPathSuffix(frame);
+  const packageCandidates = candidates.filter((key) =>
+    pathSuffixMatches(expectedSuffix, key),
+  );
+  if (packageCandidates.length === 1) return packageCandidates[0];
+  if (candidates.length === 1) return candidates[0];
+  if (packageCandidates.length > 1) {
+    return null;
   }
   return null;
 }
@@ -155,10 +192,11 @@ export async function mapStackFrames(
   const pathCache = new Map<string, string | null>();
   const out: ResolvedStackFrame[] = [];
   for (const frame of frames) {
-    let javaFilePath = pathCache.get(frame.javaFile);
+    const pathCacheKey = framePathCacheKey(frame);
+    let javaFilePath = pathCache.get(pathCacheKey);
     if (javaFilePath === undefined) {
-      javaFilePath = findJavaFilePath(envelope, frame.javaFile);
-      pathCache.set(frame.javaFile, javaFilePath);
+      javaFilePath = findJavaFilePath(envelope, frame);
+      pathCache.set(pathCacheKey, javaFilePath);
     }
     if (!javaFilePath) {
       out.push({ ...frame });

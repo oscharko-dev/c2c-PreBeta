@@ -94,6 +94,10 @@ export function StackTraceView({
   fetcher,
 }: StackTraceViewProps) {
   const parsedFrames = useMemo(() => parseStackTrace(raw ?? ""), [raw]);
+  const fallbackFrames = useMemo<ResolvedStackFrame[]>(
+    () => parsedFrames.map((frame) => ({ ...frame })),
+    [parsedFrames],
+  );
   const [state, setState] = useState<LoadState>(() =>
     parsedFrames.length === 0 ? { kind: "idle" } : { kind: "loading" },
   );
@@ -110,7 +114,7 @@ export function StackTraceView({
       // labels) even when the COBOL anchor cannot be resolved.
       setState({
         kind: "ready",
-        frames: parsedFrames.map((f) => ({ ...f })),
+        frames: fallbackFrames,
       });
       return;
     }
@@ -132,7 +136,7 @@ export function StackTraceView({
     return () => {
       cancelled = true;
     };
-  }, [parsedFrames, runId, sourceProvider, fetcher]);
+  }, [fallbackFrames, parsedFrames, runId, sourceProvider, fetcher]);
 
   const toggleRaw = useCallback(() => setShowRaw((value) => !value), []);
   const handleRevealCobol = useCallback((frame: ResolvedStackFrame) => {
@@ -222,18 +226,17 @@ export function StackTraceView({
         aria-label="Stack frames"
         className="divide-y divide-line-2"
       >
-        {(state.kind === "ready"
-          ? state.frames
-          : parsedFrames.map((f) => ({ ...f }))
-        ).map((frame, index) => (
-          <StackFrameRow
-            key={`${frame.javaFile}:${frame.javaLine}:${index}`}
-            frame={frame}
-            loading={state.kind === "loading"}
-            onRevealCobol={handleRevealCobol}
-            onOpenJava={handleOpenJava}
-          />
-        ))}
+        {(state.kind === "ready" ? state.frames : fallbackFrames).map(
+          (frame, index) => (
+            <StackFrameRow
+              key={`${frame.javaFile}:${frame.javaLine}:${index}`}
+              frame={frame}
+              loading={state.kind === "loading"}
+              onRevealCobol={handleRevealCobol}
+              onOpenJava={handleOpenJava}
+            />
+          ),
+        )}
       </ul>
 
       {showRaw && raw ? (
@@ -269,11 +272,21 @@ function StackFrameRow({
       className="px-3 py-2 text-xs font-mono"
       data-testid="stack-frame-row"
       data-resolved={cobolResolved ? "true" : "false"}
+      aria-label={
+        cobolResolved
+          ? undefined
+          : `${frame.className}.${frame.methodName} (${frame.javaFile}:${frame.javaLine}). ${NO_MAPPING_TOOLTIP}`
+      }
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span
           className={cobolResolved ? "text-text" : "text-text-dim italic"}
           title={inactiveTooltip}
+          aria-label={
+            cobolResolved
+              ? undefined
+              : `${frame.className}.${frame.methodName}. ${NO_MAPPING_TOOLTIP}`
+          }
         >
           {frame.className}
           <span className="text-text-faint">.</span>
@@ -296,11 +309,12 @@ function StackFrameRow({
           <span
             className="inline-flex items-center rounded border border-line-2 bg-bg-1 px-2 py-0.5 text-[11px] text-text-faint"
             title={NO_MAPPING_TOOLTIP}
+            aria-label={NO_MAPPING_TOOLTIP}
           >
             no source mapping
           </span>
         )}
-        {javaPathKnown ? (
+        {cobolResolved && javaPathKnown ? (
           <button
             type="button"
             onClick={() => onOpenJava(frame)}
