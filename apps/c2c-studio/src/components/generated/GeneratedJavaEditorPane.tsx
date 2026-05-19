@@ -937,7 +937,7 @@ export function GeneratedJavaEditorPane() {
     return () => {
       cancelled = true;
     };
-  }, [state.runId, selectedFilePath, overlayApi]);
+  }, [state.runId, productState.state, selectedFilePath, overlayApi]);
 
   // Studio-IDE-6 (#248): paint trust-pillar decorations and publish the
   // file-level lineage-coverage percentage whenever the overlay or file
@@ -947,9 +947,6 @@ export function GeneratedJavaEditorPane() {
   >(null);
   useEffect(() => {
     const editor = editorInstanceRef.current;
-    const monacoGlobal = (
-      window as unknown as { monaco?: typeof import("monaco-editor") }
-    ).monaco;
     if (!editor) return;
     // Studio-IDE-13 (#255) AC8: union the trust-pillar overlay
     // (deterministic / agent_proposed / repair_attempted from the
@@ -965,13 +962,13 @@ export function GeneratedJavaEditorPane() {
       traceabilityOverlay: overlay ?? null,
       manualOverlay: javaBufferEntry?.manualEditOverlay ?? null,
     });
-    if (monacoGlobal && combined.length > 0) {
+    if (monaco && combined.length > 0) {
       const repairCount =
         state.workflow?.repairAttempts?.filter(
           (a) => a.repairDecision === "propose_candidate",
         ).length ?? 0;
       const decorations = buildTrustPillarDecorations({
-        monaco: monacoGlobal,
+        monaco,
         regions: combined,
         repairCount,
       });
@@ -998,6 +995,7 @@ export function GeneratedJavaEditorPane() {
     }
   }, [
     overlay,
+    monaco,
     javaBufferEntry?.manualEditOverlay,
     selectedFilePath,
     state.workflow,
@@ -1268,7 +1266,7 @@ export function GeneratedJavaEditorPane() {
               javaFile,
               position.lineNumber,
               model.getValue(),
-            );
+            ).catch(() => ({ ok: false as const, reason: "no_mapping" }));
             if (result.ok) {
               monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
               window.dispatchEvent(

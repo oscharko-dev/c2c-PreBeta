@@ -4,9 +4,10 @@
 // trust-pillar painting both feed off this surface.
 //
 // Caching: per runId, dedupes concurrent fetches via a `Map<runId,
-// Promise<ParsedTrace>>`. Failures evict the cache entry so a retry can
-// succeed. We do NOT persist to localStorage / IndexedDB — IDE-3 owns
-// Studio persistence and this data is BFF-derived (always re-fetchable).
+// Promise<ParsedTrace>>`. Failures and incomplete successful envelopes evict
+// the cache entry so a retry can succeed after the run advances. We do NOT
+// persist to localStorage / IndexedDB — IDE-3 owns Studio persistence and
+// this data is BFF-derived (always re-fetchable).
 //
 // 404 handling: returns a typed `TraceabilityNotFoundError` so the caller
 // can render "Lineage unavailable" rather than crashing the editor.
@@ -133,8 +134,17 @@ function isJavaRegionClassification(
 
 function buildParsedTrace(envelope: TraceabilityEnvelope): ParsedTrace {
   const irSymbolMap = new Map<string, IrSymbolAnchor>();
-  for (const [key, value] of Object.entries(envelope.irSymbolMap)) {
-    irSymbolMap.set(key, value);
+  const irSymbolMapRaw = isRecord(envelope.irSymbolMap)
+    ? envelope.irSymbolMap
+    : {};
+  for (const [key, value] of Object.entries(irSymbolMapRaw)) {
+    if (isRecord(value)) {
+      const cobolFile = value.cobolFile;
+      const cobolLine = value.cobolLine;
+      if (typeof cobolFile === "string" && isPositiveInteger(cobolLine)) {
+        irSymbolMap.set(key, { cobolFile, cobolLine });
+      }
+    }
   }
   const javaRegionClassification = new Map<
     string,
@@ -144,7 +154,7 @@ function buildParsedTrace(envelope: TraceabilityEnvelope): ParsedTrace {
   // orchestrator-upstream-error fallback per ADR-0006 §4). Treat ``null`` as
   // "no classification" → empty map, which the trust-pillar effect renders
   // as "no decorations / Lineage: 0%".
-  if (envelope.javaRegionClassification) {
+  if (isRecord(envelope.javaRegionClassification)) {
     for (const [key, regions] of Object.entries(
       envelope.javaRegionClassification,
     )) {
@@ -158,8 +168,9 @@ function buildParsedTrace(envelope: TraceabilityEnvelope): ParsedTrace {
   }
   return {
     runId: envelope.runId,
-    programId: envelope.programId,
-    trace: envelope.trace,
+    programId:
+      typeof envelope.programId === "string" ? envelope.programId : "",
+    trace: isRecord(envelope.trace) ? envelope.trace : null,
     irSymbolMap,
     javaRegionClassification,
   };
@@ -188,6 +199,20 @@ async function doFetch(
   return buildParsedTrace(body);
 }
 
+function hasRecordKeys(
+  value: Record<string, unknown> | null | undefined,
+): boolean {
+  return value !== null && value !== undefined && Object.keys(value).length > 0;
+}
+
+function isCompleteTraceability(trace: ParsedTrace): boolean {
+  return (
+    hasRecordKeys(trace.trace) ||
+    trace.irSymbolMap.size > 0 ||
+    trace.javaRegionClassification.size > 0
+  );
+}
+
 export async function fetchTraceability(
   runId: string,
   fetcher?: typeof fetch,
@@ -202,11 +227,19 @@ export async function fetchTraceability(
       "fetchTraceability: fetch is not available in this environment",
     );
   }
-  const pending = doFetch(runId, fetchImpl).catch((err) => {
-    // Evict on failure so the next call can retry.
-    traceCache.delete(runId);
-    throw err;
-  });
+  const pending = doFetch(runId, fetchImpl).then(
+    (parsed) => {
+      if (!isCompleteTraceability(parsed)) {
+        traceCache.delete(runId);
+      }
+      return parsed;
+    },
+    (err) => {
+      // Evict on failure so the next call can retry.
+      traceCache.delete(runId);
+      throw err;
+    },
+  );
   traceCache.set(runId, pending);
   return pending;
 }

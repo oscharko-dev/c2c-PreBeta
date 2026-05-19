@@ -7,6 +7,7 @@ import logging
 import hmac
 import threading
 import urllib.parse
+from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import PurePosixPath
 from typing import Any
@@ -718,7 +719,9 @@ class OrchestratorService:
             classification = None
         else:
             classification = {
-                str(path): [dict(region) for region in regions]
+                str(path): [
+                    dict(region) for region in regions if isinstance(region, Mapping)
+                ]
                 for path, regions in classification_raw.items()
                 if isinstance(regions, list)
             }
