@@ -137,6 +137,33 @@ describe("fetchTraceability", () => {
     ).toHaveLength(1);
   });
 
+  it("filters unknown future region classifications from traceability maps", async () => {
+    clearTraceCache();
+    const body = envelope();
+    body.schemaVersion = "v1";
+    body.javaRegionClassification = {
+      "src/main/java/Prog1.java": [
+        ...(body.javaRegionClassification?.["src/main/java/Prog1.java"] ?? []),
+        {
+          schemaVersion: "v1",
+          lineRange: { startLine: 11, endLine: 12 },
+          originClass: "future_origin" as never,
+          verificationOutcome: "oracle_passed",
+          mappingClass: "direct",
+        },
+      ],
+    };
+    const fetchImpl = vi.fn(async () =>
+      makeResponse(200, body),
+    ) as unknown as FetchFn;
+
+    const parsed = await fetchTraceability("run-1", fetchImpl);
+
+    expect(
+      parsed.javaRegionClassification.get("src/main/java/Prog1.java"),
+    ).toHaveLength(1);
+  });
+
   it("caches results per runId", async () => {
     clearTraceCache();
     const fetchImpl = vi.fn(async () =>

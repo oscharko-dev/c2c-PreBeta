@@ -289,13 +289,15 @@ session that lands on the wrong service.
 - **OpenAPI is the wire source of truth** for Studio-BFF DTOs. The
   TS types under `apps/c2c-studio/src/types/api.ts` mirror OpenAPI;
   any drift is a bug. The `schemaVersion` field appears in both.
-- **`schemas/*.json` already carry envelope-level `schemaVersion`**;
-  this ADR does not duplicate the policy onto them. The Diagnostic
-  sub-shape now declares `schemaVersion` inside
+- **`schemas/*.json` carry executable contract versions**. The DTOs
+  named by this ADR are represented as
+  [schemas/diagnostic-v0.json](../../schemas/diagnostic-v0.json),
+  [schemas/generated-traceability-v0.json](../../schemas/generated-traceability-v0.json),
+  and [schemas/run-summary-v0.json](../../schemas/run-summary-v0.json).
+  Nested orchestrator artifacts that embed diagnostics also declare
+  `schemaVersion` inside
   [schemas/build-test-result-v0.json](../../schemas/build-test-result-v0.json)
-  via a `$defs/Diagnostic` definition so an orchestrator-side
-  consumer reading the executable schema sees the same versioning
-  surface.
+  via `$defs/Diagnostic`.
 - **Editor-Assist** (`/api/v0/editor/explain`) is covered: ADR 0004
   governs the field set; this ADR governs the version field.
 

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/generated-traceability-v0.json",
+  "title": "GeneratedTraceability v0",
+  "description": "Lineage triple emitted alongside generated Java by the BFF GeneratedView. Governed by ADR 0006 (Studio-BFF Contract Versioning). schemaVersion is optional on the wire; absence means v0. When lineage is unavailable, the whole DTO is omitted so Studio renders the ADR 0006 Decision 4 \"Lineage unavailable\" fallback.",
+  "type": "object",
+  "required": ["programId", "irId", "sourceHash"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v0"],
+      "default": "v0",
+      "description": "DTO version per ADR 0006. Optional on the wire; absence means v0. Bumped only for non-additive changes."
+    },
+    "programId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "irId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceHash": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

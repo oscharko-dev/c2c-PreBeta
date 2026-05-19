@@ -38,6 +38,9 @@ import {
   GenerateResponse,
   VerifyRequest,
   VerifyResponse,
+  GeneratedTraceability,
+  JavaRegionClassification,
+  JavaRegionClassificationMap,
 } from "@/types/api";
 import { TransformRequest } from "@/types/transform-request";
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
@@ -175,6 +178,18 @@ function isPositiveInteger(value: unknown): value is number {
   return isNonNegativeInteger(value) && value > 0;
 }
 
+function isNullish(value: unknown): value is null | undefined {
+  return value === null || value === undefined;
+}
+
+function isOptionalStringOrNull(value: unknown): boolean {
+  return isNullish(value) || isString(value);
+}
+
+function isOptionalPositiveIntegerOrNull(value: unknown): boolean {
+  return isNullish(value) || isPositiveInteger(value);
+}
+
 const DIAGNOSTIC_SEVERITIES: ReadonlySet<string> = new Set([
   "error",
   "warning",
@@ -190,14 +205,37 @@ const DIAGNOSTIC_SOURCE_KINDS: ReadonlySet<string> = new Set([
   "test",
 ]);
 
+const JAVA_ORIGIN_CLASSES: ReadonlySet<string> = new Set([
+  "deterministic",
+  "agent_proposed",
+  "repair_attempted",
+  "manual_modified",
+  "manual_edit",
+]);
+
+const JAVA_VERIFICATION_OUTCOMES: ReadonlySet<string> = new Set([
+  "oracle_passed",
+  "oracle_failed",
+  "no_oracle",
+]);
+
+const JAVA_MAPPING_CLASSES: ReadonlySet<string> = new Set([
+  "direct",
+  "aggregated",
+  "synthesized",
+  "agent_originated",
+]);
+
 function isDiagnostic(payload: unknown): payload is Diagnostic {
   if (!isRecord(payload)) {
     return false;
   }
 
   return (
-    // schemaVersion is optional on the wire (ADR 0006 Decision 1).
-    (payload.schemaVersion === undefined || payload.schemaVersion === "v0") &&
+    // schemaVersion is optional on the wire (ADR 0006 Decision 1). Future
+    // versions are rendered through the v0 fallback path rather than failing
+    // the entire endpoint (ADR 0006 Decision 3).
+    (payload.schemaVersion === undefined || isString(payload.schemaVersion)) &&
     // Studio-IDE-5 (#244 review): enforce the closed severity enum at
     // the boundary. The BFF normalizer guarantees this; the guard
     // backstops it so older or malformed responses cannot smuggle in
@@ -206,21 +244,119 @@ function isDiagnostic(payload: unknown): payload is Diagnostic {
     DIAGNOSTIC_SEVERITIES.has(payload.severity) &&
     isString(payload.code) &&
     isString(payload.message) &&
-    (payload.line === undefined || isPositiveInteger(payload.line)) &&
-    (payload.column === undefined || isPositiveInteger(payload.column)) &&
-    (payload.endLine === undefined || isPositiveInteger(payload.endLine)) &&
-    (payload.endColumn === undefined || isPositiveInteger(payload.endColumn)) &&
-    (payload.filePath === undefined || isString(payload.filePath)) &&
-    (payload.sourceKind === undefined ||
+    isOptionalPositiveIntegerOrNull(payload.line) &&
+    isOptionalPositiveIntegerOrNull(payload.column) &&
+    isOptionalPositiveIntegerOrNull(payload.endLine) &&
+    isOptionalPositiveIntegerOrNull(payload.endColumn) &&
+    isOptionalStringOrNull(payload.filePath) &&
+    (isNullish(payload.sourceKind) ||
       (isString(payload.sourceKind) &&
         DIAGNOSTIC_SOURCE_KINDS.has(payload.sourceKind))) &&
-    (payload.originStep === undefined || isString(payload.originStep)) &&
+    isOptionalStringOrNull(payload.originStep) &&
     // artifactRef is forward-looking; null is the explicit absence
     // signal per ADR 0006 Decision 4.
     (payload.artifactRef === undefined ||
       payload.artifactRef === null ||
       isOutputRef(payload.artifactRef))
   );
+}
+
+function normalizeDiagnostic(payload: Diagnostic): Diagnostic {
+  const out: Diagnostic = {
+    severity: payload.severity,
+    code: payload.code,
+    message: payload.message,
+  };
+  if (typeof payload.schemaVersion === "string") {
+    out.schemaVersion = payload.schemaVersion;
+  }
+  if (typeof payload.line === "number") out.line = payload.line;
+  if (typeof payload.column === "number") out.column = payload.column;
+  if (typeof payload.endLine === "number") out.endLine = payload.endLine;
+  if (typeof payload.endColumn === "number") out.endColumn = payload.endColumn;
+  if (typeof payload.filePath === "string") out.filePath = payload.filePath;
+  if (typeof payload.sourceKind === "string") out.sourceKind = payload.sourceKind;
+  if (typeof payload.originStep === "string") out.originStep = payload.originStep;
+  if (payload.artifactRef === null || isOutputRef(payload.artifactRef)) {
+    out.artifactRef = payload.artifactRef;
+  }
+  return out;
+}
+
+function normalizeDiagnostics(raw: unknown): Diagnostic[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || !raw.every(isDiagnostic)) return undefined;
+  return raw.map(normalizeDiagnostic);
+}
+
+function isGeneratedTraceabilityPayload(
+  payload: unknown,
+): payload is GeneratedTraceability {
+  if (!isRecord(payload)) return false;
+  return (
+    (payload.schemaVersion === undefined || isString(payload.schemaVersion)) &&
+    isString(payload.programId) &&
+    payload.programId.length > 0 &&
+    isString(payload.irId) &&
+    payload.irId.length > 0 &&
+    isString(payload.sourceHash) &&
+    payload.sourceHash.length > 0
+  );
+}
+
+function normalizeGeneratedTraceability(
+  raw: unknown,
+): GeneratedTraceability | undefined {
+  return isGeneratedTraceabilityPayload(raw) ? raw : undefined;
+}
+
+function isJavaRegionClassification(
+  payload: unknown,
+): payload is JavaRegionClassification {
+  if (!isRecord(payload)) return false;
+  const lineRange = payload.lineRange;
+  return (
+    isString(payload.schemaVersion) &&
+    isRecord(lineRange) &&
+    isPositiveInteger(lineRange.startLine) &&
+    isPositiveInteger(lineRange.endLine) &&
+    lineRange.endLine >= lineRange.startLine &&
+    isString(payload.originClass) &&
+    JAVA_ORIGIN_CLASSES.has(payload.originClass) &&
+    isString(payload.verificationOutcome) &&
+    JAVA_VERIFICATION_OUTCOMES.has(payload.verificationOutcome) &&
+    isString(payload.mappingClass) &&
+    JAVA_MAPPING_CLASSES.has(payload.mappingClass)
+  );
+}
+
+function isSafeClassificationMapKey(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value !== "__proto__" &&
+    value !== "constructor" &&
+    value !== "prototype"
+  );
+}
+
+function normalizeJavaRegionClassificationMap(
+  payload: unknown,
+): JavaRegionClassificationMap | null | undefined {
+  if (payload === undefined) return undefined;
+  if (payload === null) return null;
+  if (!isRecord(payload)) return undefined;
+
+  const result: JavaRegionClassificationMap = {};
+  for (const [file, regions] of Object.entries(payload)) {
+    if (!isSafeClassificationMapKey(file) || !Array.isArray(regions)) {
+      continue;
+    }
+    const validRegions = regions.filter(isJavaRegionClassification);
+    if (validRegions.length > 0) {
+      result[file] = validRegions;
+    }
+  }
+  return result;
 }
 
 function isGeneratedViewStatus(
@@ -361,8 +497,9 @@ function isGeneratedViewPayload(payload: unknown): payload is GeneratedView {
       isOutputRef(payload.generationResponseRef)) &&
     (payload.artifactRef === null || isOutputRef(payload.artifactRef)) &&
     (payload.diagnostics === undefined ||
-      (Array.isArray(payload.diagnostics) &&
-        payload.diagnostics.every(isDiagnostic))) &&
+      normalizeDiagnostics(payload.diagnostics) !== undefined) &&
+    (isNullish(payload.traceability) ||
+      isGeneratedTraceabilityPayload(payload.traceability)) &&
     (payload.note === undefined || isString(payload.note))
   );
 }
@@ -443,8 +580,7 @@ function isBuildTestViewPayload(payload: unknown): payload is BuildTestView {
     (payload.generatedArtifactRef === null ||
       isOutputRef(payload.generatedArtifactRef)) &&
     (payload.diagnostics === undefined ||
-      (Array.isArray(payload.diagnostics) &&
-        payload.diagnostics.every(isDiagnostic))) &&
+      normalizeDiagnostics(payload.diagnostics) !== undefined) &&
     (payload.note === undefined || isString(payload.note))
   );
 }
@@ -855,12 +991,16 @@ function isRunSummaryPayload(payload: unknown): payload is RunSummary {
     isRunProductMode(payload.productMode) &&
     isString(payload.createdAt) &&
     isString(payload.updatedAt) &&
+    (payload.schemaVersion === undefined || isString(payload.schemaVersion)) &&
     (payload.message === undefined || isString(payload.message)) &&
     (payload.evidenceRefs === undefined ||
       isStringArray(payload.evidenceRefs)) &&
     (payload.policyDecision === undefined ||
       isString(payload.policyDecision)) &&
-    hasW02ContractFields(payload)
+    hasW02ContractFields(payload) &&
+    (payload.javaRegionClassification === undefined ||
+      payload.javaRegionClassification === null ||
+      isRecord(payload.javaRegionClassification))
   );
 }
 
@@ -1162,7 +1302,16 @@ function parseRunSummary(payload: unknown): ApiResult<RunSummary> {
       { kind: "contract", body: payload },
     );
   }
-  return { ok: true, data: payload };
+  const javaRegionClassification = normalizeJavaRegionClassificationMap(
+    payload.javaRegionClassification,
+  );
+  const data: RunSummary = {
+    ...payload,
+    ...(javaRegionClassification !== undefined
+      ? { javaRegionClassification }
+      : {}),
+  };
+  return { ok: true, data };
 }
 
 function parseGeneratedView(payload: unknown): ApiResult<GeneratedView> {
@@ -1172,7 +1321,17 @@ function parseGeneratedView(payload: unknown): ApiResult<GeneratedView> {
       { kind: "contract", body: payload },
     );
   }
-  return { ok: true, data: payload };
+  const diagnostics = normalizeDiagnostics(payload.diagnostics);
+  const traceability = normalizeGeneratedTraceability(payload.traceability);
+  const data: GeneratedView = {
+    ...payload,
+    ...(diagnostics ? { diagnostics } : {}),
+    ...(traceability ? { traceability } : {}),
+  };
+  if (!traceability) {
+    delete data.traceability;
+  }
+  return { ok: true, data };
 }
 
 function parseGeneratedFilesIndex(
@@ -1194,7 +1353,14 @@ function parseBuildTestView(payload: unknown): ApiResult<BuildTestView> {
       { kind: "contract", body: payload },
     );
   }
-  return { ok: true, data: payload };
+  const diagnostics = normalizeDiagnostics(payload.diagnostics);
+  return {
+    ok: true,
+    data: {
+      ...payload,
+      ...(diagnostics ? { diagnostics } : {}),
+    },
+  };
 }
 
 function parseEvidenceView(payload: unknown): ApiResult<EvidenceView> {

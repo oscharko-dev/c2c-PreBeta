@@ -1731,6 +1731,10 @@ test("live generated endpoint never inlines upstream Java content", async () => 
     assert.equal(body.fileRefs[0]?.absolutePath, undefined);
     assert.equal(body.fileRefs[0]?.uri, undefined);
     assert.equal(body.artifactRef?.sha256, "c".repeat(64));
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(body, "traceability"),
+      false,
+    );
     const serialized = JSON.stringify(generated.body);
     assert.ok(!serialized.includes(oversizedJava.slice(0, 128)));
     assert.doesNotMatch(
@@ -4010,9 +4014,15 @@ test("Issue #97: /generated, /build-test, and /evidence all carry the same gener
     );
     const genBody = generated.body as {
       artifactRef: { sha256: string } | null;
-      traceability: { programId: string; irId: string; sourceHash: string };
+      traceability: {
+        schemaVersion: string;
+        programId: string;
+        irId: string;
+        sourceHash: string;
+      };
     };
     assert.equal(genBody.artifactRef?.sha256, manifestHash);
+    assert.equal(genBody.traceability.schemaVersion, "v0");
     assert.equal(genBody.traceability.programId, "CASE01");
     assert.equal(genBody.traceability.irId, "ir-CASE01");
 
@@ -5569,6 +5579,29 @@ test("GET /api/v0/runs/{runId}/traceability returns the traceability envelope on
           verificationOutcome: "oracle_passed",
           mappingClass: "direct",
         },
+        {
+          schemaVersion: "v1",
+          lineRange: { startLine: 16, endLine: 20 },
+          originClass: "future_origin",
+          verificationOutcome: "oracle_passed",
+          mappingClass: "direct",
+        },
+        {
+          schemaVersion: "v0",
+          lineRange: { startLine: 21, endLine: 20 },
+          originClass: "agent_proposed",
+          verificationOutcome: "oracle_failed",
+          mappingClass: "agent_originated",
+        },
+      ],
+      constructor: [
+        {
+          schemaVersion: "v0",
+          lineRange: { startLine: 1, endLine: 1 },
+          originClass: "deterministic",
+          verificationOutcome: "oracle_passed",
+          mappingClass: "direct",
+        },
       ],
     },
   };
@@ -5625,6 +5658,91 @@ test("GET /api/v0/runs/{runId}/traceability returns the traceability envelope on
     assert.equal(jrc[0]?.originClass, "deterministic");
     assert.equal(jrc[0]?.verificationOutcome, "oracle_passed");
     assert.equal(jrc[0]?.mappingClass, "direct");
+
+    const summary = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+    );
+    const summaryBody = summary.body as {
+      schemaVersion?: string;
+      javaRegionClassification: Record<string, unknown[]> | null;
+    };
+    assert.equal(summaryBody.schemaVersion, "v0");
+    assert.deepEqual(summaryBody.javaRegionClassification, {
+      "src/main/java/Foo.java": [jrc[0]],
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId}/traceability preserves cached classifications across upstream outages", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const classification = {
+    schemaVersion: "v0",
+    lineRange: { startLine: 10, endLine: 15 },
+    originClass: "deterministic",
+    verificationOutcome: "oracle_passed",
+    mappingClass: "direct",
+  };
+  const artifactResponses: ArtifactStubResponses = {
+    traceability: {
+      status: 200,
+      body: {
+        schemaVersion: "v0",
+        runId: "live-run-1",
+        programId: "CASE01",
+        trace: null,
+        irSymbolMap: {},
+        javaRegionClassification: {
+          "src/main/java/Foo.java": [classification],
+        },
+      },
+    },
+  };
+  const { client: orch } = stubOrchestrator(artifactResponses);
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+
+    await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+    );
+    artifactResponses.traceability = {
+      status: 503,
+      body: { error: "traceability temporarily unavailable" },
+    };
+    const outage = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+    );
+    const outageBody = outage.body as {
+      javaRegionClassification: unknown;
+      note?: string;
+    };
+    assert.equal(outage.status, 200);
+    assert.equal(outageBody.javaRegionClassification, null);
+    assert.ok(outageBody.note);
+
+    const summary = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+    );
+    const summaryBody = summary.body as {
+      javaRegionClassification: Record<string, unknown[]> | null;
+    };
+    assert.deepEqual(summaryBody.javaRegionClassification, {
+      "src/main/java/Foo.java": [{ ...classification, schemaVersion: "v0" }],
+    });
   } finally {
     await server.close();
   }

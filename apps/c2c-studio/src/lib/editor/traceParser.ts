@@ -57,6 +57,27 @@ const INLINE_IR_REGEX =
 
 const traceCache = new Map<string, Promise<ParsedTrace>>();
 
+const JAVA_ORIGIN_CLASSES = new Set<string>([
+  "deterministic",
+  "agent_proposed",
+  "repair_attempted",
+  "manual_modified",
+  "manual_edit",
+]);
+
+const JAVA_VERIFICATION_OUTCOMES = new Set<string>([
+  "oracle_passed",
+  "oracle_failed",
+  "no_oracle",
+]);
+
+const JAVA_MAPPING_CLASSES = new Set<string>([
+  "direct",
+  "aggregated",
+  "synthesized",
+  "agent_originated",
+]);
+
 export function clearTraceCache(): void {
   traceCache.clear();
 }
@@ -82,6 +103,34 @@ export function parseInlineIrAnchors(javaSource: string): InlineIrAnchor[] {
   return anchors;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isJavaRegionClassification(
+  value: unknown,
+): value is JavaRegionClassification {
+  if (!isRecord(value)) return false;
+  const lineRange = value.lineRange;
+  return (
+    typeof value.schemaVersion === "string" &&
+    isRecord(lineRange) &&
+    isPositiveInteger(lineRange.startLine) &&
+    isPositiveInteger(lineRange.endLine) &&
+    lineRange.endLine >= lineRange.startLine &&
+    typeof value.originClass === "string" &&
+    JAVA_ORIGIN_CLASSES.has(value.originClass) &&
+    typeof value.verificationOutcome === "string" &&
+    JAVA_VERIFICATION_OUTCOMES.has(value.verificationOutcome) &&
+    typeof value.mappingClass === "string" &&
+    JAVA_MAPPING_CLASSES.has(value.mappingClass)
+  );
+}
+
 function buildParsedTrace(envelope: TraceabilityEnvelope): ParsedTrace {
   const irSymbolMap = new Map<string, IrSymbolAnchor>();
   for (const [key, value] of Object.entries(envelope.irSymbolMap)) {
@@ -99,7 +148,12 @@ function buildParsedTrace(envelope: TraceabilityEnvelope): ParsedTrace {
     for (const [key, regions] of Object.entries(
       envelope.javaRegionClassification,
     )) {
-      javaRegionClassification.set(key, [...regions]);
+      const validRegions = Array.isArray(regions)
+        ? regions.filter(isJavaRegionClassification)
+        : [];
+      if (validRegions.length > 0) {
+        javaRegionClassification.set(key, validRegions);
+      }
     }
   }
   return {

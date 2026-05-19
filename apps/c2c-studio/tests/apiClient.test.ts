@@ -163,6 +163,77 @@ describe("apiClient", () => {
     });
   });
 
+  it("accepts future-version run summaries with the per-file classification map", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          schemaVersion: "v1",
+          runId: "run-1",
+          programId: "P1",
+          status: "completed",
+          mode: "live",
+          productMode: "live",
+          createdAt: "2026-05-15T10:00:00Z",
+          updatedAt: "2026-05-15T10:00:01Z",
+          javaRegionClassification: {
+            "src/main/java/P1.java": [
+              {
+                schemaVersion: "v1",
+                lineRange: { startLine: 1, endLine: 3 },
+                originClass: "deterministic",
+                verificationOutcome: "oracle_passed",
+                mappingClass: "direct",
+              },
+              {
+                schemaVersion: "v2",
+                lineRange: { startLine: 4, endLine: 5 },
+                originClass: "future_origin",
+                verificationOutcome: "oracle_passed",
+                mappingClass: "direct",
+              },
+            ],
+            constructor: [
+              {
+                schemaVersion: "v1",
+                lineRange: { startLine: 1, endLine: 1 },
+                originClass: "deterministic",
+                verificationOutcome: "oracle_passed",
+                mappingClass: "direct",
+              },
+            ],
+          },
+          futureField: { preserved: true },
+        }),
+    } as Response);
+
+    const result = await apiClient.getRun("run-1");
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        schemaVersion: "v1",
+        javaRegionClassification: {
+          "src/main/java/P1.java": [
+            {
+              schemaVersion: "v1",
+              originClass: "deterministic",
+            },
+          ],
+        },
+        futureField: { preserved: true },
+      },
+    });
+    if (result.ok) {
+      expect(
+        result.data.javaRegionClassification?.["src/main/java/P1.java"],
+      ).toHaveLength(1);
+      expect(result.data.javaRegionClassification).not.toHaveProperty(
+        "constructor",
+      );
+    }
+  });
+
   it("rejects malformed artifacts payloads with invalid artifact metadata", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
@@ -383,6 +454,68 @@ describe("apiClient", () => {
         artifactRef: { sha256: "a".repeat(64) },
       },
     });
+  });
+
+  it("normalizes ADR-0006 null diagnostic fallbacks on generated views", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: "run-1",
+          programId: "P1",
+          mode: "live",
+          productMode: "live",
+          status: "generated",
+          artifactRef: null,
+          traceability: {
+            schemaVersion: "v1",
+            programId: "P1",
+            irId: "ir-P1",
+            sourceHash: "source-hash",
+          },
+          diagnostics: [
+            {
+              schemaVersion: "v1",
+              severity: "info",
+              code: "legacy-location",
+              message: "location unavailable",
+              line: null,
+              column: null,
+              endLine: null,
+              endColumn: null,
+              filePath: null,
+              sourceKind: null,
+              originStep: null,
+              artifactRef: null,
+            },
+          ],
+        }),
+    } as Response);
+
+    const result = await apiClient.getGenerated("run-1");
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        traceability: {
+          schemaVersion: "v1",
+          irId: "ir-P1",
+        },
+        diagnostics: [
+          {
+            schemaVersion: "v1",
+            severity: "info",
+            code: "legacy-location",
+            message: "location unavailable",
+            artifactRef: null,
+          },
+        ],
+      },
+    });
+    if (result.ok) {
+      expect(result.data.diagnostics?.[0]).not.toHaveProperty("line");
+      expect(result.data.diagnostics?.[0]).not.toHaveProperty("filePath");
+    }
   });
 
   it("accepts live run progress payloads from the BFF progress endpoint", async () => {

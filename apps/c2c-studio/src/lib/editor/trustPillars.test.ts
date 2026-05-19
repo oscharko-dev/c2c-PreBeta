@@ -187,6 +187,23 @@ describe("buildTrustPillarDecorations", () => {
     ).toEqual([]);
   });
 
+  it("skips unknown future origin classes instead of crashing", () => {
+    const decorations = buildTrustPillarDecorations({
+      monaco: monacoStub,
+      regions: [
+        {
+          schemaVersion: "v1",
+          lineRange: { startLine: 1, endLine: 3 },
+          originClass: "future_origin" as JavaRegionClassification["originClass"],
+          verificationOutcome: "oracle_passed",
+          mappingClass: "direct",
+        },
+      ],
+    });
+
+    expect(decorations).toEqual([]);
+  });
+
   it("includes the region's classification facts in the hover content", () => {
     const regions: JavaRegionClassification[] = [
       {

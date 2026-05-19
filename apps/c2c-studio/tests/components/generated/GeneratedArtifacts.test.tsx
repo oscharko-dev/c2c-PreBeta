@@ -2,6 +2,7 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { GeneratedJavaEditorPane } from "@/components/generated/GeneratedJavaEditorPane";
+import { ArtifactMetadataPanel } from "@/components/generated/ArtifactMetadataPanel";
 import { TargetJavaInspector } from "@/components/generated/TargetJavaInspector";
 import { GeneratedArtifactsProvider } from "@/hooks/useGeneratedArtifacts";
 import { apiClient } from "@/lib/apiClient";
@@ -381,6 +382,39 @@ describe("Generated Artifacts UI", () => {
     expect(screen.getByText(/abc123def456/i)).toBeInTheDocument();
     expect(screen.getByText("App.java")).toBeInTheDocument();
     expect(screen.getByText("config.properties")).toBeInTheDocument();
+  });
+
+  it("renders traceability metadata only when the DTO is complete", () => {
+    const { rerender } = render(
+      <ArtifactMetadataPanel
+        details={{
+          traceability: {
+            schemaVersion: "v1",
+            programId: "P1",
+            irId: "ir-P1",
+            sourceHash: "source-hash",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Traceability:")).toBeInTheDocument();
+    expect(screen.getByText("IR ir-P1")).toBeInTheDocument();
+
+    rerender(
+      <ArtifactMetadataPanel
+        details={{
+          traceability: {
+            schemaVersion: "v0",
+            programId: "P1",
+            irId: "",
+            sourceHash: "source-hash",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Traceability:")).not.toBeInTheDocument();
   });
 
   it("selecting a file calls the encoded file endpoint and updates the editor", async () => {

@@ -211,13 +211,16 @@
         "severity": { "type": "string" },
         "code": { "type": "string" },
         "message": { "type": "string" },
-        "line": { "type": "integer", "minimum": 1 },
-        "column": { "type": "integer", "minimum": 1 },
-        "endLine": { "type": "integer", "minimum": 1 },
-        "endColumn": { "type": "integer", "minimum": 1 },
-        "filePath": { "type": "string" },
-        "sourceKind": { "type": "string" },
-        "originStep": { "type": "string" },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "column": { "type": ["integer", "null"], "minimum": 1 },
+        "endLine": { "type": ["integer", "null"], "minimum": 1 },
+        "endColumn": { "type": ["integer", "null"], "minimum": 1 },
+        "filePath": { "type": ["string", "null"] },
+        "sourceKind": {
+          "type": ["string", "null"],
+          "enum": ["cobol", "ir", "generated_java", "build", "test", null]
+        },
+        "originStep": { "type": ["string", "null"] },
         "artifactRef": {
           "type": ["object", "null"],
           "description": "Reference to the artifact this diagnostic attaches to (sha256, kind, optional path). Absent on diagnostics from older steps or replayed v0 fixtures."

@@ -132,7 +132,7 @@ export const TRUST_PILLAR_VISUALS: Readonly<
   },
 });
 
-export function pillarFor(region: JavaRegionClassification): TrustPillarKey {
+export function pillarFor(region: JavaRegionClassification): TrustPillarKey | null {
   switch (region.originClass) {
     case "deterministic":
       return region.verificationOutcome === "oracle_passed"
@@ -148,6 +148,8 @@ export function pillarFor(region: JavaRegionClassification): TrustPillarKey {
       return "manual-modified";
     case "manual_edit":
       return "manual-edit";
+    default:
+      return null;
   }
 }
 
@@ -189,6 +191,9 @@ export function buildTrustPillarDecorations(
   const decorations: MonacoNs.editor.IModelDeltaDecoration[] = [];
   for (const region of regions) {
     const key = pillarFor(region);
+    if (key === null) {
+      continue;
+    }
     const visual = TRUST_PILLAR_VISUALS[key];
     decorations.push({
       range: {
