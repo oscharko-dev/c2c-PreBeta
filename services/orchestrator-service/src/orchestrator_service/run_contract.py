@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import datetime
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from .artifacts import JsonObject, JsonValue
@@ -1004,6 +1004,11 @@ class W02RunContract:
             "failureCategory": str(entry.get("failureCategory") or "") or None,
             "createdAt": str(entry.get("createdAt") or _iso_now()),
         }
+        # Issue #280 (ADR 0007 §5): ``affectedRegions`` and ``manualRegionBlock``
+        # surface the manual-edit assist-interaction rule on the trajectory so
+        # Experience Learning can spot patterns where manual edits repeatedly
+        # block repair. The fields are additive and only appear on entries the
+        # orchestrator emits when the gate fires for a manual region.
         for optional_key in (
             "refusalCode",
             "escalationCode",
@@ -1014,9 +1019,28 @@ class W02RunContract:
             "buildTestResultRef",
             "rationale",
             "diffFromPreviousRef",
+            "affectedRegions",
+            "manualRegionBlock",
         ):
             value = entry.get(optional_key)
             if value is None:
+                continue
+            if optional_key == "affectedRegions":
+                if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+                    raise TypeError(
+                        "repair attempt affectedRegions must be a sequence of region records"
+                    )
+                normalised_regions: list[JsonObject] = []
+                for region in value:
+                    if not isinstance(region, Mapping):
+                        raise TypeError(
+                            "repair attempt affectedRegions entries must be mappings"
+                        )
+                    normalised_regions.append(dict(region))
+                normalised[optional_key] = normalised_regions
+                continue
+            if optional_key == "manualRegionBlock":
+                normalised[optional_key] = bool(value)
                 continue
             if isinstance(value, Mapping):
                 normalised[optional_key] = dict(value)

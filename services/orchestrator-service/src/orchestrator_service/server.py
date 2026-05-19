@@ -10,6 +10,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import PurePosixPath
 from typing import Any
+from .run_contract import JAVA_REGION_ORIGIN_MANUAL_CLASSES
 from .artifacts import (
     KIND_BUILD_TEST_RESULT,
     KIND_EVIDENCE_PACK_MANIFEST,
@@ -31,6 +32,75 @@ from .workflow import W0RunContext, W0WorkflowRunner
 
 class UpstreamServiceError(Exception):
     """Raised when Harness cannot be reached or returns an invalid upstream result."""
+
+
+def _extract_manual_overlay_regions(
+    raw: Any,
+) -> tuple[dict[str, Any], ...]:
+    """Validate and normalise the optional ``manualOverlay`` payload.
+
+    ADR 0007 §5 / Issue #280: the orchestrator accepts the manual-edit
+    overlay as either an envelope ``{"schemaVersion": "v0", "regions": [...]}``
+    or a bare ``regions`` array. ``None`` and empty payloads return an
+    empty tuple — the default for greenfield runs. Each region MUST
+    carry ``filePath``, ``originClass`` (one of the closed manual
+    classes), ``startLine``, and ``endLine``; anything else raises
+    ``ValueError`` so the orchestrator never commits to a run with a
+    malformed overlay.
+    """
+    if raw is None:
+        return ()
+    if isinstance(raw, dict):
+        regions_raw = raw.get("regions", [])
+    elif isinstance(raw, list):
+        regions_raw = raw
+    else:
+        raise ValueError(
+            "manualOverlay must be an object or array; got "
+            f"{type(raw).__name__}"
+        )
+    if not isinstance(regions_raw, list):
+        raise ValueError("manualOverlay.regions must be an array")
+    normalised: list[dict[str, Any]] = []
+    for index, region in enumerate(regions_raw):
+        if not isinstance(region, dict):
+            raise ValueError(
+                f"manualOverlay.regions[{index}] must be an object"
+            )
+        file_path = region.get("filePath")
+        origin_class = region.get("originClass")
+        if not isinstance(file_path, str) or not file_path:
+            raise ValueError(
+                f"manualOverlay.regions[{index}].filePath is required"
+            )
+        if origin_class not in JAVA_REGION_ORIGIN_MANUAL_CLASSES:
+            raise ValueError(
+                f"manualOverlay.regions[{index}].originClass must be one of "
+                f"{sorted(JAVA_REGION_ORIGIN_MANUAL_CLASSES)}, got "
+                f"{origin_class!r}"
+            )
+        try:
+            start_line = int(region.get("startLine"))
+            end_line = int(region.get("endLine"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"manualOverlay.regions[{index}] requires integer "
+                "startLine and endLine"
+            ) from exc
+        if start_line < 1 or end_line < start_line:
+            raise ValueError(
+                f"manualOverlay.regions[{index}] has invalid line range "
+                f"[{start_line}, {end_line}]"
+            )
+        normalised.append(
+            {
+                "filePath": file_path,
+                "originClass": origin_class,
+                "startLine": start_line,
+                "endLine": end_line,
+            }
+        )
+    return tuple(normalised)
 
 
 def _register_capabilities_with_harness(
@@ -783,6 +853,18 @@ class OrchestratorService:
             generate_only = False
         else:
             raise ValueError("generateOnly must be a boolean")
+        # ADR 0007 §5 / Issue #280: optional ``manualOverlay`` carries
+        # the per-region manual-edit provenance from Studio so the
+        # Verification/Repair Agent honours the assist-interaction rule
+        # on re-runs that follow a manual edit. The wire shape mirrors
+        # the evidence-pack ``manualEditOverlay`` artifact: an
+        # ``{"schemaVersion": "v0", "regions": [...]}`` envelope OR a
+        # bare ``regions`` array. Only the closed-set ``manual_modified``
+        # and ``manual_edit`` classes are accepted; anything else is
+        # rejected before the orchestrator commits to a run.
+        manual_overlay_regions = _extract_manual_overlay_regions(
+            payload.get("manualOverlay")
+        )
 
         run = self.runner.gateway.create_run(
             self.config.workflow_id,
@@ -801,6 +883,7 @@ class OrchestratorService:
             model_prompt=str(model_prompt).strip() if model_prompt else None,
             use_transformation_agent=use_transformation_agent,
             generate_only=generate_only,
+            manual_overlay_regions=manual_overlay_regions,
         )
 
         thread = threading.Thread(

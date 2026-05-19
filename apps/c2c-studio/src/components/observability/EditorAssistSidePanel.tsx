@@ -46,12 +46,42 @@ import type {
   EditorAssistResult,
 } from "@/types/editor-assist";
 
+// ADR 0007 §5 / Issue #280: the Studio surfaces the manual-edit
+// assist-interaction rule as an info banner in this side panel when the
+// user invokes "Explain this region" on a region the editor model has
+// classified as ``manual_modified`` or ``manual_edit``. The banner is
+// purely informational — it does not gate the Editor-Assist call (the
+// editor-assist channel is non-productive per ADR 0004 §"Operational
+// notes" and consumes a separate budget). The closed enum mirrors
+// ``JAVA_REGION_ORIGIN_MANUAL_CLASSES`` in
+// ``run_contract.py``; consumers MUST treat any other string as opaque
+// (per ADR 0006 §3) and the panel renders no banner for them.
+const MANUAL_EDIT_ORIGIN_CLASSES = ["manual_modified", "manual_edit"] as const;
+type ManualEditOriginClass = (typeof MANUAL_EDIT_ORIGIN_CLASSES)[number];
+
+function isManualEditOriginClass(
+  value: string | null | undefined,
+): value is ManualEditOriginClass {
+  return (
+    typeof value === "string" &&
+    (MANUAL_EDIT_ORIGIN_CLASSES as readonly string[]).includes(value)
+  );
+}
+
 export interface EditorAssistSidePanelProps {
   open: boolean;
   request: EditorAssistRequest | null;
   result: EditorAssistResult | null;
   onClose: () => void;
   onRetry: () => void;
+  // ADR 0007 §5 / Issue #280: optional originClass for the selected
+  // region. When the caller passes ``"manual_modified"`` or
+  // ``"manual_edit"``, the panel surfaces an info banner reminding the
+  // user that agent suggestions for this region require explicit
+  // opt-in. Any other value (including ``null``/``undefined``)
+  // suppresses the banner. The Studio editor model is the source of
+  // truth for this classification; the panel does not derive it.
+  regionOriginClass?: string | null;
 }
 
 const SHORT_HASH_LENGTH = 12;
@@ -363,11 +393,38 @@ function RedactionPreview({ request }: RedactionPreviewProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Manual-edit info banner (ADR 0007 §5 / Issue #280).
+// ---------------------------------------------------------------------------
+
+// Verbatim banner copy from ADR 0007 §5. Exported as a stable constant so
+// tests can pin the wording without scraping the component tree.
+export const MANUAL_EDIT_BANNER_TEXT =
+  "This region is manually edited; agent suggestions for it require explicit opt-in.";
+
+interface ManualEditBannerProps {
+  originClass: ManualEditOriginClass;
+}
+
+function ManualEditBanner({ originClass }: ManualEditBannerProps) {
+  return (
+    <div
+      role="note"
+      aria-label="Manual edit advisory"
+      data-testid="editor-assist-manual-edit-banner"
+      data-origin-class={originClass}
+      className="mb-3 rounded border border-warn/30 bg-warn-soft p-3 text-sm text-warn"
+    >
+      <p className="font-medium">{MANUAL_EDIT_BANNER_TEXT}</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main panel.
 // ---------------------------------------------------------------------------
 
 export function EditorAssistSidePanel(props: EditorAssistSidePanelProps) {
-  const { open, request, result, onClose, onRetry } = props;
+  const { open, request, result, onClose, onRetry, regionOriginClass } = props;
 
   // Refs and effects MUST be declared before any early return (Rules of Hooks).
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -455,6 +512,9 @@ export function EditorAssistSidePanel(props: EditorAssistSidePanelProps) {
       </header>
 
       <div className="flex-1 overflow-auto px-4 py-3">
+        {isManualEditOriginClass(regionOriginClass) ? (
+          <ManualEditBanner originClass={regionOriginClass} />
+        ) : null}
         {result === null ? (
           <div
             role="status"

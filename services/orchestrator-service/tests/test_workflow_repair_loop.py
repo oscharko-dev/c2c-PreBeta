@@ -426,6 +426,236 @@ class RepairLoopNoChangeTests(_BaseRepairLoopFixture):
         self.assertEqual(contract["repairAttempts"][0]["repairDecision"], "no_change")
 
 
+class RepairLoopManualRegionGuardTests(_BaseRepairLoopFixture):
+    """ADR 0007 §5 / Issue #280 — the manual-edit assist-interaction rule
+    short-circuits the repair iteration without calling the Model Gateway
+    when ``assistDecision.reasonCode != caller_explicit_opt_in``.
+    """
+
+    @staticmethod
+    def _context_with_overlay(
+        regions: tuple[Mapping[str, JsonValue], ...],
+        *,
+        use_transformation_agent: bool = False,
+    ) -> W0RunContext:
+        return W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            evidence_refs=[],
+            use_transformation_agent=use_transformation_agent,
+            manual_overlay_regions=regions,
+        )
+
+    def test_manual_region_blocks_repair_without_caller_opt_in(self):
+        """The guard fires when manual regions exist and the assist
+        decision is anything other than ``caller_explicit_opt_in``. The
+        run blocks with ``java_generation_failed``; no model invocation
+        is recorded; no model-invocation budget unit is consumed.
+        """
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = _StubGatewayWithBuildOutcomes(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+            build_outcomes=[
+                _build_failed("java_compile_failed", attempt_uri="urn:run-1/build/1"),
+            ],
+        )
+        # The invoker raises if reached. The guard must prevent the
+        # gateway hop entirely.
+        invoker = _ExceptionRepairAgentInvoker(
+            RuntimeError("model gateway must not be called for manual-blocked iteration")
+        )
+        runner, _tmp = self._runner(gateway, invoker, repair_budget_max=3)
+        regions = (
+            {
+                "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                "originClass": "manual_modified",
+                "startLine": 3,
+                "endLine": 5,
+            },
+        )
+        # ``use_transformation_agent=False`` → reasonCode
+        # ``caller_did_not_opt_in``; the guard fires.
+        result = runner.run(
+            context=self._context_with_overlay(regions),
+            input_ref=self._input_ref(),
+        )
+
+        self.assertEqual(result["status"], "blocked")
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["failureCode"], FAILURE_JAVA_GENERATION_FAILED)
+        self.assertIn("manual region", contract["failureMessage"])
+        # Exactly one trajectory entry: the no_change scoped to the region.
+        self.assertEqual(len(contract["repairAttempts"]), 1)
+        entry = contract["repairAttempts"][0]
+        self.assertEqual(entry["repairDecision"], "no_change")
+        self.assertTrue(entry["manualRegionBlock"])
+        self.assertEqual(len(entry["affectedRegions"]), 1)
+        self.assertEqual(
+            entry["affectedRegions"][0]["originClass"], "manual_modified"
+        )
+        # No model invocation reference and no input/decision artifact
+        # references — the agent never persisted anything for this attempt.
+        self.assertNotIn("modelInvocationRef", entry)
+        self.assertNotIn("repairInputRef", entry)
+        self.assertNotIn("repairDecisionRef", entry)
+        # The repair-budget slot is still consumed (one iteration ran),
+        # but the model-invocation budget is NOT charged because the
+        # gateway was never contacted.
+        self.assertEqual(contract["repairBudget"]["used"], 1)
+        self.assertEqual(
+            contract["modelInvocationBudget"]["used"], 0
+        )
+        # The agent's invoker was never reached.
+        self.assertEqual(len(invoker.calls), 0)
+
+    def test_caller_explicit_opt_in_bypasses_guard_and_proceeds(self):
+        """With ``reasonCode = caller_explicit_opt_in`` the guard does
+        not fire even when manual regions are present; the agent
+        proceeds normally and a build-test run after the propose-candidate
+        succeeds.
+        """
+        # ``caller_explicit_opt_in`` requires the productive Transformation
+        # Agent path. Stub a successful agent response so the run's first
+        # build-test (run on the AGENT's candidate, not the deterministic
+        # baseline) fails the first time and succeeds after repair.
+        sample_java = (
+            "package com.c2c.generated;\n"
+            "public class Hello {\n"
+            "    public static void main(String[] args) {\n"
+            "        System.out.println(\"hi\");\n"
+            "    }\n"
+            "}\n"
+        )
+        agent_response = {
+            "invocationId": "inv-run-1-01-transformation",
+            "runId": "run-1",
+            "modelId": "gpt-oss-120b",
+            "provider": "foundry-development",
+            "policyDecision": "policy allow",
+            "agentRole": "transformation",
+            "promptTemplateVersion": "v0",
+            "status": "completed",
+            "ledgerRef": {
+                "uri": "urn:model-gateway/inv-run-1-01",
+                "sha256": "e" * 64,
+                "byteSize": 256,
+            },
+            "output": {
+                "status": "success",
+                "files": {
+                    "src/main/java/com/c2c/generated/Hello.java": sample_java,
+                },
+                "entryClass": "Hello",
+                "entryPackage": "com.c2c.generated",
+                "entryFilePath": "src/main/java/com/c2c/generated/Hello.java",
+                "unsupportedConstructs": [],
+            },
+        }
+
+        # noinspection PyClassHasNoInitInspection
+        class _AgentInvoker:
+            def __init__(self, response: JsonObject) -> None:
+                self._response = response
+                self.calls: list[JsonObject] = []
+
+            def invoke(self, payload: Mapping[str, JsonValue]) -> JsonObject:
+                self.calls.append(dict(payload))
+                return dict(self._response)
+
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = _StubGatewayWithBuildOutcomes(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+            build_outcomes=[
+                _build_failed("java_compile_failed", attempt_uri="urn:run-1/build/1"),
+                _build_ok("urn:run-1/build/2"),
+            ],
+        )
+        repair_invoker = _StubRepairAgentInvoker(
+            [_propose_envelope(marker="opt-in")]
+        )
+        tmp = tempfile.mkdtemp()
+        artifact_store = RunArtifactStore(tmp, created_by="orchestrator-service")
+        runner = W0WorkflowRunner(
+            config=self._config(repair_budget_max=2),
+            gateway=gateway,
+            artifact_store=artifact_store,
+            transformation_agent_invoker=_AgentInvoker(agent_response),
+            repair_agent_invoker=repair_invoker,
+        )
+        regions = (
+            {
+                "filePath": "src/main/java/com/c2c/generated/Hello.java",
+                "originClass": "manual_edit",
+                "startLine": 1,
+                "endLine": 3,
+            },
+        )
+        # ``use_transformation_agent=True`` with no baseline uncertainty
+        # markers → reasonCode ``caller_explicit_opt_in``; the guard MUST
+        # NOT fire.
+        result = runner.run(
+            context=self._context_with_overlay(
+                regions, use_transformation_agent=True
+            ),
+            input_ref=self._input_ref(),
+        )
+
+        self.assertEqual(result["status"], "completed")
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_SUCCESS)
+        # The trajectory has one propose_candidate entry; the manual-edit
+        # block fields MUST be absent on this entry because the guard did
+        # not fire.
+        self.assertEqual(len(contract["repairAttempts"]), 1)
+        entry = contract["repairAttempts"][0]
+        self.assertEqual(entry["repairDecision"], DECISION_PROPOSE)
+        self.assertNotIn("manualRegionBlock", entry)
+        self.assertNotIn("affectedRegions", entry)
+        # The repair agent was invoked exactly once on the productive path.
+        self.assertEqual(len(repair_invoker.calls), 1)
+        # Sanity: the assist decision recorded on the contract is the
+        # explicit-opt-in code, which is precisely what bypasses the
+        # guard.
+        self.assertEqual(
+            contract["assistDecision"]["reasonCode"],
+            "caller_explicit_opt_in",
+        )
+
+    def test_guard_skips_when_no_manual_overlay_present(self):
+        """When no manual regions are supplied, the repair loop behaves
+        identically to the pre-Issue-280 baseline (the guard is dormant).
+        """
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = _StubGatewayWithBuildOutcomes(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+            build_outcomes=[
+                _build_failed("java_compile_failed", attempt_uri="urn:run-1/build/1"),
+                _build_ok("urn:run-1/build/2"),
+            ],
+        )
+        invoker = _StubRepairAgentInvoker([_propose_envelope(marker="no-overlay")])
+        runner, _tmp = self._runner(gateway, invoker, repair_budget_max=2)
+
+        # No manual overlay at all — the default empty tuple matches
+        # greenfield runs.
+        result = runner.run(
+            context=self._context_with_overlay(()),
+            input_ref=self._input_ref(),
+        )
+
+        self.assertEqual(result["status"], "completed")
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(contract["finalClassification"], CLASSIFICATION_SUCCESS)
+        self.assertEqual(len(contract["repairAttempts"]), 1)
+        entry = contract["repairAttempts"][0]
+        self.assertEqual(entry["repairDecision"], DECISION_PROPOSE)
+        self.assertNotIn("manualRegionBlock", entry)
+
+
 class RepairLoopEscalateTests(_BaseRepairLoopFixture):
     """Test 4 — escalate terminates the loop and surfaces the code."""
 

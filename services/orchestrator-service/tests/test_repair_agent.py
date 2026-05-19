@@ -55,6 +55,12 @@ from orchestrator_service.repair_agent import (
     RepairAgentPolicyDeniedError,
     RepairAgentRequest,
     RepairAgentTimeoutError,
+    should_manual_region_block_repair,
+)
+from orchestrator_service.run_contract import (
+    ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+    ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+    ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
 )
 
 
@@ -811,6 +817,187 @@ class RepairAgentHarnessEventTests(unittest.TestCase):
             failed_events[0]["payload"]["output"]["failureMessage"],
             "repair-agent invocation failed: model_gateway_unavailable; model gateway unavailable",
         )
+
+
+# ---------------------------------------------------------------------------
+# ADR 0007 §5 / Issue #280 — Manual-edit assist-interaction rule
+# ---------------------------------------------------------------------------
+
+
+SAMPLE_MANUAL_REGION: JsonObject = {
+    "filePath": "src/main/java/com/c2c/generated/Hello.java",
+    "originClass": "manual_modified",
+    "startLine": 3,
+    "endLine": 5,
+}
+
+
+class RepairAgentManualRegionGuardHelperTests(unittest.TestCase):
+    """Pure ``should_manual_region_block_repair`` gate matrix."""
+
+    def test_no_regions_never_blocks(self) -> None:
+        self.assertFalse(should_manual_region_block_repair([], None))
+        self.assertFalse(
+            should_manual_region_block_repair([], ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS)
+        )
+        self.assertFalse(
+            should_manual_region_block_repair([], ASSIST_REASON_CALLER_EXPLICIT_OPT_IN)
+        )
+
+    def test_caller_explicit_opt_in_never_blocks(self) -> None:
+        self.assertFalse(
+            should_manual_region_block_repair(
+                [SAMPLE_MANUAL_REGION], ASSIST_REASON_CALLER_EXPLICIT_OPT_IN
+            )
+        )
+
+    def test_regions_with_other_reason_blocks(self) -> None:
+        # Every reason code in the closed set EXCEPT
+        # ``caller_explicit_opt_in`` blocks repair when regions are
+        # present. ``None`` (the gate did not fire) also blocks.
+        for reason in (
+            None,
+            ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+            ASSIST_REASON_CALLER_DID_NOT_OPT_IN,
+            "semantic_ir_bounded_ambiguity",
+            "translation_unsupported_repairable",
+            "deterministic_candidate_low_confidence",
+            "assist_budget_exhausted",
+        ):
+            with self.subTest(reason=reason):
+                self.assertTrue(
+                    should_manual_region_block_repair(
+                        [SAMPLE_MANUAL_REGION], reason
+                    )
+                )
+
+
+class RepairAgentManualRegionGuardInvokeTests(unittest.TestCase):
+    """The agent short-circuits to ``no_change`` and never calls the gateway
+    when ADR 0007 §5 gates the iteration.
+    """
+
+    def test_guard_short_circuits_without_gateway_call(self) -> None:
+        # The stub raises if the model is invoked — proves the guard
+        # prevents the gateway hop entirely.
+        agent, store, tmp = _agent_for(
+            HarnessFailure(503, '{"errorCode":"unreachable"}')
+        )
+        request = _request(
+            manual_regions=(SAMPLE_MANUAL_REGION,),
+            assist_reason_code=ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+        )
+        result = agent.invoke(request)
+        self.assertEqual(result.decision, DECISION_NO_CHANGE)
+        self.assertTrue(result.manual_region_block)
+        # No model invocation: the productive-invocation reference is
+        # ``None`` and the agent's invoker was never reached.
+        self.assertIsNone(result.model_invocation_ref)
+        self.assertEqual(agent._model_invoker.calls, [])
+        # No on-disk artifacts (no input, no decision).
+        attempt_dir = Path(tmp) / "run-1" / REPAIR_AGENT_DIR / "attempt-01"
+        self.assertFalse(attempt_dir.exists())
+        self.assertEqual(result.repair_input_artifact_ref, {})
+        self.assertEqual(result.repair_decision_artifact_ref, {})
+        # Affected regions are surfaced verbatim so the trajectory entry
+        # can scope the no_change attempt.
+        self.assertEqual(len(result.affected_regions), 1)
+        self.assertEqual(
+            result.affected_regions[0]["originClass"], "manual_modified"
+        )
+        self.assertEqual(
+            result.failure_code, "java_generation_failed"
+        )
+        self.assertIn("manual region", result.failure_message)
+
+    def test_caller_explicit_opt_in_bypasses_guard(self) -> None:
+        # With explicit opt-in the agent proceeds normally and invokes
+        # the gateway, which returns a proposed candidate.
+        agent, store, tmp = _agent_for(_ok_propose_response())
+        request = _request(
+            manual_regions=(SAMPLE_MANUAL_REGION,),
+            assist_reason_code=ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+        )
+        result = agent.invoke(request)
+        self.assertEqual(result.decision, DECISION_PROPOSE)
+        self.assertFalse(result.manual_region_block)
+        self.assertEqual(len(result.affected_regions), 0)
+        self.assertIsNotNone(result.model_invocation_ref)
+        self.assertEqual(len(agent._model_invoker.calls), 1)
+
+    def test_no_manual_regions_bypasses_guard(self) -> None:
+        # Without manual regions the guard never fires, regardless of
+        # the reason code. The default-empty ``manual_regions`` tuple is
+        # the common case for greenfield runs.
+        agent, store, tmp = _agent_for(_ok_propose_response())
+        request = _request(
+            manual_regions=(),
+            assist_reason_code=ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+        )
+        result = agent.invoke(request)
+        self.assertEqual(result.decision, DECISION_PROPOSE)
+        self.assertFalse(result.manual_region_block)
+        self.assertEqual(len(agent._model_invoker.calls), 1)
+
+    def test_guard_emits_no_change_event_with_affected_regions(self) -> None:
+        events: list[JsonObject] = []
+
+        # noinspection PyClassHasNoInitInspection
+        class Sink:
+            @staticmethod
+            def post_event(event):
+                events.append(dict(event))
+                return {"eventId": f"evt-{len(events)}"}
+
+        tmp = tempfile.mkdtemp()
+        store = RunArtifactStore(tmp)
+        store.init_run("run-1", "w0-migration-v0")
+        agent = RepairAgent(
+            config=_config(),
+            artifact_store=store,
+            model_invoker=_StubInvoker(
+                HarnessFailure(503, '{"errorCode":"never reached"}')
+            ),
+            harness_events=Sink(),
+        )
+        agent.invoke(
+            _request(
+                manual_regions=(SAMPLE_MANUAL_REGION,),
+                assist_reason_code=ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+            )
+        )
+        no_change_events = [
+            event
+            for event in events
+            if event["eventType"] == "orchestrator.agent.repair.no_change"
+        ]
+        # Exactly one event — the manual-region guard event. No
+        # ``orchestrator.agent.repair.invoked`` event because the agent
+        # never reached the input-persistence step.
+        self.assertEqual(len(no_change_events), 1)
+        output = no_change_events[0]["payload"]["output"]
+        self.assertTrue(output["manualRegionBlock"])
+        self.assertEqual(len(output["affectedRegions"]), 1)
+        self.assertEqual(
+            output["affectedRegions"][0]["originClass"], "manual_modified"
+        )
+
+    def test_request_post_init_rejects_non_manual_origin_class(self) -> None:
+        # ``manual_regions`` entries must use one of the manual classes;
+        # the dataclass guard prevents the orchestrator from silently
+        # routing deterministic regions through the guard surface.
+        with self.assertRaises(ValueError):
+            _request(
+                manual_regions=(
+                    {
+                        "filePath": "Hello.java",
+                        "originClass": "deterministic",
+                        "startLine": 1,
+                        "endLine": 3,
+                    },
+                ),
+                assist_reason_code=ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+            )
 
 
 if __name__ == "__main__":
