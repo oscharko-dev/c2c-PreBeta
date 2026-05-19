@@ -76,6 +76,7 @@ import {
 } from "@/components/diff/ThreeWayMergeDialog";
 // Studio-IDE-7 (#252): synchronized Java + COBOL diff workspace.
 import { DiffWorkspace } from "@/components/diff/DiffWorkspace";
+import { ManualDriftWorkspace } from "@/components/diff/ManualDriftWorkspace";
 import { deriveSourceHash } from "@/lib/sourceAnalysis";
 // Studio-IDE-10 (#249): Editor-Assist channel — Ctrl/Cmd+Shift+E action.
 import { useEditorAssist } from "@/stores/editorAssist";
@@ -146,6 +147,7 @@ export function GeneratedJavaEditorPane() {
     selectedFilePath,
     selectedFileRef,
     fileContent,
+    fileContentRunId,
     isFetchingFile,
     fileFetchError,
     artifactDetails,
@@ -187,6 +189,13 @@ export function GeneratedJavaEditorPane() {
   const [showSaveNotice, setShowSaveNotice] = useState(false);
   // Studio-IDE-7 (#252): Compare Runs overlay open/close state.
   const [showDiffWorkspace, setShowDiffWorkspace] = useState(false);
+  const [showManualDriftWorkspace, setShowManualDriftWorkspace] =
+    useState(false);
+  const [manualDriftFocusLine, setManualDriftFocusLine] = useState<
+    number | null
+  >(null);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
   // Studio-IDE-14 (#256): lint state, compile-check diagnostics, and the
   // transient format toast are hoisted up here so the auto-dismiss effect
   // below can subscribe to `formatNotice` before the rest of the component
@@ -212,6 +221,28 @@ export function GeneratedJavaEditorPane() {
     });
   }, []);
 
+  const fileContentMatchesRun =
+    fileContent !== null &&
+    state.runId !== null &&
+    fileContentRunId === state.runId;
+  const activeRunFileContent = fileContentMatchesRun ? fileContent : null;
+
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (
+        viewMenuRef.current &&
+        !viewMenuRef.current.contains(event.target as Node)
+      ) {
+        setViewMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [viewMenuOpen]);
+
   // Hydrate the Java buffer for this (runId, filePath) when content lands.
   // Studio-IDE-3 (#247) seeded the buffer for status chips and conflict
   // resolution; Studio-IDE-4 (#245) now feeds user keystrokes back into the
@@ -219,17 +250,17 @@ export function GeneratedJavaEditorPane() {
   useEffect(() => {
     if (
       !selectedFilePath ||
-      fileContent === null ||
+      activeRunFileContent === null ||
       !state.runId ||
       isFetchingFile
     ) {
       return;
     }
-    void ensureJavaBaseline(selectedFilePath, fileContent, state.runId);
-    void loadJavaDraftFor(selectedFilePath, fileContent);
+    void ensureJavaBaseline(selectedFilePath, activeRunFileContent, state.runId);
+    void loadJavaDraftFor(selectedFilePath, activeRunFileContent);
   }, [
     selectedFilePath,
-    fileContent,
+    activeRunFileContent,
     state.runId,
     isFetchingFile,
     ensureJavaBaseline,
@@ -254,7 +285,7 @@ export function GeneratedJavaEditorPane() {
   useEffect(() => {
     if (
       !selectedFilePath ||
-      fileContent === null ||
+      activeRunFileContent === null ||
       !state.runId ||
       !state.programId ||
       isFetchingFile
@@ -264,7 +295,7 @@ export function GeneratedJavaEditorPane() {
     const programId = state.programId;
     const runId = state.runId;
     const filePath = selectedFilePath;
-    const content = fileContent;
+    const content = activeRunFileContent;
     let cancelled = false;
     void deriveSourceHash(content).then((hash) => {
       if (cancelled) return;
@@ -279,7 +310,7 @@ export function GeneratedJavaEditorPane() {
     };
   }, [
     selectedFilePath,
-    fileContent,
+    activeRunFileContent,
     state.runId,
     state.programId,
     isFetchingFile,
@@ -298,7 +329,7 @@ export function GeneratedJavaEditorPane() {
   useEffect(() => {
     if (
       !selectedFilePath ||
-      fileContent === null ||
+      activeRunFileContent === null ||
       !state.runId ||
       isFetchingFile
     ) {
@@ -311,7 +342,7 @@ export function GeneratedJavaEditorPane() {
     // that produced the buffer is the same as the current run (no new
     // generator output to compare against).
     if (entry.generatorBaselineRunId === state.runId) return;
-    if (fileContent === entry.content) return;
+    if (activeRunFileContent === entry.content) return;
     const key = `${state.runId}::${selectedFilePath}`;
     if (lastMergeReviewKeyRef.current === key) return;
     lastMergeReviewKeyRef.current = key;
@@ -319,12 +350,12 @@ export function GeneratedJavaEditorPane() {
       filePath: selectedFilePath,
       baselineContent: entry.generatorBaselineContent,
       manualContent: entry.content,
-      newGeneratorContent: fileContent,
+      newGeneratorContent: activeRunFileContent,
       newGeneratorRunId: state.runId,
     });
   }, [
     selectedFilePath,
-    fileContent,
+    activeRunFileContent,
     state.runId,
     isFetchingFile,
     javaBuffers,
@@ -440,7 +471,33 @@ export function GeneratedJavaEditorPane() {
   // it over the BFF response so the editor reflects in-flight work.
   const displayedContent = javaBufferEntry?.isDirty
     ? javaBufferEntry.content
-    : fileContent;
+    : activeRunFileContent;
+  const manualDriftOverlay = useMemo(() => {
+    if (javaBufferEntry?.manualEditOverlay) {
+      return javaBufferEntry.manualEditOverlay;
+    }
+    if (!selectedFilePath || !state.runId || !javaBufferEntry) {
+      return null;
+    }
+    return computeManualEditOverlay({
+      baselineContent: javaBufferEntry.generatorBaselineContent,
+      currentContent: javaBufferEntry.content,
+      runId: state.runId,
+      javaFile: selectedFilePath,
+      generatorBaselineRunId: javaBufferEntry.generatorBaselineRunId,
+    });
+  }, [javaBufferEntry, selectedFilePath, state.runId]);
+  const openManualDriftWorkspace = useCallback(
+    (focusFirstManualRegion: boolean) => {
+      setManualDriftFocusLine(
+        focusFirstManualRegion
+          ? (manualDriftOverlay?.regions[0]?.lineRange.startLine ?? null)
+          : null,
+      );
+      setShowManualDriftWorkspace(true);
+    },
+    [manualDriftOverlay],
+  );
 
   const detectedLanguage = useMemo(
     () => detectLanguageFromPath(selectedFilePath),
@@ -1559,6 +1616,7 @@ export function GeneratedJavaEditorPane() {
             pendingReRun={flags.pendingReRun}
             staleJava={flags.staleJava}
             manualEditsPresent={flags.manualEditsPresent}
+            onManualDriftClick={() => openManualDriftWorkspace(true)}
           />
         </div>
         <div className="flex gap-2 items-center">
@@ -1615,6 +1673,41 @@ export function GeneratedJavaEditorPane() {
             >
               Compare Runs
             </button>
+          ) : null}
+          {selectedFilePath ? (
+            <div ref={viewMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setViewMenuOpen((open) => !open)}
+                data-testid="java-view-menu-button"
+                title="Open Java view actions."
+                aria-label="Open Java view actions"
+                aria-haspopup="menu"
+                aria-expanded={viewMenuOpen}
+                className="rounded border border-line px-2 py-0.5 text-[10px] font-medium text-text-dim hover:bg-bg-2"
+              >
+                View
+              </button>
+              {viewMenuOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-50 mt-1 w-44 rounded border border-line bg-bg-1 py-1 text-xs shadow-lg"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="java-view-manual-drift-menuitem"
+                    onClick={() => {
+                      setViewMenuOpen(false);
+                      openManualDriftWorkspace(false);
+                    }}
+                    className="flex w-full items-center px-3 py-2 text-left text-text hover:bg-bg-2"
+                  >
+                    Manual Drift
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {selectedFilePath ? <RunModeBadge mode={runMode} /> : null}
           {fileSha ? (
@@ -1846,6 +1939,32 @@ export function GeneratedJavaEditorPane() {
           onClose={() => setShowDiffWorkspace(false)}
         />
       ) : null}
+
+      {showManualDriftWorkspace && selectedFilePath ? (
+        <ManualDriftWorkspace
+          filePath={selectedFilePath}
+          runId={
+            state.runId ??
+            javaBufferEntry?.generatorBaselineRunId ??
+            "manual-draft"
+          }
+          baselineRunId={javaBufferEntry?.generatorBaselineRunId ?? null}
+          baselineContent={
+            javaBufferEntry?.generatorBaselineRunId
+              ? javaBufferEntry.generatorBaselineContent
+              : null
+          }
+          currentContent={
+            javaBufferEntry?.content ?? displayedContent ?? ""
+          }
+          manualOverlay={manualDriftOverlay}
+          initialFocusLine={manualDriftFocusLine}
+          onClose={() => {
+            setShowManualDriftWorkspace(false);
+            setManualDriftFocusLine(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1855,11 +1974,13 @@ function JavaStatusChips({
   pendingReRun,
   staleJava,
   manualEditsPresent,
+  onManualDriftClick,
 }: {
   clean: boolean;
   pendingReRun: boolean;
   staleJava: boolean;
   manualEditsPresent: boolean;
+  onManualDriftClick?: () => void;
 }) {
   if (!clean && !pendingReRun && !staleJava && !manualEditsPresent) {
     return null;
@@ -1882,13 +2003,16 @@ function JavaStatusChips({
         </span>
       ) : null}
       {manualEditsPresent ? (
-        <span
+        <button
+          type="button"
           data-testid="java-status-chip-manual-edits"
-          title="The Java buffer diverges from the Generator Baseline."
-          className="inline-flex items-center rounded bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent border border-accent/30"
+          title="Open Manual Drift to compare this buffer with the Generator Baseline."
+          aria-label="Open Manual Drift for manual edits present"
+          onClick={onManualDriftClick}
+          className="inline-flex items-center rounded bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent border border-accent/30 hover:bg-bg-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         >
           manual edits present
-        </span>
+        </button>
       ) : null}
     </span>
   );

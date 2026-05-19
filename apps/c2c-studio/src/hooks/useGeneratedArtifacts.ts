@@ -75,6 +75,7 @@ interface GeneratedArtifactsValue {
   selectedFileRef: GeneratedFileRef | null;
   selectFile: (path: string) => void;
   fileContent: string | null;
+  fileContentRunId: string | null;
   isFetchingFile: boolean;
   fileFetchError: { path: string, status: number, message: string } | null;
   unavailableFiles: Set<string>;
@@ -87,6 +88,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
   
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileContentRunId, setFileContentRunId] = useState<string | null>(null);
   const [isFetchingFile, setIsFetchingFile] = useState(false);
   const [fileFetchError, setFileFetchError] = useState<{ path: string, status: number, message: string } | null>(null);
   const [unavailableFiles, setUnavailableFiles] = useState<Set<string>>(new Set());
@@ -97,6 +99,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
   useEffect(() => {
     setSelectedFilePath(null);
     setFileContent(null);
+    setFileContentRunId(null);
     setIsFetchingFile(false);
     setFileFetchError(null);
     setUnavailableFiles(new Set());
@@ -164,16 +167,18 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     async function fetchFile() {
       if (!selectedFilePath || !state.runId || unavailableFiles.has(selectedFilePath)) {
         setFileContent(null);
+        setFileContentRunId(null);
         setIsFetchingFile(false);
         setFileFetchError(null);
         return;
       }
 
+      const requestedRunId = state.runId;
       setIsFetchingFile(true);
       setFileFetchError(null);
 
       // Generated source content must pass through the capped file-content endpoint.
-      const result = await apiClient.getGeneratedFile(state.runId, selectedFilePath);
+      const result = await apiClient.getGeneratedFile(requestedRunId, selectedFilePath);
 
       if (!active) return;
 
@@ -181,8 +186,10 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
 
       if (result.ok) {
         setFileContent(result.data.content);
+        setFileContentRunId(result.data.runId);
       } else {
         setFileContent(null);
+        setFileContentRunId(null);
         setFileFetchError({ path: selectedFilePath, status: result.status || 500, message: result.message });
         if (result.status === 404) {
           setUnavailableFiles(prev => new Set(prev).add(selectedFilePath));
@@ -210,6 +217,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     selectedFileRef,
     selectFile,
     fileContent,
+    fileContentRunId,
     isFetchingFile,
     fileFetchError,
     unavailableFiles,

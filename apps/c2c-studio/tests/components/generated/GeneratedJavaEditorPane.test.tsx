@@ -46,12 +46,14 @@ const resolveJavaToCobolSpy = vi.hoisted(() => vi.fn());
 // onChange so the tests can assert the debounced buffer-model wiring.
 type EditorMockProps = {
   value: string;
+  original?: string;
   onChange?: (next: string) => void;
-  onMount?: (args: { editor: FakeEditor; monaco: typeof fakeMonaco }) => void;
+  onMount?: (args: { editor: FakeEditor | FakeDiffEditor; monaco: typeof fakeMonaco }) => void;
   ariaLabel?: string;
   language: string;
   mode: string;
   modelUri?: string;
+  originalModelUri?: string;
   markerGroups?: Array<{ owner: string; markers: unknown[] }>;
   className?: string;
 };
@@ -70,13 +72,24 @@ type FakeEditor = {
   getPosition: () => { lineNumber: number; column: number };
   getSelection: () => { isEmpty: () => boolean } | null;
   onDidFocusEditorText: (callback: () => void) => { dispose: () => void };
+  onDidFocusEditorWidget: (callback: () => void) => { dispose: () => void };
   createDecorationsCollection: (decorations: unknown[]) => {
     set: (decorations: unknown[]) => void;
     clear: () => void;
   };
+  revealLineInCenter: (line: number) => void;
   revealLineInCenterIfOutsideViewport: () => void;
   setPosition: () => void;
   focus: () => void;
+};
+
+type FakeDiffEditor = {
+  getOriginalEditor: () => FakeEditor;
+  getModifiedEditor: () => FakeEditor;
+  getLineChanges: () => Array<{
+    modifiedStartLineNumber: number;
+    modifiedEndLineNumber: number;
+  }>;
 };
 
 type FakeModel = {
@@ -143,7 +156,7 @@ currentFakeModel = fakeModelFor(undefined);
 
 const fakeMonaco = vi.hoisted(() => ({
   KeyMod: { CtrlCmd: 1 << 11, Shift: 1 << 10, Alt: 1 << 9 },
-  KeyCode: { KeyS: 49, KeyF: 36, KeyJ: 41, KeyE: 35, F5: 66 },
+  KeyCode: { KeyS: 49, KeyF: 36, KeyJ: 41, KeyE: 35, F5: 66, F7: 67 },
   MarkerSeverity: { Info: 2 },
   editor: { setModelMarkers: vi.fn() },
 }));
@@ -165,6 +178,7 @@ const fakeEditor: FakeEditor = {
   getPosition: () => ({ lineNumber: 1, column: 1 }),
   getSelection: () => null,
   onDidFocusEditorText: () => ({ dispose: vi.fn() }),
+  onDidFocusEditorWidget: () => ({ dispose: vi.fn() }),
   createDecorationsCollection: (decorations) => {
     decorationSetCalls.push(decorations);
     return {
@@ -176,9 +190,26 @@ const fakeEditor: FakeEditor = {
       },
     };
   },
+  revealLineInCenter: vi.fn(),
   revealLineInCenterIfOutsideViewport: vi.fn(),
   setPosition: vi.fn(),
   focus: vi.fn(),
+};
+
+const fakeOriginalEditor: FakeEditor = {
+  ...fakeEditor,
+  getModel: () => fakeModelFor("__manual-drift-original__"),
+};
+
+const fakeDiffEditor: FakeDiffEditor = {
+  getOriginalEditor: () => fakeOriginalEditor,
+  getModifiedEditor: () => fakeEditor,
+  getLineChanges: () => [
+    {
+      modifiedStartLineNumber: 1,
+      modifiedEndLineNumber: 1,
+    },
+  ],
 };
 
 vi.mock("@/components/editor/CodeEditor", async () => {
@@ -194,7 +225,10 @@ vi.mock("@/components/editor/CodeEditor", async () => {
         ariaLabel: props.ariaLabel,
         value: props.value,
       });
-      props.onMount?.({ editor: fakeEditor, monaco: fakeMonaco });
+      props.onMount?.({
+        editor: props.mode === "diff" ? fakeDiffEditor : fakeEditor,
+        monaco: fakeMonaco,
+      });
       // Mount-time only — re-firing on every prop change would inflate the
       // mount count and break assertions.
     }, []);
@@ -253,11 +287,18 @@ const setJavaBufferContentSpy = vi.fn();
 const ensureJavaBaselineSpy = vi.fn();
 const loadJavaDraftForSpy = vi.fn();
 const saveJavaDraftSpy = vi.fn();
+const setJavaManualOverlaySpy = vi.fn();
+const recordJavaDiffSnapshotSpy = vi.fn();
+const requestJavaMergeReviewSpy = vi.fn();
 const javaStatusFlagsSpy = vi.fn().mockReturnValue({
   clean: false,
   pendingReRun: false,
   staleJava: false,
+  manualEditsPresent: false,
 });
+const javaBuffersSpy = vi.fn().mockReturnValue({});
+const javaDiffHistorySpy = vi.fn().mockReturnValue({});
+const cobolDiffHistorySpy = vi.fn().mockReturnValue({});
 
 vi.mock("@/stores/transformationRun", async (importOriginal) => {
   const actual =
@@ -270,17 +311,24 @@ vi.mock("@/stores/transformationRun", async (importOriginal) => {
       return {
         state,
         productState: deriveProductState(state),
-        javaBuffers: {},
+        javaBuffers: javaBuffersSpy(),
         javaConflict: null,
         saveNoticeAt: null,
         ensureJavaBaseline: ensureJavaBaselineSpy,
         setJavaBufferContent: setJavaBufferContentSpy,
-        setJavaManualOverlay: vi.fn(),
+        setJavaManualOverlay: setJavaManualOverlaySpy,
         saveJavaDraft: saveJavaDraftSpy,
         loadJavaDraftFor: loadJavaDraftForSpy,
         resolveJavaConflict: vi.fn(),
         dismissJavaConflict: vi.fn(),
         javaStatusFlags: javaStatusFlagsSpy,
+        javaMergeReview: null,
+        requestJavaMergeReview: requestJavaMergeReviewSpy,
+        applyJavaMergeSelections: vi.fn(),
+        cancelJavaMergeReview: vi.fn(),
+        javaDiffHistory: javaDiffHistorySpy(),
+        cobolDiffHistory: cobolDiffHistorySpy(),
+        recordJavaDiffSnapshot: recordJavaDiffSnapshotSpy,
       };
     },
   };
@@ -319,16 +367,20 @@ function mockGeneratedFileContents(
   );
 }
 
-function renderPane() {
-  return render(
+function paneTree() {
+  return (
     <OriginOverlayProvider>
       <LineageCoverageProvider>
         <GeneratedArtifactsProvider>
           <GeneratedJavaEditorPane />
         </GeneratedArtifactsProvider>
       </LineageCoverageProvider>
-    </OriginOverlayProvider>,
+    </OriginOverlayProvider>
   );
+}
+
+function renderPane() {
+  return render(paneTree());
 }
 
 function SelectGeneratedFileButton({ path }: { path: string }) {
@@ -463,6 +515,15 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     ensureJavaBaselineSpy.mockClear();
     loadJavaDraftForSpy.mockClear();
     saveJavaDraftSpy.mockClear();
+    setJavaManualOverlaySpy.mockClear();
+    recordJavaDiffSnapshotSpy.mockClear();
+    requestJavaMergeReviewSpy.mockClear();
+    javaBuffersSpy.mockReset();
+    javaBuffersSpy.mockReturnValue({});
+    javaDiffHistorySpy.mockReset();
+    javaDiffHistorySpy.mockReturnValue({});
+    cobolDiffHistorySpy.mockReset();
+    cobolDiffHistorySpy.mockReturnValue({});
     fetchTraceabilitySpy.mockReset();
     fetchTraceabilitySpy.mockRejectedValue(
       new Error("traceability fixture not configured"),
@@ -476,6 +537,7 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       clean: false,
       pendingReRun: false,
       staleJava: false,
+      manualEditsPresent: false,
     });
     vi.mocked(apiClient.getGeneratedFile).mockReset();
   });
@@ -1008,6 +1070,7 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       clean: false,
       pendingReRun: false,
       staleJava: true,
+      manualEditsPresent: false,
     });
     mockTransformationState.mockReturnValue({
       ...completedRunWith(["src/App.java"]),
@@ -1054,6 +1117,153 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
         "public class App {}",
       );
     });
+  });
+
+  it("does not baseline or diff-snapshot stale file content after a runId change", async () => {
+    let currentState = {
+      ...completedRunWith(["src/App.java"]),
+      programId: "APP",
+    } as ReturnType<typeof completedRunWith> & {
+      programId: string;
+      generated: ReturnType<typeof completedRunWith>["generated"] | null;
+      generatedFiles:
+        | ReturnType<typeof completedRunWith>["generatedFiles"]
+        | null;
+    };
+    mockTransformationState.mockImplementation(() => currentState);
+    mockGeneratedFileContents({ "src/App.java": "public class First {}" });
+
+    const view = renderPane();
+
+    await waitFor(() => {
+      expect(ensureJavaBaselineSpy).toHaveBeenCalledWith(
+        "src/App.java",
+        "public class First {}",
+        "run-123",
+      );
+    });
+    await waitFor(() => {
+      expect(recordJavaDiffSnapshotSpy).toHaveBeenCalledWith(
+        "APP",
+        "src/App.java",
+        expect.objectContaining({
+          content: "public class First {}",
+          runId: "run-123",
+        }),
+      );
+    });
+
+    ensureJavaBaselineSpy.mockClear();
+    loadJavaDraftForSpy.mockClear();
+    recordJavaDiffSnapshotSpy.mockClear();
+    vi.mocked(apiClient.getGeneratedFile).mockImplementation(
+      () => new Promise<ApiResult<GeneratedFileContent>>(() => undefined),
+    );
+
+    currentState = {
+      ...currentState,
+      phase: "failed",
+      runId: "run-456",
+      generated: null,
+      generatedFiles: null,
+    };
+    view.rerender(paneTree());
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(ensureJavaBaselineSpy).not.toHaveBeenCalled();
+    expect(loadJavaDraftForSpy).not.toHaveBeenCalled();
+    expect(recordJavaDiffSnapshotSpy).not.toHaveBeenCalled();
+  });
+
+  it("opens the Manual Drift empty state from the Java View menu", async () => {
+    mockTransformationState.mockReturnValue({
+      ...completedRunWith(["src/App.java"]),
+      programId: "APP",
+    });
+    mockGeneratedFileContents({ "src/App.java": "public class App {}" });
+
+    renderPane();
+
+    await screen.findByTestId("code-editor-mock");
+    fireEvent.click(screen.getByTestId("java-view-menu-button"));
+    fireEvent.click(screen.getByTestId("java-view-manual-drift-menuitem"));
+
+    expect(
+      await screen.findByTestId("manual-drift-workspace-empty"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No Generator Baseline exists for this file yet."),
+    ).toBeInTheDocument();
+  });
+
+  it("opens Manual Drift from the manual-edits chip and focuses the first changed region", async () => {
+    const manualOverlay = {
+      schemaVersion: "v0" as const,
+      runId: "run-123",
+      javaFile: "src/App.java",
+      regions: [
+        {
+          lineRange: { startLine: 2, endLine: 2 },
+          originClass: "manual_modified" as const,
+        },
+      ],
+    };
+    const bufferEntry = {
+      content: "class App {\n  int b;\n}\n",
+      bufferHash: "current-hash",
+      lastRunInputHash: "baseline-hash",
+      lastRunInputContent: "class App {\n  int a;\n}\n",
+      displayedArtifactSourceHash: "baseline-hash",
+      generatorBaselineContent: "class App {\n  int a;\n}\n",
+      generatorBaselineHash: "baseline-hash",
+      generatorBaselineRunId: "run-123",
+      manualEditOverlay: manualOverlay,
+      isDirty: true,
+      lastSavedAt: null,
+    };
+    javaBuffersSpy.mockReturnValue({ "src/App.java": bufferEntry });
+    javaStatusFlagsSpy.mockReturnValue({
+      clean: false,
+      pendingReRun: false,
+      staleJava: false,
+      manualEditsPresent: true,
+    });
+    mockTransformationState.mockReturnValue({
+      ...completedRunWith(["src/App.java"]),
+      programId: "APP",
+    });
+    mockGeneratedFileContents({ "src/App.java": "class App {\n  int a;\n}\n" });
+
+    renderPane();
+
+    const chip = await screen.findByTestId("java-status-chip-manual-edits");
+    expect(chip.tagName).toBe("BUTTON");
+    fireEvent.click(chip);
+
+    expect(
+      await screen.findByTestId("manual-drift-workspace"),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(editorMounts.some((mount) => mount.mode === "diff")).toBe(true);
+    });
+    const diffMount = editorMounts.find((mount) => mount.mode === "diff");
+    expect(diffMount).toMatchObject({
+      language: "java",
+      value: bufferEntry.content,
+      modelUri:
+        "inmemory://c2c-studio/diff/manual-drift/run-123/src/App.java~modified",
+      ariaLabel: "Manual drift diff for src/App.java",
+    });
+    expect(fakeEditor.revealLineInCenter).toHaveBeenCalledWith(2);
+    expect(fakeEditor.setPosition).toHaveBeenCalledWith({
+      lineNumber: 2,
+      column: 1,
+    });
+    expect(fakeEditor.focus).toHaveBeenCalled();
   });
 
   it("completes a Problems-panel jump after resolving a suffix-matched generated file", async () => {
