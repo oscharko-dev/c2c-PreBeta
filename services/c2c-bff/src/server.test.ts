@@ -6188,6 +6188,50 @@ test("POST /api/v0/compile-check returns 400 when javaFiles entry has no path", 
   }
 });
 
+test("POST /api/v0/compile-check rejects unsafe javaFiles paths before upstream work", async () => {
+  const auth = createRouteAuth();
+  let upstreamCalls = 0;
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: {
+      enabled: true,
+      async formatJava() {
+        return undefined;
+      },
+      async runVerification() {
+        upstreamCalls += 1;
+        return { status: 200, body: { status: "success", diagnostics: [] } };
+      },
+    },
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    for (const path of [
+      "../Pwn.java",
+      "/tmp/Pwn.java",
+      "C:\\tmp\\Pwn.java",
+      "https://internal.example/Pwn.java",
+    ]) {
+      const response = await fetchJson(
+        `${server.baseUrl}/api/v0/compile-check`,
+        auth.post({ javaFiles: [{ path, content: "class Pwn {}" }] }),
+      );
+      assert.equal(response.status, 400);
+      assert.ok(
+        (response.body as { error: string }).error.includes("safe relative"),
+      );
+    }
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/v0/compile-check returns 413 when total content exceeds cap", async () => {
   const auth = createRouteAuth();
   const handler = createApp({
@@ -6376,6 +6420,46 @@ test("POST /api/v0/verify returns 400 when javaFiles is missing", async () => {
     );
     assert.equal(response.status, 400);
     assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/verify rejects unsafe javaFiles paths before upstream work", async () => {
+  const auth = createRouteAuth();
+  let upstreamCalls = 0;
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    buildTestRunner: {
+      enabled: true,
+      async formatJava() {
+        return undefined;
+      },
+      async runVerification() {
+        upstreamCalls += 1;
+        return { status: 200, body: { status: "success", diagnostics: [] } };
+      },
+    },
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/verify`,
+      auth.post({
+        runId: "run-1",
+        javaFiles: [{ path: "../../Pwn.java", content: "class Pwn {}" }],
+      }),
+    );
+    assert.equal(response.status, 400);
+    assert.ok(
+      (response.body as { error: string }).error.includes("safe relative"),
+    );
+    assert.equal(upstreamCalls, 0);
   } finally {
     await server.close();
   }

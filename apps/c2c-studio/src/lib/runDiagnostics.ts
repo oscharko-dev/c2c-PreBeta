@@ -10,6 +10,7 @@
 
 import type { Diagnostic } from "@/types/api";
 import type { TransformationRunState } from "@/types/run";
+import { DEFAULT_MARKER_LIMIT, sourceKindToOwner } from "@/lib/editor/diagnosticMarkers";
 
 // "scope" describes the upstream step the diagnostic flowed from, used
 // for the panel's secondary chip and for grouping when sorted by source.
@@ -162,4 +163,57 @@ export function summarize(entries: DiagnosticEntry[]): AggregateSummary {
     }
   }
   return summary;
+}
+
+type MarkerSurface = "cobol" | "generated-java";
+
+function markerSurfaceFor(diagnostic: Diagnostic): MarkerSurface | null {
+  switch (sourceKindToOwner(diagnostic.sourceKind)) {
+    case "c2c-cobol":
+    case "c2c-ir":
+      return "cobol";
+    case "c2c-generated-java":
+    case "c2c-build":
+    case "c2c-test":
+      return "generated-java";
+    default:
+      return null;
+  }
+}
+
+function normalizedFilePath(filePath: string): string {
+  return filePath.replace(/\\/g, "/").replace(/\/+/g, "/").trim();
+}
+
+// Count diagnostics that will be dropped from editor marker surfaces while
+// still appearing in the Problems panel. The cap is shared by all marker
+// owners attached to the same editor surface and file, matching the COBOL
+// and generated-Java pane marker application order.
+export function countEditorMarkerOverflow(
+  entries: DiagnosticEntry[],
+  limit = DEFAULT_MARKER_LIMIT,
+): number {
+  const countsBySurfaceFile = new Map<string, number>();
+
+  for (const { diagnostic } of entries) {
+    if (diagnostic.line === undefined || diagnostic.filePath === undefined) {
+      continue;
+    }
+    const surface = markerSurfaceFor(diagnostic);
+    if (surface === null) {
+      continue;
+    }
+    const filePath = normalizedFilePath(diagnostic.filePath);
+    if (filePath.length === 0) {
+      continue;
+    }
+    const key = `${surface}\0${filePath}`;
+    countsBySurfaceFile.set(key, (countsBySurfaceFile.get(key) ?? 0) + 1);
+  }
+
+  let overflow = 0;
+  for (const count of countsBySurfaceFile.values()) {
+    overflow += Math.max(0, count - limit);
+  }
+  return overflow;
 }

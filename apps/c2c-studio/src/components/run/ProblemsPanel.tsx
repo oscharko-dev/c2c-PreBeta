@@ -24,6 +24,7 @@ import { useMarkerNavigation } from "@/lib/editor/markerNavigation";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
   DEFAULT_SORT,
+  countEditorMarkerOverflow,
   type DiagnosticSortKey,
   type DiagnosticSortOrder,
   collectDiagnostics,
@@ -31,12 +32,16 @@ import {
   summarize,
 } from "@/lib/runDiagnostics";
 import { deriveRunProblems } from "@/components/run/runPanelUtils";
-import { DEFAULT_MARKER_LIMIT, partitionByOwner } from "@/lib/editor/diagnosticMarkers";
 import type { Diagnostic } from "@/types/api";
 
 interface SeverityBadgeProps {
   severity: Diagnostic["severity"];
 }
+
+const DIAGNOSTIC_VIRTUALIZATION_THRESHOLD = 500;
+const DIAGNOSTIC_ROW_HEIGHT_PX = 32;
+const DIAGNOSTIC_WINDOW_ROWS = 90;
+const DIAGNOSTIC_WINDOW_OVERSCAN = 12;
 
 function SeverityBadge({ severity }: SeverityBadgeProps) {
   const styles: Record<Diagnostic["severity"], string> = {
@@ -86,6 +91,7 @@ export function ProblemsPanel({
   const { state } = useTransformationRun();
   const { navigateToDiagnostic } = useMarkerNavigation();
   const [sortOrder, setSortOrder] = useState<DiagnosticSortOrder>(DEFAULT_SORT);
+  const [scrollTop, setScrollTop] = useState(0);
 
   const diagnostics = useMemo(() => collectDiagnostics(state), [state]);
   const sorted = useMemo(
@@ -93,31 +99,39 @@ export function ProblemsPanel({
     [diagnostics, sortOrder],
   );
   const summary = useMemo(() => summarize(diagnostics), [diagnostics]);
-  // Studio-IDE-5 (#244 review): the editor surface caps markers
-  // per-owner. A 1500-COBOL + 1500-build run does not trigger the cap
-  // on any single owner, so the aggregation chip must compute the
-  // truncation count per owner and sum those. We compute it via
-  // `partitionByOwner` to mirror what the editors will do.
-  const aggregatedOverflow = useMemo(() => {
-    const byOwner = partitionByOwner(
-      diagnostics.map((entry) => entry.diagnostic),
-    );
-    let overflow = 0;
-    for (const owner of Object.keys(byOwner) as Array<
-      keyof typeof byOwner
-    >) {
-      const renderableInEditor = byOwner[owner].filter(
-        (d) => d.line !== undefined && d.filePath !== undefined,
-      );
-      overflow += Math.max(
-        0,
-        renderableInEditor.length - DEFAULT_MARKER_LIMIT,
-      );
-    }
-    return overflow;
-  }, [diagnostics]);
+  const aggregatedOverflow = useMemo(
+    () => countEditorMarkerOverflow(diagnostics),
+    [diagnostics],
+  );
 
   const legacyProblems = useMemo(() => deriveRunProblems(state), [state]);
+  const virtualWindow = useMemo(() => {
+    if (sorted.length <= DIAGNOSTIC_VIRTUALIZATION_THRESHOLD) {
+      return {
+        enabled: false,
+        start: 0,
+        end: sorted.length,
+        topPadding: 0,
+        bottomPadding: 0,
+      };
+    }
+    const estimatedStart = Math.floor(scrollTop / DIAGNOSTIC_ROW_HEIGHT_PX);
+    const start = Math.max(0, estimatedStart - DIAGNOSTIC_WINDOW_OVERSCAN);
+    const end = Math.min(
+      sorted.length,
+      start + DIAGNOSTIC_WINDOW_ROWS + DIAGNOSTIC_WINDOW_OVERSCAN * 2,
+    );
+    return {
+      enabled: true,
+      start,
+      end,
+      topPadding: start * DIAGNOSTIC_ROW_HEIGHT_PX,
+      bottomPadding: (sorted.length - end) * DIAGNOSTIC_ROW_HEIGHT_PX,
+    };
+  }, [scrollTop, sorted.length]);
+  const visibleDiagnostics = virtualWindow.enabled
+    ? sorted.slice(virtualWindow.start, virtualWindow.end)
+    : sorted;
 
   if (state.phase === "idle") {
     return (
@@ -141,7 +155,14 @@ export function ProblemsPanel({
   };
 
   return (
-    <div className="p-4 h-full overflow-auto bg-bg-0 text-sm">
+    <div
+      className="p-4 h-full overflow-auto bg-bg-0 text-sm"
+      onScroll={(event) => {
+        if (sorted.length > DIAGNOSTIC_VIRTUALIZATION_THRESHOLD) {
+          setScrollTop(event.currentTarget.scrollTop);
+        }
+      }}
+    >
       <header className="mb-3 flex flex-wrap items-baseline gap-3">
         <h3 className="font-medium text-text">Diagnostics & Issues</h3>
         <ul
@@ -236,7 +257,17 @@ export function ProblemsPanel({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((entry, index) => {
+            {virtualWindow.topPadding > 0 ? (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={6}
+                  className="border-0 p-0"
+                  style={{ height: virtualWindow.topPadding }}
+                />
+              </tr>
+            ) : null}
+            {visibleDiagnostics.map((entry, visibleIndex) => {
+              const index = virtualWindow.start + visibleIndex;
               const { diagnostic, scope } = entry;
               const sourceLabel =
                 diagnostic.sourceKind ?? (scope === "build-test" ? "build" : "run");
@@ -298,6 +329,15 @@ export function ProblemsPanel({
                 </tr>
               );
             })}
+            {virtualWindow.bottomPadding > 0 ? (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={6}
+                  className="border-0 p-0"
+                  style={{ height: virtualWindow.bottomPadding }}
+                />
+              </tr>
+            ) : null}
           </tbody>
         </table>
       ) : null}

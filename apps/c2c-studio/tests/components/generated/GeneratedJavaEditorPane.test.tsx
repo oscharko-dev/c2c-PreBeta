@@ -13,6 +13,10 @@ import {
   GeneratedArtifactsProvider,
   useGeneratedArtifacts,
 } from "@/hooks/useGeneratedArtifacts";
+import {
+  MarkerNavigationProvider,
+  useMarkerNavigation,
+} from "@/lib/editor/markerNavigation";
 // Studio-IDE-6 (#248): the Java pane now consumes the OriginOverlay and
 // LineageCoverage providers (for trust-pillar overlays and the status-bar
 // coverage chip). Both providers are pure context wrappers — the test
@@ -21,7 +25,7 @@ import {
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
 import { LineageCoverageProvider } from "@/stores/lineageCoverage";
 import { apiClient } from "@/lib/apiClient";
-import type { ApiResult, GeneratedFileContent } from "@/types/api";
+import type { ApiResult, Diagnostic, GeneratedFileContent } from "@/types/api";
 
 // Studio-IDE-4 (#245): exercise the editor surface (language, mode, model
 // URI, onChange) through a textarea-backed CodeEditor mock — Monaco itself
@@ -240,6 +244,34 @@ function renderPaneWithSelector(path: string) {
         <GeneratedArtifactsProvider>
           <SelectGeneratedFileButton path={path} />
           <GeneratedJavaEditorPane />
+        </GeneratedArtifactsProvider>
+      </LineageCoverageProvider>
+    </OriginOverlayProvider>,
+  );
+}
+
+function NavigateDiagnosticButton({
+  diagnostic,
+}: {
+  diagnostic: Diagnostic;
+}) {
+  const { navigateToDiagnostic } = useMarkerNavigation();
+  return (
+    <button type="button" onClick={() => navigateToDiagnostic(diagnostic)}>
+      Navigate diagnostic
+    </button>
+  );
+}
+
+function renderPaneWithMarkerNavigation(diagnostic: Diagnostic) {
+  return render(
+    <OriginOverlayProvider>
+      <LineageCoverageProvider>
+        <GeneratedArtifactsProvider>
+          <MarkerNavigationProvider>
+            <NavigateDiagnosticButton diagnostic={diagnostic} />
+            <GeneratedJavaEditorPane />
+          </MarkerNavigationProvider>
         </GeneratedArtifactsProvider>
       </LineageCoverageProvider>
     </OriginOverlayProvider>,
@@ -546,6 +578,53 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
         "src/App.java",
         "public class App {}",
       );
+    });
+  });
+
+  it("completes a Problems-panel jump after resolving a suffix-matched generated file", async () => {
+    const diagnostic: Diagnostic = {
+      schemaVersion: "v0",
+      severity: "error",
+      code: "JAVAC",
+      message: "syntax error",
+      line: 13,
+      column: 5,
+      filePath: "/tmp/work/src/main/java/com/example/Foo.java",
+      sourceKind: "build",
+    };
+    mockTransformationState.mockReturnValue(
+      completedRunWith(
+        ["src/main/java/com/example/Initial.java", "src/main/java/com/example/Foo.java"],
+        "src/main/java/com/example/Initial.java",
+      ),
+    );
+    mockGeneratedFileContents({
+      "src/main/java/com/example/Initial.java": "public class Initial {}",
+      "src/main/java/com/example/Foo.java": "public class Foo {}",
+    });
+
+    renderPaneWithMarkerNavigation(diagnostic);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("code-editor-mock")).toHaveAttribute(
+        "data-model-uri",
+        "inmemory://c2c-studio/generated/run-123/src/main/java/com/example/Initial.java",
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /navigate diagnostic/i }),
+    );
+
+    await waitFor(() => {
+      expect(fakeEditor.revealLineInCenterIfOutsideViewport).toHaveBeenCalledWith(
+        13,
+      );
+      expect(fakeEditor.setPosition).toHaveBeenCalledWith({
+        lineNumber: 13,
+        column: 5,
+      });
+      expect(fakeEditor.focus).toHaveBeenCalled();
     });
   });
 });

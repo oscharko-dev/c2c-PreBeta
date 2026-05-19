@@ -811,6 +811,12 @@ function isSafeGeneratedRelpath(raw: string): boolean {
   return true;
 }
 
+function isSafeRequestJavaFilePath(raw: string): boolean {
+  if (raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw)) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return false;
+  return isSafeGeneratedRelpath(raw);
+}
+
 function transformLinks(runId: string): Record<string, string> {
   return {
     ...runLinks(runId),
@@ -4568,6 +4574,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             badRequest(res, `javaFiles[${i}].path must be a non-empty string`);
             return;
           }
+          if (!isSafeRequestJavaFilePath(entryRecord.path)) {
+            badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
+            return;
+          }
           if (typeof entryRecord.content !== "string") {
             badRequest(res, `javaFiles[${i}].content must be a string`);
             return;
@@ -4727,6 +4737,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             entryRecord.path.length === 0
           ) {
             badRequest(res, `javaFiles[${i}].path must be a non-empty string`);
+            return;
+          }
+          if (!isSafeRequestJavaFilePath(entryRecord.path)) {
+            badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
             return;
           }
           if (typeof entryRecord.content !== "string") {

@@ -180,11 +180,11 @@ export interface OutputRef {
 // the Studio Problems panel and editor markers. ``schemaVersion`` is
 // optional on the wire; absence means ``"v0"``. Null-fallback rules
 // per ADR 0006 Decision 4:
-//   - ``line`` absent     → marker at file level; no source jump
+//   - ``line`` absent     → Problems entry only; no editor marker or jump
 //   - ``column`` absent   → marker spans the whole ``line``
 //   - ``endLine`` /
 //     ``endColumn`` absent → point marker at ``(line, column)``
-//   - ``filePath`` absent → run-level Problems entry; no editor tab
+//   - ``filePath`` absent → run-level Problems entry; no editor marker or tab
 //   - ``sourceKind`` absent → treat as ``"unknown"``; do not infer
 //   - ``originStep`` absent → suppress originated-step pill
 //   - ``artifactRef`` absent → no "jump to artifact" affordance
