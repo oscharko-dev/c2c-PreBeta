@@ -24,7 +24,10 @@ import {
   type EditorAssistResult,
 } from "@/types/editor-assist";
 
-import { EditorAssistSidePanel } from "./EditorAssistSidePanel";
+import {
+  EditorAssistSidePanel,
+  MANUAL_EDIT_BANNER_TEXT,
+} from "./EditorAssistSidePanel";
 
 const SAMPLE_REQUEST: EditorAssistRequest = {
   schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
@@ -490,5 +493,134 @@ describe("EditorAssistSidePanel — preview redaction + a11y", () => {
     await vi.waitFor(() => {
       expect(liveRegion?.textContent).toBe("Copied");
     });
+  });
+});
+
+// ADR 0007 §5 / Issue #280: the panel surfaces a non-blocking info
+// banner when the selected region is manually edited. The banner is
+// purely informational — it does not gate the Editor-Assist call (the
+// editor-assist channel is non-productive per ADR 0004 §"Operational
+// notes") and the exact copy is fixed by the ADR.
+describe("EditorAssistSidePanel — manual-edit banner (ADR 0007 §5 / Issue #280)", () => {
+  it("renders the info banner when regionOriginClass is manual_modified", () => {
+    render(
+      <EditorAssistSidePanel
+        open
+        request={SAMPLE_REQUEST}
+        result={successResult()}
+        onClose={() => {}}
+        onRetry={() => {}}
+        regionOriginClass="manual_modified"
+      />,
+    );
+    const banner = screen.getByTestId("editor-assist-manual-edit-banner");
+    expect(banner).toHaveTextContent(MANUAL_EDIT_BANNER_TEXT);
+    expect(banner).toHaveAttribute("data-origin-class", "manual_modified");
+    expect(banner).toHaveAttribute("role", "note");
+  });
+
+  it("renders the info banner when regionOriginClass is manual_edit", () => {
+    render(
+      <EditorAssistSidePanel
+        open
+        request={SAMPLE_REQUEST}
+        result={successResult()}
+        onClose={() => {}}
+        onRetry={() => {}}
+        regionOriginClass="manual_edit"
+      />,
+    );
+    const banner = screen.getByTestId("editor-assist-manual-edit-banner");
+    expect(banner).toHaveTextContent(MANUAL_EDIT_BANNER_TEXT);
+    expect(banner).toHaveAttribute("data-origin-class", "manual_edit");
+  });
+
+  it("suppresses the banner when regionOriginClass is omitted", () => {
+    render(
+      <EditorAssistSidePanel
+        open
+        request={SAMPLE_REQUEST}
+        result={successResult()}
+        onClose={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("editor-assist-manual-edit-banner")).toBeNull();
+  });
+
+  it("suppresses the banner when regionOriginClass is a non-manual class", () => {
+    // ``deterministic``, ``agent_proposed``, ``repair_attempted`` are
+    // all non-manual classes. ADR 0007 §5 limits the banner to manual
+    // classes; treating any other value as opaque (per ADR 0006 §3)
+    // means rendering no banner.
+    for (const klass of [
+      "deterministic",
+      "agent_proposed",
+      "repair_attempted",
+      "future_unknown_class",
+      "",
+    ]) {
+      const { unmount } = render(
+        <EditorAssistSidePanel
+          open
+          request={SAMPLE_REQUEST}
+          result={successResult()}
+          onClose={() => {}}
+          onRetry={() => {}}
+          regionOriginClass={klass}
+        />,
+      );
+      expect(
+        screen.queryByTestId("editor-assist-manual-edit-banner"),
+      ).toBeNull();
+      unmount();
+    }
+  });
+
+  it("renders the banner alongside the explanation (does not replace it)", () => {
+    // The banner is additive: the user still gets the model's
+    // explanation in the same panel. ADR 0007 §5 is about advisory
+    // copy, not about blocking the Editor-Assist channel.
+    render(
+      <EditorAssistSidePanel
+        open
+        request={SAMPLE_REQUEST}
+        result={successResult({ explanation: "**Bold** explanation." })}
+        onClose={() => {}}
+        onRetry={() => {}}
+        regionOriginClass="manual_modified"
+      />,
+    );
+    expect(
+      screen.getByTestId("editor-assist-manual-edit-banner"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("editor-assist-explanation")).toBeInTheDocument();
+  });
+
+  it("renders the banner with an error result (informational, independent of API outcome)", () => {
+    // Even when the Editor-Assist call returns an error, the manual-edit
+    // advisory still applies to the region and should be visible.
+    render(
+      <EditorAssistSidePanel
+        open
+        request={SAMPLE_REQUEST}
+        result={errorResult("gateway_unavailable", "Service unavailable")}
+        onClose={() => {}}
+        onRetry={() => {}}
+        regionOriginClass="manual_edit"
+      />,
+    );
+    expect(
+      screen.getByTestId("editor-assist-manual-edit-banner"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("editor-assist-error-gateway"),
+    ).toBeInTheDocument();
+  });
+
+  it("pins the banner copy verbatim from ADR 0007 §5", () => {
+    expect(MANUAL_EDIT_BANNER_TEXT).toBe(
+      "This region is manually edited; agent suggestions for it require explicit opt-in.",
+    );
   });
 });

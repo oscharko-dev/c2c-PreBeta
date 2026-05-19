@@ -554,6 +554,86 @@ class W02RunContractShapeTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             contract.record_repair_attempt("not a mapping")
 
+    def test_record_repair_attempt_persists_manual_region_block_fields(self):
+        """ADR 0007 §5 / Issue #280: ``manualRegionBlock`` and
+        ``affectedRegions`` survive normalisation so the W02 contract
+        trajectory ledger records which regions blocked the iteration.
+        """
+        contract = self._build()
+        normalised = contract.record_repair_attempt(
+            {
+                "attemptNumber": 1,
+                "repairDecision": "no_change",
+                "failureCategory": "java_compile_failed",
+                "rationale": "manual-edit guard fired",
+                "manualRegionBlock": True,
+                "affectedRegions": [
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/Hello.java",
+                        "originClass": "manual_modified",
+                        "startLine": 3,
+                        "endLine": 5,
+                    },
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/Util.java",
+                        "originClass": "manual_edit",
+                        "startLine": 10,
+                        "endLine": 12,
+                    },
+                ],
+            }
+        )
+        self.assertTrue(normalised["manualRegionBlock"])
+        self.assertEqual(len(normalised["affectedRegions"]), 2)
+        self.assertEqual(
+            normalised["affectedRegions"][0]["originClass"], "manual_modified"
+        )
+        self.assertEqual(
+            normalised["affectedRegions"][1]["originClass"], "manual_edit"
+        )
+        # The fields surface on the run contract snapshot too.
+        payload = contract.to_dict()
+        attempt = payload["repairAttempts"][0]
+        self.assertTrue(attempt["manualRegionBlock"])
+        self.assertEqual(len(attempt["affectedRegions"]), 2)
+        # And the no_change attempt is counted by the existing pathology
+        # property so Experience Learning can spot manual-block repeats
+        # alongside agent-driven no-change loops.
+        self.assertEqual(contract.repeated_no_change_count, 1)
+
+    def test_record_repair_attempt_rejects_malformed_affected_regions(self):
+        contract = self._build()
+        with self.assertRaises(TypeError):
+            contract.record_repair_attempt(
+                {
+                    "attemptNumber": 1,
+                    "repairDecision": "no_change",
+                    "affectedRegions": "not a list",
+                }
+            )
+        with self.assertRaises(TypeError):
+            contract.record_repair_attempt(
+                {
+                    "attemptNumber": 1,
+                    "repairDecision": "no_change",
+                    "affectedRegions": ["not a mapping"],
+                }
+            )
+
+    def test_record_repair_attempt_omits_manual_block_when_absent(self):
+        """The fields are opt-in: an unaffected attempt records no
+        ``manualRegionBlock`` and no ``affectedRegions`` keys."""
+        contract = self._build()
+        normalised = contract.record_repair_attempt(
+            {
+                "attemptNumber": 1,
+                "repairDecision": "propose_candidate",
+                "failureCategory": "java_compile_failed",
+            }
+        )
+        self.assertNotIn("manualRegionBlock", normalised)
+        self.assertNotIn("affectedRegions", normalised)
+
     def test_repeated_no_change_count_property(self):
         contract = self._build()
         self.assertEqual(contract.repeated_no_change_count, 0)

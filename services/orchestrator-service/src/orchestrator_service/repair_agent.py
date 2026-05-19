@@ -49,7 +49,7 @@ from __future__ import annotations
 import datetime
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any
@@ -73,6 +73,10 @@ from .artifacts import (
 )
 from .config import OrchestratorConfig
 from .harness import HarnessFailure
+from .run_contract import (
+    ASSIST_REASON_CALLER_EXPLICIT_OPT_IN,
+    JAVA_REGION_ORIGIN_MANUAL_CLASSES,
+)
 # noinspection PyProtectedMemberInspection
 from .transformation_agent import (
     AgentContractInvalidAgentError,
@@ -243,6 +247,19 @@ class RepairAgentRequest:
     previous_repair_decision_refs: tuple[Mapping[str, JsonValue], ...] = ()
     deadline_ms: int = 60000
     trace_ref: str | None = None
+    # ADR 0007 §5 / Issue #280: per-region manual-edit context the
+    # orchestrator supplies before each repair iteration. Each entry has
+    # ``filePath``, ``originClass`` (``manual_modified`` or ``manual_edit``),
+    # ``startLine``, and ``endLine``. The agent uses this context to short-
+    # circuit iterations that would touch a manual region without the
+    # caller's explicit opt-in.
+    manual_regions: tuple[Mapping[str, JsonValue], ...] = ()
+    # ADR 0007 §5 / Issue #280: the run's ``assistDecision.reasonCode``
+    # at the moment the repair iteration is launched. ``None`` means no
+    # assist decision has been recorded on the run (the gate did not
+    # fire); the manual-region guard then treats the call as
+    # "no explicit opt-in" and blocks repair when manual regions exist.
+    assist_reason_code: str | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id:
@@ -270,6 +287,15 @@ class RepairAgentRequest:
             raise ValueError("deadline_ms must be positive")
         if self.repair_budget_remaining < 0:
             raise ValueError("repair_budget_remaining must be non-negative")
+        for region in self.manual_regions:
+            if not isinstance(region, Mapping):
+                raise ValueError("manual_regions entries must be mappings")
+            origin = region.get("originClass")
+            if origin not in JAVA_REGION_ORIGIN_MANUAL_CLASSES:
+                raise ValueError(
+                    "manual_regions originClass must be one of "
+                    f"{JAVA_REGION_ORIGIN_MANUAL_CLASSES}, got {origin!r}"
+                )
 
 
 # noinspection PyClassHasNoInitInspection
@@ -316,11 +342,18 @@ class RepairAgentResult:
     """Outcome the Orchestrator consumes after a repair-agent invocation.
 
     The decision is one of ``propose_candidate``, ``refuse``, ``escalate``,
-    or ``no_change``. ``no_change`` is a synthetic outcome added by the
-    Orchestrator-side adapter when the agent proposed a candidate whose
-    canonical content equals the previous candidate's; in that case the
-    Orchestrator must terminate the loop rather than burn the rest of the
-    repair budget on identical attempts.
+    or ``no_change``. ``no_change`` has two sources:
+
+    * The agent proposed a candidate whose canonical content equals the
+      previous candidate's; the orchestrator must terminate the loop
+      rather than burn the rest of the repair budget on identical
+      attempts.
+    * ADR 0007 §5 / Issue #280 — the iteration targets a manual-edit
+      region and the caller has not opted in via
+      ``assistDecision.reasonCode = caller_explicit_opt_in``. In that
+      case ``manual_region_block`` is ``True``, ``model_invocation_ref``
+      is ``None`` (the gateway is never called), and ``affected_regions``
+      lists the manual regions that blocked the attempt.
     """
 
     decision: str
@@ -331,7 +364,7 @@ class RepairAgentResult:
     confidence: float | None
     failure_code: str | None
     failure_message: str | None
-    model_invocation_ref: JsonObject
+    model_invocation_ref: JsonObject | None
     new_java_candidate_ref: JsonObject | None
     diff_from_previous_ref: JsonObject | None
     repair_input_payload: JsonObject
@@ -339,6 +372,8 @@ class RepairAgentResult:
     repair_input_artifact_ref: JsonObject
     repair_decision_artifact_ref: JsonObject
     persisted_artifacts: list[JsonObject] = field(default_factory=list)
+    manual_region_block: bool = False
+    affected_regions: tuple[JsonObject, ...] = ()
 
     @property
     def proposed_candidate(self) -> bool:
@@ -360,6 +395,24 @@ class RepairAgentResult:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def should_manual_region_block_repair(
+    manual_regions: Sequence[Mapping[str, JsonValue]],
+    assist_reason_code: str | None,
+) -> bool:
+    """Return ``True`` when ADR 0007 §5 gates the next repair iteration.
+
+    Issue #280: the workflow consults this before consuming a Model
+    Gateway budget unit so a manual-region-blocked iteration does NOT
+    burn productive-assist budget. The helper is intentionally pure: the
+    same inputs the workflow uses to build :class:`RepairAgentRequest`
+    must produce the same gate verdict the agent applies in
+    :meth:`RepairAgent._maybe_manual_region_block`.
+    """
+    if not manual_regions:
+        return False
+    return assist_reason_code != ASSIST_REASON_CALLER_EXPLICIT_OPT_IN
 
 
 def _meta_to_ref(meta: ArtifactMetadata) -> JsonObject:
@@ -555,6 +608,19 @@ class RepairAgent:
         escalate / no_change) the method returns the structured result and
         never raises.
         """
+        # ADR 0007 §5 / Issue #280: when the iteration targets a manual-edit
+        # region and the caller has not opted in via
+        # ``assistDecision.reasonCode = caller_explicit_opt_in``, the agent
+        # MUST NOT propose changes. We short-circuit here so no model
+        # invocation, no input artifact, and no candidate output are
+        # produced. The trajectory ledger still records the attempt via
+        # the orchestrator (see ``W02RunContract.record_repair_attempt``)
+        # so Experience Learning can spot patterns where manual edits
+        # repeatedly block repair.
+        manual_block_result = self._maybe_manual_region_block(request)
+        if manual_block_result is not None:
+            return manual_block_result
+
         started_at = self._iso_now()
         attempt_dir = _attempt_dir(request.attempt_number)
 
@@ -813,6 +879,75 @@ class RepairAgent:
 
     def _iso_now(self) -> str:
         return _iso_now(self._clock)
+
+    def _maybe_manual_region_block(
+        self, request: RepairAgentRequest
+    ) -> RepairAgentResult | None:
+        """Return a synthetic ``no_change`` result when the manual-edit
+        assist-interaction rule (ADR 0007 §5) blocks the iteration.
+
+        Returns ``None`` when the iteration is free to proceed: either no
+        manual regions exist on the previous candidate, or the caller has
+        opted in via ``assistDecision.reasonCode = caller_explicit_opt_in``.
+
+        When the guard fires, the method emits a single
+        ``orchestrator.agent.repair.no_change`` harness event tagged with
+        ``manualRegionBlock=true`` and the affected regions. No artifacts
+        are persisted: the trajectory ledger entry recorded by the
+        orchestrator is the durable record for this attempt.
+        """
+        if not request.manual_regions:
+            return None
+        if request.assist_reason_code == ASSIST_REASON_CALLER_EXPLICIT_OPT_IN:
+            return None
+        affected = tuple(dict(region) for region in request.manual_regions)
+        rationale = (
+            "manual-edit assist-interaction rule (ADR 0007 §5): iteration "
+            "targets a manual region without "
+            "``assistDecision.reasonCode = caller_explicit_opt_in``; "
+            "no model invocation, no candidate output."
+        )
+        failure_message = (
+            f"manual-region guard blocked repair attempt {request.attempt_number}; "
+            f"{len(affected)} manual region(s) require explicit opt-in"
+        )
+        self._emit_event(
+            request,
+            event_type="orchestrator.agent.repair.no_change",
+            state_transition="agent.repair.no_change",
+            status=DECISION_NO_CHANGE,
+            input_payload={
+                "runId": request.run_id,
+                "attemptNumber": request.attempt_number,
+                "failureCategory": request.failure_category,
+                "assistReasonCode": request.assist_reason_code,
+            },
+            output_payload={
+                "decision": DECISION_NO_CHANGE,
+                "manualRegionBlock": True,
+                "affectedRegions": list(affected),
+            },
+        )
+        return RepairAgentResult(
+            decision=DECISION_NO_CHANGE,
+            candidate=None,
+            refusal_code=None,
+            escalation_code=None,
+            rationale=rationale,
+            confidence=None,
+            failure_code="java_generation_failed",
+            failure_message=failure_message,
+            model_invocation_ref=None,
+            new_java_candidate_ref=None,
+            diff_from_previous_ref=None,
+            repair_input_payload={},
+            repair_decision_payload={},
+            repair_input_artifact_ref={},
+            repair_decision_artifact_ref={},
+            persisted_artifacts=[],
+            manual_region_block=True,
+            affected_regions=affected,
+        )
 
     def _decode_repair_candidate(
         self, inner_envelope: Mapping[str, JsonValue]
@@ -1325,4 +1460,5 @@ __all__ = [
     "VALID_ESCALATION_CODES",
     "VALID_FAILURE_CATEGORIES",
     "VALID_REFUSAL_CODES",
+    "should_manual_region_block_repair",
 ]

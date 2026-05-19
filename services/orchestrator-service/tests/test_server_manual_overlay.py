@@ -1,0 +1,146 @@
+"""ADR 0007 §5 / Issue #280 — server-side ``manualOverlay`` extraction.
+
+The orchestrator HTTP API accepts the manual-edit overlay as part of the
+``POST /api/v0/transform`` payload so Studio re-runs after manual edits
+flow the per-region provenance through to the Verification/Repair Agent.
+``_extract_manual_overlay_regions`` is the pure validator that normalises
+the wire shape before the orchestrator commits to a run.
+"""
+
+from __future__ import annotations
+
+import unittest
+
+from orchestrator_service.server import _extract_manual_overlay_regions
+
+
+class ExtractManualOverlayRegionsTests(unittest.TestCase):
+    def test_none_returns_empty_tuple(self) -> None:
+        self.assertEqual(_extract_manual_overlay_regions(None), ())
+
+    def test_empty_envelope_returns_empty_tuple(self) -> None:
+        self.assertEqual(
+            _extract_manual_overlay_regions({"schemaVersion": "v0", "regions": []}),
+            (),
+        )
+
+    def test_bare_regions_array_accepted(self) -> None:
+        # Bare-array form is convenient for ad-hoc callers; the
+        # envelope form mirrors the evidence-pack artifact shape.
+        regions = _extract_manual_overlay_regions(
+            [
+                {
+                    "filePath": "src/main/java/com/c2c/generated/Hello.java",
+                    "originClass": "manual_modified",
+                    "startLine": 3,
+                    "endLine": 5,
+                },
+            ]
+        )
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0]["originClass"], "manual_modified")
+        self.assertEqual(regions[0]["startLine"], 3)
+        self.assertEqual(regions[0]["endLine"], 5)
+
+    def test_envelope_with_regions_accepted(self) -> None:
+        regions = _extract_manual_overlay_regions(
+            {
+                "schemaVersion": "v0",
+                "regions": [
+                    {
+                        "filePath": "Util.java",
+                        "originClass": "manual_edit",
+                        "startLine": 10,
+                        "endLine": 12,
+                    }
+                ],
+            }
+        )
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0]["originClass"], "manual_edit")
+
+    def test_unknown_origin_class_rejected(self) -> None:
+        # ADR 0007 §"Rationale" pins the closed enum; non-manual
+        # classes MUST NOT silently pass through the manual-overlay
+        # surface.
+        with self.assertRaises(ValueError) as ctx:
+            _extract_manual_overlay_regions(
+                [
+                    {
+                        "filePath": "Hello.java",
+                        "originClass": "deterministic",
+                        "startLine": 1,
+                        "endLine": 3,
+                    },
+                ]
+            )
+        self.assertIn("originClass", str(ctx.exception))
+
+    def test_missing_file_path_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(
+                [
+                    {
+                        "filePath": "",
+                        "originClass": "manual_modified",
+                        "startLine": 1,
+                        "endLine": 3,
+                    },
+                ]
+            )
+
+    def test_invalid_line_range_rejected(self) -> None:
+        # startLine must be >= 1 and endLine must be >= startLine.
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(
+                [
+                    {
+                        "filePath": "Hello.java",
+                        "originClass": "manual_modified",
+                        "startLine": 0,
+                        "endLine": 3,
+                    },
+                ]
+            )
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(
+                [
+                    {
+                        "filePath": "Hello.java",
+                        "originClass": "manual_modified",
+                        "startLine": 5,
+                        "endLine": 3,
+                    },
+                ]
+            )
+
+    def test_non_integer_line_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(
+                [
+                    {
+                        "filePath": "Hello.java",
+                        "originClass": "manual_modified",
+                        "startLine": "first",
+                        "endLine": 3,
+                    },
+                ]
+            )
+
+    def test_non_object_payload_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions("not a payload")
+
+    def test_non_array_regions_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(
+                {"schemaVersion": "v0", "regions": "not a list"}
+            )
+
+    def test_non_object_region_entry_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(["not an object"])
+
+
+if __name__ == "__main__":
+    unittest.main()

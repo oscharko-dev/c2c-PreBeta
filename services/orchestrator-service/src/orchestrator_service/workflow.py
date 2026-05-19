@@ -57,6 +57,7 @@ from .repair_agent import (
     RepairAgentRequest,
     RepairAgentResult,
     RepairAgentTimeoutError,
+    should_manual_region_block_repair,
 )
 from .transformation_agent import (
     AgentContractInvalidAgentError,
@@ -220,6 +221,16 @@ class W0RunContext:
     # ``/api/v0/transform`` callers preserve their composed
     # Generate & Verify behaviour.
     generate_only: bool = False
+    # ADR 0007 §5 / Issue #280: per-region manual-edit overlay submitted
+    # with the run. Each entry is a region record with ``filePath``,
+    # ``originClass`` (``manual_modified`` or ``manual_edit``),
+    # ``startLine``, and ``endLine``. The orchestrator forwards these to
+    # every Verification/Repair Agent iteration; combined with the run's
+    # ``assistDecision.reasonCode``, they gate whether the agent can
+    # propose changes to a manual region (caller opt-in required per the
+    # assist-interaction rule). The default empty tuple matches runs that
+    # carry no manual-edit overlay (the common case for greenfield runs).
+    manual_overlay_regions: tuple[Mapping[str, JsonValue], ...] = ()
 
 
 # noinspection PyClassHasNoInitInspection
@@ -1099,6 +1110,18 @@ class W0WorkflowRunner:
         configured_default_model = _text(
             getattr(self.config, "model_gateway_model_id", None)
         )
+        # ADR 0007 §5 / Issue #280: forward the manual-edit overlay (if
+        # any) and the run's current ``assistDecision.reasonCode`` so the
+        # agent can short-circuit iterations that would touch a manual
+        # region without an explicit caller opt-in. ``None`` for the
+        # reason code means the gate has not fired on this run yet; the
+        # agent treats that as "no opt-in" and blocks repair when manual
+        # regions are present.
+        assist_reason_code = (
+            _contract.assist_decision.reason_code
+            if _contract.assist_decision is not None
+            else None
+        )
         request = RepairAgentRequest(
             run_id=context.run_id,
             workflow_id=context.workflow_id,
@@ -1131,6 +1154,10 @@ class W0WorkflowRunner:
             )
             or DEFAULT_MODEL_TIMEOUT_MS,
             trace_ref=f"trace-{context.run_id}",
+            manual_regions=tuple(
+                dict(region) for region in context.manual_overlay_regions
+            ),
+            assist_reason_code=assist_reason_code,
         )
         return agent.invoke(request)
 
@@ -2391,6 +2418,19 @@ class W0WorkflowRunner:
                     actor="verification-repair-agent",
                     input_ref=build_test_output.output_ref,
                 )
+                # ADR 0007 §5 / Issue #280: when the manual-edit
+                # assist-interaction rule blocks the iteration, skip the
+                # Model Gateway budget consume so the manual-region guard
+                # never burns productive-assist budget. The repair agent
+                # short-circuits to ``no_change`` without invoking the
+                # gateway, and the orchestrator records the attempt on
+                # the trajectory below.
+                _manual_block_pending = should_manual_region_block_repair(
+                    context.manual_overlay_regions,
+                    w02_contract.assist_decision.reason_code
+                    if w02_contract.assist_decision is not None
+                    else None,
+                )
                 # Issue #216 (W0.3-5): consume one Model Gateway unit
                 # before each repair-iteration call so an exhausted
                 # budget terminates the loop *before* the gateway is
@@ -2399,7 +2439,8 @@ class W0WorkflowRunner:
                 # last objective build-test failure code so consumers can
                 # distinguish budget exhaustion from agent-side failures.
                 try:
-                    w02_contract.model_invocation_budget.consume()
+                    if not _manual_block_pending:
+                        w02_contract.model_invocation_budget.consume()
                 except ModelInvocationBudgetExhaustedError as exhausted_exc:
                     self._record_step_finish(
                         context,
@@ -2514,38 +2555,62 @@ class W0WorkflowRunner:
                     )
                     break
                 # Persist the agent's decision reference for any subsequent
-                # attempt's previousRepairDecisionRefs array.
-                previous_repair_decision_refs.append(
-                    dict(repair_result.repair_decision_artifact_ref)
-                )
-                _record_productive_model_invocation(
-                    repair_result.model_invocation_ref,
-                    agent_role="verification-repair",
-                )
+                # attempt's previousRepairDecisionRefs array. Skip when the
+                # manual-region guard short-circuited the iteration: no
+                # decision artifact was written (ADR 0007 §5 / Issue #280).
+                if repair_result.repair_decision_artifact_ref:
+                    previous_repair_decision_refs.append(
+                        dict(repair_result.repair_decision_artifact_ref)
+                    )
+                # Manual-region-guarded iterations never invoke the Model
+                # Gateway, so there is no model invocation to record on the
+                # productive-invocation ledger (Issue #280).
+                if repair_result.model_invocation_ref:
+                    _record_productive_model_invocation(
+                        repair_result.model_invocation_ref,
+                        agent_role="verification-repair",
+                    )
                 # Record the trajectory entry for this attempt regardless
                 # of outcome — every attempt must be visible in the run
-                # contract for Experience Learning.
-                w02_contract.record_repair_attempt(
-                    {
-                        "attemptNumber": attempt,
-                        "repairDecision": repair_result.decision,
-                        "failureCategory": build_failure_code,
-                        "refusalCode": repair_result.refusal_code,
-                        "escalationCode": repair_result.escalation_code,
-                        "rationale": repair_result.rationale,
-                        "modelInvocationRef": dict(repair_result.model_invocation_ref),
-                        "repairInputRef": dict(repair_result.repair_input_artifact_ref),
-                        "repairDecisionRef": dict(
-                            repair_result.repair_decision_artifact_ref
-                        ),
-                        "buildTestResultRef": build_test_result_ref_payload,
-                        "javaCandidateRef": (
-                            dict(repair_result.new_java_candidate_ref)
-                            if repair_result.new_java_candidate_ref
-                            else None
-                        ),
-                    }
-                )
+                # contract for Experience Learning. ``affectedRegions`` and
+                # ``manualRegionBlock`` are populated when the manual-region
+                # guard fires; ``record_repair_attempt`` filters ``None``
+                # values so the entry stays compact for unaffected attempts.
+                trajectory_entry: JsonObject = {
+                    "attemptNumber": attempt,
+                    "repairDecision": repair_result.decision,
+                    "failureCategory": build_failure_code,
+                    "refusalCode": repair_result.refusal_code,
+                    "escalationCode": repair_result.escalation_code,
+                    "rationale": repair_result.rationale,
+                    "modelInvocationRef": (
+                        dict(repair_result.model_invocation_ref)
+                        if repair_result.model_invocation_ref
+                        else None
+                    ),
+                    "repairInputRef": (
+                        dict(repair_result.repair_input_artifact_ref)
+                        if repair_result.repair_input_artifact_ref
+                        else None
+                    ),
+                    "repairDecisionRef": (
+                        dict(repair_result.repair_decision_artifact_ref)
+                        if repair_result.repair_decision_artifact_ref
+                        else None
+                    ),
+                    "buildTestResultRef": build_test_result_ref_payload,
+                    "javaCandidateRef": (
+                        dict(repair_result.new_java_candidate_ref)
+                        if repair_result.new_java_candidate_ref
+                        else None
+                    ),
+                }
+                if repair_result.manual_region_block:
+                    trajectory_entry["manualRegionBlock"] = True
+                    trajectory_entry["affectedRegions"] = [
+                        dict(region) for region in repair_result.affected_regions
+                    ]
+                w02_contract.record_repair_attempt(trajectory_entry)
                 if repair_result.is_refusal or repair_result.is_escalation:
                     self._record_step_finish(
                         context,
