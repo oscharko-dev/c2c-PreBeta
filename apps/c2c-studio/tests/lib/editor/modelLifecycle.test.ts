@@ -5,9 +5,13 @@ import {
   clearViewState,
   createModel,
   disposeModel,
+  getDiffViewState,
   getViewState,
+  restoreDiffViewState,
   restoreViewState,
+  saveDiffViewState,
   saveViewState,
+  type DiffEditorViewState,
   type DiffViewStateRestorable,
   type EditorViewState,
   type MonacoLifecycleSurface,
@@ -107,6 +111,12 @@ function stubViewState(payload: Record<string, unknown>): EditorViewState {
   return payload as unknown as EditorViewState;
 }
 
+function stubDiffViewState(
+  payload: Record<string, unknown>,
+): DiffEditorViewState {
+  return payload as unknown as DiffEditorViewState;
+}
+
 describe("modelLifecycle", () => {
   beforeEach(() => {
     __resetLifecycleForTests();
@@ -180,15 +190,28 @@ describe("modelLifecycle", () => {
 
   it("clearViewState removes both standalone and diff state", () => {
     saveViewState("inmemory://c", stubViewState({ a: 1 }));
+    saveDiffViewState("inmemory://c", stubDiffViewState({ b: 2 }));
     clearViewState("inmemory://c");
     expect(getViewState("inmemory://c")).toBeUndefined();
+    expect(getDiffViewState("inmemory://c")).toBeUndefined();
   });
 
-  it("DiffViewStateRestorable can be passed to restoreDiffViewState shape (compile check)", () => {
-    // This is a compile-time invariant — instantiate the helper but do not
-    // exercise it (no state is stored), which still proves the type accepts
-    // the structural mock.
+  it("diff view-state round-trip restores the same object", () => {
+    const state = stubDiffViewState({
+      modified: { scrollTop: 10 },
+      original: { scrollTop: 4 },
+    });
+    saveDiffViewState("inmemory://diff", state);
     const editor = makeMockDiffViewStateRestorable();
-    expect(typeof editor.restoreViewState).toBe("function");
+    const ok = restoreDiffViewState(editor, "inmemory://diff");
+    expect(ok).toBe(true);
+    expect(editor.restoreViewState).toHaveBeenCalledWith(state);
+  });
+
+  it("restoreDiffViewState returns false when no diff state is stored", () => {
+    const editor = makeMockDiffViewStateRestorable();
+    const ok = restoreDiffViewState(editor, "inmemory://missing-diff");
+    expect(ok).toBe(false);
+    expect(editor.restoreViewState).not.toHaveBeenCalled();
   });
 });

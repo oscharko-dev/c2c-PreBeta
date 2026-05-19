@@ -228,6 +228,23 @@ describe("verify-monaco-lazy regex tightening (#258 Copilot review)", () => {
     }
   });
 
+  it("requires Monaco to appear in at least one lazy chunk", () => {
+    const firstLoadContent = `
+      const firstLoadOnly = "clean";
+    `;
+    const lazyContent = `
+      const lazyButNotMonaco = "still clean";
+    `;
+    const fake = setupFakeBuild({ firstLoadContent, lazyContent });
+    try {
+      const result = runVerify(fake.studioRoot);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("No chunk references Monaco at all");
+    } finally {
+      fake.cleanup();
+    }
+  });
+
   it("requires the build manifest to exist", () => {
     const root = mkdtempSync(join(tmpdir(), "verify-monaco-lazy-empty-"));
     try {
