@@ -1412,7 +1412,9 @@ components:
         studioRedactionProfileVersion: { type: string, minLength: 1 }
         matchedPatternIds:
           type: array
-          items: { type: string }
+          items:
+            type: string
+            pattern: "^[A-Za-z][A-Za-z0-9_:-]{0,127}$"
 
     EditorExplainRequest:
       type: object
@@ -1489,7 +1491,9 @@ components:
         budgetSnapshot: { $ref: "#/components/schemas/EditorAssistBudget" }
         redactionApplied:
           type: array
-          items: { type: string }
+          items:
+            type: string
+            pattern: "^[A-Za-z][A-Za-z0-9_:-]{0,127}$"
 
     EditorExplainErrorCode:
       type: string

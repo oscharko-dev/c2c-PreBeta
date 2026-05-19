@@ -8024,6 +8024,76 @@ test("POST /api/v0/editor/explain falls back to local ledgerRef when gateway omi
   }
 });
 
+test("POST /api/v0/editor/explain drops unsafe gateway metadata before responding or writing ledger", async () => {
+  const { client: gateway } = explainGateway({
+    status: 200,
+    body: {
+      explanation: "ok",
+      invocationId: "https://internal.example/inv/123",
+      ledgerRef: "urn:https://internal.example/run?token=opaque",
+      redactedFields: [
+        "field-name-class:email",
+        "internal.example",
+        "alice@example.invalid",
+        "https://internal.example/redaction/1",
+      ],
+    },
+  });
+  const ledger: Array<Record<string, unknown>> = [];
+  const auth = createEditorAssistAuth();
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    sessionStore: auth.sessionStore,
+    editorAssistLedgerSink: (entry) =>
+      ledger.push(entry as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: explainRequestBody({ sessionId: "safe-gateway-metadata" }),
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    assert.match(
+      body.ledgerRef as string,
+      /^urn:c2c\/editor-assist\/tenant-a\/safe-gateway-metadata\//,
+    );
+    assert.match(
+      body.modelInvocationRef as string,
+      /^mi-\d+-eai-tenant-a-safe-gateway-metadata-\d+$/,
+    );
+    assert.deepEqual(
+      (body.redactionApplied as string[]).sort(),
+      ["field-name-class:email", "ssn-us"].sort(),
+    );
+    assert.equal(JSON.stringify(body).includes("alice@example.invalid"), false);
+    assert.equal(JSON.stringify(body).includes("internal.example"), false);
+
+    assert.equal(ledger.length, 1);
+    const entry = ledger[0] as Record<string, unknown>;
+    assert.equal(entry.ledgerRef, body.ledgerRef);
+    assert.equal(entry.invocationId, null);
+    assert.deepEqual(
+      (entry.redactedFields as string[]).sort(),
+      ["field-name-class:email", "ssn-us"].sort(),
+    );
+    assert.equal(JSON.stringify(entry).includes("alice@example.invalid"), false);
+    assert.equal(JSON.stringify(entry).includes("internal.example"), false);
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/v0/editor/explain returns 415 when Content-Type is not application/json", async () => {
   // M1: the route must reject non-JSON content types before reading the body.
   // No budget is consumed and no ledger entry is written.

@@ -197,6 +197,10 @@ const HEX64 = /^[a-fA-F0-9]{64}$/;
 // L3: allow-lists for identifier fields echoed into the ledger / forwarded
 // to the gateway. Unicode property escapes require the `u` flag.
 const SAFE_ID_PATTERN = /^[A-Za-z0-9._\-]+$/u;
+const SAFE_REDACTION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_:-]{0,127}$/u;
+const SAFE_GATEWAY_REF_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/u;
+const SAFE_GATEWAY_LEDGER_REF_PATTERN =
+  /^urn:[A-Za-z0-9][A-Za-z0-9._:/+\-=]{0,511}$/u;
 // filePath allows letters, digits, dots, underscores, forward-slashes, and
 // hyphens. The `u` flag enables Unicode property escapes; \p{L} and \p{N}
 // cover non-ASCII identifiers that appear in some enterprise file layouts.
@@ -252,6 +256,21 @@ function isStringArray(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === "string")
   );
+}
+
+function isSafeRedactionPatternId(value: string): boolean {
+  return SAFE_REDACTION_ID_PATTERN.test(value);
+}
+
+function normaliseGatewayInvocationId(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  return SAFE_GATEWAY_REF_PATTERN.test(value) ? value : null;
+}
+
+function normaliseGatewayLedgerRef(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  if (value.includes("://")) return null;
+  return SAFE_GATEWAY_LEDGER_REF_PATTERN.test(value) ? value : null;
 }
 
 function rejectUnsupportedFields(
@@ -373,6 +392,14 @@ function validateRedactionMetadata(
   if (!isStringArray(record.matchedPatternIds)) {
     return rejectInvalidRegion(
       "studioRedactionMetadata.matchedPatternIds must be an array of strings",
+    );
+  }
+  const invalidPatternId = record.matchedPatternIds.find(
+    (id) => !isSafeRedactionPatternId(id),
+  );
+  if (invalidPatternId !== undefined) {
+    return rejectInvalidRegion(
+      "studioRedactionMetadata.matchedPatternIds must contain opaque redaction pattern ids",
     );
   }
   return {
@@ -728,15 +755,17 @@ export function buildLocalLedgerRef(args: RefBuilderArgs): string {
 export function extractLedgerRef(body: unknown): string | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const candidate = (body as Record<string, unknown>).ledgerRef;
-  if (typeof candidate === "string" && candidate.length > 0) {
-    return candidate;
+  const direct = normaliseGatewayLedgerRef(candidate);
+  if (direct !== null) {
+    return direct;
   }
   // ADR-aligned mapping ref (e.g. orchestrator clients embed
-  // ``ledgerRef`` as ``{ uri, sha256 }``). Accept the same shape so the
-  // BFF passes the opaque value through verbatim.
+  // ``ledgerRef`` as ``{ uri, sha256 }``). Accept the same shape, but only
+  // when the URI is an opaque URN; gateway URLs or raw values must not cross
+  // the editor redaction boundary.
   if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
     const uri = (candidate as Record<string, unknown>).uri;
-    if (typeof uri === "string" && uri.length > 0) return uri;
+    return normaliseGatewayLedgerRef(uri);
   }
   return null;
 }
@@ -777,15 +806,12 @@ export function mapGatewayResponse(
       const record = body as Record<string, unknown>;
       const explanation = record.explanation;
       if (typeof explanation === "string" && explanation.length > 0) {
-        const invocationIdRaw = record.invocationId;
-        const invocationId =
-          typeof invocationIdRaw === "string" && invocationIdRaw.length > 0
-            ? invocationIdRaw
-            : null;
+        const invocationId = normaliseGatewayInvocationId(record.invocationId);
         const gatewayLedgerRef = extractLedgerRef(record);
         const gatewayRedactedFields = Array.isArray(record.redactedFields)
           ? record.redactedFields.filter(
-              (field): field is string => typeof field === "string",
+              (field): field is string =>
+                typeof field === "string" && isSafeRedactionPatternId(field),
             )
           : [];
         return {
@@ -852,13 +878,13 @@ export function normaliseGatewayRedactedFields(
 ): string[] {
   const union = new Set<string>();
   for (const id of args.studioMatchedPatternIds) {
-    if (typeof id === "string" && id.length > 0) {
+    if (typeof id === "string" && isSafeRedactionPatternId(id)) {
       union.add(id);
     }
   }
   const gateway = args.gatewayRedactedFields ?? [];
   for (const id of gateway) {
-    if (typeof id === "string" && id.length > 0) {
+    if (typeof id === "string" && isSafeRedactionPatternId(id)) {
       union.add(id);
     }
   }
