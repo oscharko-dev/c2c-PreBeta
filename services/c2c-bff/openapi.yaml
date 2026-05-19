@@ -30,6 +30,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
+  /api/v0/csp-report:
+    post:
+      summary: Receive a browser CSP violation report
+      description: >
+        Issue #271 / ADR-0005 §6: receiver for browser CSP violation
+        reports. Accepts both the legacy `application/csp-report`
+        envelope and the Reporting API v2 `application/reports+json`
+        batch shape. The endpoint is intentionally unauthenticated
+        because the browser cannot attach credentials to `report-uri`
+        requests. Sanitisation strips query strings, fragments, and
+        any non-allowlisted fields before the report reaches the log
+        sink, so no PII leaks server-side.
+      operationId: cspReport
+      requestBody:
+        required: true
+        content:
+          application/csp-report:
+            schema:
+              type: object
+              additionalProperties: true
+          application/reports+json:
+            schema:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "204":
+          description: report accepted (no body)
+        "400":
+          description: malformed envelope or empty batch
+        "413":
+          description: body exceeds the 64 KiB cap
+        "415":
+          description: unsupported content-type
+
   /api/v0/mode:
     get:
       summary: Report upstream reachability (orchestrator and evidence-service)

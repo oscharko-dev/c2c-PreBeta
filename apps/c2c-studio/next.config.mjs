@@ -1,105 +1,40 @@
-// Studio-IDE-12 (#250): Content Security Policy aligned with the
-// DOMPurify allow-list in ``src/lib/editor/hoverMarkdownSanitizer.ts``.
+// Issue #271 / ADR-0005 §6: the Studio CSP is owned by
+// ``src/middleware.ts``, which mints a per-request nonce and writes
+// the production-grade ``script-src 'self' 'nonce-{N}' 'strict-dynamic'``
+// header per the ADR. ``next.config.mjs headers()`` cannot host that
+// policy because it is evaluated without per-request context.
 //
-// The policy is dev-vs-production aware:
+// What stays here is a **static-asset fallback CSP**. The middleware
+// matcher excludes ``/_next/static``, ``/_next/image``, ``/favicon``
+// and ``/api`` from per-request work; those paths fall through to
+// the policy below. They ship no inline scripts, so a tight
+// ``script-src 'self'`` (without a nonce) is correct for them.
 //
-//   * **Development** (``npm run dev``): Next.js' Fast Refresh requires
-//     ``'unsafe-eval'`` + inline scripts and opens a WebSocket connection
-//     for HMR. Without those allowances the dev experience breaks
-//     (blank pages, no HMR). The dev policy keeps every other gate
-//     tight.
+// Defence-in-depth security headers (``X-Content-Type-Options``,
+// ``Referrer-Policy``, ``X-Frame-Options``) ship on every response
+// from both the middleware and this fallback so they cover both
+// branches without coordination.
 //
-//   * **Production** (``next build`` output): Next.js' App Router still
-//     emits hydration / RSC payload scripts inline. Implementing a
-//     nonce / hash-based ``script-src 'self' 'strict-dynamic'`` policy
-//     is a focused follow-up (Issue #250 review-finding); until then
-//     the production policy permits ``'unsafe-inline'`` on
-//     ``script-src`` so the workbench shell hydrates. Every other gate
-//     stays strict (no ``'unsafe-eval'``, no third-party origins, no
-//     framing, no plugins).
-//
-// Split-server dev (``NEXT_PUBLIC_C2C_BFF_BASE_URL=http://localhost:18089``
-// while Next runs on :3000) is a different-origin setup. The CSP picks
-// up the override at config-load time and adds it to ``connect-src``
-// so browser fetches to the BFF succeed.
-//
-// Additional security headers ship alongside CSP:
-//   * ``X-Content-Type-Options: nosniff``
-//   * ``Referrer-Policy: strict-origin-when-cross-origin``
-//   * ``X-Frame-Options: DENY`` — redundant with
-//     ``frame-ancestors 'none'`` for modern browsers; kept as a
-//     defence-in-depth for older user agents.
+// Dev-mode note: the middleware now runs in both dev and prod (see
+// the ``isDev`` branch in ``src/middleware.ts``) so dev HMR no
+// longer needs an ``'unsafe-eval'`` carve-out at this layer. The
+// fallback below covers static assets only, where neither HMR nor
+// inline scripts are in play.
 
-// Treat ONLY ``NODE_ENV=development`` as the relaxed-policy branch so
-// the production policy is asserted in the test (``NODE_ENV=test``) and
-// CI (``NODE_ENV=production`` for the build step) environments alike.
-const IS_DEV = process.env.NODE_ENV === "development";
-const BFF_OVERRIDE = (process.env.NEXT_PUBLIC_C2C_BFF_BASE_URL ?? "").trim();
-
-function safeOriginFromOverride(rawOverride) {
-  if (!rawOverride) return null;
-  try {
-    const parsed = new URL(rawOverride);
-    // Limit to local hosts — mirrors the runtime guard in
-    // ``src/lib/apiBaseUrl.ts`` so the CSP cannot be widened by a
-    // hostile env value.
-    if (!["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) {
-      return null;
-    }
-    return parsed.origin;
-  } catch {
-    return null;
-  }
-}
-
-function buildConnectSrc() {
-  const sources = ["'self'"];
-  const bffOrigin = safeOriginFromOverride(BFF_OVERRIDE);
-  if (bffOrigin) sources.push(bffOrigin);
-  if (IS_DEV) {
-    // Webpack HMR + Fast Refresh open a WebSocket back to the dev
-    // server. Allowing same-origin ws: covers both
-    // ``next dev`` (same origin as the page) and the split-server
-    // case (where the override above is the BFF, not the HMR
-    // socket).
-    sources.push("ws:");
-    sources.push("wss:");
-  }
-  return `connect-src ${sources.join(" ")}`;
-}
-
-function buildScriptSrc() {
-  if (IS_DEV) {
-    // Fast Refresh / React Refresh transformation requires
-    // ``eval``-based bootstrapping. The dev allowance is intentional;
-    // production keeps ``'unsafe-eval'`` out of the policy.
-    return "script-src 'self' 'unsafe-eval' 'unsafe-inline'";
-  }
-  // Production: ``src/middleware.ts`` overrides this header on every
-  // HTML response with a per-request nonced policy
-  // (``script-src 'self' 'nonce-<NONCE>' 'strict-dynamic'``). The
-  // policy below is the fallback used for routes the middleware
-  // skips (static asset paths). Those routes ship no inline
-  // scripts, so the strict ``'self'`` directive is correct and
-  // ``'unsafe-inline'`` is no longer needed.
-  return "script-src 'self'";
-}
-
-function buildCspHeader() {
-  return [
-    "default-src 'self'",
-    buildScriptSrc(),
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    buildConnectSrc(),
-    "font-src 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "worker-src 'self' blob:",
-  ].join("; ");
-}
+const STATIC_FALLBACK_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "worker-src 'self'",
+  "connect-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self' data:",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "report-uri /api/v0/csp-report",
+].join("; ");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -118,7 +53,7 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: [
-          { key: "Content-Security-Policy", value: buildCspHeader() },
+          { key: "Content-Security-Policy", value: STATIC_FALLBACK_CSP },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Frame-Options", value: "DENY" },

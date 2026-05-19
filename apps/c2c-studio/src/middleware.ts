@@ -1,32 +1,33 @@
-// Studio-IDE-12 (#250) follow-up: nonce-based CSP for the production
-// HTML routes. Retires the ``'unsafe-inline'`` allowance on
-// ``script-src`` that ``next.config.mjs`` kept in place so Next's App
-// Router hydration scripts could run.
+// Issue #271 / ADR-0005 §6 "CSP Compatibility": Studio CSP plumbing.
 //
-// How it works:
+// Mints a per-request 128-bit nonce, writes the production CSP onto
+// the response, and forwards the nonce on the request as ``x-nonce``
+// so the App Router renderer threads it through every framework-
+// emitted ``<script>`` tag (hydration bootstrap, RSC Flight payload,
+// ``next/script``). Pages that own custom scripts read the same
+// header via ``headers().get("x-nonce")`` and stamp it themselves.
 //
-//   1. ``middleware`` generates a fresh 16-byte base64 nonce on every
-//      request (App Router HTML responses are dynamic per request,
-//      so the nonce stays unpredictable and unique).
-//   2. The middleware writes a tight CSP onto BOTH the request
-//      headers (so React Server Components / ``headers()`` in
-//      layout/page can read it) AND the response headers (so the
-//      browser sees it). The directive includes
-//      ``script-src 'self' 'nonce-{NONCE}' 'strict-dynamic'`` —
-//      ``'strict-dynamic'`` lets Next's hydration entry script load
-//      its dynamic chunks without needing each one allowlisted
-//      separately.
-//   3. ``app/layout.tsx`` reads the nonce via ``headers().get(...)``
-//      and stamps it on the framework's ``<Script>`` tags. Next.js
-//      automatically threads the same nonce through its own
-//      Fast-Refresh / hydration bootstrap when the request header
-//      is present.
+// Why a middleware (not ``next.config.mjs headers()``):
 //
-// Static assets (``/_next/static/*``), the favicon redirect, and
-// dev-tools paths are excluded so the middleware's per-request
-// nonce work does not slow down the file-server fast path. The
-// ``next.config.mjs`` ``headers()`` policy still ships for those
-// paths and stays the fallback for non-HTML responses.
+//   ``headers()`` in ``next.config.mjs`` is evaluated without a
+//   per-request context — it cannot mint the ``{NONCE}`` value that
+//   the CSP requires, and it cannot communicate that value to the App
+//   Router renderer for re-use in the inline framework scripts. The
+//   nonce, the CSP header, and the framework scripts must agree on a
+//   single value, and the only place that single value can be born is
+//   a middleware that runs once per request.
+//
+// Dev-mode branch: ``script-src`` adds ``'unsafe-eval'`` because
+// Next.js' Fast Refresh transformer compiles modules with ``eval``.
+// The dev policy is the only place this token appears. Production
+// keeps it out.
+//
+// Static assets, Next-internal image / data fetches, the favicon
+// redirect, and the BFF-proxied ``/api/*`` paths are excluded by the
+// matcher so the per-request nonce work does not sit on the file-
+// server fast path. The fallback policy in ``next.config.mjs``
+// (``script-src 'self'`` only — no inline scripts on those paths)
+// covers them.
 
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -37,11 +38,15 @@ const STATIC_PATH_EXCLUSIONS = [
   "/favicon.ico",
 ];
 
+// Local-host allow-list mirrors the split-server dev guard in
+// ``src/lib/apiBaseUrl.ts``. A non-local override is treated as
+// absent so a hostile env value cannot widen the CSP.
+const LOCAL_OVERRIDE_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
 function generateNonce(): string {
-  // Web Crypto's randomUUID returns 36 chars; encoding to base64 gives
-  // us ~24 chars of crypto-strong entropy — more than enough for a
-  // per-request nonce. The base64 form keeps the value CSP-safe (no
-  // single-quote escaping).
+  // 16 random bytes → ~22 base64 chars (no padding). RFC 8941
+  // recommends ≥128 bits of entropy for CSP nonces; this matches the
+  // Next.js documentation example verbatim.
   const random = new Uint8Array(16);
   crypto.getRandomValues(random);
   // Edge runtime exposes ``btoa`` for base64 encoding.
@@ -57,27 +62,61 @@ function shouldSkip(pathname: string): boolean {
   return false;
 }
 
-function buildCspWithNonce(nonce: string): string {
-  // Notes:
-  // * ``'strict-dynamic'`` is the load-bearing token that lets the
-  //   nonced entry script load further chunks without needing each
-  //   one in the allowlist. Without it, App Router's chunked
-  //   hydration breaks on first navigation.
-  // * Dev mode keeps its own permissive policy via
-  //   ``next.config.mjs`` (the middleware only runs in production
-  //   builds — Fast Refresh / HMR isn't on this code path).
+function safeBffOrigin(): string | null {
+  const raw = (process.env.NEXT_PUBLIC_C2C_BFF_BASE_URL ?? "").trim();
+  if (!raw) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) return null;
+  if (!LOCAL_OVERRIDE_HOSTS.has(parsed.hostname)) return null;
+  return parsed.origin;
+}
+
+interface CspContext {
+  nonce: string;
+  isDev: boolean;
+}
+
+function buildCsp({ nonce, isDev }: CspContext): string {
+  // ADR-0005 §6 production CSP, additive over today's empty baseline.
+  // Order mirrors the ADR table so a future reviewer can diff this
+  // file against the ADR without re-sorting in their head.
+  const scriptSrcParts = ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'"];
+  if (isDev) {
+    // Next.js Fast Refresh uses ``eval``-based bootstrapping. Only the
+    // dev branch carries this token; the production policy must never
+    // include it.
+    scriptSrcParts.push("'unsafe-eval'");
+  }
+
+  const connectSrcParts = ["'self'"];
+  const bffOrigin = safeBffOrigin();
+  if (bffOrigin) connectSrcParts.push(bffOrigin);
+  if (isDev) {
+    // HMR opens a WebSocket back to the dev server. Cover both
+    // same-origin (``next dev``) and the split-server case where the
+    // BFF override is the API origin but the HMR socket is still
+    // local.
+    connectSrcParts.push("ws:", "wss:");
+  }
+
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `script-src ${scriptSrcParts.join(" ")}`,
     "style-src 'self' 'unsafe-inline'",
+    "worker-src 'self'",
+    `connect-src ${connectSrcParts.join(" ")}`,
     "img-src 'self' data:",
-    "connect-src 'self'",
-    "font-src 'self'",
+    "font-src 'self' data:",
     "object-src 'none'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "worker-src 'self' blob:",
+    "report-uri /api/v0/csp-report",
   ].join("; ");
 }
 
@@ -85,40 +124,32 @@ export function middleware(request: NextRequest) {
   if (shouldSkip(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
-  // Dev mode: ``next.config.mjs`` already serves a relaxed policy
-  // that includes ``'unsafe-eval'`` + ``'unsafe-inline'`` for Fast
-  // Refresh. The middleware only runs strict-dynamic in production.
-  if (process.env.NODE_ENV === "development") {
-    return NextResponse.next();
-  }
 
+  const isDev = process.env.NODE_ENV !== "production";
   const nonce = generateNonce();
-  const csp = buildCspWithNonce(nonce);
+  const csp = buildCsp({ nonce, isDev });
 
-  // Forward the nonce on the request so ``app/layout.tsx`` can read
-  // it from ``headers()`` and stamp it on its Script tags.
+  // Forward the nonce on the request so the App Router renderer
+  // (``headers().get("x-nonce")`` in layout/page) threads it onto
+  // every framework-emitted script. Next.js' renderer specifically
+  // looks for ``x-nonce`` to auto-propagate to its own hydration
+  // bootstrap and RSC Flight payload tags.
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-c2c-csp-nonce", nonce);
+  requestHeaders.set("x-nonce", nonce);
 
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
-  // Overwrite the static CSP from next.config.mjs with the per-
-  // request nonced version.
   response.headers.set("Content-Security-Policy", csp);
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("X-Frame-Options", "DENY");
-  // Studio-IDE-12 (#250) §Memory: enabling
-  // ``performance.measureUserAgentSpecificMemory()`` in Chromium
-  // requires the page to be in a cross-origin-isolated context.
-  // ``Cross-Origin-Opener-Policy: same-origin`` +
-  // ``Cross-Origin-Embedder-Policy: credentialless`` produces an
-  // isolated context that allows same-origin embeds (workers, the
-  // BFF) and rejects cross-origin embeds. Studio currently embeds
-  // nothing cross-origin, so this is safe; if a future feature
-  // needs a cross-origin resource it must opt-in via CORP headers
-  // on that resource.
+  // Studio-IDE-12 (#250) §Memory: ``performance.measureUserAgentSpecificMemory()``
+  // in Chromium requires a cross-origin-isolated context. COOP
+  // same-origin + COEP credentialless gives us isolation while still
+  // allowing same-origin embeds (workers, BFF). Studio embeds nothing
+  // cross-origin today; a future feature that needs to must opt-in on
+  // the embedded resource via CORP headers.
   response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   response.headers.set("Cross-Origin-Embedder-Policy", "credentialless");
   return response;
@@ -126,9 +157,10 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Run on every HTML route except static assets and Next-internal
-    // image / data fetches. The negative lookahead is the standard
-    // App-Router-with-middleware pattern from the Next.js docs.
+    // Run on every HTML route except static assets, Next-internal
+    // image / data fetches, and the BFF-proxied ``/api/*`` paths.
+    // The negative lookahead is the standard App-Router-with-
+    // middleware pattern from the Next.js docs.
     "/((?!api|_next/static|_next/image|favicon).*)",
   ],
 };

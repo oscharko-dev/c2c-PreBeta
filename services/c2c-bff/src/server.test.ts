@@ -6877,5 +6877,279 @@ test("editor telemetry route rejects non-JSON content-type with 415", async () =
   }
 });
 
+// Issue #271 / ADR-0005 §6: POST /api/v0/csp-report receiver. The
+// integration tests below pin the on-wire contract (status codes,
+// content-type negotiation, body-size cap) and the PII gate (no
+// query strings / fragments reach the sink). Unit tests for the
+// parser live in `cspReport.test.ts`.
+
+async function postRaw(
+  url: string,
+  contentType: string,
+  body: string,
+): Promise<{ status: number; body: string }> {
+  const target = new URL(url);
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        method: "POST",
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname,
+        headers: {
+          "content-type": contentType,
+          "content-length": String(Buffer.byteLength(body)),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf-8"),
+          }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+test("POST /api/v0/csp-report accepts application/csp-report and returns 204", async () => {
+  const sink: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    cspReportSink: (report) =>
+      sink.push(report as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await postRaw(
+      `${server.baseUrl}/api/v0/csp-report`,
+      "application/csp-report",
+      JSON.stringify({
+        "csp-report": {
+          "document-uri": "http://127.0.0.1/page",
+          "violated-directive": "script-src",
+          "blocked-uri": "inline",
+        },
+      }),
+    );
+    assert.equal(response.status, 204);
+    assert.equal(response.body, "");
+    assert.equal(sink.length, 1);
+    const first = sink[0];
+    assert.ok(first);
+    assert.equal(first["violated-directive"], "script-src");
+    assert.equal(first["blocked-uri"], "inline");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/csp-report strips query strings and fragments before logging", async () => {
+  const sink: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    cspReportSink: (report) =>
+      sink.push(report as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await postRaw(
+      `${server.baseUrl}/api/v0/csp-report`,
+      "application/csp-report",
+      JSON.stringify({
+        "csp-report": {
+          "document-uri":
+            "http://127.0.0.1/page?session=secret-token&user=alice@example.com#frag",
+          "violated-directive": "script-src",
+          "blocked-uri": "http://127.0.0.1/asset.js?cb=1",
+          referrer: "http://127.0.0.1/from?token=abc",
+        },
+      }),
+    );
+    assert.equal(response.status, 204);
+    assert.equal(sink.length, 1);
+    const first = sink[0];
+    assert.ok(first);
+    const serialised = JSON.stringify(first);
+    // The PII tokens must not appear in the sink record.
+    assert.equal(serialised.includes("secret-token"), false);
+    assert.equal(serialised.includes("alice@example.com"), false);
+    assert.equal(serialised.includes("abc"), false);
+    // The pathname is preserved so we can still triage which page
+    // tripped the policy.
+    assert.equal(first["document-uri"], "http://127.0.0.1/page");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/csp-report accepts application/reports+json batches", async () => {
+  const sink: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    cspReportSink: (report) =>
+      sink.push(report as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await postRaw(
+      `${server.baseUrl}/api/v0/csp-report`,
+      "application/reports+json",
+      JSON.stringify([
+        {
+          type: "csp-violation",
+          body: {
+            "violated-directive": "script-src",
+            "blocked-uri": "inline",
+          },
+        },
+        {
+          type: "deprecation",
+          body: { id: "x" },
+        },
+        {
+          type: "csp-violation",
+          body: {
+            "violated-directive": "style-src",
+            "blocked-uri": "inline",
+          },
+        },
+      ]),
+    );
+    assert.equal(response.status, 204);
+    assert.equal(sink.length, 2);
+    const [first, second] = sink;
+    assert.ok(first);
+    assert.ok(second);
+    assert.equal(first["violated-directive"], "script-src");
+    assert.equal(second["violated-directive"], "style-src");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/csp-report rejects unsupported content-type with 415", async () => {
+  const sink: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    cspReportSink: (report) =>
+      sink.push(report as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await postRaw(
+      `${server.baseUrl}/api/v0/csp-report`,
+      "text/plain",
+      "not a report",
+    );
+    assert.equal(response.status, 415);
+    assert.equal(sink.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/csp-report rejects malformed JSON with 400", async () => {
+  const sink: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    cspReportSink: (report) =>
+      sink.push(report as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await postRaw(
+      `${server.baseUrl}/api/v0/csp-report`,
+      "application/csp-report",
+      "{not json",
+    );
+    assert.equal(response.status, 400);
+    assert.equal(sink.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/csp-report rejects an empty envelope with 400", async () => {
+  const sink: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    cspReportSink: (report) =>
+      sink.push(report as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await postRaw(
+      `${server.baseUrl}/api/v0/csp-report`,
+      "application/csp-report",
+      JSON.stringify({ "csp-report": {} }),
+    );
+    assert.equal(response.status, 400);
+    assert.equal(sink.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/csp-report rejects oversize bodies with 413", async () => {
+  const sink: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    cspReportSink: (report) =>
+      sink.push(report as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    // 128 KiB body — over the 64 KiB cap.
+    const huge = "x".repeat(128 * 1024);
+    const response = await postRaw(
+      `${server.baseUrl}/api/v0/csp-report`,
+      "application/csp-report",
+      JSON.stringify({
+        "csp-report": { "violated-directive": "script-src", padding: huge },
+      }),
+    );
+    assert.equal(response.status, 413);
+    assert.equal(sink.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
 // Silence unused-import warnings under strict mode
 void net;

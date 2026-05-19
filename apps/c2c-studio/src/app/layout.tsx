@@ -35,14 +35,17 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Studio-IDE-12 (#250) follow-up: read the per-request CSP nonce
+  // Issue #271 / ADR-0005 §6: read the per-request CSP nonce
   // ``src/middleware.ts`` stamps on the request and thread it onto
   // Next's framework script tags. ``headers()`` is async in App
-  // Router runtimes that include the Next 16 streaming pipeline. The
-  // nonce is undefined in dev (the middleware short-circuits) and
-  // when the route is statically generated — both cases fall back to
-  // the dev-friendly policy from ``next.config.mjs``.
-  const nonce = (await headers()).get("x-c2c-csp-nonce") ?? undefined;
+  // Router runtimes that include the Next 16 streaming pipeline.
+  // ``x-nonce`` is the header name Next.js' renderer specifically
+  // recognises for auto-propagation onto hydration / RSC Flight
+  // ``<script>`` tags; we read it here so any explicit ``<Script>``
+  // in the layout subtree can be threaded too. When the request is
+  // statically generated the nonce is absent — the static asset
+  // fallback CSP from ``next.config.mjs`` covers that branch.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en">
       <body
