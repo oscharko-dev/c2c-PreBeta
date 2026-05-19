@@ -66,4 +66,16 @@ describe("lazyMonaco", () => {
     });
     expect(typeof result.current?.editor.defineTheme).toBe("function");
   });
+
+  it("useMonacoReady stays idle while disabled", async () => {
+    const { useMonacoReady } = await import("@/lib/editor/lazyMonaco");
+    const { result } = renderHook(() => useMonacoReady(false));
+
+    expect(result.current).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result.current).toBeNull();
+    expect(
+      (globalThis as { MonacoEnvironment?: unknown }).MonacoEnvironment,
+    ).toBeUndefined();
+  });
 });

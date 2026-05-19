@@ -490,7 +490,13 @@ export function GeneratedJavaEditorPane() {
   // loader completes, then re-renders so the memo recomputes with the
   // real instance. Without this, a cold mount with diagnostics already
   // in state would cache an empty marker group permanently.
-  const monaco = useMonacoReady();
+  const shouldLoadMonacoForGeneratedEditor =
+    Boolean(selectedFilePath) &&
+    displayedContent !== null &&
+    !isFetchingFile &&
+    !fileFetchError &&
+    !unavailableFiles.has(selectedFilePath ?? "");
+  const monaco = useMonacoReady(shouldLoadMonacoForGeneratedEditor);
 
   // Studio-IDE-5 (#244 review): when Problems-panel clicks point at a
   // generated file that is not currently selected, switch panes. The

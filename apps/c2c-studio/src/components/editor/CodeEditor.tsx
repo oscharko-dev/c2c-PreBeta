@@ -24,6 +24,7 @@ export type {
   CodeEditorViewStateRef,
   StandaloneCodeEditorProps,
   DiffCodeEditorProps,
+  CodeEditorBeforeMountArgs,
   StandaloneEditorMountArgs,
   DiffEditorMountArgs,
 } from "./codeEditorTypes";

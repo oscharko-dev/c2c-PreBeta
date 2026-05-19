@@ -15,8 +15,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page, type Response } from "@playwright/test";
 
-const COBOL_EDITOR_LABEL = /COBOL source editor/i;
-
 const NEGATIVE_SOURCE = readFileSync(
   path.resolve(
     __dirname,
@@ -86,24 +84,33 @@ function topBarStartButton(page: Page) {
     .getByRole("button", { name: "Generate & Verify" });
 }
 
-// Issue #246: Monaco's accessibility textarea does not mirror the full
-// document into `value`. The model is still driven by `fill()` (Monaco
-// intercepts the input events) — we just verify the source landed in the
-// model by checking the rendered `.view-line` DOM.
-async function enterCobolSource(
-  page: Page,
-  source: string,
-  expectedProgramIdRegex: RegExp,
-) {
-  await page.getByRole("button", { name: "Start Typing" }).click();
-  const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-  await editor.fill(source);
-  await expect(
-    page
-      .locator(".view-line")
-      .filter({ hasText: expectedProgramIdRegex })
-      .first(),
-  ).toBeVisible();
+async function enterCobolSource(page: Page, source: string) {
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        (window as unknown as { __c2cEditorHarnessReady?: boolean })
+          .__c2cEditorHarnessReady,
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.evaluate((sourceText) => {
+    window.dispatchEvent(
+      new CustomEvent("c2c-e2e:load-cobol", {
+        detail: { sourceText, sourceName: "pasted-source.cbl" },
+      }),
+    );
+  }, source);
+  const editorSurface = page.getByTestId("code-editor-standalone");
+  await expect(editorSurface).toBeVisible();
+  const aiAssistToggle = page.getByLabel(
+    "Allow AI assist after deterministic baseline",
+  );
+  if (await aiAssistToggle.isChecked()) {
+    await aiAssistToggle.click();
+  }
+  await expect(aiAssistToggle).not.toBeChecked();
+  await expect(topBarStartButton(page)).toBeEnabled();
 }
 
 async function waitForTerminalNonSuccess(
@@ -142,7 +149,7 @@ test.describe("W0.2 release-gate browser acceptance", () => {
     page,
   }) => {
     await expectReadyWorkbench(page);
-    await enterCobolSource(page, NEGATIVE_SOURCE, /PROGRAM-ID\. FILEIONO\./);
+    await enterCobolSource(page, NEGATIVE_SOURCE);
 
     const transformResponsePromise: Promise<Response> = page.waitForResponse(
       (response) =>
@@ -155,6 +162,11 @@ test.describe("W0.2 release-gate browser acceptance", () => {
     await topBarStartButton(page).click();
 
     const transformResponse = await transformResponsePromise;
+    expect(transformResponse.request().postDataJSON()).toEqual(
+      expect.objectContaining({
+        sourceText: NEGATIVE_SOURCE,
+      }),
+    );
     const transformBody = await transformResponse.json();
     expect(transformBody.runId).toBeTruthy();
     const runId = String(transformBody.runId);

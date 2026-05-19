@@ -19,14 +19,18 @@ type EditorMockProps = {
   language: string;
   mode: string;
   modelUri?: string;
+  beforeMount?: (args: { monaco: unknown }) => void;
   onMount?: (args: {
     editor: {
       updateOptions: (options: unknown) => void;
-      addCommand: (keybinding: number, callback: () => void) => void;
+      addCommand: (
+        keybinding: number,
+        callback: () => void,
+      ) => { dispose: () => void };
       // Studio-IDE-6 (#248): the COBOL pane now registers an Alt+C action
       // via `addAction`; the test mock satisfies the type so the keybinding
       // path executes without crashing the render.
-      addAction: (descriptor: unknown) => void;
+      addAction: (descriptor: unknown) => { dispose: () => void };
     };
     monaco: unknown;
   }) => void;
@@ -40,6 +44,11 @@ const mountCalls: Array<{
   ariaLabel?: string;
 }> = [];
 const updateOptionsCalls: Array<Record<string, unknown>> = [];
+const commandRegistrations: Array<{ keybinding: number }> = [];
+const actionRegistrations: Array<{
+  id?: string;
+  keybindings?: number[];
+}> = [];
 
 vi.mock("@/components/editor/CodeEditor", async () => {
   const reactNs = await import("react");
@@ -51,21 +60,34 @@ vi.mock("@/components/editor/CodeEditor", async () => {
         modelUri: props.modelUri,
         ariaLabel: props.ariaLabel,
       });
+      const monaco = {
+        KeyMod: { CtrlCmd: 1 << 11, Alt: 1 << 9, Shift: 1 << 10 },
+        KeyCode: { KeyS: 49, KeyC: 33, KeyE: 35 },
+      };
+      props.beforeMount?.({ monaco });
       props.onMount?.({
         editor: {
           updateOptions: (options) => {
             updateOptionsCalls.push(options as Record<string, unknown>);
           },
-          addCommand: () => undefined,
+          addCommand: (keybinding) => {
+            commandRegistrations.push({ keybinding });
+            return { dispose: () => undefined };
+          },
           // Studio-IDE-6 (#248): no-op so the Alt+C action registration
           // path runs without throwing under the jsdom mock harness. The
           // action behaviour itself is covered by lineageNavigation.test.ts.
-          addAction: () => undefined,
+          addAction: (descriptor) => {
+            actionRegistrations.push(
+              descriptor as {
+                id?: string;
+                keybindings?: number[];
+              },
+            );
+            return { dispose: () => undefined };
+          },
         },
-        monaco: {
-          KeyMod: { CtrlCmd: 1 << 11, Alt: 1 << 9 },
-          KeyCode: { KeyS: 49, KeyC: 33 },
-        },
+        monaco,
       });
       // Effect intentionally runs only on mount — matching Monaco's real
       // onMount lifecycle. Including `props` in deps would re-fire on every
@@ -164,6 +186,8 @@ describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
   beforeEach(() => {
     mountCalls.length = 0;
     updateOptionsCalls.length = 0;
+    commandRegistrations.length = 0;
+    actionRegistrations.length = 0;
     registerCalls.length = 0;
     hoverRegistrationCalls.length = 0;
   });
@@ -172,6 +196,8 @@ describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
     renderPane();
     expect(screen.getByText("No source file selected")).toBeInTheDocument();
     expect(screen.queryByTestId("code-editor-mock")).not.toBeInTheDocument();
+    expect(registerCalls).toHaveLength(0);
+    expect(hoverRegistrationCalls).toHaveLength(0);
   });
 
   it("mounts CodeEditor in editable mode with the cobol language and a stable in-memory model URI", () => {
@@ -203,6 +229,27 @@ describe("CobolEditorPane — Monaco-backed COBOL editor (Issue #246)", () => {
     // provider itself prevents double-attach against a real Monaco
     // instance, so we only require at least one invocation here.
     expect(hoverRegistrationCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("registers editor-scoped save, lineage, and explain keybindings", () => {
+    renderPane();
+    fireEvent.click(screen.getByText("Start Typing"));
+
+    expect(commandRegistrations).toContainEqual({
+      keybinding: (1 << 11) | 49,
+    });
+    expect(actionRegistrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "c2c.lineage.cobolToJava",
+          keybindings: [(1 << 9) | 33],
+        }),
+        expect.objectContaining({
+          id: "c2c.editorAssist.explain",
+          keybindings: [(1 << 11) | (1 << 10) | 35],
+        }),
+      ]),
+    );
   });
 
   it("forwards the editor content to the source workspace on edit (dirty flag, character-accurate value)", () => {

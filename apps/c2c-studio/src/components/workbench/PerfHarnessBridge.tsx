@@ -1,22 +1,26 @@
 "use client";
 
-// Studio-IDE-12 (#250) §Performance test seam: lets the
-// ``tests/e2e/perf.spec.ts`` harness drive the workbench from outside
-// (load a large COBOL fixture into the COBOL editor pane and trigger
-// Monaco actions) without having to thread test-only props through
-// every store.
+// Studio-IDE-12 (#250) §Performance / E2E test seam: lets browser
+// harnesses drive the workbench from outside (load a COBOL fixture into
+// the COBOL editor pane and trigger Monaco actions) without threading
+// test-only props through every store.
 //
-// Activated only when
-// ``process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1"``. The hook
-// renders ``null`` in every other build so production users never
-// pay the cost of the listener / global it installs.
+// Activated only in explicit harness builds when
+// ``process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1"`` or
+// ``process.env.NEXT_PUBLIC_C2C_E2E_HARNESS === "1"``. The hook renders
+// ``null`` in every other build so production users never pay the cost of the
+// listener / global it installs.
 //
 // Hooks installed when active:
 //
 //   * ``window.addEventListener("c2c-perf:load-cobol", ev)`` →
-//     calls ``setSourceFile(detail.sourceText, "perf-harness.cbl")``.
+//     calls ``setSourceFile(detail.sourceText, detail.sourceName)``.
+//   * ``window.addEventListener("c2c-e2e:load-cobol", ev)`` →
+//     calls ``setSourceFile(detail.sourceText, detail.sourceName)``.
 //   * ``window.addEventListener("c2c-perf:clear-editors", ev)`` →
 //     calls ``clearWorkspace()`` to reset to the empty state.
+//   * ``window.__c2cEditorHarnessReady`` → boolean readiness flag for
+//     Playwright helpers so they do not dispatch before the effect mounts.
 //   * ``window.__c2cMonacoEditor`` → the focused
 //     ``IStandaloneCodeEditor`` instance, refreshed whenever a Monaco
 //     editor mounts (CodeEditorInner emits a ``c2c:editor-mounted``
@@ -29,7 +33,9 @@ import { useEffect } from "react";
 
 import { useSourceWorkspace } from "../../stores/sourceWorkspace";
 
-const PERF_HARNESS_ENABLED = process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1";
+const EDITOR_HARNESS_ENABLED =
+  process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1" ||
+  process.env.NEXT_PUBLIC_C2C_E2E_HARNESS === "1";
 
 interface LoadCobolDetail {
   sourceText: string;
@@ -40,8 +46,14 @@ export function PerfHarnessBridge() {
   const { setSourceFile, clearWorkspace } = useSourceWorkspace();
 
   useEffect(() => {
-    if (!PERF_HARNESS_ENABLED) return;
+    if (!EDITOR_HARNESS_ENABLED) return;
     if (typeof window === "undefined") return;
+
+    (
+      window as unknown as {
+        __c2cEditorHarnessReady?: boolean;
+      }
+    ).__c2cEditorHarnessReady = true;
 
     const onLoad = (event: Event) => {
       const detail = (event as CustomEvent<LoadCobolDetail>).detail;
@@ -52,10 +64,19 @@ export function PerfHarnessBridge() {
     const onClear = () => clearWorkspace();
 
     window.addEventListener("c2c-perf:load-cobol", onLoad);
+    window.addEventListener("c2c-e2e:load-cobol", onLoad);
     window.addEventListener("c2c-perf:clear-editors", onClear);
+    window.addEventListener("c2c-e2e:clear-editors", onClear);
     return () => {
       window.removeEventListener("c2c-perf:load-cobol", onLoad);
+      window.removeEventListener("c2c-e2e:load-cobol", onLoad);
       window.removeEventListener("c2c-perf:clear-editors", onClear);
+      window.removeEventListener("c2c-e2e:clear-editors", onClear);
+      (
+        window as unknown as {
+          __c2cEditorHarnessReady?: boolean;
+        }
+      ).__c2cEditorHarnessReady = false;
     };
   }, [setSourceFile, clearWorkspace]);
 

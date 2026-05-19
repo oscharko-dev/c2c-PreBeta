@@ -36,6 +36,7 @@ export default defineConfig({
       ...process.env,
       C2C_LOCAL_ENV_FILE: envFile,
       C2C_LOCAL_MODEL_GATEWAY_ENABLED: 'false',
+      NEXT_PUBLIC_C2C_E2E_HARNESS: '1',
     },
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: !process.env.CI,

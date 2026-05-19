@@ -31,7 +31,7 @@ export default function CodeEditorInner(props: CodeEditorProps) {
 
   useEffect(() => {
     let cancelled = false;
-    getMonaco()
+    getMonaco(props.language)
       .then((instance) => {
         if (cancelled) {
           return;
@@ -49,7 +49,7 @@ export default function CodeEditorInner(props: CodeEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [props.language]);
 
   if (loadError) {
     return (
@@ -91,6 +91,7 @@ function StandaloneEditorView({
   className,
   ariaLabel,
   modelUri,
+  beforeMount,
   viewStateRef,
   onMount,
 }: StandaloneEditorViewProps) {
@@ -240,6 +241,9 @@ function StandaloneEditorView({
         path={resolvedUri}
         theme={STUDIO_DARK_THEME}
         loading={<EditorSkeleton />}
+        beforeMount={(monacoInstance) =>
+          beforeMount?.({ monaco: monacoInstance })
+        }
         options={{
           readOnly: mode === "readonly",
           minimap: { enabled: true },
@@ -261,8 +265,9 @@ function StandaloneEditorView({
           // perf harness can call ``editor.trigger(...)`` /
           // ``editor.focus()`` without needing a Studio-internal
           // ref. Gated on
-          // ``NEXT_PUBLIC_C2C_PERF_HARNESS === "1"`` so production
-          // bundles never expose the global.
+          // ``NEXT_PUBLIC_C2C_PERF_HARNESS === "1"`` so normal production
+          // bundles never expose the global; CI builds an explicit harness
+          // variant for the @perf gate.
           if (
             typeof window !== "undefined" &&
             process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1"
@@ -372,6 +377,7 @@ function DiffEditorView({
   ariaLabel,
   modelUri,
   originalModelUri,
+  beforeMount,
   onMount,
 }: DiffEditorViewProps) {
   const diffEditorRef = useRef<MonacoNs.editor.IStandaloneDiffEditor | null>(
@@ -534,6 +540,9 @@ function DiffEditorView({
         modifiedModelPath={resolvedUri}
         theme={STUDIO_DARK_THEME}
         loading={<EditorSkeleton />}
+        beforeMount={(monacoInstance) =>
+          beforeMount?.({ monaco: monacoInstance })
+        }
         options={{
           readOnly: false,
           renderSideBySide: true,

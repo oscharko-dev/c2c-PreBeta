@@ -1,57 +1,9 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { COBOL_FIXED_FORMAT_ZONES } from "@/lib/editor/cobolFixedFormat";
 
-// Fixed-format COBOL column zones. Column indices are 1-based, matching the
-// COBOL '85 standard. The widths are derived from the inclusive zone bounds
-// (e.g., area B spans columns 12-72 inclusive, so its width is 61 columns).
-interface ColumnZone {
-  readonly key: string;
-  readonly label: string;
-  readonly description: string;
-  readonly startColumn: number;
-  readonly endColumn: number;
-}
-
-export const FIXED_FORMAT_ZONES: readonly ColumnZone[] = [
-  {
-    key: "sequence",
-    label: "Seq",
-    description: "Columns 1-6 — sequence number area",
-    startColumn: 1,
-    endColumn: 6,
-  },
-  {
-    key: "indicator",
-    label: "I",
-    description:
-      "Column 7 — indicator: * = comment, - = continuation, D = debug, / = page break",
-    startColumn: 7,
-    endColumn: 7,
-  },
-  {
-    key: "areaA",
-    label: "A",
-    description: "Columns 8-11 — area A: division / section / paragraph names",
-    startColumn: 8,
-    endColumn: 11,
-  },
-  {
-    key: "areaB",
-    label: "B",
-    description: "Columns 12-72 — area B: statements and clauses",
-    startColumn: 12,
-    endColumn: 72,
-  },
-  {
-    key: "identification",
-    label: "Id",
-    description:
-      "Columns 73-80 — identification area: source-sequence comments (ignored by the compiler)",
-    startColumn: 73,
-    endColumn: 80,
-  },
-];
+export const FIXED_FORMAT_ZONES = COBOL_FIXED_FORMAT_ZONES;
 
 interface FixedFormatRulerProps {
   readonly className?: string;
