@@ -7602,6 +7602,40 @@ test("POST /api/v0/editor/explain maps gateway 504 to timeout with HTTP 504", as
   }
 });
 
+test("POST /api/v0/editor/explain maps transport timeouts to HTTP 504", async () => {
+  const timeoutError = new Error("upstream request timed out after 5000ms");
+  const { client: gateway } = explainGateway(undefined, {
+    throwError: timeoutError,
+  });
+  const auth = createEditorAssistAuth();
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "POST",
+      headers: auth.headers,
+      body: explainRequestBody(),
+    });
+    assert.equal(response.status, 504);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "timeout");
+    assert.doesNotMatch(body.message as string, /5000ms|upstream request/i);
+  } finally {
+    console.warn = originalWarn;
+    await server.close();
+  }
+});
+
 test("POST /api/v0/editor/explain maps gateway 500 to gateway_unavailable with HTTP 503", async () => {
   const { client: gateway } = explainGateway({
     status: 500,
@@ -7725,7 +7759,7 @@ test("POST /api/v0/editor/explain enforces the per-tenant-per-day ceiling across
 });
 
 test("POST /api/v0/editor/explain rejects malformed payloads with invalid_region", async () => {
-  const { client: gateway } = explainGateway({
+  const { client: gateway, calls } = explainGateway({
     status: 200,
     body: { explanation: "ok", invocationId: "mi-1" },
   });
@@ -7772,6 +7806,20 @@ test("POST /api/v0/editor/explain rejects malformed payloads with invalid_region
       { method: "POST", body: wrongKind },
     );
     assert.equal(wrongKindRes.status, 400);
+
+    const extraField = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: { ...(explainRequestBody() as object), unsupported: true },
+      },
+    );
+    assert.equal(extraField.status, 400);
+    assert.match(
+      (extraField.body as Record<string, unknown>).message as string,
+      /unsupported field unsupported/,
+    );
+    assert.equal(calls.length, 0);
   } finally {
     await server.close();
   }
@@ -7892,6 +7940,26 @@ test("GET /api/v0/editor/budget validates identifiers against the active session
     assert.match(
       (invalidTenant.body as Record<string, unknown>).error as string,
       /tenantId/,
+    );
+
+    const blankTenant = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1&tenantId=`,
+      { headers: auth.headers },
+    );
+    assert.equal(blankTenant.status, 400);
+    assert.match(
+      (blankTenant.body as Record<string, unknown>).error as string,
+      /tenantId/,
+    );
+
+    const blankUser = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1&userId=`,
+      { headers: auth.headers },
+    );
+    assert.equal(blankUser.status, 400);
+    assert.match(
+      (blankUser.body as Record<string, unknown>).error as string,
+      /userId/,
     );
 
     const mismatchedUser = await fetchJson(

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { AddressInfo } from "node:net";
 
 import {
+  MODEL_GATEWAY_EXPLAIN_MAX_RESPONSE_BYTES,
   createBuildTestRunnerClient,
   createEvidenceClient,
   createModelGatewayClient,
@@ -562,6 +563,40 @@ test("model gateway client posts /v0/explain when enabled", async () => {
       assert.equal(parsed.sessionId, "s-1");
       assert.equal(parsed.region.sourceKind, "cobol");
     },
+  );
+});
+
+test("model gateway client caps /v0/explain response bytes", async () => {
+  const calls: Array<{
+    url: string;
+    options: {
+      method?: string;
+      body?: unknown;
+      timeoutMs: number;
+      maxResponseBytes?: number;
+    };
+  }> = [];
+  const client = {
+    async request(url: string, options: (typeof calls)[number]["options"]) {
+      calls.push({ url, options });
+      return { status: 200, body: { explanation: "ok" } };
+    },
+  };
+  const gateway = createModelGatewayClient(
+    "http://gateway.local/",
+    client,
+    1_000,
+  );
+
+  await gateway.explain({ sessionId: "s-1" }, 2_000);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url, "http://gateway.local/v0/explain");
+  assert.equal(calls[0]?.options.method, "POST");
+  assert.equal(calls[0]?.options.timeoutMs, 2_000);
+  assert.equal(
+    calls[0]?.options.maxResponseBytes,
+    MODEL_GATEWAY_EXPLAIN_MAX_RESPONSE_BYTES,
   );
 });
 

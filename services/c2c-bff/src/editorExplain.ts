@@ -204,6 +204,28 @@ const SAFE_FILEPATH_PATTERN = /^[\p{L}\p{N}._/\-]+$/u;
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:/u;
 const INVALID_FILEPATH_MESSAGE =
   "filePath must be a workspace-relative path without drive prefixes or parent-directory traversal";
+const EXPLAIN_REQUEST_FIELDS = new Set([
+  "schemaVersion",
+  "sessionId",
+  "tenantId",
+  "userId",
+  "runId",
+  "sourceHash",
+  "region",
+  "redactedBytes",
+  "byteHash",
+  "studioRedactionMetadata",
+]);
+const REGION_FIELDS = new Set([
+  "filePath",
+  "sourceKind",
+  "startLine",
+  "endLine",
+]);
+const REDACTION_METADATA_FIELDS = new Set([
+  "studioRedactionProfileVersion",
+  "matchedPatternIds",
+]);
 
 function rejectInvalidRegion(message: string): EditorExplainValidationError {
   return {
@@ -230,6 +252,21 @@ function isStringArray(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === "string")
   );
+}
+
+function rejectUnsupportedFields(
+  record: Record<string, unknown>,
+  allowedFields: ReadonlySet<string>,
+  objectName: string,
+): EditorExplainValidationError | null {
+  for (const key of Object.keys(record)) {
+    if (!allowedFields.has(key)) {
+      return rejectInvalidRegion(
+        `${objectName} contains unsupported field ${key}`,
+      );
+    }
+  }
+  return null;
 }
 
 // L3: validate identifier-class string fields before they are echoed into
@@ -280,6 +317,8 @@ function validateRegion(
     return rejectInvalidRegion("region must be an object");
   }
   const record = raw as Record<string, unknown>;
+  const unknownField = rejectUnsupportedFields(record, REGION_FIELDS, "region");
+  if (unknownField) return unknownField;
   if (!isNonEmptyString(record.filePath)) {
     return rejectInvalidRegion("region.filePath must be a non-empty string");
   }
@@ -320,6 +359,12 @@ function validateRedactionMetadata(
     return rejectInvalidRegion("studioRedactionMetadata must be an object");
   }
   const record = raw as Record<string, unknown>;
+  const unknownField = rejectUnsupportedFields(
+    record,
+    REDACTION_METADATA_FIELDS,
+    "studioRedactionMetadata",
+  );
+  if (unknownField) return unknownField;
   if (!isNonEmptyString(record.studioRedactionProfileVersion)) {
     return rejectInvalidRegion(
       "studioRedactionMetadata.studioRedactionProfileVersion must be a non-empty string",
@@ -345,6 +390,12 @@ export function validateExplainRequest(raw: unknown): EditorExplainValidation {
     return rejectInvalidRegion("request body must be a JSON object");
   }
   const record = raw as Record<string, unknown>;
+  const unknownField = rejectUnsupportedFields(
+    record,
+    EXPLAIN_REQUEST_FIELDS,
+    "request body",
+  );
+  if (unknownField) return unknownField;
 
   // schemaVersion is required; we only accept v0.
   if (record.schemaVersion !== EDITOR_ASSIST_SCHEMA_VERSION) {
@@ -372,22 +423,32 @@ export function validateExplainRequest(raw: unknown): EditorExplainValidation {
     );
   }
 
-  const tenantId = isNonEmptyString(record.tenantId)
-    ? record.tenantId
-    : "default";
-  const userId = isNonEmptyString(record.userId) ? record.userId : "local";
+  let tenantId = "default";
+  let userId = "local";
 
   // L3: validate tenantId and userId allow-lists when explicitly provided.
-  if (isNonEmptyString(record.tenantId)) {
+  if (Object.prototype.hasOwnProperty.call(record, "tenantId")) {
+    if (!isNonEmptyString(record.tenantId)) {
+      return rejectInvalidRegion(
+        "tenantId must be a non-empty string when provided",
+      );
+    }
     const tenantIdErr = validateEditorAssistIdentifier(
       record.tenantId,
       "tenantId",
     );
     if (tenantIdErr) return tenantIdErr;
+    tenantId = record.tenantId;
   }
-  if (isNonEmptyString(record.userId)) {
+  if (Object.prototype.hasOwnProperty.call(record, "userId")) {
+    if (!isNonEmptyString(record.userId)) {
+      return rejectInvalidRegion(
+        "userId must be a non-empty string when provided",
+      );
+    }
     const userIdErr = validateEditorAssistIdentifier(record.userId, "userId");
     if (userIdErr) return userIdErr;
+    userId = record.userId;
   }
 
   let runId: string | null = null;

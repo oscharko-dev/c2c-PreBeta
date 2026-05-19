@@ -3238,6 +3238,13 @@ function writeEditorAssistLedgerEntry(
   }
 }
 
+function isEditorAssistTransportTimeout(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as Error & { code?: unknown }).code;
+  if (code === "ETIMEDOUT" || code === "ESOCKETTIMEDOUT") return true;
+  return /\btimed?\s*out\b|timeout/i.test(err.message);
+}
+
 async function handleEditorExplain(
   args: HandleEditorExplainArgs,
 ): Promise<void> {
@@ -3356,7 +3363,7 @@ async function handleEditorExplain(
 
   const startedAt = now().toISOString();
   let gatewayResponse: UpstreamResponse | undefined;
-  let upstreamError = false;
+  let upstreamErrorCode: EditorExplainErrorCode | null = null;
   try {
     gatewayResponse = await modelGateway.explain({
       schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,
@@ -3371,8 +3378,10 @@ async function handleEditorExplain(
       studioRedactionMetadata: request.studioRedactionMetadata,
     });
   } catch (err) {
+    upstreamErrorCode = isEditorAssistTransportTimeout(err)
+      ? "timeout"
+      : "gateway_unavailable";
     if (err instanceof UpstreamResponseTooLargeError) {
-      upstreamError = true;
       // M3: log oversize responses distinctly so operators can tune the cap.
       console.warn(
         JSON.stringify({
@@ -3381,12 +3390,11 @@ async function handleEditorExplain(
           errorClass: "UpstreamResponseTooLargeError",
           message: sanitizeUpstreamMessage(
             err instanceof Error ? err.message : String(err),
-            defaultMessageForErrorCode("gateway_unavailable"),
+            defaultMessageForErrorCode(upstreamErrorCode),
           ),
         }),
       );
     } else {
-      upstreamError = true;
       // M3: log transport/gateway failures so operators can see failure patterns.
       // sanitizeUpstreamMessage strips API keys, JWTs, URLs, file paths, and
       // stack traces before the message is written to the log.
@@ -3402,18 +3410,18 @@ async function handleEditorExplain(
               : "Unknown",
           message: sanitizeUpstreamMessage(
             err instanceof Error ? err.message : String(err),
-            defaultMessageForErrorCode("gateway_unavailable"),
+            defaultMessageForErrorCode(upstreamErrorCode),
           ),
         }),
       );
     }
   }
 
-  const mapped = upstreamError
+  const mapped = upstreamErrorCode
     ? ({
         kind: "error",
-        errorCode: "gateway_unavailable",
-        message: defaultMessageForErrorCode("gateway_unavailable"),
+        errorCode: upstreamErrorCode,
+        message: defaultMessageForErrorCode(upstreamErrorCode),
       } as const)
     : mapGatewayResponse(gatewayResponse);
 
@@ -3932,7 +3940,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
         const tenantIdRaw = requestUrl.searchParams.get("tenantId");
         const userIdRaw = requestUrl.searchParams.get("userId");
-        if (tenantIdRaw !== null && tenantIdRaw.trim().length > 0) {
+        if (tenantIdRaw !== null) {
+          if (tenantIdRaw.trim().length === 0) {
+            badRequest(res, "tenantId must be a non-empty string when provided");
+            return;
+          }
           const tenantIdErr = validateEditorAssistIdentifier(
             tenantIdRaw,
             "tenantId",
@@ -3942,7 +3954,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             return;
           }
         }
-        if (userIdRaw !== null && userIdRaw.trim().length > 0) {
+        if (userIdRaw !== null) {
+          if (userIdRaw.trim().length === 0) {
+            badRequest(res, "userId must be a non-empty string when provided");
+            return;
+          }
           const userIdErr = validateEditorAssistIdentifier(userIdRaw, "userId");
           if (userIdErr) {
             badRequest(res, userIdErr.message);

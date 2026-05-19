@@ -50,6 +50,11 @@ export interface HttpClient {
   ): Promise<UpstreamResponse>;
 }
 
+// Studio-IDE-10 (#249): editor-assist explanations are intentionally
+// compact prose. Keep the gateway response bounded so a misconfigured
+// gateway cannot make the BFF buffer an unbounded /v0/explain body.
+export const MODEL_GATEWAY_EXPLAIN_MAX_RESPONSE_BYTES = 512 * 1024;
+
 export function createNodeHttpClient(): HttpClient {
   return {
     request(targetUrl, options) {
@@ -602,6 +607,7 @@ export function createModelGatewayClient(
         method: "POST",
         body: payload,
         timeoutMs: timeoutOverrideMs ?? timeoutMs,
+        maxResponseBytes: MODEL_GATEWAY_EXPLAIN_MAX_RESPONSE_BYTES,
       });
     },
   };

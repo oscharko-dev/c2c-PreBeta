@@ -281,27 +281,29 @@ describe("EditorAssistSidePanel — error branches", () => {
     const alert = screen.getByTestId("editor-assist-error-budget");
     expect(alert).toHaveTextContent(/No more Explain calls/i);
     expect(alert.querySelector("a")?.getAttribute("href")).toBe(
-      "./docs/editor-assist-budget.md",
+      "/docs/editor-assist-budget.md",
     );
   });
 
-  it("renders the policy_denied branch with a copy chip for the policy id", () => {
+  it("renders the policy_denied branch without treating the message as a policy id", () => {
     render(
       <EditorAssistSidePanel
         open
         request={SAMPLE_REQUEST}
-        result={errorResult("policy_denied", "policy-id-7771")}
+        result={errorResult(
+          "policy_denied",
+          "Editor-assist policy denied this request.",
+        )}
         onClose={() => {}}
         onRetry={() => {}}
       />,
     );
     const alert = screen.getByTestId("editor-assist-error-policy");
     expect(alert).toHaveTextContent(/Policy declined/i);
-    const copy = within(alert).getByRole("button", {
-      name: /Copy policy id/i,
-    });
-    fireEvent.click(copy);
-    expect(clipboardSpy).toHaveBeenCalledWith("policy-id-7771");
+    expect(alert).toHaveTextContent(/Policy decision details/i);
+    expect(
+      within(alert).queryByRole("button", { name: /Copy policy id/i }),
+    ).toBeNull();
   });
 
   it("renders session policy_denied responses as re-auth guidance without a policy chip", () => {
@@ -391,6 +393,9 @@ describe("EditorAssistSidePanel — preview redaction + a11y", () => {
     // regardless of the open state, which is good enough for assertion.
     expect(preview).toHaveTextContent("field-name-class:customer-name");
     expect(preview).toHaveTextContent("ssn-us");
+    expect(screen.getByTestId("editor-assist-redacted-preview")).toHaveTextContent(
+      SAMPLE_REQUEST.redactedBytes,
+    );
   });
 
   it("renders 'No patterns matched' when the metadata is empty", () => {
@@ -489,6 +494,37 @@ describe("EditorAssistSidePanel — preview redaction + a11y", () => {
       name: /Close Editor-Assist panel/i,
     });
     expect(document.activeElement).toBe(close);
+  });
+
+  it("restores focus to the previously focused element after close", () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "Open explain";
+    document.body.appendChild(trigger);
+    trigger.focus();
+
+    const { rerender } = render(
+      <EditorAssistSidePanel
+        open
+        request={SAMPLE_REQUEST}
+        result={successResult()}
+        onClose={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    expect(document.activeElement).not.toBe(trigger);
+
+    rerender(
+      <EditorAssistSidePanel
+        open={false}
+        request={SAMPLE_REQUEST}
+        result={successResult()}
+        onClose={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
   });
 
   it("CopyChip live region announces 'Copied' after click (WCAG 4.1.3)", async () => {
