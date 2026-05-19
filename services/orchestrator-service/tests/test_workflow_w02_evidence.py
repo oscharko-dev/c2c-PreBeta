@@ -947,10 +947,12 @@ class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):
 
 
 class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
-    """ADR 0007 (#257, Issue #279): the orchestrator forwards the
-    run-summary manual-edit signals so evidence-service can enforce the
-    overlay-presence contract. Defaults are omitted from the wire shape
-    so pre-ADR-0007 packs stay byte-identical to today."""
+    """ADR 0007 (#257, Issue #279): the orchestrator suppresses the
+    run-summary manual-edit signals until the overlay-artifact wiring
+    lands. Forwarding the signal alone would cause evidence-service to
+    reject the write-evidence step (the v0 manifest cross-field
+    consistency rule requires the overlay when carried_over=true), so
+    the pre-ADR-0007 wire shape is preserved end-to-end."""
 
     def _w02_contract(self):
         return new_run_contract(
@@ -1011,14 +1013,22 @@ class W02ManualEditOverlaySignalTests(_BaseEvidenceFixture):
         self.assertNotIn("manualEditsCarriedOver", payload)
         self.assertNotIn("manualDriftRegionCount", payload)
 
-    def test_forwards_manual_edit_signals_when_contract_carries_drift(self) -> None:
+    def test_omits_manual_edit_signals_even_when_contract_carries_drift(self) -> None:
+        # Until the overlay-artifact wiring lands, the orchestrator MUST
+        # NOT forward ``manualEditsCarriedOver`` on its own — doing so
+        # without the matching overlay would make evidence-service reject
+        # the write-evidence step.
         contract = self._w02_contract()
         contract.set_manual_edit_summary(
             carried_over=True, drift_region_count=3
         )
         payload = self._build_payload(contract)
-        self.assertTrue(payload["manualEditsCarriedOver"])
-        self.assertEqual(payload["manualDriftRegionCount"], 3)
+        self.assertNotIn("manualEditsCarriedOver", payload)
+        self.assertNotIn("manualDriftRegionCount", payload)
+        # The contract itself still records the drift — only the wire
+        # shape suppresses it pending the overlay wiring.
+        self.assertTrue(contract.manual_edits_carried_over)
+        self.assertEqual(contract.manual_drift_region_count, 3)
 
 
 if __name__ == "__main__":

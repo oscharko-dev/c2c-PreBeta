@@ -1036,7 +1036,14 @@ func validateArtifactsShape(a *Artifacts) error {
 			return err
 		}
 	}
-	if a.ManualEditOverlay != nil && !a.ManualEditOverlay.IsZero() {
+	if a.ManualEditOverlay != nil {
+		// Validate any non-nil overlay structurally — including a
+		// zero-valued ``{}`` — so the structural check is defence-in-depth
+		// for the cross-field rule in validateManualEditConsistency. A
+		// non-nil empty overlay surfaces as "uri is required" here even
+		// if the caller's payload bypassed the cross-field check (e.g.,
+		// via a future code path that calls validateArtifactsShape
+		// directly).
 		if err := a.ManualEditOverlay.Validate("artifacts.manualEditOverlay"); err != nil {
 			return err
 		}

@@ -1739,7 +1739,54 @@ components:
           description: >
             Issue #97 consistency anchor — same sha256 as
             BuildTestView.generatedArtifactRef and GeneratedView.artifactRef.
+        # ADR 0007 (#257, #279) — Manual-edit provenance run-summary
+        # signals mirrored from the orchestrator's W02RunContract, plus
+        # the persisted overlay reference so the Studio can fetch the
+        # per-region overlay JSON for audit review. Defaults are
+        # false / 0 / null per ADR 0006 §2 absence semantics.
+        manualEditsCarriedOver:
+          type: boolean
+          description: >
+            True iff the verified Java buffer contained at least one
+            ``manual_modified`` or ``manual_edit`` region. Mirrors
+            ``EvidencePackManifest.manualEditsCarriedOver``.
+        manualDriftRegionCount:
+          type: integer
+          minimum: 0
+          description: >
+            Number of regions whose ``originClass`` is ``manual_modified``
+            or ``manual_edit``. Mirrors
+            ``EvidencePackManifest.manualDriftRegionCount``.
+        manualEditOverlay:
+          oneOf:
+            - $ref: "#/components/schemas/ManualEditOverlayView"
+            - type: 'null'
+          description: >
+            Reference to the persisted per-region manual-edit overlay
+            artifact. Present iff ``manualEditsCarriedOver`` is true.
         note: { type: string }
+
+    ManualEditOverlayView:
+      type: object
+      required: [uri, sha256, regionCount]
+      description: >
+        BFF projection of the evidence-pack ``artifacts.manualEditOverlay``
+        reference (ADR 0007 §3). The Studio dereferences ``uri`` to fetch
+        the overlay JSON for audit review; ``regionCount`` mirrors
+        EvidenceView.manualDriftRegionCount.
+      properties:
+        uri: { type: string }
+        sha256: { type: string, pattern: "^[0-9a-fA-F]{64}$" }
+        byteSize: { type: integer, minimum: 0 }
+        mimeType: { type: string }
+        kind: { type: string }
+        schemaVersion: { type: string, enum: [v0] }
+        regionCount:
+          type: integer
+          minimum: 1
+          description: >
+            Number of regions enumerated in the referenced overlay. MUST
+            equal EvidenceView.manualDriftRegionCount.
 
     RunArtifactMetadata:
       type: object
