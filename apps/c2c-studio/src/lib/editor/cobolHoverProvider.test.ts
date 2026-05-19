@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   __resetCobolHoverProviderForTests,
@@ -7,6 +7,14 @@ import {
   createCobolHoverProvider,
   registerCobolHoverProvider,
 } from "./cobolHoverProvider";
+import {
+  __resetEditorTelemetryForTests,
+  flushPendingForTests,
+} from "./editorTelemetry";
+
+afterEach(() => {
+  __resetEditorTelemetryForTests();
+});
 
 // ---------------------------------------------------------------------------
 // Monaco stubs
@@ -78,6 +86,17 @@ describe("computeHoverFor — PIC clauses", () => {
     });
     expect(computed!.entry.title).toMatch(/^PIC/);
   });
+
+  it("normalises the COBOL sentence period after a PIC clause", () => {
+    const line = "       01 WS-TOTAL          PIC 99.";
+    const picStart = line.indexOf("99");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: picStart + 2,
+    });
+    expect(computed!.entry.title).toBe("PIC 99");
+    expect(computed!.entry.javaMapping).toMatch(/int/);
+  });
 });
 
 describe("computeHoverFor — USAGE clauses", () => {
@@ -90,6 +109,17 @@ describe("computeHoverFor — USAGE clauses", () => {
     });
     expect(computed!.entry.title).toBe("USAGE COMP-3");
     expect(computed!.entry.explanation).toMatch(/[Pp]acked decimal/);
+  });
+
+  it("recognises COMPUTATIONAL-3 as the COMP-3 packed-decimal synonym", () => {
+    const line = "       01 WS-AMOUNT         USAGE COMPUTATIONAL-3.";
+    const compStart = line.indexOf("COMPUTATIONAL-3");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: compStart + 4,
+    });
+    expect(computed!.entry.title).toBe("USAGE COMP-3");
+    expect(computed!.constructKind).toBe("comp3");
   });
 
   it("does not steal hover from the DISPLAY *verb*", () => {
@@ -170,6 +200,17 @@ describe("computeHoverFor — USAGE clauses", () => {
       column: displayStart + 2,
     });
     expect(computed!.constructKind).toBe("usage");
+  });
+
+  it("does not treat a VALUE string literal as a USAGE clause", () => {
+    const line = "       01 WS-MODE           PIC X(4) VALUE 'COMP'.";
+    const literalStart = line.indexOf("COMP");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: literalStart + 2,
+    });
+    expect(computed!.entry.title).toBe("VALUE (string literal)");
+    expect(computed!.entry.title).not.toBe("USAGE COMP");
   });
 });
 
@@ -303,6 +344,28 @@ describe("computeHoverFor — fixed-format zones", () => {
       expect(computed.entry.title).not.toMatch(/^PIC /);
     }
   });
+
+  it("does not surface construct hovers from fixed-format comment lines", () => {
+    const line = "      * 01 WS-COMMENT       PIC 99.";
+    const picStart = line.indexOf("PIC");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: picStart + 2,
+    });
+    expect(computed).not.toBeNull();
+    expect(computed!.entry.title).not.toMatch(/^PIC /);
+  });
+
+  it("does not surface construct hovers from floating comment suffixes", () => {
+    const line = "       01 WS-REAL           PIC 99. *> PIC S9(5)V99.";
+    const suffixPicStart = line.lastIndexOf("PIC");
+    const computed = computeHoverFor(line, {
+      lineNumber: 1,
+      column: suffixPicStart + 2,
+    });
+    expect(computed).not.toBeNull();
+    expect(computed!.entry.title).not.toMatch(/^PIC /);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -349,6 +412,13 @@ describe("hover content security", () => {
     )[0]!;
     expect(content.isTrusted).toBe(false);
     expect(content.supportHtml).toBe(false);
+    expect(content.value).toContain("**x**");
+    expect(result.range).toEqual({
+      startLineNumber: 1,
+      endLineNumber: 1,
+      startColumn: 1,
+      endColumn: 2,
+    });
   });
 });
 
@@ -389,6 +459,43 @@ describe("createCobolHoverProvider", () => {
     const content = md.contents[0]!;
     expect(content.value).toMatch(/PIC S9\(5\)V99/);
   });
+
+  it("emits the closed-set hover telemetry payload for successful hovers", async () => {
+    const calls: RequestInit[] = [];
+    __resetEditorTelemetryForTests({
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+      fetchFn: (async (_url: string, init: RequestInit) => {
+        calls.push(init);
+        return { ok: true, status: 202 } as Response;
+      }) as unknown as typeof fetch,
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+      resolveBaseUrl: () => ({ ok: true, data: "" }),
+      sessionId: "hover-provider-test-session",
+    });
+    const monaco = fakeMonaco();
+    const provider = createCobolHoverProvider(monaco);
+    const line = "       01 WS-AMT            USAGE COMPUTATIONAL-3.";
+    provider.provideHover(
+      modelFor([line]),
+      positionAt(1, line.indexOf("COMPUTATIONAL-3") + 3),
+      undefined as unknown as Parameters<typeof provider.provideHover>[2],
+    );
+    await flushPendingForTests();
+
+    const body = JSON.parse(calls[0]!.body as string) as {
+      events: Array<{ eventType: string; payload: { constructKind: string } }>;
+    };
+    expect(body.events).toEqual([
+      {
+        schemaVersion: "v0",
+        eventType: "hover.opened",
+        occurredAt: "2026-05-18T12:00:00.000Z",
+        sessionId: "hover-provider-test-session",
+        payload: { constructKind: "comp3" },
+      },
+    ]);
+  });
 });
 
 describe("registerCobolHoverProvider", () => {
@@ -412,14 +519,20 @@ describe("provider has zero network footprint", () => {
     const fetchSpy = vi.fn();
     const xhrSpy = vi.fn();
     const wsSpy = vi.fn();
+    const sendBeaconSpy = vi.fn();
     const originalFetch = globalThis.fetch;
     const originalXhr = globalThis.XMLHttpRequest;
     const originalWs = globalThis.WebSocket;
+    const originalNavigator = globalThis.navigator;
     // Replace each network primitive with a recording spy so any call
     // is observable. The provider must not touch any of them.
     (globalThis as { fetch?: unknown }).fetch = fetchSpy;
     (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = xhrSpy;
     (globalThis as { WebSocket?: unknown }).WebSocket = wsSpy;
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { ...originalNavigator, sendBeacon: sendBeaconSpy },
+    });
     try {
       const line = "       01 WS-AMT            PIC S9(5)V99.";
       provider.provideHover(
@@ -431,9 +544,14 @@ describe("provider has zero network footprint", () => {
       (globalThis as { fetch?: unknown }).fetch = originalFetch;
       (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = originalXhr;
       (globalThis as { WebSocket?: unknown }).WebSocket = originalWs;
+      Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: originalNavigator,
+      });
     }
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(xhrSpy).not.toHaveBeenCalled();
     expect(wsSpy).not.toHaveBeenCalled();
+    expect(sendBeaconSpy).not.toHaveBeenCalled();
   });
 });

@@ -65,6 +65,13 @@ describe("parsePicture", () => {
     expect(parsePicture("PPPV999").kind).toBe("unknown");
     expect(parsePicture("9PPP").kind).toBe("unknown");
   });
+
+  it("normalises a terminating sentence period out of PIC text", () => {
+    const shape = parsePicture("99.");
+    expect(shape.raw).toBe("99");
+    expect(shape.kind).toBe("numeric");
+    expect(shape.integerDigits).toBe(2);
+  });
 });
 
 describe("explainPicture", () => {
@@ -89,6 +96,12 @@ describe("explainPicture", () => {
     expect(entry.javaMapping).toMatch(/int/);
   });
 
+  it("PIC 99. maps to int instead of treating the period as an edit mask", () => {
+    const entry = explainPicture("99.");
+    expect(entry.title).toBe("PIC 99");
+    expect(entry.javaMapping).toMatch(/int/);
+  });
+
   it("PIC 9(19) overflows long and maps to BigInteger", () => {
     const entry = explainPicture("9(19)");
     expect(entry.javaMapping).toMatch(/BigInteger/);
@@ -107,6 +120,13 @@ describe("explainUsage", () => {
   it("PACKED-DECIMAL is a synonym for COMP-3", () => {
     const entry = explainUsage("PACKED-DECIMAL");
     expect(entry).not.toBeNull();
+    expect(entry!.javaMapping).toMatch(/BigDecimal/);
+  });
+
+  it("COMPUTATIONAL-3 is a synonym for COMP-3", () => {
+    const entry = explainUsage("COMPUTATIONAL-3");
+    expect(entry).not.toBeNull();
+    expect(entry!.title).toBe("USAGE COMP-3");
     expect(entry!.javaMapping).toMatch(/BigDecimal/);
   });
 
@@ -326,6 +346,64 @@ describe("extractDataItems", () => {
     const items = extractDataItems(withComments);
     expect(items.map((i) => i.name)).toEqual(["WS-REAL"]);
   });
+
+  it("skips comment lines before testing DATA and PROCEDURE division boundaries", () => {
+    const source = [
+      "       *> PROCEDURE DIVISION.",
+      "       DATA DIVISION.",
+      "       WORKING-STORAGE SECTION.",
+      "       01 WS-REAL          PIC 99.",
+    ].join("\n");
+    expect(extractDataItems(source).map((i) => i.name)).toEqual(["WS-REAL"]);
+  });
+
+  it("detects fixed-format declarations after sequence columns", () => {
+    const source = [
+      "000100 IDENTIFICATION DIVISION.",
+      "000200 PROGRAM-ID. SAMPLE.",
+      "000300 DATA DIVISION.",
+      "000400 WORKING-STORAGE SECTION.",
+      "000500 01 WS-TOTAL         PIC 99.",
+    ].join("\n");
+    const items = extractDataItems(source);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      line: 5,
+      level: "01",
+      name: "WS-TOTAL",
+      picture: "99",
+    });
+  });
+
+  it("collects declaration clauses continued onto following lines", () => {
+    const source = [
+      "       DATA DIVISION.",
+      "       WORKING-STORAGE SECTION.",
+      "       01 WS-AMOUNT",
+      "          PIC S9(5)V99",
+      "          USAGE COMPUTATIONAL-3",
+      "          VALUE 0.",
+    ].join("\n");
+    const [item] = extractDataItems(source);
+    expect(item).toMatchObject({
+      line: 3,
+      name: "WS-AMOUNT",
+      picture: "S9(5)V99",
+      usage: "COMPUTATIONAL-3",
+      value: "0",
+    });
+  });
+
+  it("does not treat storage keywords inside VALUE string literals as USAGE", () => {
+    const source = [
+      "       DATA DIVISION.",
+      "       WORKING-STORAGE SECTION.",
+      "       01 WS-MODE           PIC X(4) VALUE 'COMP'.",
+    ].join("\n");
+    const [item] = extractDataItems(source);
+    expect(item?.usage).toBeNull();
+    expect(item?.value).toBe("'COMP'");
+  });
 });
 
 describe("summariseDataItem", () => {
@@ -346,5 +424,34 @@ describe("summariseDataItem", () => {
     expect(entry.explanation).toMatch(/Level 01/);
     expect(entry.explanation).toMatch(/5 integer digits/);
     expect(entry.explanation).toMatch(/Packed decimal/i);
+    expect(entry.javaMapping).toMatch(/BigDecimal/);
+  });
+
+  it("includes OCCURS mappings and REDEFINES warnings in dictionary summaries", () => {
+    const occursEntry = summariseDataItem({
+      line: 8,
+      level: "05",
+      name: "WS-CELL",
+      picture: "9(3)",
+      usage: null,
+      value: null,
+      occurs: "OCCURS 10 TIMES",
+      redefines: null,
+    });
+    expect(occursEntry.explanation).toMatch(/exactly 10 occurrences/);
+    expect(occursEntry.javaMapping).toMatch(/\[10\]/);
+
+    const redefinesEntry = summariseDataItem({
+      line: 9,
+      level: "01",
+      name: "WS-ALIAS",
+      picture: null,
+      usage: null,
+      value: null,
+      occurs: null,
+      redefines: "OLD-FIELD",
+    });
+    expect(redefinesEntry.explanation).toMatch(/share the same bytes/);
+    expect(redefinesEntry.warning).toMatch(/W0 assumption/);
   });
 });

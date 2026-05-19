@@ -146,13 +146,35 @@ describe("WorkbenchShell Layout & Topbar Readiness", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("c2c brand")).toBeInTheDocument();
     expect(screen.getByLabelText("Activity Bar")).toBeInTheDocument();
-    expect(screen.getByLabelText("Secondary Stripe")).toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "COBOL Explorer" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("COBOL Explorer")).toBeInTheDocument();
     expect(screen.getByLabelText("Split Editor Area")).toBeInTheDocument();
     expect(screen.getByLabelText("Java Project Explorer")).toBeInTheDocument();
     expect(screen.getByLabelText("Bottom Workbench")).toBeInTheDocument();
     expect(screen.getByLabelText("Status Bar")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("No run active");
+  });
+
+  it("renames the secondary landmark when the Data Dictionary panel opens", () => {
+    vi.mocked(useC2cApi).mockReturnValue({
+      health: { status: "ok" },
+      mode: { orchestrator: "live", evidence: "live" },
+      error: null,
+      errorKind: null,
+      loading: false,
+    });
+
+    render(<WorkbenchShell />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /open cobol data dictionary/i }),
+    );
+
+    expect(
+      screen.getByRole("complementary", { name: "Data Dictionary" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the IDE shell constrained to the viewport and delegates scrolling to inner panes", () => {
