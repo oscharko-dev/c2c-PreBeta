@@ -1130,6 +1130,52 @@ func TestCreatePackW02RejectsCarriedOverWithoutOverlay(t *testing.T) {
 	}
 }
 
+func TestValidateManualEditConsistencyRejectsZeroOverlayWhenNotCarriedOver(t *testing.T) {
+	// Regression: a non-nil but zero-valued overlay pointer must NOT slip
+	// through the forbiddance branch — otherwise Go's omitempty would
+	// serialise a stale ``manualEditOverlay: {}`` onto the manifest even
+	// when the run carried no manual edits.
+	empty := &ManualEditOverlayRef{}
+	err := validateManualEditConsistency(false, 0, empty)
+	if err == nil {
+		t.Fatalf("expected validation to reject zero-valued overlay when carried_over=false")
+	}
+	if !strings.Contains(err.Error(), "forbids") {
+		t.Fatalf("expected forbiddance message; got %v", err)
+	}
+}
+
+func TestEvaluateValidationForManifestExtendsRequiredArtifactsWhenCarriedOver(t *testing.T) {
+	// Regression: MissingArtifacts MUST stay a subset of RequiredArtifacts
+	// so consumers can rely on the "required" list as authoritative.
+	m := &EvidencePackManifest{
+		Wave:                   WaveW02,
+		Artifacts:              completeW02Artifacts(t),
+		ManualEditsCarriedOver: true,
+		ManualDriftRegionCount: 2,
+	}
+	result := EvaluateValidationForManifest(m)
+	if !containsString(result.RequiredArtifacts, "manualEditOverlay") {
+		t.Fatalf("expected RequiredArtifacts to include manualEditOverlay; got %v", result.RequiredArtifacts)
+	}
+	for _, missing := range result.MissingArtifacts {
+		if !containsString(result.RequiredArtifacts, missing) {
+			t.Fatalf("missing %q is not in required %v", missing, result.RequiredArtifacts)
+		}
+	}
+	// Idempotent re-evaluation: calling twice must not duplicate.
+	again := EvaluateValidationForManifest(m)
+	requiredCount := 0
+	for _, r := range again.RequiredArtifacts {
+		if r == "manualEditOverlay" {
+			requiredCount++
+		}
+	}
+	if requiredCount != 1 {
+		t.Fatalf("expected one manualEditOverlay entry on re-evaluation; got %d", requiredCount)
+	}
+}
+
 func TestCreatePackW02RejectsOverlayWithoutCarriedOver(t *testing.T) {
 	srv, _ := newTestServer(t)
 	artifacts := completeW02Artifacts(t)

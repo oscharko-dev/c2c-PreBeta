@@ -643,10 +643,12 @@ type Artifacts struct {
 	BudgetSummary  *BudgetSummary         `json:"budgetSummary,omitempty"`
 	// ADR 0007 (#257, Issue #279): reference to the per-region manual-edit
 	// overlay JSON. Present iff the run-summary
-	// ``manualEditsCarriedOver`` flag is true; omitted when false. The
-	// completeness validator enforces the cross-field consistency in
-	// EvaluateValidationForWave; structural validation lives on the ref
-	// type itself.
+	// ``manualEditsCarriedOver`` flag is true; omitted when false. Structural
+	// validation lives on the ref type itself; the "missing overlay when
+	// carried_over=true" reporting lives in EvaluateValidationForManifest;
+	// the strict cross-field consistency (signal ↔ overlay, regionCount
+	// tally, "MUST be absent when false") is enforced in manifest.Validate
+	// via validateManualEditConsistency.
 	ManualEditOverlay *ManualEditOverlayRef `json:"manualEditOverlay,omitempty"`
 }
 
@@ -866,6 +868,15 @@ func (m *EvidencePackManifest) Validate() error {
 // inputs; evidence-service fails closed when they disagree so a reviewer
 // never sees a pack that claims manual edits without an overlay (or vice
 // versa).
+//
+// The forbiddance branch treats ANY non-nil overlay pointer as "present"
+// — including a zero-valued “{}“ — because Go's “omitempty“ on a
+// pointer only suppresses serialisation when the pointer itself is nil,
+// not when it points at an empty struct. Storing a non-nil zero overlay
+// would otherwise leak a stale “manualEditOverlay: {}“ object onto the
+// manifest. The presence branch is stricter: it also requires the overlay
+// to be non-zero so a structurally valid ref is what reaches downstream
+// consumers.
 func validateManualEditConsistency(
 	carriedOver bool,
 	driftRegionCount int,
@@ -891,7 +902,7 @@ func validateManualEditConsistency(
 			"artifacts.manualEditOverlay",
 			"manualEditsCarriedOver=true requires artifacts.manualEditOverlay",
 		)
-	case !carriedOver && overlayPresent:
+	case !carriedOver && overlay != nil:
 		return fieldError(
 			"artifacts.manualEditOverlay",
 			"manualEditsCarriedOver=false forbids artifacts.manualEditOverlay",
@@ -1175,9 +1186,18 @@ func EvaluateValidationForManifest(m *EvidencePackManifest) ValidationResult {
 	}
 	result := EvaluateValidationForWave(&m.Artifacts, m.Wave)
 	if m.ManualEditsCarriedOver {
+		// Extend RequiredArtifacts so downstream consumers can rely on it as
+		// the authoritative list — keep MissingArtifacts ⊆ RequiredArtifacts.
+		// Append-only and de-duplicated so re-evaluating the same manifest
+		// stays stable across calls.
+		if !stringSliceContains(result.RequiredArtifacts, "manualEditOverlay") {
+			result.RequiredArtifacts = append(result.RequiredArtifacts, "manualEditOverlay")
+		}
 		overlay := m.Artifacts.ManualEditOverlay
 		if overlay == nil || overlay.IsZero() {
-			result.MissingArtifacts = append(result.MissingArtifacts, "manualEditOverlay")
+			if !stringSliceContains(result.MissingArtifacts, "manualEditOverlay") {
+				result.MissingArtifacts = append(result.MissingArtifacts, "manualEditOverlay")
+			}
 			result.OK = false
 			result.CompletenessStatus = CompletenessStatusEvidenceIncomplete
 			result.Messages = append(
@@ -1187,6 +1207,17 @@ func EvaluateValidationForManifest(m *EvidencePackManifest) ValidationResult {
 		}
 	}
 	return result
+}
+
+// stringSliceContains is a tiny O(n) membership check used to keep
+// EvaluateValidationForManifest idempotent under repeated calls.
+func stringSliceContains(haystack []string, needle string) bool {
+	for _, value := range haystack {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func validateW02ReferentialIntegrity(a *Artifacts) []string {

@@ -450,7 +450,7 @@
     "manualEditOverlayRef": {
       "type": "object",
       "description": "ADR 0007 (#257) — Evidence-Pack reference to the manual-edit overlay artifact for one run. The artifact body is a content-addressed JSON document whose top-level shape is `{ schemaVersion: \"v0\", regions: ManualEditRegion[] }`. Each ManualEditRegion has required keys lineRange:{startLine,endLine}, originClass ∈ {\"manual_modified\",\"manual_edit\"}, generatorBaselineRunId, lastModifiedAt (ISO8601), lastModifiedBy:{userId,tenantId}, manualEditCount (integer); manual_modified entries additionally require generatorBaselineRegionHash (SHA-256 hex). Consumers MUST treat any originClass outside the closed set as opaque.",
-      "required": ["uri", "sha256", "byteSize"],
+      "required": ["uri", "sha256", "byteSize", "regionCount"],
       "properties": {
         "uri": { "type": "string", "minLength": 1 },
         "sha256": {
@@ -466,8 +466,8 @@
         },
         "regionCount": {
           "type": "integer",
-          "minimum": 0,
-          "description": "Number of regions enumerated in the referenced overlay. Mirrors RunSummary.manualDriftRegionCount; required so consumers can audit completeness without dereferencing the artifact."
+          "minimum": 1,
+          "description": "Number of regions enumerated in the referenced overlay. Mirrors RunSummary.manualDriftRegionCount and MUST equal it. The minimum is 1 because an overlay with no regions is indistinguishable from \"no manual edits\" and MUST be omitted entirely — the orchestrator drops it before persistence."
         }
       },
       "additionalProperties": false

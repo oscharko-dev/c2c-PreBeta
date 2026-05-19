@@ -383,7 +383,7 @@ components:
     # manualEditCount, and (for manual_modified) generatorBaselineRegionHash.
     ManualEditOverlayRef:
       type: object
-      required: [uri, sha256, byteSize]
+      required: [uri, sha256, byteSize, regionCount]
       properties:
         uri: { type: string }
         sha256: { type: string, pattern: "^[0-9a-fA-F]{64}$" }
@@ -393,11 +393,13 @@ components:
         schemaVersion: { type: string, enum: [v0] }
         regionCount:
           type: integer
-          minimum: 0
+          minimum: 1
           description: |
             Number of regions enumerated in the referenced overlay. MUST
-            equal the run-summary ``manualDriftRegionCount`` and MUST be
-            > 0 (an overlay with no regions is omitted entirely).
+            equal the run-summary ``manualDriftRegionCount``. The minimum
+            is 1 because an overlay with no regions is indistinguishable
+            from "no manual edits" and MUST be omitted entirely — the
+            orchestrator drops it before persistence.
 
     AssistDecisionLineage:
       type: object
