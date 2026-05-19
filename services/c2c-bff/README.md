@@ -62,6 +62,7 @@ Every payload from a run-scoped endpoint includes two mode signals:
 | Env var                          | Default                  | Purpose                                                                                                                                                                                                                                         |
 | -------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `C2C_BFF_PORT`                   | `8090`                   | HTTP listen port.                                                                                                                                                                                                                               |
+| `C2C_BFF_HOST`                   | `127.0.0.1`              | HTTP listen host. Defaults to loopback; set explicitly (for example `0.0.0.0`) only behind network controls and authenticated routes.                                                                                                           |
 | `C2C_REPO_ROOT`                  | walks up from package    | Repo root used to locate `corpus/` and `fixtures/`.                                                                                                                                                                                             |
 | `C2C_UI_DIST`                    | `../../apps/c2c-ui/dist` | Optional static root served under `/`. Unused in the current Studio-only setup; the BFF silently skips static routing when the directory is missing.                                                                                            |
 | `C2C_ORCHESTRATOR_URL`           | empty                    | Base URL for `orchestrator-service`. Empty means product mode is not ready.                                                                                                                                                                     |
@@ -76,6 +77,12 @@ Editor-assist endpoints require the `c2c.sid` session cookie. The BFF derives
 `tenantId` and `userId` from the server-side session record for budget and
 ledger attribution; request body or query identity fields are treated only as
 legacy echoes and must match the active session.
+
+Java editor execution-adjacent routes (`/api/v0/format/java`,
+`/api/v0/compile-check`, and `/api/v0/verify`) also require the session cookie,
+an allowed Studio browser origin when `Origin` is present, and
+`Content-Type: application/json` before request bodies are parsed or upstream
+build/test services are invoked.
 
 ## Local commands
 

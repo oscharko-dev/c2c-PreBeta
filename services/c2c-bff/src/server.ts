@@ -594,6 +594,18 @@ function rejectDisallowedBrowserOrigin(
   return true;
 }
 
+function rejectNonJsonContentType(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): boolean {
+  const contentType = req.headers["content-type"] ?? "";
+  if (contentType.toLowerCase().startsWith("application/json")) return false;
+  jsonResponse(res, 415, {
+    error: "request must use Content-Type: application/json",
+  });
+  return true;
+}
+
 function appendVaryHeader(res: http.ServerResponse, fieldName: string): void {
   const existing = res.getHeader("vary");
   if (existing === undefined) {
@@ -3102,6 +3114,33 @@ function resolveEditorAssistSession(
   return { ok: true, record };
 }
 
+function rejectUnauthenticatedStudioJsonRequest(args: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  allowedOrigins: readonly string[];
+  sessionStore: SessionStore;
+  forceSecureSessionCookies: boolean;
+}): boolean {
+  if (
+    rejectDisallowedBrowserOrigin(args.req, args.res, args.allowedOrigins) ||
+    rejectNonJsonContentType(args.req, args.res)
+  ) {
+    return true;
+  }
+  const session = resolveEditorAssistSession(
+    args.req,
+    args.res,
+    args.sessionStore,
+    args.forceSecureSessionCookies,
+  );
+  if (!session.ok) {
+    jsonResponse(args.res, 401, { error: session.message });
+    return true;
+  }
+  appendVaryHeader(args.res, "Cookie");
+  return false;
+}
+
 function explicitStringField(
   raw: unknown,
   fieldName: string,
@@ -3709,6 +3748,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // client (lib/editor/javaFormatClient.ts) calls this on
       // Cmd/Ctrl+Shift+F and on opt-in format-on-save.
       if (pathname === "/api/v0/format/java" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         if (!buildTestRunner.enabled) {
           jsonResponse(
             res,
@@ -4465,6 +4515,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // files to the build-test-runner-service for a build-only check
       // (skipExecution: true). Returns normalised diagnostics.
       if (pathname === "/api/v0/compile-check" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         if (!buildTestRunner.enabled) {
           jsonResponse(res, 503, {
             error:
@@ -4610,6 +4671,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // (build + test + oracle). Returns the run summary including manual-edit
       // provenance fields derived from the optional manualEditOverlay.
       if (pathname === "/api/v0/verify" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         if (!buildTestRunner.enabled) {
           jsonResponse(res, 503, {
             error:
@@ -5656,6 +5728,6 @@ export function createApp(deps: ServerDeps): http.RequestListener {
 export function startServer(deps: ServerDeps): http.Server {
   const handler = createApp(deps);
   const server = http.createServer(handler);
-  server.listen(deps.config.port);
+  server.listen(deps.config.port, deps.config.host);
   return server;
 }

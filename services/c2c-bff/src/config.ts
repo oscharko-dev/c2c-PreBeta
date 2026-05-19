@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 export interface BffConfig {
   serviceName: string;
   port: number;
+  host: string;
   repoRoot: string;
   staticRoot: string;
   orchestratorUrl: string;
@@ -61,6 +62,7 @@ export interface BffConfig {
 
 const SERVICE_NAME = "c2c-bff";
 const DEFAULT_PORT = 8090;
+const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 4_000;
 const DEFAULT_TRANSFORM_SOURCE_MAX_BYTES = 1_000_000;
 const DEFAULT_ARTIFACT_CONTENT_MAX_BYTES = 1_048_576;
@@ -77,6 +79,15 @@ function parsePort(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0 || value > 65_535) {
     throw new Error(`invalid port ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+function parseHost(raw: string | undefined, fallback: string): string {
+  if (!raw || raw.trim() === "") return fallback;
+  const value = raw.trim();
+  if (/[\s/]/.test(value)) {
+    throw new Error(`invalid host ${JSON.stringify(raw)}`);
   }
   return value;
 }
@@ -219,6 +230,7 @@ export function loadConfig(
   return {
     serviceName: SERVICE_NAME,
     port: parsePort(env.C2C_BFF_PORT, DEFAULT_PORT),
+    host: parseHost(env.C2C_BFF_HOST, DEFAULT_HOST),
     repoRoot,
     staticRoot: resolveStaticRoot(env, repoRoot),
     orchestratorUrl,

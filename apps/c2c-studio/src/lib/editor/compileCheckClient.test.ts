@@ -23,8 +23,10 @@ function makeResponse(
 
 describe("compileCheck client", () => {
   it("parses diagnostics from `{ diagnostics: [...] }`", async () => {
-    const fetchImpl = vi.fn(async () =>
-      makeResponse(200, {
+    let capturedInit: RequestInit | undefined;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedInit = init;
+      return makeResponse(200, {
         diagnostics: [
           {
             severity: "error",
@@ -36,10 +38,11 @@ describe("compileCheck client", () => {
             sourceKind: "build",
           },
         ],
-      }),
-    ) as unknown as FetchFn;
+      });
+    }) as unknown as FetchFn;
     const result = await compileCheck({ content: "x" }, { fetchImpl });
     expect(result.ok).toBe(true);
+    expect(capturedInit).toMatchObject({ credentials: "include" });
     if (result.ok) {
       expect(result.diagnostics).toHaveLength(1);
       expect(result.diagnostics[0]?.message).toBe("missing semicolon");

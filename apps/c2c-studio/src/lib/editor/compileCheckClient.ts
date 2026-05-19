@@ -227,6 +227,7 @@ export async function compileCheck(
     response = await fetchImpl(`${baseUrlResult.data}/api/v0/compile-check`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

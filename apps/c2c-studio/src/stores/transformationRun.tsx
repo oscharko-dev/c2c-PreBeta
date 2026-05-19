@@ -39,6 +39,7 @@ import {
   type ConflictRegion,
   type ConflictRegionResolution,
 } from "../lib/editor/conflictDetection";
+import { computeManualEditOverlay } from "../lib/editor/manualEditOverlay";
 import {
   appendJavaSnapshot,
   recordCobolByRun,
@@ -136,7 +137,13 @@ export interface TransformationRunContextValue {
     filePath: string,
     overlay: JavaOriginOverlay | null,
   ) => void;
-  saveJavaDraft: (filePath: string) => Promise<void>;
+  saveJavaDraft: (
+    filePath: string,
+    options?: {
+      content?: string;
+      manualEditOverlay?: JavaOriginOverlay | null;
+    },
+  ) => Promise<void>;
   loadJavaDraftFor: (filePath: string, backendContent: string) => Promise<void>;
   resolveJavaConflict: (
     choice: "backendSample" | "localDraft" | "lastRunInput",
@@ -634,6 +641,8 @@ export function TransformationRunProvider({
             generatorBaselineContent: review.newGeneratorContent,
             generatorBaselineHash: newBaselineHash,
             generatorBaselineRunId: review.newGeneratorRunId,
+            lastRunInputHash: newBaselineHash,
+            displayedArtifactSourceHash: newBaselineHash,
             isDirty: merged !== review.newGeneratorContent,
           },
         };
@@ -673,7 +682,7 @@ export function TransformationRunProvider({
           [filePath]: {
             content: backendContent,
             bufferHash: hash,
-            lastRunInputHash: existing?.lastRunInputHash ?? hash,
+            lastRunInputHash: hash,
             displayedArtifactSourceHash: hash,
             generatorBaselineContent: backendContent,
             generatorBaselineHash: hash,
@@ -738,7 +747,13 @@ export function TransformationRunProvider({
   );
 
   const saveJavaDraft = useCallback(
-    async (filePath: string) => {
+    async (
+      filePath: string,
+      options?: {
+        content?: string;
+        manualEditOverlay?: JavaOriginOverlay | null;
+      },
+    ) => {
       const entry = javaBuffers[filePath];
       if (!entry) {
         return;
@@ -747,16 +762,33 @@ export function TransformationRunProvider({
       if (!programId) {
         return;
       }
+      const content = options?.content ?? entry.content;
+      const bufferHash =
+        options?.content === undefined
+          ? entry.bufferHash
+          : await deriveSourceHash(content);
+      const manualEditOverlay =
+        options?.manualEditOverlay !== undefined
+          ? options.manualEditOverlay
+          : options?.content !== undefined
+            ? computeManualEditOverlay({
+                baselineContent: entry.generatorBaselineContent,
+                currentContent: content,
+                runId: state.runId ?? entry.generatorBaselineRunId,
+                javaFile: filePath,
+                generatorBaselineRunId: entry.generatorBaselineRunId,
+              })
+            : entry.manualEditOverlay;
       const scope = await getCurrentDraftScope();
       const payload: DraftPayload = {
         schemaVersion: "v0",
         kind: "java",
-        content: entry.content,
-        bufferHash: entry.bufferHash,
+        content,
+        bufferHash,
         lastRunInputHash: entry.lastRunInputHash ?? undefined,
         generatorBaselineHash: entry.generatorBaselineHash,
         generatorBaselineRunId: entry.generatorBaselineRunId,
-        manualEditOverlay: entry.manualEditOverlay ?? undefined,
+        manualEditOverlay: manualEditOverlay ?? undefined,
         savedAt: new Date().toISOString(),
       };
       const sourceName = filePath.split("/").pop() ?? filePath;
@@ -777,12 +809,23 @@ export function TransformationRunProvider({
         }
         return {
           ...prev,
-          [filePath]: { ...existing, lastSavedAt: payload.savedAt },
+          [filePath]: {
+            ...existing,
+            ...(options?.content !== undefined
+              ? {
+                  content,
+                  bufferHash,
+                  isDirty: content !== existing.generatorBaselineContent,
+                }
+              : {}),
+            manualEditOverlay: manualEditOverlay ?? null,
+            lastSavedAt: payload.savedAt,
+          },
         };
       });
       setSaveNoticeAt(Date.now());
     },
-    [javaBuffers, state.programId],
+    [javaBuffers, state.programId, state.runId],
   );
 
   const loadJavaDraftFor = useCallback(

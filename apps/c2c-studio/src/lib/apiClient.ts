@@ -1590,6 +1590,7 @@ export const apiClient = {
   verify: (request: VerifyRequest) =>
     fetchJson("/api/v0/verify", parseVerifyResponse, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },

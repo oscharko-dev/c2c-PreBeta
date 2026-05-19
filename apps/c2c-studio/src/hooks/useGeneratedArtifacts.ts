@@ -8,6 +8,16 @@ function buildFileTree(files: GeneratedFileRef[] | undefined): FileTreeNode[] {
   if (!files || files.length === 0) return [];
 
   const root: FileTreeNode = { name: '', path: '', type: 'directory', children: [] };
+  const childIndexes = new WeakMap<FileTreeNode, Map<string, FileTreeNode>>();
+
+  const childIndexFor = (node: FileTreeNode): Map<string, FileTreeNode> => {
+    let index = childIndexes.get(node);
+    if (!index) {
+      index = new Map(node.children.map((child) => [child.name, child]));
+      childIndexes.set(node, index);
+    }
+    return index;
+  };
 
   for (const file of files) {
     const segments = file.path.split('/');
@@ -17,8 +27,9 @@ function buildFileTree(files: GeneratedFileRef[] | undefined): FileTreeNode[] {
       const segment = segments[i];
       const isFile = i === segments.length - 1;
       const currentPath = segments.slice(0, i + 1).join('/');
+      const childrenByName = childIndexFor(current);
 
-      let child = current.children.find(c => c.name === segment);
+      let child = childrenByName.get(segment);
       if (!child) {
         child = {
           name: segment,
@@ -28,6 +39,7 @@ function buildFileTree(files: GeneratedFileRef[] | undefined): FileTreeNode[] {
           ...(isFile ? { ref: file } : {})
         };
         current.children.push(child);
+        childrenByName.set(segment, child);
       }
       current = child;
     }

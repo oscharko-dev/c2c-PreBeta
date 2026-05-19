@@ -21,6 +21,7 @@ import type { BffConfig } from "./config";
 const baseConfig: BffConfig = {
   serviceName: "c2c-bff",
   port: 0,
+  host: "127.0.0.1",
   repoRoot: "/tmp/c2c-test-root",
   staticRoot: "/tmp/c2c-test-static-does-not-exist",
   orchestratorUrl: "",
