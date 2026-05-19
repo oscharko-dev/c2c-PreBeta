@@ -92,24 +92,11 @@ export function createRateLimiter(
   };
 }
 
-// Resolve the request peer address. We do NOT trust
-// ``X-Forwarded-For`` blindly — only the leftmost value, and only
-// when present (so a malicious client cannot spoof the bucket by
-// rotating header values).
+// Resolve the request peer address. Do not trust X-Forwarded-For here:
+// this BFF has no trusted-proxy allow-list, so client-supplied forwarded
+// headers would let callers rotate buckets and bypass fixture sign-in
+// throttling.
 export function resolveClientBucketKey(req: http.IncomingMessage): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  const forwardedFirst = pickFirstHeader(forwarded);
-  if (forwardedFirst) {
-    const leftmost = forwardedFirst.split(",")[0]?.trim();
-    if (leftmost && leftmost.length > 0) return leftmost;
-  }
   const remote = req.socket.remoteAddress;
   return typeof remote === "string" && remote.length > 0 ? remote : "unknown";
-}
-
-function pickFirstHeader(value: string | string[] | undefined): string | null {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string")
-    return value[0];
-  return null;
 }

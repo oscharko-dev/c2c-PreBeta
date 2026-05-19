@@ -73,6 +73,15 @@ function isEditorAssistErrorCode(
   );
 }
 
+function stripClientAssertedIdentity(
+  payload: EditorAssistRequest,
+): Omit<EditorAssistRequest, "tenantId" | "userId"> {
+  const serverPayload = { ...payload };
+  delete serverPayload.tenantId;
+  delete serverPayload.userId;
+  return serverPayload;
+}
+
 function isSuccessResponse(
   value: unknown,
 ): value is EditorAssistSuccessResponse {
@@ -123,6 +132,7 @@ export function parseEditorAssistError(
   payload: unknown,
   _status: number,
 ): EditorAssistResult {
+  void _status;
   if (!isRecord(payload)) {
     return unavailableResult();
   }
@@ -151,11 +161,11 @@ export interface RequestExplanationOptions {
   signal?: AbortSignal;
 }
 
-// Issues `POST /api/v0/editor/explain` with the caller-supplied
-// payload. The request body is sent verbatim — Studio is the
-// authoritative producer of redacted bytes, hashes, and the redaction
-// metadata; we never mutate them here. The response is parse-and-
-// validated; anything off-contract is normalised into a
+// Issues `POST /api/v0/editor/explain`. Studio is the authoritative
+// producer of redacted bytes, hashes, and the redaction metadata, but
+// tenantId/userId are not sent because the BFF binds identity to the
+// HttpOnly session cookie. The response is parse-and-validated;
+// anything off-contract is normalised into a
 // `gateway_unavailable` failure so the side panel never has to render
 // an unlabelled state.
 export async function requestExplanation(
@@ -190,10 +200,12 @@ export async function requestExplanation(
 
   let response: Response;
   try {
+    const serverPayload = stripClientAssertedIdentity(payload);
     response = await fetch(`${baseUrlResult.data}/api/v0/editor/explain`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      credentials: "include",
+      body: JSON.stringify(serverPayload),
       signal: options.signal,
     });
   } catch {
@@ -252,16 +264,11 @@ export interface GetBudgetOptions {
   signal?: AbortSignal;
 }
 
-// Encodes the budget scope into the query string. `encodeURIComponent`
-// covers every reserved character we care about (`/`, `&`, `+`, `=`).
+// Encodes the budget scope into the query string. The BFF derives
+// tenantId/userId from the HttpOnly session cookie, so the preflight
+// only sends the client-issued editor session identifier.
 function buildBudgetUrl(base: string, scope: EditorAssistBudgetScope): string {
   const params: string[] = [`sessionId=${encodeURIComponent(scope.sessionId)}`];
-  if (scope.tenantId !== undefined) {
-    params.push(`tenantId=${encodeURIComponent(scope.tenantId)}`);
-  }
-  if (scope.userId !== undefined) {
-    params.push(`userId=${encodeURIComponent(scope.userId)}`);
-  }
   return `${base}/api/v0/editor/budget?${params.join("&")}`;
 }
 
@@ -294,6 +301,7 @@ export async function getBudget(
     response = await fetch(buildBudgetUrl(baseUrlResult.data, scope), {
       method: "GET",
       headers: { Accept: "application/json" },
+      credentials: "include",
       signal: options.signal,
     });
   } catch {

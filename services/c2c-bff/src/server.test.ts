@@ -4,8 +4,13 @@ import * as http from "node:http";
 import { createHash } from "node:crypto";
 import * as net from "node:net";
 import { AddressInfo } from "node:net";
+import * as os from "node:os";
 
-import { createApp } from "./server";
+import {
+  createApp,
+  createJsonlEditorAssistLedgerSink,
+  type EditorAssistLedgerSink,
+} from "./server";
 import { createRunStore } from "./run-store";
 import {
   PLACEHOLDER_JAVA_MARKERS,
@@ -28,8 +33,11 @@ import {
 import { loadConfig, type BffConfig } from "./config";
 import {
   createEditorAssistBudgetStore,
+  type EditorAssistLedgerEntry,
   type BudgetSnapshot,
 } from "./editorExplain";
+import { createSessionStore, type SessionStore } from "./sessionStore";
+import { SESSION_COOKIE_NAME } from "./sessionCookie";
 
 const FIXED_SAMPLE: SampleDetail = {
   programId: "BRNCH01",
@@ -386,11 +394,13 @@ function availableModelGateway(): ModelGatewayClient {
   };
 }
 
+const baseRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "c2c-bff-test-root-"));
+
 const baseConfig: BffConfig = {
   serviceName: "c2c-bff",
   port: 0,
-  repoRoot: "/tmp/c2c-test-root",
-  staticRoot: "/tmp/c2c-test-static-does-not-exist",
+  repoRoot: baseRepoRoot,
+  staticRoot: path.join(baseRepoRoot, "static-does-not-exist"),
   orchestratorUrl: "",
   orchestratorControlToken: "",
   evidenceUrl: "",
@@ -407,6 +417,7 @@ const baseConfig: BffConfig = {
   enableDiagnosticFixtures: false,
   enableFixtureSessions: true,
   forceSecureSessionCookies: false,
+  studioCorsOrigins: ["http://127.0.0.1:3000", "http://localhost:3000"],
 };
 
 test("loadConfig rejects live orchestrator URL without a control token", () => {
@@ -420,6 +431,104 @@ test("loadConfig rejects live orchestrator URL without a control token", () => {
         __dirname,
       ),
     /C2C_ORCHESTRATOR_CONTROL_TOKEN is required/,
+  );
+});
+
+test("loadConfig surfaces the default and override editor-assist ledger path", () => {
+  const defaults = loadConfig(
+    { C2C_REPO_ROOT: "/tmp/c2c-test-root" } as NodeJS.ProcessEnv,
+    __dirname,
+  );
+  assert.equal(
+    defaults.editorAssistLedgerPath,
+    path.resolve(
+      "/tmp/c2c-test-root",
+      "var",
+      "c2c-local",
+      "trajectory-ledger",
+      "editor-assist.jsonl",
+    ),
+  );
+
+  const overridden = loadConfig(
+    {
+      C2C_REPO_ROOT: "/tmp/c2c-test-root",
+      C2C_EDITOR_ASSIST_LEDGER_PATH:
+        "var/c2c-local/trajectory-ledger/custom-editor-assist.jsonl",
+    } as NodeJS.ProcessEnv,
+    __dirname,
+  );
+  assert.equal(
+    overridden.editorAssistLedgerPath,
+    path.resolve(
+      "/tmp/c2c-test-root",
+      "var",
+      "c2c-local",
+      "trajectory-ledger",
+      "custom-editor-assist.jsonl",
+    ),
+  );
+
+  assert.throws(
+    () =>
+      loadConfig(
+        {
+          C2C_REPO_ROOT: "/tmp/c2c-test-root",
+          C2C_EDITOR_ASSIST_LEDGER_PATH: "/tmp/c2c-editor-assist.jsonl",
+        } as NodeJS.ProcessEnv,
+        __dirname,
+      ),
+    /C2C_EDITOR_ASSIST_LEDGER_PATH must resolve inside C2C_REPO_ROOT/,
+  );
+});
+
+test("loadConfig surfaces exact Studio CORS origins", () => {
+  const defaults = loadConfig(
+    { C2C_REPO_ROOT: "/tmp/c2c-test-root" } as NodeJS.ProcessEnv,
+    __dirname,
+  );
+  assert.deepEqual(defaults.studioCorsOrigins, [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://[::1]:3000",
+  ]);
+
+  const customPort = loadConfig(
+    {
+      C2C_REPO_ROOT: "/tmp/c2c-test-root",
+      C2C_LOCAL_STUDIO_PORT: "5173",
+    } as NodeJS.ProcessEnv,
+    __dirname,
+  );
+  assert.deepEqual(customPort.studioCorsOrigins, [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://[::1]:5173",
+  ]);
+
+  const explicit = loadConfig(
+    {
+      C2C_REPO_ROOT: "/tmp/c2c-test-root",
+      C2C_STUDIO_CORS_ORIGINS:
+        "http://localhost:5173/, http://127.0.0.1:5174",
+    } as NodeJS.ProcessEnv,
+    __dirname,
+  );
+  assert.deepEqual(explicit.studioCorsOrigins, [
+    "http://localhost:5173",
+    "http://127.0.0.1:5174",
+  ]);
+
+  assert.throws(
+    () =>
+      loadConfig(
+        {
+          C2C_REPO_ROOT: "/tmp/c2c-test-root",
+          C2C_STUDIO_CORS_ORIGINS: "http://localhost:3000/path",
+        } as NodeJS.ProcessEnv,
+        __dirname,
+      ),
+    /C2C_STUDIO_CORS_ORIGINS origins must not include path/,
   );
 });
 
@@ -445,7 +554,7 @@ async function startTestServer(
 
 async function fetchJson(
   url: string,
-  init?: { method?: string; body?: unknown },
+  init?: { method?: string; body?: unknown; headers?: Record<string, string> },
 ): Promise<{ status: number; body: unknown }> {
   const target = new URL(url);
   const bodyBytes =
@@ -461,6 +570,7 @@ async function fetchJson(
         path: `${target.pathname}${target.search}`,
         headers: {
           accept: "application/json",
+          ...(init?.headers ?? {}),
           ...(bodyBytes
             ? {
                 "content-type": "application/json",
@@ -581,6 +691,21 @@ test("API endpoints allow local split-server CORS requests from Studio", async (
     assert.equal(
       health.headers.get("access-control-allow-origin"),
       "http://127.0.0.1:3000",
+    );
+
+    const blocked = await fetch(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type",
+      },
+    });
+    assert.equal(blocked.status, 204);
+    assert.equal(blocked.headers.get("access-control-allow-origin"), null);
+    assert.equal(
+      blocked.headers.get("access-control-allow-credentials"),
+      null,
     );
   } finally {
     await server.close();
@@ -6252,6 +6377,54 @@ function explainRequestBody(overrides: Record<string, unknown> = {}): unknown {
   };
 }
 
+function createEditorAssistAuth(
+  identity: { tenantId: string; userId: string } = {
+    tenantId: "tenant-a",
+    userId: "user-a",
+  },
+): {
+  sessionStore: SessionStore;
+  headers: Record<string, string>;
+  sessionId: string;
+} {
+  const sessionStore = createSessionStore({ idleTimeoutMs: 0 });
+  const record = sessionStore.create(identity);
+  return {
+    sessionStore,
+    headers: { cookie: `${SESSION_COOKIE_NAME}=${record.sessionId}` },
+    sessionId: record.sessionId,
+  };
+}
+
+function minimalEditorAssistLedgerEntry(): EditorAssistLedgerEntry {
+  return {
+    schemaVersion: "v0",
+    kind: "editor_assist",
+    ledgerEntryId: "eai-tenant-a-studio-session-1-1",
+    invocationId: "mi-test",
+    tenantId: "tenant-a",
+    userId: "user-a",
+    sessionId: "studio-session-1",
+    requestSource: "editor",
+    requestRegion: {
+      filePath: "src/cobol/HELLO.cbl",
+      sourceKind: "cobol",
+      startLine: 1,
+      endLine: 1,
+      byteHash: `sha256:${"a".repeat(64)}`,
+    },
+    redactedFields: [],
+    ledgerRef: "urn:c2c/editor-assist/tenant-a/studio-session-1/1",
+    editorAssistRef: "eai-tenant-a-studio-session-1-1",
+    budgetSnapshot: { limit: 3, used: 1, remaining: 2 },
+    startedAt: "2026-05-19T00:00:00.000Z",
+    endedAt: "2026-05-19T00:00:01.000Z",
+    status: "success",
+    failureCode: null,
+    runIdRef: null,
+  };
+}
+
 test("POST /api/v0/editor/explain returns the success body and consumes one budget unit", async () => {
   const { client: gateway, calls } = explainGateway({
     status: 200,
@@ -6263,6 +6436,7 @@ test("POST /api/v0/editor/explain returns the success body and consumes one budg
     },
   });
   const ledger: Array<Record<string, unknown>> = [];
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6270,16 +6444,21 @@ test("POST /api/v0/editor/explain returns the success body and consumes one budg
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
     editorAssistLedgerSink: (entry) =>
       ledger.push(entry as unknown as Record<string, unknown>),
   });
   const server = await startTestServer(handler);
   try {
+    const bodyWithoutClientIdentity = explainRequestBody();
+    delete (bodyWithoutClientIdentity as Record<string, unknown>).tenantId;
+    delete (bodyWithoutClientIdentity as Record<string, unknown>).userId;
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/editor/explain`,
       {
         method: "POST",
-        body: explainRequestBody(),
+        headers: auth.headers,
+        body: bodyWithoutClientIdentity,
       },
     );
     assert.equal(response.status, 200);
@@ -6298,10 +6477,343 @@ test("POST /api/v0/editor/explain returns the success body and consumes one budg
     assert.equal(redaction.includes("ssn-us"), true);
     assert.equal(redaction.includes("customerName"), true);
     assert.equal(calls.length, 1);
+    const forwarded = calls[0]?.payload as Record<string, unknown>;
+    assert.equal(forwarded.tenantId, "tenant-a");
+    assert.equal(forwarded.userId, "user-a");
     assert.equal(ledger.length, 1);
     const entry = ledger[0] as Record<string, unknown>;
     assert.equal(entry.kind, "editor_assist");
     assert.equal(entry.status, "success");
+    assert.equal(entry.tenantId, "tenant-a");
+    assert.equal(entry.userId, "user-a");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain binds identity to the active session cookie", async () => {
+  const { client: gateway, calls } = explainGateway({
+    status: 200,
+    body: { explanation: "ok", invocationId: "mi-identity" },
+  });
+  const auth = createEditorAssistAuth();
+  const ledger: Array<Record<string, unknown>> = [];
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    sessionStore: auth.sessionStore,
+    editorAssistLedgerSink: (entry) =>
+      ledger.push(entry as unknown as Record<string, unknown>),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const mismatched = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: explainRequestBody({ tenantId: "tenant-b" }),
+      },
+    );
+    assert.equal(mismatched.status, 403);
+    assert.equal(
+      (mismatched.body as Record<string, unknown>).errorCode,
+      "policy_denied",
+    );
+    assert.equal(calls.length, 0);
+    assert.equal(ledger.length, 0);
+
+    const missingCookie = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        body: explainRequestBody(),
+      },
+    );
+    assert.equal(missingCookie.status, 403);
+    assert.equal(
+      (missingCookie.body as Record<string, unknown>).errorCode,
+      "policy_denied",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("editor-assist routes reject credentialed requests from unlisted browser origins", async () => {
+  const { client: gateway, calls } = explainGateway({
+    status: 200,
+    body: { explanation: "should not be reached", invocationId: "mi-csrf" },
+  });
+  const auth = createEditorAssistAuth();
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  const maliciousHeaders = {
+    ...auth.headers,
+    Origin: "http://localhost:5173",
+  };
+  try {
+    const explain = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        headers: maliciousHeaders,
+        body: explainRequestBody({ sessionId: "origin-denied-session" }),
+      },
+    );
+    assert.equal(explain.status, 403);
+    assert.equal(
+      (explain.body as Record<string, unknown>).error,
+      "origin not allowed",
+    );
+    assert.equal(calls.length, 0);
+
+    const budget = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=origin-denied-session`,
+      { headers: maliciousHeaders },
+    );
+    assert.equal(budget.status, 403);
+    assert.equal(
+      (budget.body as Record<string, unknown>).error,
+      "origin not allowed",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain persists the default JSONL ledger entry", async () => {
+  const repoRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "c2c-bff-editor-ledger-"),
+  );
+  const ledgerPath = path.join(
+    repoRoot,
+    "var",
+    "c2c-local",
+    "trajectory-ledger",
+    "editor-assist.jsonl",
+  );
+  const { client: gateway } = explainGateway({
+    status: 200,
+    body: {
+      explanation: "MOVE moves bytes from WS-A to WS-B.",
+      invocationId: "mi-explain-jsonl",
+      ledgerRef: "urn:ledger/explain/jsonl",
+      redactedFields: ["customerName"],
+    },
+  });
+  const auth = createEditorAssistAuth();
+  const handler = createApp({
+    config: {
+      ...baseConfig,
+      repoRoot,
+      modelGatewayUrl: "http://gateway",
+      editorAssistLedgerPath: ledgerPath,
+    },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: explainRequestBody({ sessionId: "jsonl-session" }),
+      },
+    );
+    assert.equal(response.status, 200);
+    const lines = fs.readFileSync(ledgerPath, "utf8").trim().split("\n");
+    assert.equal(lines.length, 1);
+    const line = lines[0];
+    if (line === undefined) {
+      throw new Error("expected one editor-assist ledger JSONL line");
+    }
+    const entry = JSON.parse(line) as Record<string, unknown>;
+    assert.equal(entry.kind, "editor_assist");
+    assert.equal(
+      entry.editorAssistRef,
+      (response.body as Record<string, unknown>).editorAssistRef,
+    );
+    assert.equal(entry.ledgerRef, "urn:ledger/explain/jsonl");
+    assert.equal(entry.status, "success");
+  } finally {
+    await server.close();
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("createJsonlEditorAssistLedgerSink rejects symlink ledger targets", () => {
+  const repoRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "c2c-bff-editor-ledger-symlink-"),
+  );
+  try {
+    const realPath = path.join(repoRoot, "real-ledger.jsonl");
+    fs.writeFileSync(realPath, "", { mode: 0o600 });
+    const symlinkPath = path.join(repoRoot, "editor-assist.jsonl");
+    fs.symlinkSync(realPath, symlinkPath);
+    const sink = createJsonlEditorAssistLedgerSink(symlinkPath, {
+      allowedRoot: repoRoot,
+    });
+    assert.throws(
+      () => sink(minimalEditorAssistLedgerEntry()),
+      /regular file|ELOOP/i,
+    );
+    assert.equal(fs.readFileSync(realPath, "utf8"), "");
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("createJsonlEditorAssistLedgerSink rejects symlink parent directories", () => {
+  const repoRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "c2c-bff-editor-ledger-parent-"),
+  );
+  const outsideRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "c2c-bff-editor-ledger-outside-"),
+  );
+  try {
+    fs.mkdirSync(path.join(repoRoot, "var"), { recursive: true });
+    const symlinkParent = path.join(repoRoot, "var", "linked");
+    fs.symlinkSync(outsideRoot, symlinkParent, "dir");
+    const escapedLedgerPath = path.join(symlinkParent, "editor-assist.jsonl");
+    const sink = createJsonlEditorAssistLedgerSink(escapedLedgerPath, {
+      allowedRoot: repoRoot,
+    });
+
+    assert.throws(
+      () => sink(minimalEditorAssistLedgerEntry()),
+      /symlink|escapes|allowed root/i,
+    );
+    assert.equal(
+      fs.existsSync(path.join(outsideRoot, "editor-assist.jsonl")),
+      false,
+    );
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("POST /api/v0/editor/explain preflights the ledger before budget and gateway", async () => {
+  const { client: gateway, calls } = explainGateway({
+    status: 200,
+    body: {
+      explanation: "should not be reached",
+      invocationId: "mi-preflight-fail",
+    },
+  });
+  const auth = createEditorAssistAuth();
+  const failingSink: EditorAssistLedgerSink = () => {
+    throw new Error("unexpected ledger write");
+  };
+  failingSink.preflight = () => {
+    throw new Error("EACCES /tmp/c2c-secret-ledger/editor-assist.jsonl");
+  };
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    sessionStore: auth.sessionStore,
+    editorAssistLedgerSink: failingSink,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: explainRequestBody({ sessionId: "preflight-fail-session" }),
+      },
+    );
+    assert.equal(response.status, 503);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "gateway_unavailable");
+    assert.equal(
+      body.message,
+      "Editor-assist audit ledger unavailable. Try again shortly.",
+    );
+    assert.equal(body.budgetSnapshot, null);
+    assert.doesNotMatch(JSON.stringify(body), /c2c-secret-ledger|EACCES/);
+    assert.equal(calls.length, 0);
+
+    const budget = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=preflight-fail-session`,
+      { headers: auth.headers },
+    );
+    assert.equal(budget.status, 200);
+    assert.deepEqual((budget.body as Record<string, unknown>).budget, {
+      limit: 3,
+      used: 0,
+      remaining: 3,
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/editor/explain fails closed when ledger persistence fails", async () => {
+  const { client: gateway } = explainGateway({
+    status: 200,
+    body: {
+      explanation: "MOVE moves bytes from WS-A to WS-B.",
+      invocationId: "mi-ledger-fail",
+      ledgerRef: "urn:ledger/explain/fail",
+    },
+  });
+  const auth = createEditorAssistAuth();
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: gateway,
+    sessionStore: auth.sessionStore,
+    editorAssistLedgerSink: () => {
+      throw new Error("EACCES /tmp/c2c-secret-ledger/editor-assist.jsonl");
+    },
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: explainRequestBody({ sessionId: "ledger-fail-session" }),
+      },
+    );
+    assert.equal(response.status, 503);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.errorCode, "gateway_unavailable");
+    assert.equal(
+      body.message,
+      "Editor-assist audit ledger unavailable. Try again shortly.",
+    );
+    assert.doesNotMatch(JSON.stringify(body), /c2c-secret-ledger|EACCES/);
+    assert.deepEqual(body.budgetSnapshot, { limit: 3, used: 1, remaining: 2 });
   } finally {
     await server.close();
   }
@@ -6349,6 +6861,7 @@ test("POST /api/v0/editor/explain returns 400 invalid_region on byteHash mismatc
     status: 200,
     body: { explanation: "should not be reached", invocationId: "mi-x" },
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6356,6 +6869,7 @@ test("POST /api/v0/editor/explain returns 400 invalid_region on byteHash mismatc
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -6377,6 +6891,7 @@ test("POST /api/v0/editor/explain returns 400 invalid_region on byteHash mismatc
     // Budget endpoint confirms used=0.
     const budget = await fetchJson(
       `${server.baseUrl}/api/v0/editor/budget?sessionId=studio-session-explain-1&tenantId=tenant-a&userId=user-a`,
+      { headers: auth.headers },
     );
     assert.deepEqual((budget.body as { budget: BudgetSnapshot }).budget, {
       limit: 3,
@@ -6393,6 +6908,7 @@ test("POST /api/v0/editor/explain maps gateway 403 to policy_denied with HTTP 40
     status: 403,
     body: { error: "policy denied" },
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6400,6 +6916,7 @@ test("POST /api/v0/editor/explain maps gateway 403 to policy_denied with HTTP 40
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -6407,6 +6924,7 @@ test("POST /api/v0/editor/explain maps gateway 403 to policy_denied with HTTP 40
       `${server.baseUrl}/api/v0/editor/explain`,
       {
         method: "POST",
+        headers: auth.headers,
         body: explainRequestBody(),
       },
     );
@@ -6424,6 +6942,7 @@ test("POST /api/v0/editor/explain maps gateway 504 to timeout with HTTP 504", as
     status: 504,
     body: { error: "slow" },
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6431,6 +6950,7 @@ test("POST /api/v0/editor/explain maps gateway 504 to timeout with HTTP 504", as
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -6438,6 +6958,7 @@ test("POST /api/v0/editor/explain maps gateway 504 to timeout with HTTP 504", as
       `${server.baseUrl}/api/v0/editor/explain`,
       {
         method: "POST",
+        headers: auth.headers,
         body: explainRequestBody(),
       },
     );
@@ -6457,6 +6978,7 @@ test("POST /api/v0/editor/explain maps gateway 500 to gateway_unavailable with H
         "Traceback (most recent call last): leak\nsk-deadbeefdeadbeefdeadbeef",
     },
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6464,6 +6986,7 @@ test("POST /api/v0/editor/explain maps gateway 500 to gateway_unavailable with H
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -6471,6 +6994,7 @@ test("POST /api/v0/editor/explain maps gateway 500 to gateway_unavailable with H
       `${server.baseUrl}/api/v0/editor/explain`,
       {
         method: "POST",
+        headers: auth.headers,
         body: explainRequestBody(),
       },
     );
@@ -6491,6 +7015,7 @@ test("POST /api/v0/editor/explain returns 429 budget_exhausted when the session 
     status: 200,
     body: { explanation: "ok", invocationId: "mi-1", ledgerRef: "urn:l/1" },
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6498,6 +7023,7 @@ test("POST /api/v0/editor/explain returns 429 budget_exhausted when the session 
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
     // Inject a 1-unit budget store so a single call exhausts the
     // session.
     editorAssistBudgets: createEditorAssistBudgetStore({ defaultLimit: 1 }),
@@ -6506,12 +7032,14 @@ test("POST /api/v0/editor/explain returns 429 budget_exhausted when the session 
   try {
     const first = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
       method: "POST",
+      headers: auth.headers,
       body: explainRequestBody(),
     });
     assert.equal(first.status, 200);
 
     const second = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
       method: "POST",
+      headers: auth.headers,
       body: explainRequestBody(),
     });
     assert.equal(second.status, 429);
@@ -6528,6 +7056,7 @@ test("POST /api/v0/editor/explain enforces the per-tenant-per-day ceiling across
     status: 200,
     body: { explanation: "ok", invocationId: "mi-1", ledgerRef: "urn:l/1" },
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6535,6 +7064,7 @@ test("POST /api/v0/editor/explain enforces the per-tenant-per-day ceiling across
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
     editorAssistBudgets: createEditorAssistBudgetStore({
       defaultLimit: 10,
       tenantDailyCap: 1,
@@ -6544,12 +7074,14 @@ test("POST /api/v0/editor/explain enforces the per-tenant-per-day ceiling across
   try {
     const first = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
       method: "POST",
+      headers: auth.headers,
       body: explainRequestBody({ sessionId: "sess-A" }),
     });
     assert.equal(first.status, 200);
     // Fresh sessionId, same tenantId — must still hit the daily cap.
     const second = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
       method: "POST",
+      headers: auth.headers,
       body: explainRequestBody({ sessionId: "sess-B" }),
     });
     assert.equal(second.status, 429);
@@ -6614,6 +7146,7 @@ test("POST /api/v0/editor/explain rejects malformed payloads with invalid_region
 });
 
 test("GET /api/v0/editor/budget returns the current session snapshot", async () => {
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6621,16 +7154,54 @@ test("GET /api/v0/editor/budget returns the current session snapshot", async () 
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: explainGateway(undefined).client,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(
-      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1&tenantId=t-1&userId=u-1`,
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1&tenantId=tenant-a&userId=user-a`,
+      { headers: auth.headers },
     );
     assert.equal(response.status, 200);
     const body = response.body as Record<string, unknown>;
     assert.equal(body.schemaVersion, "v0");
     assert.deepEqual(body.budget, { limit: 3, used: 0, remaining: 3 });
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/editor/budget treats query sessionId as correlation only", async () => {
+  const auth = createEditorAssistAuth();
+  const budgets = createEditorAssistBudgetStore();
+  const consumed = await budgets.consume({
+    tenantId: "tenant-a",
+    userId: "user-a",
+    sessionId: auth.sessionId,
+  });
+  assert.equal(consumed.ok, true);
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: explainGateway(undefined).client,
+    editorAssistBudgets: budgets,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=another-studio-session`,
+      { headers: auth.headers },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual((response.body as Record<string, unknown>).budget, {
+      limit: 3,
+      used: 1,
+      remaining: 2,
+    });
   } finally {
     await server.close();
   }
@@ -6658,6 +7229,58 @@ test("GET /api/v0/editor/budget rejects missing sessionId with 400", async () =>
   }
 });
 
+test("GET /api/v0/editor/budget validates identifiers against the active session", async () => {
+  const auth = createEditorAssistAuth();
+  const handler = createApp({
+    config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: explainGateway(undefined).client,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const invalidSession = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=bad%20session`,
+      { headers: auth.headers },
+    );
+    assert.equal(invalidSession.status, 400);
+    assert.match(
+      (invalidSession.body as Record<string, unknown>).error as string,
+      /sessionId/,
+    );
+
+    const invalidTenant = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1&tenantId=bad%20tenant`,
+      { headers: auth.headers },
+    );
+    assert.equal(invalidTenant.status, 400);
+    assert.match(
+      (invalidTenant.body as Record<string, unknown>).error as string,
+      /tenantId/,
+    );
+
+    const mismatchedUser = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1&userId=user-b`,
+      { headers: auth.headers },
+    );
+    assert.equal(mismatchedUser.status, 403);
+    assert.match(
+      (mismatchedUser.body as Record<string, unknown>).error as string,
+      /userId/,
+    );
+
+    const missingCookie = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/budget?sessionId=s-1`,
+    );
+    assert.equal(missingCookie.status, 401);
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/v0/editor/explain falls back to local ledgerRef when gateway omits it", async () => {
   const { client: gateway } = explainGateway({
     status: 200,
@@ -6667,6 +7290,7 @@ test("POST /api/v0/editor/explain falls back to local ledgerRef when gateway omi
       // No ledgerRef from gateway — BFF must emit the local placeholder.
     },
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6674,6 +7298,7 @@ test("POST /api/v0/editor/explain falls back to local ledgerRef when gateway omi
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -6681,6 +7306,7 @@ test("POST /api/v0/editor/explain falls back to local ledgerRef when gateway omi
       `${server.baseUrl}/api/v0/editor/explain`,
       {
         method: "POST",
+        headers: auth.headers,
         body: explainRequestBody({ sessionId: "fallback-sess" }),
       },
     );
@@ -6688,7 +7314,9 @@ test("POST /api/v0/editor/explain falls back to local ledgerRef when gateway omi
     const body = response.body as Record<string, unknown>;
     assert.equal(
       typeof body.ledgerRef === "string" &&
-        (body.ledgerRef as string).startsWith("edit-tenant-a-fallback-sess-"),
+        (body.ledgerRef as string).startsWith(
+          "urn:c2c/editor-assist/tenant-a/fallback-sess/",
+        ),
       true,
     );
   } finally {
@@ -6773,6 +7401,7 @@ test("POST /api/v0/editor/explain emits structured console.warn on gateway throw
   const { client: gateway } = explainGateway(undefined, {
     throwError: new Error("transport failure: ECONNREFUSED"),
   });
+  const auth = createEditorAssistAuth();
   const handler = createApp({
     config: { ...baseConfig, modelGatewayUrl: "http://gateway" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6780,6 +7409,7 @@ test("POST /api/v0/editor/explain emits structured console.warn on gateway throw
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: gateway,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   const warnings: string[] = [];
@@ -6792,6 +7422,7 @@ test("POST /api/v0/editor/explain emits structured console.warn on gateway throw
       `${server.baseUrl}/api/v0/editor/explain`,
       {
         method: "POST",
+        headers: auth.headers,
         body: explainRequestBody(),
       },
     );

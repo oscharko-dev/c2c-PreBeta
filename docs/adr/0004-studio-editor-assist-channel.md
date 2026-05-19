@@ -82,10 +82,14 @@ Same shape as the existing W0.3 budgets:
 
 - **Default**: `3`.
 - **Allowed range**: `[1..10]`.
-- **Scope**: per `(tenantId, userId, sessionId)`. `sessionId` is a
-  client-issued Studio editor session identifier. The BFF enforces the
-  budget per session and additionally caps total editor-assist calls
-  per `(tenantId, day)` to prevent abuse via session-ID minting.
+- **Scope**: per BFF-derived `(tenantId, userId, authSessionId)`.
+  `tenantId` and `userId` come from the active `c2c.sid` session
+  cookie, never from request body authority. The request still carries
+  a client-issued Studio editor `sessionId` for UI correlation and
+  ledger readability, but budget enforcement is keyed to the
+  server-issued session identifier. The BFF additionally caps total
+  editor-assist calls per `(tenantId, day)` to prevent abuse via
+  session-ID minting.
 - **Independence**: `editorAssistBudget` is **not** consumed by, and
   does not consume from, `repairBudget`, `assistBudget`, or
   `modelInvocationBudget`. It does not appear in the run-contract
@@ -112,7 +116,7 @@ where semantics line up):
 {
   "schemaVersion": "v0",
   "kind": "editor_assist",
-  "ledgerEntryId": "edit-{tenantId}-{sessionId}-{seq}",
+  "ledgerEntryId": "eai-{tenantId}-{sessionId}-{seq}",
   "invocationId": "mi-{uuid}",
   "tenantId": "...",
   "userId": "...",
@@ -132,6 +136,7 @@ where semantics line up):
   "policyDecision": "allowed",
   "promptTemplateId": "editor-explain-v1",
   "promptTemplateVersion": "1.0.0",
+  "ledgerRef": "urn:c2c/editor-assist/{tenantId}/{sessionId}/{seq}",
   "budgetSnapshot": { "limit": 3, "used": 2, "remaining": 1 },
   "startedAt": "...",
   "endedAt": "...",
@@ -148,12 +153,19 @@ Field semantics:
   distinguish trajectory entries by trigger surface when filtering the
   ledger across kinds.
 - `requestRegion.sourceKind` is `"cobol"` or `"java"`.
+- `requestRegion.filePath` is workspace-relative only; absolute paths,
+  drive prefixes, and parent-directory traversal are rejected before any
+  Model Gateway call or ledger write.
 - `requestRegion.byteHash` is a SHA-256 of the selected region bytes;
   it lets auditors confirm what content was sent to the model without
   storing the content itself in the ledger.
 - `redactedFields[]` lists the field names the Model Gateway redactor
   stripped before transmission, mirroring the existing model-invocation
   ledger so the same redaction tooling applies.
+- `ledgerEntryId` equals `editorAssistRef` so every editor-assist
+  entry has one stable, user-visible correlation key. `ledgerRef`
+  points at the durable ledger record written by the BFF or returned
+  by the Model Gateway.
 - `budgetSnapshot` records the post-consume snapshot of the
   `editorAssistBudget` so each entry is independently audit-readable.
 - `runIdRef` is optional and informational. If a run happened to be
@@ -164,12 +176,15 @@ Field semantics:
 ### API surface
 
 - `POST /api/v0/editor/explain` (BFF) — submit a region for
-  explanation. Request body carries `sessionId`, `requestRegion`, and
-  the redaction profile. Response carries the natural-language
-  explanation, the post-consume `budgetSnapshot`, the
-  `redactedFields[]`, and the `ledgerRef` to the written entry.
+  explanation. Request body carries the client-issued editor
+  `sessionId`, `requestRegion`, and the redaction profile. The BFF
+  derives `tenantId` and `userId` from the active `c2c.sid` session
+  cookie; optional legacy body copies must match that session. Response
+  carries the natural-language explanation, the post-consume
+  `budgetSnapshot`, the `redactedFields[]`, and the `ledgerRef` to the
+  written entry.
 - `GET /api/v0/editor/budget` (BFF) — return the current
-  `editorAssistBudget` for the calling `(tenantId, userId, sessionId)`.
+  `editorAssistBudget` for the active session-derived budget scope.
 
 The Orchestrator exposes **no** editor-assist surface. The Orchestrator
 state machine is unchanged.

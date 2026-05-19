@@ -39,6 +39,7 @@ const baseConfig: BffConfig = {
   enableDiagnosticFixtures: false,
   enableFixtureSessions: true,
   forceSecureSessionCookies: false,
+  studioCorsOrigins: ["http://127.0.0.1:3000", "http://localhost:3000"],
 };
 
 interface RunningServer {
@@ -74,6 +75,7 @@ async function fetchWithCookies(
     body?: unknown;
     cookie?: string;
     forwardedProto?: string;
+    origin?: string;
   } = {},
 ): Promise<FetchResult> {
   const target = new URL(url);
@@ -88,6 +90,7 @@ async function fetchWithCookies(
   }
   if (init.cookie) headers["cookie"] = init.cookie;
   if (init.forwardedProto) headers["x-forwarded-proto"] = init.forwardedProto;
+  if (init.origin) headers["origin"] = init.origin;
   return await new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -138,11 +141,12 @@ interface RawHeadersResult {
 
 async function fetchRawHeaders(
   url: string,
-  init: { method?: string; cookie?: string } = {},
+  init: { method?: string; cookie?: string; origin?: string } = {},
 ): Promise<RawHeadersResult> {
   const target = new URL(url);
   const headers: Record<string, string> = { accept: "application/json" };
   if (init.cookie) headers["cookie"] = init.cookie;
+  if (init.origin) headers["origin"] = init.origin;
   return await new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -267,6 +271,28 @@ test("POST /api/v0/session/sign-in mints a session and sets HttpOnly + SameSite=
       (body as { draftKeyWrappingSecret?: unknown }).draftKeyWrappingSecret,
       undefined,
     );
+  } finally {
+    await server.close();
+  }
+});
+
+test("session routes reject browser requests from unlisted origins", async () => {
+  const server = await startTestServer(makeApp());
+  try {
+    const signIn = await fetchWithCookies(
+      `${server.baseUrl}/api/v0/session/sign-in`,
+      {
+        method: "POST",
+        body: {},
+        origin: "http://localhost:5173",
+      },
+    );
+    assert.equal(signIn.status, 403);
+    assert.equal(
+      (signIn.body as Record<string, unknown>).error,
+      "origin not allowed",
+    );
+    assert.deepEqual(signIn.setCookie, []);
   } finally {
     await server.close();
   }
@@ -530,7 +556,7 @@ test("sign-in body cap rejects oversized payloads with 413", async () => {
   }
 });
 
-test("bootstrap response includes Vary: Cookie so caches do not mix users", async () => {
+test("bootstrap response preserves Vary: Origin and Cookie for CORS caches", async () => {
   const server = await startTestServer(makeApp());
   try {
     const signIn = await fetchWithCookies(
@@ -542,7 +568,11 @@ test("bootstrap response includes Vary: Cookie so caches do not mix users", asyn
     // Use a raw http.request so we can inspect response headers directly.
     const rawResponse = await fetchRawHeaders(
       `${server.baseUrl}/api/v0/session/bootstrap`,
-      { method: "POST", cookie: cookieHeader },
+      {
+        method: "POST",
+        cookie: cookieHeader,
+        origin: "http://127.0.0.1:3000",
+      },
     );
     assert.equal(rawResponse.status, 200);
     // Vary may be set as multiple headers or comma-joined; allow either.
@@ -551,6 +581,15 @@ test("bootstrap response includes Vary: Cookie so caches do not mix users", asyn
       vary,
       /cookie/,
       `bootstrap response must include 'Vary: Cookie' so a CDN cannot serve one user's wrapping secret to another (got: '${rawResponse.headers.vary ?? "<missing>"}')`,
+    );
+    assert.match(
+      vary,
+      /origin/,
+      `bootstrap response must keep 'Vary: Origin' for credentialed CORS responses (got: '${rawResponse.headers.vary ?? "<missing>"}')`,
+    );
+    assert.equal(
+      rawResponse.headers["access-control-allow-origin"],
+      "http://127.0.0.1:3000",
     );
     // The existing jsonResponse helper also stamps Cache-Control: no-store —
     // assert that too so the contract is observable from one test.

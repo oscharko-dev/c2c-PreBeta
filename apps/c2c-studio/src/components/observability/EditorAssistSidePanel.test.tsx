@@ -304,6 +304,27 @@ describe("EditorAssistSidePanel — error branches", () => {
     expect(clipboardSpy).toHaveBeenCalledWith("policy-id-7771");
   });
 
+  it("renders session policy_denied responses as re-auth guidance without a policy chip", () => {
+    render(
+      <EditorAssistSidePanel
+        open
+        request={SAMPLE_REQUEST}
+        result={errorResult(
+          "policy_denied",
+          "Editor-assist session is unavailable. Sign in again.",
+        )}
+        onClose={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    const alert = screen.getByTestId("editor-assist-error-session");
+    expect(alert).toHaveTextContent(/session needs attention/i);
+    expect(alert).toHaveTextContent(/Sign in again/i);
+    expect(
+      within(alert).queryByRole("button", { name: /Copy policy id/i }),
+    ).toBeNull();
+  });
+
   it("renders the gateway_unavailable branch with a working Retry button", () => {
     const onRetry = vi.fn();
     render(

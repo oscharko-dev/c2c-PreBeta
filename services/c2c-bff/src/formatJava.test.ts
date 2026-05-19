@@ -51,6 +51,7 @@ const baseConfig: BffConfig = {
   enableDiagnosticFixtures: false,
   enableFixtureSessions: true,
   forceSecureSessionCookies: false,
+  studioCorsOrigins: ["http://127.0.0.1:3000", "http://localhost:3000"],
 };
 
 function disabledOrchestrator(): OrchestratorClient {

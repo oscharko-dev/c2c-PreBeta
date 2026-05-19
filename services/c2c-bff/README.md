@@ -68,7 +68,14 @@ Every payload from a run-scoped endpoint includes two mode signals:
 | `C2C_ORCHESTRATOR_CONTROL_TOKEN` | empty                    | Bearer/control token for orchestrator live-mode calls. Required whenever `C2C_ORCHESTRATOR_URL` is set.                                                                                                                                         |
 | `C2C_EVIDENCE_URL`               | empty                    | Base URL for `evidence-service`. Empty means evidence-service is not reachable; product runs still proceed but artifact endpoints report `productMode: "unavailable"` until upstream payloads land.                                             |
 | `C2C_UPSTREAM_TIMEOUT_MS`        | `4000`                   | Per-upstream-request timeout.                                                                                                                                                                                                                   |
+| `C2C_STUDIO_CORS_ORIGINS`        | `http://localhost:3000,http://127.0.0.1:3000,http://[::1]:3000` | Comma-separated exact Studio browser origins allowed to make credentialed split-server requests. Do not use wildcard localhost origins for cookie-backed routes. |
+| `C2C_EDITOR_ASSIST_LEDGER_PATH`  | `var/c2c-local/trajectory-ledger/editor-assist.jsonl` | Append-only JSONL sink for `kind=editor_assist` ledger entries produced by `/api/v0/editor/explain`; overrides must resolve inside `C2C_REPO_ROOT`, and symlinked parent directories, symlink targets, or special-file targets are rejected. |
 | `C2C_ENABLE_DIAGNOSTIC_FIXTURES` | unset                    | Developer opt-in. When `true`, `POST /api/v0/runs` produces a `diagnostic-fixture` run (deterministic local content) instead of `503`. The resulting run is never labelled as a product result. Must not be set in W0 browser acceptance flows. |
+
+Editor-assist endpoints require the `c2c.sid` session cookie. The BFF derives
+`tenantId` and `userId` from the server-side session record for budget and
+ledger attribution; request body or query identity fields are treated only as
+legacy echoes and must match the active session.
 
 ## Local commands
 

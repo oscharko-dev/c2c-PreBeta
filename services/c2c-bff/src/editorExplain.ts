@@ -10,18 +10,17 @@
 //     bounds, redacted-bytes size cap, and the SHA-256 byteHash
 //     verification ADR 0005 §4 makes load-bearing.
 //   * createEditorAssistBudgetStore — in-process budget store with
-//     per-(tenantId, userId, sessionId) atomic consume and the
-//     per-(tenantId, UTC day) ceiling ADR 0004 prescribes against
-//     session-ID minting abuse.
+//     per-(tenantId, userId, sessionId) atomic consume. The BFF route
+//     passes its server-issued auth session id as `sessionId`, while
+//     retaining the client-issued editor session id only for correlation
+//     fields. Both session and tenant counters are serialized so
+//     concurrent sessions cannot overshoot the daily cap.
 //   * mapGatewayResponse — normalises the Model Gateway /v0/explain
 //     reply into the closed editor-assist error code set. Upstream
 //     error text is NEVER reflected to the user; only fixed default
 //     messages flow into the BFF response.
 //   * buildLedgerEntry — produces the kind=editor_assist trajectory
-//     ledger entry shape sketched in ADR 0004. The BFF currently keeps
-//     the entry in-process (V1); the data shape is contract-stable so
-//     a future writer can ship it to the trajectory ledger without
-//     contract surgery.
+//     ledger entry shape sketched in ADR 0004.
 
 import { createHash } from "node:crypto";
 
@@ -202,6 +201,9 @@ const SAFE_ID_PATTERN = /^[A-Za-z0-9._\-]+$/u;
 // hyphens. The `u` flag enables Unicode property escapes; \p{L} and \p{N}
 // cover non-ASCII identifiers that appear in some enterprise file layouts.
 const SAFE_FILEPATH_PATTERN = /^[\p{L}\p{N}._/\-]+$/u;
+const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:/u;
+const INVALID_FILEPATH_MESSAGE =
+  "filePath must be a workspace-relative path without drive prefixes or parent-directory traversal";
 
 function rejectInvalidRegion(message: string): EditorExplainValidationError {
   return {
@@ -233,7 +235,7 @@ function isStringArray(value: unknown): value is string[] {
 // L3: validate identifier-class string fields before they are echoed into
 // the ledger or forwarded to the gateway.
 
-function validateIdField(
+export function validateEditorAssistIdentifier(
   value: string,
   fieldName: string,
   maxLen = 128,
@@ -253,19 +255,20 @@ function validateIdField(
 
 function validateFilePath(value: string): EditorExplainValidationError | null {
   if (value.length > 512) {
-    return rejectInvalidRegion(
-      "filePath contains invalid characters or exceeds 512 chars",
-    );
+    return rejectInvalidRegion(INVALID_FILEPATH_MESSAGE);
+  }
+  if (
+    value.startsWith("/") ||
+    value.startsWith("\\") ||
+    WINDOWS_DRIVE_PATH_PATTERN.test(value)
+  ) {
+    return rejectInvalidRegion(INVALID_FILEPATH_MESSAGE);
   }
   if (!SAFE_FILEPATH_PATTERN.test(value)) {
-    return rejectInvalidRegion(
-      "filePath contains invalid characters or exceeds 512 chars",
-    );
+    return rejectInvalidRegion(INVALID_FILEPATH_MESSAGE);
   }
-  if (value.includes("..")) {
-    return rejectInvalidRegion(
-      "filePath contains invalid characters or exceeds 512 chars",
-    );
+  if (value.split("/").some((segment) => segment === "..")) {
+    return rejectInvalidRegion(INVALID_FILEPATH_MESSAGE);
   }
   return null;
 }
@@ -353,7 +356,10 @@ export function validateExplainRequest(raw: unknown): EditorExplainValidation {
     return rejectInvalidRegion("sessionId must be a non-empty string");
   }
   // L3: validate sessionId allow-list before it is echoed into the ledger.
-  const sessionIdErr = validateIdField(record.sessionId, "sessionId");
+  const sessionIdErr = validateEditorAssistIdentifier(
+    record.sessionId,
+    "sessionId",
+  );
   if (sessionIdErr) return sessionIdErr;
 
   if (!isNonEmptyString(record.sourceHash)) {
@@ -373,11 +379,14 @@ export function validateExplainRequest(raw: unknown): EditorExplainValidation {
 
   // L3: validate tenantId and userId allow-lists when explicitly provided.
   if (isNonEmptyString(record.tenantId)) {
-    const tenantIdErr = validateIdField(record.tenantId, "tenantId");
+    const tenantIdErr = validateEditorAssistIdentifier(
+      record.tenantId,
+      "tenantId",
+    );
     if (tenantIdErr) return tenantIdErr;
   }
   if (isNonEmptyString(record.userId)) {
-    const userIdErr = validateIdField(record.userId, "userId");
+    const userIdErr = validateEditorAssistIdentifier(record.userId, "userId");
     if (userIdErr) return userIdErr;
   }
 
@@ -389,7 +398,7 @@ export function validateExplainRequest(raw: unknown): EditorExplainValidation {
       );
     }
     // L3: validate runId allow-list before it is forwarded to the gateway.
-    const runIdErr = validateIdField(record.runId, "runId");
+    const runIdErr = validateEditorAssistIdentifier(record.runId, "runId");
     if (runIdErr) return runIdErr;
     runId = record.runId;
   }
@@ -489,27 +498,50 @@ export interface CreateBudgetStoreOptions {
   now?: () => Date;
 }
 
-interface SessionEntry {
-  used: number;
-  // Per-session async mutex: chains the next consume onto the previous
-  // promise so two concurrent requests cannot both observe remaining=1.
-  // The lock is released as soon as the synchronous read-modify-write
-  // completes; there is no I/O held under the lock.
+interface LockEntry {
   tail: Promise<void>;
 }
 
-interface TenantEntry {
+interface SessionEntry extends LockEntry {
+  used: number;
+}
+
+interface TenantEntry extends LockEntry {
   dateUtc: string;
   used: number;
 }
 
 function scopeKey(scope: BudgetScope): string {
-  return `${scope.tenantId} ${scope.userId} ${scope.sessionId}`;
+  return `${scope.tenantId}\0${scope.userId}\0${scope.sessionId}`;
 }
 
 function utcDateKey(now: Date): string {
   // YYYY-MM-DD in UTC.
   return now.toISOString().slice(0, 10);
+}
+
+async function withLock<T>(
+  entry: LockEntry,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  // Chain onto the previous tail so concurrent consumes serialize. The
+  // closure body stays synchronous in production; the Promise return keeps
+  // the helper usable in focused tests without changing the lock contract.
+  let releaseLock: () => void = () => {};
+  const previousTail = entry.tail;
+  const nextTail = previousTail.then(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseLock = resolve;
+      }),
+  );
+  entry.tail = nextTail;
+  await previousTail;
+  try {
+    return await fn();
+  } finally {
+    releaseLock();
+  }
 }
 
 export function createEditorAssistBudgetStore(
@@ -534,15 +566,26 @@ export function createEditorAssistBudgetStore(
     return entry;
   }
 
-  function tenantSnapshot(tenantId: string): TenantEntry {
+  function getOrInitTenant(tenantId: string): TenantEntry {
     const today = utcDateKey(nowFn());
     const existing = tenants.get(tenantId);
-    if (!existing || existing.dateUtc !== today) {
-      const entry: TenantEntry = { dateUtc: today, used: 0 };
-      tenants.set(tenantId, entry);
-      return entry;
+    if (existing) return existing;
+    const entry: TenantEntry = {
+      dateUtc: today,
+      used: 0,
+      tail: Promise.resolve(),
+    };
+    tenants.set(tenantId, entry);
+    return entry;
+  }
+
+  function refreshTenantForToday(entry: TenantEntry): TenantEntry {
+    const today = utcDateKey(nowFn());
+    if (entry.dateUtc !== today) {
+      entry.dateUtc = today;
+      entry.used = 0;
     }
-    return existing;
+    return entry;
   }
 
   function snapshotForSession(used: number): BudgetSnapshot {
@@ -561,46 +604,34 @@ export function createEditorAssistBudgetStore(
     },
     async consume(scope) {
       const entry = getOrInitSession(scope);
-      // Chain onto the per-session tail so concurrent consumes serialise.
-      // The chained closure performs the read-modify-write synchronously
-      // before resolving the new tail.
-      let releaseLock: () => void = () => {};
-      const nextTail = entry.tail.then(
-        () =>
-          new Promise<void>((resolve) => {
-            releaseLock = resolve;
-          }),
+      const tenantEntry = getOrInitTenant(scope.tenantId);
+      return withLock(entry, () =>
+        withLock(tenantEntry, () => {
+          const tenant = refreshTenantForToday(tenantEntry);
+          // Per-tenant-per-day ceiling first: it is the abuse boundary and
+          // must reject even when the session still has remaining budget.
+          if (tenant.used >= tenantDailyCap) {
+            return {
+              ok: false,
+              errorCode: "budget_exhausted",
+              snapshot: snapshotForSession(entry.used),
+            };
+          }
+          if (entry.used >= defaultLimit) {
+            return {
+              ok: false,
+              errorCode: "budget_exhausted",
+              snapshot: snapshotForSession(entry.used),
+            };
+          }
+          entry.used += 1;
+          tenant.used += 1;
+          return {
+            ok: true,
+            snapshot: snapshotForSession(entry.used),
+          };
+        }),
       );
-      const previousTail = entry.tail;
-      entry.tail = nextTail;
-      await previousTail;
-      try {
-        // Per-tenant-per-day ceiling first: it is the abuse boundary and
-        // must reject even when the session still has remaining budget.
-        const tenant = tenantSnapshot(scope.tenantId);
-        if (tenant.used >= tenantDailyCap) {
-          return {
-            ok: false,
-            errorCode: "budget_exhausted",
-            snapshot: snapshotForSession(entry.used),
-          };
-        }
-        if (entry.used >= defaultLimit) {
-          return {
-            ok: false,
-            errorCode: "budget_exhausted",
-            snapshot: snapshotForSession(entry.used),
-          };
-        }
-        entry.used += 1;
-        tenant.used += 1;
-        return {
-          ok: true,
-          snapshot: snapshotForSession(entry.used),
-        };
-      } finally {
-        releaseLock();
-      }
     },
     refund(scope) {
       const entry = sessions.get(scopeKey(scope));
@@ -630,7 +661,7 @@ export function buildEditorAssistRef(args: RefBuilderArgs): string {
 }
 
 export function buildLocalLedgerRef(args: RefBuilderArgs): string {
-  return `edit-${args.tenantId}-${args.sessionId}-${args.seq}`;
+  return `urn:c2c/editor-assist/${args.tenantId}/${args.sessionId}/${args.seq}`;
 }
 
 export function extractLedgerRef(body: unknown): string | null {
@@ -875,7 +906,7 @@ export function createSequenceCounter(): SequenceCounter {
   const counters = new Map<string, number>();
   return {
     next(scope) {
-      const key = `${scope.tenantId} ${scope.sessionId}`;
+      const key = `${scope.tenantId}\0${scope.sessionId}`;
       const current = counters.get(key) ?? 0;
       const next = current + 1;
       counters.set(key, next);

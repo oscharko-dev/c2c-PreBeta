@@ -605,6 +605,7 @@ start_bff() {
     C2C_EXPERIENCE_LEARNING_URL="$EXPERIENCE_URL" \
     C2C_MODEL_GATEWAY_URL="$bff_model_gateway_url" \
     C2C_HARNESS_URL="$HARNESS_URL" \
+    C2C_STUDIO_CORS_ORIGINS="$STUDIO_URL,http://localhost:${STUDIO_PORT}" \
     -- \
     node "$ROOT_DIR/services/c2c-bff/dist/index.js"
   wait_http c2c-bff "$BFF_URL/api/v0/health"

@@ -181,10 +181,13 @@ COBOL or Java region to the Model Gateway via the BFF.
 
 - Default: `3`.
 - Allowed range: `[1..10]`.
-- Scope: per `(tenantId, userId, sessionId)`, where `sessionId` is a
-  client-issued Studio editor session identifier. The BFF additionally
-  enforces a per-`(tenantId, day)` ceiling to prevent abuse via
-  session-ID minting.
+- Scope: per BFF-derived `(tenantId, userId, authSessionId)`.
+  `tenantId` and `userId` come from the active `c2c.sid` session
+  cookie. The request still carries a client-issued Studio editor
+  `sessionId` for UI correlation and ledger readability, but budget
+  enforcement is keyed to the server-issued session identifier. The BFF
+  additionally enforces a per-`(tenantId, day)` ceiling to prevent abuse
+  via session-ID minting.
 
 `editorAssistBudget` is independent of `repairBudget`, `assistBudget`, and
 `modelInvocationBudget`. It does not appear in the run-contract payload
@@ -199,6 +202,15 @@ redactors, the `requestRegion` (`sourceKind`, line range, and the SHA-256
 redaction per [ADR 0005](../adr/0005-studio-local-persistence-security-boundary.md)
 §4), and an optional informational `runIdRef` when a run happens to be
 open at the time of the call.
+`requestRegion.filePath` is workspace-relative only; absolute paths, drive
+prefixes, and parent-directory traversal are rejected so local workstation
+paths do not reach the Model Gateway or ledger.
+
+The BFF default deployment appends these entries to an on-disk JSONL ledger at
+`var/c2c-local/trajectory-ledger/editor-assist.jsonl` (overridable by
+`C2C_EDITOR_ASSIST_LEDGER_PATH`, constrained inside `C2C_REPO_ROOT`). Test
+deployments may inject an equivalent sink, but the route must not silently
+discard accepted editor-assist entries.
 
 The Orchestrator exposes no editor-assist surface; the state machine is
 unchanged. An editor-assist call does not produce an `assistDecision` and
@@ -214,9 +226,9 @@ forward-compatibility violation. Upstream error text is never echoed into
 | `errorCode`           | HTTP status | When                                                                                                                                     |
 | --------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `invalid_region`      | 400         | Malformed payload, region out of bounds, `redactedBytes` empty or above the BFF size cap, or `byteHash` recompute mismatch.              |
-| `policy_denied`       | 403         | Model Gateway returned 403 (policy guardrail rejected the region or context).                                                            |
+| `policy_denied`       | 403         | Model Gateway returned 403 (policy guardrail rejected the region or context), the editor-assist session cookie is unavailable, or optional request identity does not match the active session. |
 | `budget_exhausted`    | 429         | Per-session `editorAssistBudget` exhausted, or per-`(tenantId, day)` ceiling reached.                                                    |
-| `gateway_unavailable` | 503         | Model Gateway disabled (`modelGateway.enabled === false`), 5xx from the gateway, transport failure, or 2xx without a usable explanation. |
+| `gateway_unavailable` | 503         | Model Gateway disabled (`modelGateway.enabled === false`), 5xx from the gateway, transport failure, 2xx without a usable explanation, or editor-assist ledger sink unavailable. |
 | `timeout`             | 504         | Model Gateway returned 504, or the BFF-side timeout elapsed before a response arrived.                                                   |
 
 Error response body shape:
@@ -236,26 +248,16 @@ disabled-gateway fast-path); it is the post-decision snapshot otherwise.
 
 #### Trust model and known gaps
 
-The editor-assist channel currently operates under a reduced-trust posture.
-The gaps below are pre-existing and consistent with `/api/v0/transform`; none
-are blocking for this slice.
+The editor-assist channel requires the same `c2c.sid` session cookie used by
+`POST /api/v0/session/bootstrap`. The BFF derives `tenantId` and `userId` from
+that server-side session record; optional legacy body/query copies are
+validated only as echoes and must match the active session. A caller cannot
+mint new tenant identities through the editor-assist body or budget query.
 
-- **No server-side authentication.** The BFF does not validate session tokens.
-  CORS is gated to `localhost` and identity is client-asserted. A valid Studio
-  session is presumed; actual token verification is deferred to the
-  `POST /api/v0/session/bootstrap` prerequisite described in ADR-0005 §3.
-- **Per-tenant-per-day caps are best-effort.** The in-process budget store
-  enforces a daily ceiling, but an unauthenticated caller can supply arbitrary
-  `tenantId` values and effectively mint new tenant identities, bypassing the
-  cap on any single `tenantId`.
-- **No per-IP rate limiting.** Connection-level throttling is not implemented;
-  a local client can issue requests at line rate subject only to the per-session
-  and per-tenant-per-day budget counters.
-- **Remediation requires `POST /api/v0/session/bootstrap`.** Once that endpoint
-  is implemented (ADR-0005 §3 prerequisite), the BFF can validate the session
-  token server-side, bind `tenantId`/`userId` to the authenticated principal,
-  and add connection-level rate limiting. Until then, the BFF MUST NOT bind to
-  a non-loopback interface.
+Remaining reduced-trust items are outside this channel: fixture session sign-in
+is still a dev-mode bootstrap surface and MUST be disabled behind a real IdP
+integration (`C2C_ENABLE_FIXTURE_SESSIONS=false`), and connection-level
+rate-limiting for editor-assist calls remains a follow-up.
 
 ## Evidence Requirements
 
@@ -326,8 +328,9 @@ The rules consumers depend on:
 The BFF additionally exposes the editor-assist channel (per
 [ADR 0004](../adr/0004-studio-editor-assist-channel.md)):
 
-- `POST /api/v0/editor/explain` — submit a region for explanation.
+- `POST /api/v0/editor/explain` — submit a region for explanation. The BFF
+  derives `tenantId` and `userId` from the active `c2c.sid` session cookie.
 - `GET /api/v0/editor/budget` — return the current `editorAssistBudget`
-  for the calling `(tenantId, userId, sessionId)`.
+  for the active session-derived budget scope.
 
 The Orchestrator has no editor-assist surface.
