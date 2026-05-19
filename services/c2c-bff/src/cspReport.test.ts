@@ -243,17 +243,82 @@ test("parseCspReportPayload rejects an unsupported content-type with 415", () =>
   assert.equal(result.status, 415);
 });
 
-test("parseCspReportPayload caps free-text fields at 1 KiB", () => {
-  const huge = "x".repeat(8 * 1024);
+test("parseCspReportPayload drops script-sample entirely (PII gate)", () => {
+  // ``script-sample`` is a verbatim slice of the offending source.
+  // For inline-script violations on a page that renders user data,
+  // that slice can carry email / account / token bytes — so the
+  // allow-list deliberately excludes it. The information loss is
+  // bounded: ``source-file`` + ``line-number`` + ``column-number``
+  // still locate the violation exactly.
   const result = parseCspReportPayload("application/csp-report", {
     "csp-report": {
       "violated-directive": "script-src",
-      "script-sample": huge,
+      "script-sample":
+        "document.write('user email: alice@example.com, token=abc')",
     },
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  const sample = firstReport(result.reports)["script-sample"];
-  assert.equal(typeof sample, "string");
-  assert.equal((sample as string).length, 1024);
+  const report = firstReport(result.reports);
+  assert.equal(Object.keys(report).includes("script-sample"), false);
+  // Sanity: no PII bytes leaked through any other field.
+  const serialised = JSON.stringify(report);
+  assert.equal(serialised.includes("alice@example.com"), false);
+  assert.equal(serialised.includes("token=abc"), false);
+});
+
+test("parseCspReportPayload caps free-text fields at 1 KiB", () => {
+  // ``original-policy`` is a free-text field on the allow-list. A
+  // misbehaving client could send a multi-megabyte string to bloat
+  // the log sink; the parser caps every free-text field at 1 KiB.
+  const huge = "x".repeat(8 * 1024);
+  const result = parseCspReportPayload("application/csp-report", {
+    "csp-report": {
+      "violated-directive": "script-src",
+      "original-policy": huge,
+    },
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const value = firstReport(result.reports)["original-policy"];
+  assert.equal(typeof value, "string");
+  assert.equal((value as string).length, 1024);
+});
+
+test("parseCspReportPayload reduces non-loggable schemes (data:/blob:/file:/javascript:) to the scheme marker", () => {
+  const result = parseCspReportPayload("application/csp-report", {
+    "csp-report": {
+      "violated-directive": "img-src",
+      "blocked-uri":
+        "data:image/png;base64,AAAA-user-email-alice@example.com-AAAA",
+      "document-uri": "https://studio.example.com/page",
+    },
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const report = firstReport(result.reports);
+  // Only the scheme survives — the payload (which could carry PII
+  // verbatim) is gone.
+  assert.equal(report["blocked-uri"], "data:");
+  const serialised = JSON.stringify(report);
+  assert.equal(serialised.includes("alice@example.com"), false);
+});
+
+test("parseCspReportPayload allows http(s) / ws(s) origin+pathname through", () => {
+  for (const value of [
+    "http://studio.example.com/path",
+    "https://studio.example.com/path",
+    "ws://studio.example.com/socket",
+    "wss://studio.example.com/socket",
+  ]) {
+    const result = parseCspReportPayload("application/csp-report", {
+      "csp-report": {
+        "violated-directive": "connect-src",
+        "blocked-uri": value,
+      },
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) continue;
+    assert.equal(firstReport(result.reports)["blocked-uri"], value);
+  }
 });

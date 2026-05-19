@@ -150,58 +150,110 @@ test.describe("@csp Studio hydrates and Monaco mounts under the ADR-0005 §6 CSP
   }) => {
     // The hover sanitizer (``hoverMarkdownSanitizer.ts``) is the
     // first line of defence and is unit-tested against every payload
-    // in ADR §5. This test is the *second* line: even if a future
-    // change widened the sanitizer, the CSP must still block these
-    // payloads from running. We inject each payload into a detached
-    // DOM fragment using ``innerHTML`` — the only browser surface
-    // that would let an attacker bypass DOMPurify — and assert that
-    // no global side-effect is observed.
+    // in ADR §5. This test is the *second* line: even if DOMPurify
+    // were bypassed, the realistic XSS vector — content reaching a
+    // ``dangerouslySetInnerHTML`` / ``innerHTML`` sink — must not
+    // produce executable code.
+    //
+    // Where the browser and the CSP each carry the load:
+    //
+    //   * ``<script>`` via ``innerHTML``: **browser-inert** by the
+    //     HTML5 fragment-parsing rules, regardless of CSP. We assert
+    //     it anyway because that browser guarantee is part of the
+    //     defence-in-depth story.
+    //   * ``<img onerror>`` via ``innerHTML`` or ``setAttribute``:
+    //     **CSP-blocked** because ``script-src`` carries no
+    //     ``'unsafe-inline'`` (inline event handlers count as inline
+    //     script). This is the load-bearing CSP assertion.
+    //   * ``javascript:`` link, clicked: **CSP-blocked** for the same
+    //     reason — ``javascript:`` URIs are inline script.
+    //   * Cross-document scripts via ``data:`` iframe: the framed
+    //     document's CSP is inherited from the parent (Chromium's
+    //     "inherit from initiator" rule for ``data:`` documents), so
+    //     its inline script is blocked too.
+    //
+    // ``'strict-dynamic'`` deliberately propagates trust to scripts
+    // created by already-trusted scripts. A ``page.evaluate`` block
+    // runs in a trusted context, so testing
+    // ``document.createElement('script')`` would prove nothing about
+    // CSP — it would correctly succeed. The vectors below are the
+    // ones a real attacker would reach through a DOMPurify bypass.
     await page.goto("/");
     await expect(page.getByTestId("studio-workbench-shell")).toBeVisible();
 
     const collector = startCspViolationCollector(page);
     try {
       const result = await page.evaluate(() => {
-        const payloads = [
-          "<script>window.__csp_pwned_script=true;</script>",
-          '<img src=x onerror="window.__csp_pwned_img=true">',
-          "<svg><script>window.__csp_pwned_svg=true;</script></svg>",
-          '<a href="javascript:window.__csp_pwned_js=true">x</a>',
-          '<iframe src="data:text/html,<script>parent.__csp_pwned_iframe=true</script>"></iframe>',
-        ];
         const container = document.createElement("div");
         document.body.appendChild(container);
-        for (const payload of payloads) {
-          container.innerHTML = payload;
-          // Try to trigger the javascript: anchor as well.
-          const anchor = container.querySelector("a");
-          if (anchor) anchor.click();
-        }
-        // Yield once so any queued image-error tasks have a chance to
-        // run before we inspect globals.
+
+        // (1) Inline <script> via innerHTML — browser-inert.
+        container.innerHTML =
+          "<script>window.__csp_pwned_inline_script=true;</script>";
+
+        // (2) <img onerror> via innerHTML — onerror counts as inline
+        //     script, CSP must block.
+        const imgContainer = document.createElement("div");
+        document.body.appendChild(imgContainer);
+        imgContainer.innerHTML =
+          '<img src="data:image/png;base64,AA" onerror="window.__csp_pwned_img_innerhtml=true">';
+
+        // (3) <img onerror> via setAttribute on a real element — the
+        //     other realistic vector for inline handlers.
+        const liveImg = document.createElement("img");
+        document.body.appendChild(liveImg);
+        liveImg.setAttribute("onerror", "window.__csp_pwned_img_setattr=true");
+        liveImg.src = "data:image/png;base64,BB";
+
+        // (4) javascript: link, clicked.
+        const anchor = document.createElement("a");
+        anchor.href = "javascript:window.__csp_pwned_js=true";
+        document.body.appendChild(anchor);
+        anchor.click();
+
+        // (5) data: iframe with a nested <script> trying to set the
+        //     parent's global. Chromium inherits the parent's CSP for
+        //     data: documents, so the nested script is blocked.
+        const iframe = document.createElement("iframe");
+        iframe.src =
+          "data:text/html,<script>parent.__csp_pwned_iframe=true<\/script>";
+        document.body.appendChild(iframe);
+
+        // Yield once so any queued image-error / iframe-load tasks
+        // have a chance to run before we inspect globals.
         return new Promise<Record<string, boolean>>((resolve) => {
           setTimeout(() => {
             const w = window as unknown as Record<string, unknown>;
             resolve({
-              script: w.__csp_pwned_script === true,
-              img: w.__csp_pwned_img === true,
-              svg: w.__csp_pwned_svg === true,
+              inlineScript: w.__csp_pwned_inline_script === true,
+              imgInnerHtml: w.__csp_pwned_img_innerhtml === true,
+              imgSetAttr: w.__csp_pwned_img_setattr === true,
               js: w.__csp_pwned_js === true,
               iframe: w.__csp_pwned_iframe === true,
             });
-          }, 100);
+          }, 300);
         });
       });
 
-      // None of the payloads may have set their global. The CSP is
-      // load-bearing here — even ``innerHTML``-injected ``<script>``
-      // would normally run, but ``script-src 'self' 'nonce-…'``
-      // requires the nonce, which the payload cannot mint.
-      expect(result.script, "<script> payload executed").toBe(false);
-      expect(result.img, "<img onerror> payload executed").toBe(false);
-      expect(result.svg, "<svg><script>> payload executed").toBe(false);
-      expect(result.js, "javascript: link payload executed").toBe(false);
-      expect(result.iframe, "data: iframe payload executed").toBe(false);
+      expect(result.inlineScript, "<script> via innerHTML executed").toBe(
+        false,
+      );
+      expect(
+        result.imgInnerHtml,
+        "<img onerror> via innerHTML executed (CSP must block inline handlers)",
+      ).toBe(false);
+      expect(
+        result.imgSetAttr,
+        "<img onerror> via setAttribute executed (CSP must block inline handlers)",
+      ).toBe(false);
+      expect(
+        result.js,
+        "javascript: link executed (CSP must block javascript: URIs)",
+      ).toBe(false);
+      expect(
+        result.iframe,
+        "data: iframe payload executed (parent CSP must apply to data: documents)",
+      ).toBe(false);
     } finally {
       collector.stop();
     }

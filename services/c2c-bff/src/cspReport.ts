@@ -39,6 +39,15 @@
 
 // Strict allow-list of fields we are willing to forward to the log
 // sink. Anything else the browser ships is dropped at the boundary.
+//
+// **``script-sample`` is intentionally NOT on the list.** The CSP
+// specification caps it at ~40 chars of the offending source, but
+// for inline-script violations that 40 chars is a verbatim slice of
+// page content — which can hold rendered user data (names, emails,
+// account numbers, session-derived tokens). The triage signal we
+// lose by dropping it is small: ``source-file`` + ``line-number`` +
+// ``column-number`` already point to the exact source location, and
+// ``blocked-uri`` carries the inline/eval discriminator.
 const ALLOWED_REPORT_FIELDS = [
   "document-uri",
   "referrer",
@@ -51,20 +60,31 @@ const ALLOWED_REPORT_FIELDS = [
   "column-number",
   "source-file",
   "status-code",
-  "script-sample",
 ] as const;
 type AllowedReportField = (typeof ALLOWED_REPORT_FIELDS)[number];
 
 // URL-shaped fields are normalised before logging so query/fragment
 // segments — which may carry session tokens or PII — never reach the
-// log sink. ``script-sample`` is included because the browser will
-// quote up to 40 chars of the offending source, which can incidentally
-// hold a URL the page tried to fetch.
+// log sink.
 const URL_SHAPED_FIELDS: ReadonlySet<AllowedReportField> = new Set([
   "document-uri",
   "referrer",
   "blocked-uri",
   "source-file",
+]);
+
+// Protocols whose ``origin + pathname`` we are willing to log
+// verbatim. Everything else (``data:``, ``blob:``, ``file:``,
+// ``javascript:``, custom schemes) gets reduced to the scheme
+// marker only, because ``new URL("data:text/html,...")`` yields
+// ``origin === "null"`` and ``pathname === <entire payload>`` —
+// which would let an inline-script violation log the literal
+// rendered HTML (and any PII it carried).
+const URL_LOGGABLE_PROTOCOLS: ReadonlySet<string> = new Set([
+  "http:",
+  "https:",
+  "ws:",
+  "wss:",
 ]);
 
 // Numeric fields are coerced to number before logging so a string
@@ -101,11 +121,18 @@ export type CspReportParseResult =
 function sanitizeUrlField(value: string): string {
   // Relative ``blocked-uri`` markers (``inline``, ``eval``,
   // ``self``) are preserved verbatim — they are not URLs. Anything
-  // else gets origin + pathname only.
+  // else gets origin + pathname only, and only for protocols on
+  // the loggable allow-list. Non-loggable schemes (``data:``,
+  // ``blob:``, ``file:``, ``javascript:``, …) are reduced to the
+  // protocol marker so the violation is still triageable but no
+  // payload bytes survive into the log sink.
   if (value === "" || /^[a-z]+$/i.test(value)) return value;
   try {
     const parsed = new URL(value);
-    return `${parsed.origin}${parsed.pathname}`;
+    if (URL_LOGGABLE_PROTOCOLS.has(parsed.protocol)) {
+      return `${parsed.origin}${parsed.pathname}`;
+    }
+    return parsed.protocol;
   } catch {
     // Browsers occasionally emit relative paths (especially for
     // ``blocked-uri`` of inline violations). Strip any ``?`` /
