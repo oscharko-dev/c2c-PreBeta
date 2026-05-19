@@ -111,6 +111,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const [lastRunInputHash, setLastRunInputHash] = useState<string | null>(null);
   const [conflict, setConflict] = useState<CobolConflict | null>(null);
   const [saveNoticeAt, setSaveNoticeAt] = useState<number | null>(null);
+  const draftRestoreTokenRef = useRef(0);
 
   const {
     state: runState,
@@ -158,6 +159,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   };
 
   const setSourceText = (text: string) => {
+    draftRestoreTokenRef.current += 1;
     setSourceTextInternal(text);
     setIsDirty(true);
     setTransformError(null);
@@ -173,6 +175,8 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     newSourceIdentityPath: string | null = null,
   ) => {
     const effectiveSourceName = newSourceName || DEFAULT_SOURCE_NAME;
+    const restoreToken = draftRestoreTokenRef.current + 1;
+    draftRestoreTokenRef.current = restoreToken;
     setSourceTextInternal(text);
     setSourceName(effectiveSourceName);
     setSourceIdentityPath(newSourceIdentityPath);
@@ -188,6 +192,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       nextSourceName: effectiveSourceName,
       nextSourceIdentityPath: newSourceIdentityPath,
       nextLastRunInputHash: null,
+      restoreToken,
     }).catch(() => {
       // Draft restore is best-effort. File open should not fail just
       // because the session bootstrap or browser storage is unavailable.
@@ -210,6 +215,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   };
 
   const clearWorkspace = () => {
+    draftRestoreTokenRef.current += 1;
     setSourceTextInternal("");
     setSourceName(null);
     setSourceIdentityPath(null);
@@ -414,12 +420,14 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     nextSourceName,
     nextSourceIdentityPath,
     nextLastRunInputHash,
+    restoreToken,
   }: {
     backendSample: string;
     nextProgramId: string | null;
     nextSourceName: string;
     nextSourceIdentityPath: string | null;
     nextLastRunInputHash: string | null;
+    restoreToken?: number;
   }): Promise<void> => {
     const scope = await getCurrentDraftScope();
     const key = await makeCobolKeyFor({
@@ -430,6 +438,12 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     });
     if (!key) return;
     const loaded = await editorPersistence.loadDraft(scope, key);
+    if (
+      restoreToken !== undefined &&
+      restoreToken !== draftRestoreTokenRef.current
+    ) {
+      return;
+    }
     if (!loaded || loaded.isExpired) {
       return;
     }

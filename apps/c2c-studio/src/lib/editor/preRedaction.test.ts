@@ -235,6 +235,27 @@ describe("redactRegion — tenant additions", () => {
     expect(result.redactedText).toContain("CUSTOMER-SECRET-CODE");
     expect(result.matchedPatternIds).not.toContain("tenant:literal-only");
   });
+
+  it("does not let tenant additions match generated redaction markers", () => {
+    const result = redactRegion("MOVE '123-45-6789' TO WS-OUT.", [
+      { id: "tenant:redacted-word", literal: "REDACTED" },
+    ]);
+
+    expect(result.redactedText).toBe("MOVE '[REDACTED:ssn-us]' TO WS-OUT.");
+    expect(result.matchedPatternIds).toEqual(["ssn-us"]);
+  });
+
+  it("does not let baseline patterns rewrite tenant marker ids", () => {
+    const result = redactRegion("MOVE CUSTOMER-SECRET-CODE TO OUT.", [
+      {
+        id: "tenant:email",
+        literal: "CUSTOMER-SECRET-CODE",
+      },
+    ]);
+
+    expect(result.redactedText).toBe("MOVE [REDACTED:tenant:email] TO OUT.");
+    expect(result.matchedPatternIds).toEqual(["tenant:email"]);
+  });
 });
 
 describe("redactRegion — ReDoS hygiene", () => {

@@ -18,6 +18,13 @@ interface RedactionPattern {
   readonly regex: RegExp;
 }
 
+interface RedactionMatch {
+  readonly id: string;
+  readonly start: number;
+  readonly end: number;
+  readonly order: number;
+}
+
 export interface StudioRedactionPatternAddition {
   readonly id: string;
   readonly literal: string;
@@ -144,43 +151,71 @@ export interface RedactionResult {
 }
 
 // Apply all patterns to ``rawText`` and return the redacted text plus the
-// set of pattern ids that matched. The order is left-to-right (pattern
-// list order, which is alphabetical within the BIC/IBAN/PII/SSN block
-// and alphabetical within the field-name block). The pattern list is
-// flattened so the iteration order is deterministic across calls.
+// set of pattern ids that matched. All matches are collected against the
+// original input before replacement, so tenant additions cannot match the
+// generated ``[REDACTED:...]`` markers and baseline patterns cannot rewrite
+// tenant marker ids.
 export function redactRegion(
   rawText: string,
   tenantAdditions: readonly StudioRedactionPatternAddition[] = [],
 ): RedactionResult {
-  let working = rawText;
-  const matched = new Set<string>();
-  for (const pattern of [
+  const patterns = [
     ...RAW_PATTERNS,
     ...buildTenantAdditionPatterns(tenantAdditions),
-  ]) {
+  ];
+  const matches = collectMatches(rawText, patterns);
+  const appliedMatches: RedactionMatch[] = [];
+  let cursor = 0;
+  let redactedText = "";
+  for (const match of matches) {
+    if (match.start < cursor) {
+      continue;
+    }
+    redactedText += rawText.slice(cursor, match.start);
+    const matchedText = rawText.slice(match.start, match.end);
+    if (match.id === "pii-comment-line" && matchedText.startsWith("\n")) {
+      redactedText += `\n[REDACTED:${match.id}]`;
+    } else {
+      redactedText += `[REDACTED:${match.id}]`;
+    }
+    appliedMatches.push(match);
+    cursor = match.end;
+  }
+  redactedText += rawText.slice(cursor);
+  const matchedPatternIds = Array.from(
+    new Set(appliedMatches.map((match) => match.id)),
+  ).sort();
+  return {
+    redactedText,
+    matchedPatternIds,
+    profileVersion: STUDIO_REDACTION_PROFILE_VERSION,
+  };
+}
+
+function collectMatches(
+  rawText: string,
+  patterns: readonly RedactionPattern[],
+): RedactionMatch[] {
+  const matches: RedactionMatch[] = [];
+  patterns.forEach((pattern, order) => {
     // Reset lastIndex defensively even though each RegExp is its own
     // instance — guards against accidental sharing in future
     // refactors.
     pattern.regex.lastIndex = 0;
-    if (pattern.regex.test(working)) {
-      matched.add(pattern.id);
-      pattern.regex.lastIndex = 0;
-      working = working.replace(pattern.regex, (match) => {
-        // PII comment lines preserve a leading newline so the
-        // surrounding source layout stays readable.
-        if (pattern.id === "pii-comment-line" && match.startsWith("\n")) {
-          return `\n[REDACTED:${pattern.id}]`;
-        }
-        return `[REDACTED:${pattern.id}]`;
-      });
+    let match = pattern.regex.exec(rawText);
+    while (match) {
+      if (match[0].length > 0) {
+        matches.push({
+          id: pattern.id,
+          start: match.index,
+          end: match.index + match[0].length,
+          order,
+        });
+      }
+      match = pattern.regex.exec(rawText);
     }
-  }
-  const matchedPatternIds = Array.from(matched).sort();
-  return {
-    redactedText: working,
-    matchedPatternIds,
-    profileVersion: STUDIO_REDACTION_PROFILE_VERSION,
-  };
+  });
+  return matches.sort((a, b) => a.start - b.start || a.order - b.order);
 }
 
 function buildTenantAdditionPatterns(

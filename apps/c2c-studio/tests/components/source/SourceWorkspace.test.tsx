@@ -1,9 +1,12 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CobolEditorPane } from "@/components/source/CobolEditorPane";
 import { SecondaryStripe } from "@/components/workbench/SecondaryStripe";
 import { WorkbenchProvider } from "@/stores/workbench";
-import { SourceWorkspaceProvider } from "@/stores/sourceWorkspace";
+import {
+  SourceWorkspaceProvider,
+  useSourceWorkspace,
+} from "@/stores/sourceWorkspace";
 import {
   TransformationRunProvider,
   useTransformationRun,
@@ -54,6 +57,22 @@ vi.mock("@/hooks/useC2cApi", () => ({
     errorKind: null,
     loading: false,
   }),
+}));
+
+const { getCurrentDraftScopeMock, loadDraftMock, saveDraftMock } = vi.hoisted(
+  () => ({
+    getCurrentDraftScopeMock: vi.fn(),
+    loadDraftMock: vi.fn(),
+    saveDraftMock: vi.fn(),
+  }),
+);
+
+vi.mock("@/lib/editor/editorPersistence", () => ({
+  getCurrentDraftScope: getCurrentDraftScopeMock,
+  editorPersistence: {
+    loadDraft: loadDraftMock,
+    saveDraft: saveDraftMock,
+  },
 }));
 
 // Monaco does not boot under vitest's jsdom environment (the lazy loader
@@ -117,9 +136,49 @@ function renderSourceWorkbench(children: React.ReactNode) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function FileOpenRaceHarness() {
+  const { setSourceFile, sourceText } = useSourceWorkspace();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setSourceFile("A backend", "a.cbl", "a.cbl")}
+      >
+        Open A
+      </button>
+      <button
+        type="button"
+        onClick={() => setSourceFile("B backend", "b.cbl", "b.cbl")}
+      >
+        Open B
+      </button>
+      <output data-testid="source-text">{sourceText}</output>
+    </>
+  );
+}
+
 describe("COBOL source input", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getCurrentDraftScopeMock.mockResolvedValue({
+      tenantId: "tenant-A",
+      userId: "user-1",
+    });
+    loadDraftMock.mockResolvedValue(null);
+    saveDraftMock.mockResolvedValue({
+      encryptedSize: 1,
+      ttlExpiresAt: "2026-06-01T00:00:00.000Z",
+    });
     vi.mocked(apiClient.getRun).mockResolvedValue(
       okResult<RunSummary>({
         runId: "run-1",
@@ -224,6 +283,52 @@ describe("COBOL source input", () => {
     ).toHaveValue(source);
     expect(screen.getAllByText("payroll.cbl").length).toBeGreaterThan(0);
     expect(screen.getByText("ID: PAY01")).toBeInTheDocument();
+  });
+
+  it("ignores stale async draft restore results after a newer file opens", async () => {
+    const staleDraft = deferred<{
+      payload: {
+        schemaVersion: "v0";
+        kind: "cobol";
+        content: string;
+        bufferHash: string;
+        savedAt: string;
+      };
+      isExpired: boolean;
+      savedAt: string;
+      ttlExpiresAt: string;
+    } | null>();
+    loadDraftMock.mockImplementation(
+      async (_scope: unknown, key: { sourceName: string }) => {
+        if (key.sourceName === "a.cbl") {
+          return staleDraft.promise;
+        }
+        return null;
+      },
+    );
+    renderSourceWorkbench(<FileOpenRaceHarness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open B" }));
+    expect(screen.getByTestId("source-text")).toHaveTextContent("B backend");
+
+    await act(async () => {
+      staleDraft.resolve({
+        payload: {
+          schemaVersion: "v0",
+          kind: "cobol",
+          content: "A local draft",
+          bufferHash: "hash-a",
+          savedAt: "2026-05-19T00:00:00.000Z",
+        },
+        isExpired: false,
+        savedAt: "2026-05-19T00:00:00.000Z",
+        ttlExpiresAt: "2026-06-02T00:00:00.000Z",
+      });
+      await staleDraft.promise;
+    });
+
+    expect(screen.getByTestId("source-text")).toHaveTextContent("B backend");
   });
 
   it("editing source marks the buffer dirty and submits only the user source", async () => {
