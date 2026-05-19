@@ -131,6 +131,53 @@ test("validateExplainRequest defaults tenantId and userId when omitted", () => {
   assert.equal(result.value.userId, "local");
 });
 
+test("validateExplainRequest rejects blank or null identity echoes when provided", () => {
+  for (const override of [
+    { tenantId: "" },
+    { tenantId: null },
+    { userId: "" },
+    { userId: null },
+  ]) {
+    const result = validateExplainRequest(validRequest(override));
+    assert.equal(result.ok, false, `expected ${JSON.stringify(override)}`);
+    if (!result.ok) {
+      assert.equal(result.errorCode, "invalid_region");
+      assert.match(result.message, /tenantId|userId/);
+    }
+  }
+});
+
+test("validateExplainRequest rejects unsupported fields in closed objects", () => {
+  const topLevel = validateExplainRequest(
+    validRequest({ extraTopLevel: true }),
+  );
+  assert.equal(topLevel.ok, false);
+  if (!topLevel.ok) {
+    assert.match(topLevel.message, /unsupported field extraTopLevel/);
+  }
+
+  const nestedRegion = validRequest();
+  (nestedRegion as { region: Record<string, unknown> }).region.extra = true;
+  const regionResult = validateExplainRequest(nestedRegion);
+  assert.equal(regionResult.ok, false);
+  if (!regionResult.ok) {
+    assert.match(regionResult.message, /region.*unsupported field extra/);
+  }
+
+  const nestedMeta = validRequest();
+  (
+    nestedMeta as { studioRedactionMetadata: Record<string, unknown> }
+  ).studioRedactionMetadata.extra = true;
+  const metaResult = validateExplainRequest(nestedMeta);
+  assert.equal(metaResult.ok, false);
+  if (!metaResult.ok) {
+    assert.match(
+      metaResult.message,
+      /studioRedactionMetadata.*unsupported field extra/,
+    );
+  }
+});
+
 test("validateExplainRequest rejects non-object body", () => {
   const result = validateExplainRequest("not an object");
   assert.equal(result.ok, false);

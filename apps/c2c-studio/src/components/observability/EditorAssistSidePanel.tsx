@@ -210,7 +210,7 @@ function BudgetExhaustedBody({ message }: { message: string }) {
       <p className="mt-2 text-xs text-text-dim">
         Need more? See the{" "}
         <a
-          href="./docs/editor-assist-budget.md"
+          href="/docs/editor-assist-budget.md"
           className="underline hover:text-text"
         >
           Editor-Assist budget guide
@@ -245,10 +245,9 @@ function PolicyDeniedBody({ message }: { message: string }) {
     );
   }
 
-  // The BFF places the policy id at the start of `message` when the
-  // call is denied by an explicit rule (see ADR 0005 §6). We expose
-  // it as a copy chip so the user can paste it into a support ticket
-  // without rummaging through the panel text.
+  // The BFF intentionally returns a fixed user-facing message for
+  // policy denials. It does not expose a policy id in this response,
+  // so the panel must not treat `message` as a machine-readable handle.
   return (
     <div
       role="alert"
@@ -257,9 +256,10 @@ function PolicyDeniedBody({ message }: { message: string }) {
     >
       <p className="font-medium">Policy declined this call.</p>
       <p className="mt-1 text-text">{message}</p>
-      <div className="mt-2">
-        <CopyChip label="policy" value={message} ariaLabel="Copy policy id" />
-      </div>
+      <p className="mt-2 text-xs text-text-dim">
+        Policy decision details are available only when the governance view is
+        present.
+      </p>
     </div>
   );
 }
@@ -410,6 +410,17 @@ function RedactionPreview({ request }: RedactionPreviewProps) {
             ))}
           </ul>
         )}
+        <div className="space-y-1">
+          <p className="font-medium text-text">
+            Bytes sent after Studio redaction
+          </p>
+          <pre
+            data-testid="editor-assist-redacted-preview"
+            className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-line bg-bg-0 p-2 font-mono text-[11px] text-text"
+          >
+            {request.redactedBytes}
+          </pre>
+        </div>
       </div>
     </details>
   );

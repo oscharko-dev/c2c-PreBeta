@@ -225,7 +225,9 @@ does not advance any run state.
 The BFF returns one of the following error codes for failed editor-assist
 calls. The set is closed: consumers MUST treat any other value as a
 forward-compatibility violation. Upstream error text is never echoed into
-`message`; the BFF emits a fixed user-facing string for each code.
+`message`; the BFF emits a fixed user-facing string for each code except
+local request-validation failures, where `invalid_region` may carry a
+field-specific validation message.
 
 | `errorCode`           | HTTP status | When                                                                                                                                     |
 | --------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
