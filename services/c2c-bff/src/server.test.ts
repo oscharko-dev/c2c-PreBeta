@@ -6214,9 +6214,11 @@ test("POST /api/v0/compile-check rejects unsafe javaFiles paths before upstream 
     for (const path of [
       "../Pwn.java",
       "/tmp/Pwn.java",
+      String.raw`\tmp\Pwn.java`,
       "C:\\tmp\\Pwn.java",
       String.raw`\\server\share\Foo.java`,
       String.raw`\\?\C:\tmp\Foo.java`,
+      "file:/tmp/Pwn.java",
       "https://internal.example/Pwn.java",
     ]) {
       const response = await fetchJson(
@@ -6477,6 +6479,11 @@ test("POST /api/v0/verify rejects unsafe javaFiles paths before upstream work", 
             content: "class Foo {}",
           },
         ],
+        expectedError: "safe relative",
+      },
+      {
+        runId: "run-1",
+        javaFiles: [{ path: "file:/tmp/Pwn.java", content: "class Pwn {}" }],
         expectedError: "safe relative",
       },
       {

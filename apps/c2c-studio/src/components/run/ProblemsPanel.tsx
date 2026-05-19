@@ -201,9 +201,17 @@ export function ProblemsPanel({
 
       {sorted.length > 0 ? (
         <table
-          className="w-full text-left"
+          className="w-full table-fixed text-left"
           data-testid="problems-diagnostic-table"
         >
+          <colgroup>
+            <col className="w-28" />
+            <col className="w-56" />
+            <col className="w-16" />
+            <col className="w-32" />
+            <col className="w-24" />
+            <col />
+          </colgroup>
           <thead>
             <tr className="border-b border-line-2 text-text-faint">
               <th className="py-1 pr-3" aria-sort={sortOrder.key === "severity" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
@@ -285,6 +293,7 @@ export function ProblemsPanel({
                   key={`${scope}-${index}-${codeLabel}-${diagnostic.message}`}
                   className={`border-b border-line-2/50 ${hasJump ? "cursor-pointer hover:bg-bg-1" : ""}`}
                   data-testid={`problems-row-${diagnostic.severity}`}
+                  style={{ height: DIAGNOSTIC_ROW_HEIGHT_PX }}
                   onClick={() => {
                     if (hasJump) {
                       navigateToDiagnostic(diagnostic);
@@ -303,28 +312,41 @@ export function ProblemsPanel({
                   title={`${codeLabel} — ${diagnostic.message}`}
                   aria-label={`${diagnostic.severity} ${codeLabel} at ${fileLabel}${diagnostic.line ? `:${diagnostic.line}` : ""}`}
                 >
-                  <td className="py-1 pr-3 align-top">
+                  <td className="h-8 overflow-hidden py-0 pr-3 align-middle">
                     <SeverityBadge severity={diagnostic.severity} />
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-xs text-text-dim">
+                  <td
+                    className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-xs text-text-dim"
+                    title={fileLabel}
+                  >
                     {fileLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-xs text-text-dim">
+                  <td className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-xs text-text-dim">
                     {lineLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-xs text-text">
+                  <td
+                    className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-xs text-text"
+                    title={codeLabel}
+                  >
                     {codeLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top font-mono text-[10px] uppercase text-text-faint">
+                  <td
+                    className="h-8 overflow-hidden whitespace-nowrap text-ellipsis py-0 pr-3 align-middle font-mono text-[10px] uppercase text-text-faint"
+                    title={sourceLabel}
+                  >
                     {sourceLabel}
                   </td>
-                  <td className="py-1 pr-3 align-top text-text">
-                    {diagnostic.message}
-                    {diagnostic.originStep ? (
-                      <span className="ml-2 rounded bg-bg-2 px-1.5 py-0.5 text-[10px] text-text-faint">
-                        step {diagnostic.originStep}
+                  <td className="h-8 overflow-hidden py-0 pr-3 align-middle text-text">
+                    <div className="flex w-full min-w-0 items-center">
+                      <span className="min-w-0 truncate">
+                        {diagnostic.message}
                       </span>
-                    ) : null}
+                      {diagnostic.originStep ? (
+                        <span className="ml-2 shrink-0 rounded bg-bg-2 px-1.5 py-0.5 text-[10px] text-text-faint">
+                          step {diagnostic.originStep}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               );

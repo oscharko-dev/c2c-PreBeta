@@ -815,7 +815,7 @@ function isSafeRequestJavaFilePath(raw: string): boolean {
   const normalized = normalizeRequestJavaFilePath(raw);
   if (normalized.startsWith("/")) return false;
   if (/^[A-Za-z]:\//.test(normalized)) return false;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(normalized)) return false;
   return isSafeGeneratedRelpath(normalized);
 }
 
