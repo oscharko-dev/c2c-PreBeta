@@ -18,7 +18,7 @@
 //     measured against the actual instance.
 //
 // The CI runner is not the M2 reference profile, so the SLA assertions
-// use a 5× cushion. The actual numbers are logged to stdout for
+// use a 2× cushion. The actual numbers are logged to stdout for
 // trend-tracking, and the CI workflow stays required — a regression
 // past the cushion is a real signal worth blocking on.
 
@@ -84,6 +84,12 @@ async function loadCobolAndAwaitMount(
 async function readyWorkbench(page: import("@playwright/test").Page) {
   await page.goto("/");
   await expect(page.getByTestId("studio-workbench-shell")).toBeVisible();
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __c2cEditorHarnessReady?: boolean;
+    };
+    return w.__c2cEditorHarnessReady === true;
+  });
 }
 
 // Hardware-class cushion. Issue #250 §Performance numbers are pinned
@@ -292,7 +298,7 @@ test.describe("@perf editor mount + search", () => {
       return frametimes[idx]!;
     });
     console.log(
-      `[perf] scroll p95 frametime: ${p95.toFixed(2)} ms (SLA ${SCROLL_P95_FRAMETIME_MS} ms)`,
+      `[perf] scroll p95 frametime: ${p95.toFixed(2)} ms (reference ${SCROLL_P95_FRAMETIME_MS} ms, gate ${(SCROLL_P95_FRAMETIME_MS * HARDWARE_CUSHION).toFixed(1)} ms)`,
     );
     expect(p95).toBeGreaterThan(0);
     expect(p95).toBeLessThan(SCROLL_P95_FRAMETIME_MS * HARDWARE_CUSHION);

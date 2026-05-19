@@ -2,17 +2,15 @@
 //
 // Runs axe-core against the Studio workbench shell with the WCAG 2.2 AA
 // rule pack enabled and asserts zero ``serious`` or ``critical``
-// violations. The test is tagged ``@a11y`` so the CI workflow runs it
-// alongside the contract suite while keeping the slower ``@perf`` and
-// ``@memory`` tags non-blocking initially.
+// violations. The test is tagged ``@a11y`` so the dedicated CI workflow
+// can enforce the shell gate without starting the full BFF stack.
 //
 // Coverage: the shell exercise covers the eight workbench regions
 // Issue #250 §Accessibility enumerates (top bar, activity bar,
 // secondary stripe, bottom workbench, status bar, sample selector,
-// Monaco editor surface, problems panel access). The dedicated
-// conflict-resolver dialog and editor-assist side panel run only when
-// the user opens them; those are exercised by dedicated tests in the
-// follow-up axe-core extension (see PR description P1 list).
+// Monaco editor surface, problems panel access). Dialogs and side panels
+// have focused keyboard/component coverage; the shell gate remains scoped
+// to the always-rendered workbench surface.
 
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";

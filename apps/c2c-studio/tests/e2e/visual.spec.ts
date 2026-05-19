@@ -3,9 +3,9 @@
 //
 // Issue #250 §Visual Regression mandates that snapshots stay scoped to
 // structural elements (toolbar layout, marker gutter glyphs, trust
-// pillar decoration positions, status-bar chips, dialog frames) so
-// caret / font-rendering jitter does not produce false positives. Raw
-// editor content is excluded.
+// pillar decoration positions, status-bar chips, dialog frames) so caret /
+// font-rendering jitter does not produce false positives. Raw editor content
+// is excluded; dialog snapshots are limited to stable chrome and copy.
 //
 // CI policy:
 //   * Tagged ``@visual`` so the default ``test:e2e:ci`` script
@@ -14,7 +14,7 @@
 //     ``test:e2e:update-snapshots`` and committed alongside the
 //     source change that affects them.
 //   * Chromium / macOS only — baselines are pinned to the primary
-//     local environment.
+//     local and CI macOS environment.
 
 import { expect, test } from "@playwright/test";
 
@@ -33,7 +33,7 @@ test.describe("@visual structural baselines", () => {
   );
   test.skip(
     process.platform !== "darwin",
-    "Visual baselines are pinned to the primary local macOS environment.",
+    "Visual baselines are pinned to the primary macOS environment.",
   );
 
   test("top bar layout", async ({ page }) => {
@@ -63,6 +63,24 @@ test.describe("@visual structural baselines", () => {
     const statusBar = page.getByLabel("Status Bar");
     await expect(statusBar).toBeVisible();
     await expect(statusBar).toHaveScreenshot("status-bar.png", {
+      animations: "disabled",
+      caret: "hide",
+      maxDiffPixelRatio: MAX_DIFF_PIXEL_RATIO,
+    });
+  });
+
+  test("clear local drafts dialog frame", async ({ page }) => {
+    await readyWorkbench(page);
+    await page.getByLabel("More workbench actions").click();
+    await page
+      .getByRole("menuitem", { name: "Clear local drafts" })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Clear local drafts?" });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByText("Unavailable without an active session"),
+    ).toBeVisible();
+    await expect(dialog).toHaveScreenshot("clear-drafts-dialog.png", {
       animations: "disabled",
       caret: "hide",
       maxDiffPixelRatio: MAX_DIFF_PIXEL_RATIO,

@@ -234,6 +234,7 @@ export function useEditorMarkerRegistration(args: {
   const { registerEditor, unregisterEditor, setActiveEditorId } =
     useMarkerNavigation();
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
+  const focusDisposableRef = useRef<MonacoNs.IDisposable | null>(null);
 
   // Keep the registration's filePath up-to-date as the pane changes
   // files. We re-register with the same id (a no-op for ordering) so
@@ -251,6 +252,8 @@ export function useEditorMarkerRegistration(args: {
   // drift onto another pane).
   useEffect(() => {
     return () => {
+      focusDisposableRef.current?.dispose();
+      focusDisposableRef.current = null;
       unregisterEditor(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -258,12 +261,14 @@ export function useEditorMarkerRegistration(args: {
 
   const registerOnMount = useCallback(
     (editor: MonacoNs.editor.IStandaloneCodeEditor) => {
+      focusDisposableRef.current?.dispose();
+      focusDisposableRef.current = null;
       editorRef.current = editor;
       registerEditor(id, { filePath, editor });
       // The standalone editor exposes `onDidFocusEditorText`; some
       // test doubles do not, so guard before subscribing.
       if (typeof editor.onDidFocusEditorText === "function") {
-        editor.onDidFocusEditorText(() => {
+        focusDisposableRef.current = editor.onDidFocusEditorText(() => {
           setActiveEditorId(id);
         });
       }

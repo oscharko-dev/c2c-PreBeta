@@ -125,11 +125,10 @@ describe("StackTraceView", () => {
       const rows = screen.getAllByTestId("stack-frame-row");
       // 3 frames pass the parser (native is dropped); 1 resolves.
       expect(rows).toHaveLength(3);
+      expect(rows[0].getAttribute("data-resolved")).toBe("true");
+      expect(rows[1].getAttribute("data-resolved")).toBe("false");
+      expect(rows[2].getAttribute("data-resolved")).toBe("false");
     });
-    const rows = screen.getAllByTestId("stack-frame-row");
-    expect(rows[0].getAttribute("data-resolved")).toBe("true");
-    expect(rows[1].getAttribute("data-resolved")).toBe("false");
-    expect(rows[2].getAttribute("data-resolved")).toBe("false");
   });
 
   it("dispatches `c2c:reveal-cobol` when the COBOL-link button is activated", async () => {

@@ -2,34 +2,23 @@ name: Studio perf + memory
 
 # Studio-IDE-12 (#250) §Performance + §Memory ACs.
 #
-# After PR #291 demonstrated both harnesses run cleanly on the CI
-# runner, the memory job is required. The perf job stays advisory:
-# the harness needs Studio runtime hooks
-# (``c2c-perf:load-cobol`` window event listener +
-# ``__c2cMonacoEditor`` global) that don't exist in the production
-# bundle yet, so the test times out waiting for the COBOL editor
-# label in the empty-workbench state. Flipping to required is the
-# dedicated follow-up that wires those runtime hooks.
-#
-# The memory harness gracefully skips when
-# ``performance.measureUserAgentSpecificMemory()`` is unavailable
-# (no COOP/COEP on the static hosting), so the assertion only
-# fires when the API is present AND heap growth exceeds 10% —
-# safe to ship as required.
+# The perf and memory jobs build the explicit harness variant so the
+# workbench exposes the browser-only test bridge. Normal production and
+# dev builds do not set ``NEXT_PUBLIC_C2C_PERF_HARNESS`` and never ship
+# the bridge globals.
 #
 # Perf SLAs (per Issue #250):
 #   * 5k-line mount: ≤ 800 ms
 #   * 10k-line mount: ≤ 1500 ms
 #   * Search to first match (5k buffer): ≤ 200 ms
-#   The Playwright harness uses a 5× cushion against the reference
+#   The Playwright harness uses a 2× cushion against the reference
 #   SLAs so transient CI hardware variance does not cause noise; the
 #   actual numbers are emitted to stdout for tracking.
 #
 # Memory SLA (per Issue #250):
-#   * ≤ 10% JS heap growth after 50 run-switch cycles.
-#   The harness skips gracefully when
-#   ``performance.measureUserAgentSpecificMemory()`` is unavailable
-#   in the CI Chromium (COOP/COEP not enabled on the static hosting).
+#   * ≤ 10% JS heap growth after 50 run-switch cycles using Chromium heap
+#     sampling after forced GC.
+#   * Monaco model count returns to baseline after 50 file switches.
 
 on:
   push:
@@ -97,7 +86,7 @@ jobs:
         env:
           CI: "1"
         # The harness measures editor mount + cold-start latency.
-        # The 5× SLA cushion (``MOUNT_SLA_*_MS * 5``) absorbs CI
+        # The 2× SLA cushion (``MOUNT_SLA_*_MS * 2``) absorbs CI
         # hardware variance; a regression past the cushion is a
         # real signal worth blocking on.
         run: npx playwright test --config=playwright.studio-only.config.ts --grep @perf --reporter=line
@@ -140,19 +129,19 @@ jobs:
         working-directory: apps/c2c-studio
         run: npx playwright install-deps chromium
 
-      - name: Build Studio (production)
+      - name: Build Studio (production with perf harness bridge)
         working-directory: apps/c2c-studio
         env:
           NEXT_PUBLIC_C2C_BFF_BASE_URL: ""
+          NEXT_PUBLIC_C2C_PERF_HARNESS: "1"
         run: npm run build
 
       - name: Run @memory harness
         working-directory: apps/c2c-studio
         env:
           CI: "1"
-        # The memory harness gracefully skips when
-        # ``performance.measureUserAgentSpecificMemory()`` is
-        # unavailable in CI Chromium (no COOP/COEP on the static
-        # hosting); the assertion only fires when the API is
-        # present AND heap growth exceeds 10% — a real regression.
+        # The memory harness drives real load/clear cycles through
+        # the same bridge as @perf and always enforces Monaco model
+        # count disposal. Heap growth is sampled from Chromium after
+        # forced GC so pending collection does not hide retained objects.
         run: npx playwright test --config=playwright.studio-only.config.ts --grep @memory --reporter=line

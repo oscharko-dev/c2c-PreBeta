@@ -37,6 +37,7 @@ const config: Config = {
         },
         success: {
           DEFAULT: 'var(--success)',
+          badge: 'var(--success-badge)',
           soft: 'var(--success-soft)',
         },
         warn: {
@@ -45,6 +46,7 @@ const config: Config = {
         },
         error: {
           DEFAULT: 'var(--error)',
+          badge: 'var(--error-badge)',
           soft: 'var(--error-soft)',
         },
         teal: {

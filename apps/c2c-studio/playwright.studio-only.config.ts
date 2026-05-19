@@ -1,5 +1,5 @@
 // Studio-IDE-12 (#250) follow-up: shared Playwright configuration for
-// the advisory @perf and @memory specs.
+// the required @perf and @memory specs.
 //
 // Like ``playwright.a11y.config.ts`` and ``playwright.visual.config.ts``,
 // this config runs ONLY the Studio's production ``next start`` — no
@@ -40,6 +40,7 @@ export default defineConfig({
           args: [
             "--enable-blink-features=ForceEagerMeasureMemory",
             "--enable-features=PerformanceMeasureMemory",
+            "--enable-precise-memory-info",
           ],
         },
       },

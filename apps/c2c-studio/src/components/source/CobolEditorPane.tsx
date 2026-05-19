@@ -383,8 +383,20 @@ export function CobolEditorPane() {
     [],
   );
 
+  const disposeEditorActionDisposables = useCallback(() => {
+    for (const disposable of editorActionDisposablesRef.current.splice(0)) {
+      try {
+        disposable.dispose();
+      } catch {
+        // Idempotent cleanup — swallow if Monaco already tore the
+        // editor down before us.
+      }
+    }
+  }, []);
+
   const handleEditorMount = useCallback(
     ({ editor, monaco }: StandaloneEditorMountArgs) => {
+      disposeEditorActionDisposables();
       editorRef.current = editor;
       registerMarkerEditor(editor);
       setCobolEditorMountToken((value) => value + 1);
@@ -549,7 +561,13 @@ export function CobolEditorPane() {
         }),
       );
     },
-    [rulerEnabled, saveDraftNow, registerMarkerEditor, javaSourceProvider],
+    [
+      disposeEditorActionDisposables,
+      rulerEnabled,
+      saveDraftNow,
+      registerMarkerEditor,
+      javaSourceProvider,
+    ],
   );
 
   // Studio-IDE-12 (#250): dispose every tracked Monaco command /
@@ -558,17 +576,9 @@ export function CobolEditorPane() {
   // that hold onto stale closures.
   useEffect(() => {
     return () => {
-      for (const disposable of editorActionDisposablesRef.current) {
-        try {
-          disposable.dispose();
-        } catch {
-          // Idempotent cleanup — swallow if Monaco already tore the
-          // editor down before us.
-        }
-      }
-      editorActionDisposablesRef.current = [];
+      disposeEditorActionDisposables();
     };
-  }, []);
+  }, [disposeEditorActionDisposables]);
 
   const conflictPanels: ConflictPanel[] = useMemo(() => {
     if (!conflict) {

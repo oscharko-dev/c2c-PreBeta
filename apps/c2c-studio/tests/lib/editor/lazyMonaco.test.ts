@@ -1,6 +1,13 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const contributionLoads = vi.hoisted(() => ({
+  java: 0,
+  json: 0,
+  markdown: 0,
+  xml: 0,
+}));
+
 vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
   editor: {
     create: vi.fn(),
@@ -15,20 +22,37 @@ vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
 }));
 vi.mock(
   "monaco-editor/esm/vs/basic-languages/java/java.contribution",
-  () => ({}),
+  () => {
+    contributionLoads.java += 1;
+    return {};
+  },
 );
 vi.mock(
   "monaco-editor/esm/vs/basic-languages/xml/xml.contribution",
-  () => ({}),
+  () => {
+    contributionLoads.xml += 1;
+    return {};
+  },
 );
 vi.mock(
   "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution",
-  () => ({}),
+  () => {
+    contributionLoads.markdown += 1;
+    return {};
+  },
 );
-vi.mock("monaco-editor/esm/vs/language/json/monaco.contribution", () => ({}));
+vi.mock("monaco-editor/esm/vs/language/json/monaco.contribution", () => {
+  contributionLoads.json += 1;
+  return {};
+});
 
 describe("lazyMonaco", () => {
   beforeEach(async () => {
+    vi.resetModules();
+    contributionLoads.java = 0;
+    contributionLoads.json = 0;
+    contributionLoads.markdown = 0;
+    contributionLoads.xml = 0;
     const m = await import("@/lib/editor/lazyMonaco");
     m.__resetMonacoForTests();
   });
@@ -77,5 +101,35 @@ describe("lazyMonaco", () => {
     expect(
       (globalThis as { MonacoEnvironment?: unknown }).MonacoEnvironment,
     ).toBeUndefined();
+  });
+
+  it("loads each requested language contribution once", async () => {
+    const { getMonaco } = await import("@/lib/editor/lazyMonaco");
+
+    await getMonaco("java");
+    await getMonaco("JAVA");
+
+    expect(contributionLoads.java).toBe(1);
+  });
+
+  it("normalizes, filters, and de-duplicates multi-language contribution requests", async () => {
+    const { getMonaco } = await import("@/lib/editor/lazyMonaco");
+
+    await getMonaco(["xml", "markdown", "xml", "cobol"]);
+
+    expect(contributionLoads).toMatchObject({
+      java: 0,
+      json: 0,
+      markdown: 1,
+      xml: 1,
+    });
+  });
+
+  it("de-duplicates concurrent contribution requests for the same language", async () => {
+    const { getMonaco } = await import("@/lib/editor/lazyMonaco");
+
+    await Promise.all([getMonaco("json"), getMonaco("JSON")]);
+
+    expect(contributionLoads.json).toBe(1);
   });
 });

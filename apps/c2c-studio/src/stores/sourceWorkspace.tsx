@@ -77,6 +77,7 @@ export interface SourceWorkspaceState {
     text: string,
     sourceName: string,
     sourceIdentityPath?: string | null,
+    options?: SetSourceFileOptions,
   ) => void;
   setExpectedOutput: (text: string) => void;
   setOracleInput: (text: string) => void;
@@ -106,6 +107,10 @@ export interface SourceWorkspaceState {
     sourceName: string,
     sourceIdentityPath?: string | null,
   ) => Promise<void>;
+}
+
+export interface SetSourceFileOptions {
+  restoreDraft?: boolean;
 }
 
 const SourceWorkspaceContext = createContext<SourceWorkspaceState | null>(null);
@@ -202,6 +207,7 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     text: string,
     newSourceName: string,
     newSourceIdentityPath: string | null = null,
+    options: SetSourceFileOptions = {},
   ) => {
     const effectiveSourceName = newSourceName || DEFAULT_SOURCE_NAME;
     const restoreToken = draftRestoreTokenRef.current + 1;
@@ -217,17 +223,19 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setLastRunInputContent(null);
     setConflict(null);
     lastSeenRunIdRef.current = null;
-    void loadDraftForSource({
-      backendSample: text,
-      nextProgramId: null,
-      nextSourceName: effectiveSourceName,
-      nextSourceIdentityPath: newSourceIdentityPath,
-      nextLastRunInputHash: null,
-      restoreToken,
-    }).catch(() => {
-      // Draft restore is best-effort. File open should not fail just
-      // because the session bootstrap or browser storage is unavailable.
-    });
+    if (options.restoreDraft !== false) {
+      void loadDraftForSource({
+        backendSample: text,
+        nextProgramId: null,
+        nextSourceName: effectiveSourceName,
+        nextSourceIdentityPath: newSourceIdentityPath,
+        nextLastRunInputHash: null,
+        restoreToken,
+      }).catch(() => {
+        // Draft restore is best-effort. File open should not fail just
+        // because the session bootstrap or browser storage is unavailable.
+      });
+    }
   };
 
   const setExpectedOutput = (text: string) => {

@@ -1,7 +1,14 @@
 "use client";
 
 import type * as MonacoNs from "monaco-editor";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import { X } from "lucide-react";
 
 import { CodeEditor } from "@/components/editor/CodeEditor";
@@ -71,11 +78,15 @@ function EmptyManualDriftShell({
   filePath: string;
   onClose: () => void;
 }) {
+  const { dialogRef, handleDialogKeyDown } = useDialogKeyboard(onClose);
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="manual-drift-title"
+      tabIndex={-1}
+      onKeyDown={handleDialogKeyDown}
       data-testid="manual-drift-workspace-empty"
       className="fixed inset-0 z-40 flex flex-col bg-bg-0/95 backdrop-blur-sm"
     >
@@ -165,6 +176,7 @@ function ManualDriftWorkspaceBody({
   const modifiedDecorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
   const disposablesRef = useRef<MonacoNs.IDisposable[]>([]);
+  const { dialogRef, handleDialogKeyDown } = useDialogKeyboard(onClose);
 
   const manualRegions = useMemo(
     () =>
@@ -295,9 +307,12 @@ function ManualDriftWorkspaceBody({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="manual-drift-title"
+      tabIndex={-1}
+      onKeyDown={handleDialogKeyDown}
       data-testid="manual-drift-workspace"
       className="fixed inset-0 z-40 flex flex-col bg-bg-0/95 backdrop-blur-sm"
     >
@@ -362,4 +377,29 @@ function ManualDriftWorkspaceBody({
       </div>
     </div>
   );
+}
+
+function useDialogKeyboard(onClose: () => void): {
+  dialogRef: RefObject<HTMLDivElement>;
+  handleDialogKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+} {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    dialogRef.current?.focus();
+    return () => {
+      if (previous instanceof HTMLElement) {
+        previous.focus();
+      }
+    };
+  }, []);
+  const handleDialogKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onClose();
+    },
+    [onClose],
+  );
+  return { dialogRef, handleDialogKeyDown };
 }

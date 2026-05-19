@@ -43,10 +43,12 @@
     --accent-dim: #2a7a55;
     --accent-soft: rgba(78, 186, 135, 0.18);
     --success: #4eba87;
+    --success-badge: #1f6f4f;
     --success-soft: rgba(78, 166, 116, 0.16);
     --warn: #d4a25b;
     --warn-soft: rgba(212, 162, 91, 0.16);
     --error: #d96168;
+    --error-badge: #a8343d;
     --error-soft: rgba(217, 97, 104, 0.16);
     --teal: #4eba87;
     --teal-soft: rgba(78, 186, 135, 0.14);

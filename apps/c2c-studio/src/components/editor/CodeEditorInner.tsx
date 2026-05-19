@@ -10,6 +10,8 @@ import {
   saveDiffViewState,
   restoreViewState,
   restoreDiffViewState,
+  disposeModel,
+  getLifecycleStateCounts,
 } from "@/lib/editor/modelLifecycle";
 import { applyStudioTheme, STUDIO_DARK_THEME } from "@/lib/editor/monacoTheme";
 
@@ -24,6 +26,19 @@ import {
   type EditorMarkerGroup,
   type StandaloneCodeEditorProps,
 } from "@/components/editor/codeEditorTypes";
+
+interface MonacoHarnessWindow {
+  __c2cMonacoEditor?: MonacoNs.editor.IStandaloneCodeEditor;
+  __c2cMonacoModelCount?: () => number;
+  __c2cMonacoModelUris?: () => string[];
+  __c2cEditorLifecycleStateCounts?: () => {
+    viewStates: number;
+    diffViewStates: number;
+  };
+}
+
+const EDITOR_HARNESS_ENABLED =
+  process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1";
 
 export default function CodeEditorInner(props: CodeEditorProps) {
   const [monaco, setMonaco] = useState<Monaco | null>(null);
@@ -96,6 +111,9 @@ function StandaloneEditorView({
   onMount,
 }: StandaloneEditorViewProps) {
   const editorRef = useRef<MonacoNs.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef(monaco);
+  monacoRef.current = monaco;
+  const activeModelUriRef = useRef<string | null>(null);
   const decorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
   const actionDisposablesRef = useRef<MonacoNs.IDisposable[]>([]);
@@ -211,6 +229,23 @@ function StandaloneEditorView({
   // editor was still mounted.
   useEffect(() => {
     return () => {
+      const activeModelUri =
+        activeModelUriRef.current ??
+        editorRef.current?.getModel()?.uri.toString() ??
+        null;
+      if (activeModelUri) {
+        disposeModelByUri(monacoRef.current, activeModelUri);
+        activeModelUriRef.current = null;
+      }
+      if (typeof window !== "undefined" && EDITOR_HARNESS_ENABLED) {
+        const harnessWindow = window as unknown as MonacoHarnessWindow;
+        if (
+          editorRef.current &&
+          harnessWindow.__c2cMonacoEditor === editorRef.current
+        ) {
+          delete harnessWindow.__c2cMonacoEditor;
+        }
+      }
       if (modelChangeDisposableRef.current) {
         modelChangeDisposableRef.current.dispose();
         modelChangeDisposableRef.current = null;
@@ -268,15 +303,17 @@ function StandaloneEditorView({
           // ``NEXT_PUBLIC_C2C_PERF_HARNESS === "1"`` so normal production
           // bundles never expose the global; CI builds an explicit harness
           // variant for the @perf gate.
-          if (
-            typeof window !== "undefined" &&
-            process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1"
-          ) {
-            (
-              window as unknown as {
-                __c2cMonacoEditor?: import("monaco-editor").editor.IStandaloneCodeEditor;
-              }
-            ).__c2cMonacoEditor = editor;
+          if (typeof window !== "undefined" && EDITOR_HARNESS_ENABLED) {
+            const harnessWindow = window as unknown as MonacoHarnessWindow;
+            harnessWindow.__c2cMonacoEditor = editor;
+            harnessWindow.__c2cMonacoModelCount = () =>
+              monacoInstance.editor.getModels().length;
+            harnessWindow.__c2cMonacoModelUris = () =>
+              monacoInstance.editor
+                .getModels()
+                .map((model) => model.uri.toString());
+            harnessWindow.__c2cEditorLifecycleStateCounts =
+              getLifecycleStateCounts;
           }
           const restored = restoreViewState(editor, resolvedUri);
           if (!restored && viewStateRef?.current) {
@@ -284,6 +321,7 @@ function StandaloneEditorView({
           }
           const model = editor.getModel();
           if (model) {
+            activeModelUriRef.current = model.uri.toString();
             applyMarkers(
               monacoInstance,
               model,
@@ -304,7 +342,13 @@ function StandaloneEditorView({
           // on every swap so a long-lived editor that hops between URIs
           // stays consistent with its view-state map.
           modelChangeDisposableRef.current = editor.onDidChangeModel(() => {
+            const previousModelUri = activeModelUriRef.current;
             const newModel = editor.getModel();
+            const nextModelUri = newModel?.uri.toString() ?? null;
+            if (previousModelUri && previousModelUri !== nextModelUri) {
+              disposeModelByUri(monacoInstance, previousModelUri);
+            }
+            activeModelUriRef.current = nextModelUri;
             if (!newModel) {
               return;
             }
@@ -383,6 +427,12 @@ function DiffEditorView({
   const diffEditorRef = useRef<MonacoNs.editor.IStandaloneDiffEditor | null>(
     null,
   );
+  const monacoRef = useRef(monaco);
+  monacoRef.current = monaco;
+  const activeDiffModelUrisRef = useRef<{
+    modified: string | null;
+    original: string | null;
+  }>({ modified: null, original: null });
   const decorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
   const actionDisposablesRef = useRef<MonacoNs.IDisposable[]>([]);
@@ -504,6 +554,14 @@ function DiffEditorView({
   // URI changed, leaving subsequent model swaps unwired.
   useEffect(() => {
     return () => {
+      const { modified, original } = activeDiffModelUrisRef.current;
+      if (modified) {
+        disposeModelByUri(monacoRef.current, modified);
+      }
+      if (original) {
+        disposeModelByUri(monacoRef.current, original);
+      }
+      activeDiffModelUrisRef.current = { modified: null, original: null };
       if (modelChangeDisposableRef.current) {
         modelChangeDisposableRef.current.dispose();
         modelChangeDisposableRef.current = null;
@@ -570,6 +628,27 @@ function DiffEditorView({
               contentChangeDisposableRef.current = null;
             }
             const currentModel = modifiedEditor.getModel();
+            const currentModifiedUri = currentModel?.uri.toString() ?? null;
+            const currentOriginalUri =
+              diffEditor.getOriginalEditor().getModel()?.uri.toString() ??
+              null;
+            const previousUris = activeDiffModelUrisRef.current;
+            if (
+              previousUris.modified &&
+              previousUris.modified !== currentModifiedUri
+            ) {
+              disposeModelByUri(monacoInstance, previousUris.modified);
+            }
+            if (
+              previousUris.original &&
+              previousUris.original !== currentOriginalUri
+            ) {
+              disposeModelByUri(monacoInstance, previousUris.original);
+            }
+            activeDiffModelUrisRef.current = {
+              modified: currentModifiedUri,
+              original: currentOriginalUri,
+            };
             if (!currentModel) {
               return;
             }
@@ -656,6 +735,14 @@ function disposeActionDisposables(actionDisposablesRef: {
       // Monaco cleanup is best-effort on unmount; one hostile disposable must
       // not prevent the rest of the editor resources from being released.
     }
+  }
+}
+
+function disposeModelByUri(monaco: Monaco, uri: string): void {
+  try {
+    disposeModel(monaco, uri);
+  } catch {
+    // Monaco model disposal is idempotent and can race with editor teardown.
   }
 }
 

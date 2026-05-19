@@ -60,6 +60,7 @@ import {
   buildTrustPillarDecorations,
   lineageCoveragePct,
   mergeRegionsForTrustPillars,
+  trustPillarAriaSummary,
 } from "@/lib/editor/trustPillars";
 // Studio-IDE-13 (#255): manual-edit overlay computation and 3-Way Merge
 // dialog wiring. The overlay is recomputed on every debounced buffer
@@ -467,6 +468,21 @@ export function GeneratedJavaEditorPane() {
   const javaBufferEntry = selectedFilePath
     ? javaBuffers[selectedFilePath]
     : undefined;
+  // Studio-IDE-13 (#255) AC8: union the traceability overlay with the
+  // manual-edit overlay so both the visual trust pillars and the accessible
+  // summary describe one consistent provenance model.
+  const trustPillarRegions = useMemo(
+    () =>
+      mergeRegionsForTrustPillars({
+        traceabilityOverlay: overlay ?? null,
+        manualOverlay: javaBufferEntry?.manualEditOverlay ?? null,
+      }),
+    [overlay, javaBufferEntry?.manualEditOverlay],
+  );
+  const trustPillarSummary = useMemo(
+    () => trustPillarAriaSummary(trustPillarRegions),
+    [trustPillarRegions],
+  );
   // When the Java buffer holds user edits (dirty or persisted draft), prefer
   // it over the BFF response so the editor reflects in-flight work.
   const displayedContent = javaBufferEntry?.isDirty
@@ -1010,28 +1026,14 @@ export function GeneratedJavaEditorPane() {
   useEffect(() => {
     const editor = editorInstanceRef.current;
     if (!editor) return;
-    // Studio-IDE-13 (#255) AC8: union the trust-pillar overlay
-    // (deterministic / agent_proposed / repair_attempted from the
-    // traceability fetch) with the manual-edit overlay (manual_modified
-    // / manual_edit from local diff) so manual regions render in purple
-    // / orange per the issue spec. Manual regions synthesize a
-    // ``no_oracle`` verification outcome and ``synthesized`` mapping
-    // class so they pass the trust-pillar painter's type filter (which
-    // requires both fields to be present); this is consistent with
-    // ADR-0007 §6 which states manual lineage is stale or unavailable
-    // and therefore cannot carry a real verification outcome.
-    const combined = mergeRegionsForTrustPillars({
-      traceabilityOverlay: overlay ?? null,
-      manualOverlay: javaBufferEntry?.manualEditOverlay ?? null,
-    });
-    if (monaco && combined.length > 0) {
+    if (monaco && trustPillarRegions.length > 0) {
       const repairCount =
         state.workflow?.repairAttempts?.filter(
           (a) => a.repairDecision === "propose_candidate",
         ).length ?? 0;
       const decorations = buildTrustPillarDecorations({
         monaco,
-        regions: combined,
+        regions: trustPillarRegions,
         repairCount,
       });
       if (decorationCollectionRef.current) {
@@ -1050,15 +1052,14 @@ export function GeneratedJavaEditorPane() {
     if (selectedFilePath && totalLines > 0) {
       lineageCoverageApi.publish({
         filePath: selectedFilePath,
-        pct: lineageCoveragePct(totalLines, combined),
+        pct: lineageCoveragePct(totalLines, trustPillarRegions),
       });
     } else {
       lineageCoverageApi.publish(null);
     }
   }, [
-    overlay,
     monaco,
-    javaBufferEntry?.manualEditOverlay,
+    trustPillarRegions,
     selectedFilePath,
     state.workflow,
     lineageCoverageApi,
@@ -1876,17 +1877,30 @@ export function GeneratedJavaEditorPane() {
             <p>File content is empty or unavailable.</p>
           </div>
         ) : (
-          <CodeEditor
-            mode={isJavaEditable ? "editable" : "readonly"}
-            language={detectedLanguage}
-            value={displayedContent}
-            onChange={isJavaEditable ? handleEditorChange : undefined}
-            onMount={handleEditorMount}
-            modelUri={modelUri}
-            ariaLabel={`Generated Java source for ${selectedFilePath}`}
-            markerGroups={javaMarkerGroups}
-            className="h-full"
-          />
+          <>
+            {trustPillarSummary ? (
+              <p
+                className="sr-only"
+                data-testid="generated-java-trust-summary"
+                aria-live="polite"
+              >
+                {trustPillarSummary}
+              </p>
+            ) : null}
+            <CodeEditor
+              mode={isJavaEditable ? "editable" : "readonly"}
+              language={detectedLanguage}
+              value={displayedContent}
+              onChange={isJavaEditable ? handleEditorChange : undefined}
+              onMount={handleEditorMount}
+              modelUri={modelUri}
+              ariaLabel={`Generated Java source for ${selectedFilePath}${
+                trustPillarSummary ? `. ${trustPillarSummary}` : ""
+              }`}
+              markerGroups={javaMarkerGroups}
+              className="h-full"
+            />
+          </>
         )}
       </div>
 

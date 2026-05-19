@@ -210,9 +210,8 @@ describe("AppTopBar clear-local-drafts", () => {
     });
   });
 
-  it("falls back to an auth-independent browser-local wipe when scope lookup fails", async () => {
+  it("disables scoped clearing when scope lookup fails", async () => {
     countDraftsMock.mockRejectedValueOnce(new Error("session expired"));
-    clearLocalOriginMock.mockResolvedValueOnce({ purgedCount: 2 });
     renderTopBar();
 
     fireEvent.click(screen.getByLabelText(/more workbench actions/i));
@@ -223,11 +222,11 @@ describe("AppTopBar clear-local-drafts", () => {
     expect(
       await screen.findByText(/session unavailable/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/all local drafts in this browser/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear drafts" })).toBeEnabled();
+    expect(screen.getByText(/current signed-in workspace/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear drafts" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Clear drafts" }));
     await waitFor(() => {
-      expect(clearLocalOriginMock).toHaveBeenCalledTimes(1);
+      expect(clearLocalOriginMock).not.toHaveBeenCalled();
     });
     expect(clearAllMock).not.toHaveBeenCalled();
   });
