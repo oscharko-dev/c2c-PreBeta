@@ -78,7 +78,7 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
               }
             }}
             className={cn(
-              "px-3 py-1 rounded text-sm font-medium transition-colors outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              "min-h-6 px-3 py-1 rounded text-sm font-medium transition-colors outline-none focus-visible:ring-1 focus-visible:ring-accent",
               {
                 'bg-bg-0 text-text shadow-sm': value === tab.value,
                 'text-text-dim hover:text-text hover:bg-bg-3': value !== tab.value,

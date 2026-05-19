@@ -134,6 +134,18 @@ describe("renderSanitizedHtml — href scheme allow-list", () => {
     expect(html).toContain('href="../shared/guide.md"');
   });
 
+  it("prevents target=_blank anchors from surviving without noopener", () => {
+    const html = renderSanitizedHtml(
+      '<a href="#section-1" target="_blank">Doc</a>',
+    );
+    expect(html).toContain('href="#section-1"');
+    if (html.includes('target="_blank"')) {
+      expect(html).toContain('rel="noopener noreferrer"');
+    } else {
+      expect(html).not.toContain("target=");
+    }
+  });
+
   it("strips absolute http URIs not in the configured prefix", () => {
     const html = renderSanitizedHtml("[Link](http://attacker.example/)");
     expect(html.toLowerCase()).not.toContain("attacker.example");

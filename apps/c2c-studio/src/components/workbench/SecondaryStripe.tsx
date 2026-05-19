@@ -51,23 +51,29 @@ export function SecondaryStripe() {
     setSourceFile(text, file.name, deriveBrowserFileIdentity(file));
   };
 
+  const activePanelTitle =
+    activeActivityTab === "harness"
+      ? "Harness"
+      : activeActivityTab === "model-gateway"
+        ? "Model Gateway"
+        : activeActivityTab === "experience"
+          ? "Experience Learning"
+          : activeActivityTab === "data-dictionary"
+            ? "Data Dictionary"
+            : "COBOL Explorer";
+
   return (
     <aside
       id="secondary-stripe"
       className="absolute bottom-0 left-12 top-0 z-30 flex w-52 shrink-0 flex-col overflow-hidden border-r border-line bg-bg-1 shadow-lg md:static md:z-auto md:w-64 md:self-stretch md:shadow-none"
-      aria-label="Secondary Stripe"
+      aria-labelledby="secondary-stripe-heading"
     >
-      <div className="flex items-center px-4 h-10 border-b border-line-2 font-medium text-xs uppercase tracking-wider text-text-dim">
-        {activeActivityTab === "harness"
-          ? "Harness"
-          : activeActivityTab === "model-gateway"
-            ? "Model Gateway"
-            : activeActivityTab === "experience"
-              ? "Experience Learning"
-              : activeActivityTab === "data-dictionary"
-                ? "Data Dictionary"
-                : "COBOL Explorer"}
-      </div>
+      <h2
+        id="secondary-stripe-heading"
+        className="flex h-10 items-center border-b border-line-2 px-4 text-xs font-medium uppercase tracking-wider text-text-dim"
+      >
+        {activePanelTitle}
+      </h2>
       <div className="flex flex-1 flex-col overflow-auto">
         {activeActivityTab === "explorer" && (
           <div className="flex flex-1 flex-col gap-4 p-4">

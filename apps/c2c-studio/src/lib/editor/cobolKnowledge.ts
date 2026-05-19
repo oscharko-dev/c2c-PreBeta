@@ -54,7 +54,8 @@ const PIC_COUNT_CAP = 1000;
 // `kind: "unknown"` rather than throw, so the hover surface always
 // renders *some* explanation.
 export function parsePicture(raw: string): PictureShape {
-  const trimmed = raw.trim().toUpperCase();
+  const canonical = normalizePictureText(raw);
+  const trimmed = canonical.toUpperCase();
   // Expand `9(5)` / `X(10)` style repetition into a flat character
   // sequence we can count. Bounded repetition guards against ReDoS
   // (the inner `\d{1,6}` cap defangs the count).
@@ -108,7 +109,7 @@ export function parsePicture(raw: string): PictureShape {
     kind = "alphabetic";
   }
   return {
-    raw,
+    raw: canonical,
     integerDigits:
       kind === "numeric" || kind === "mixed" ? integerDigits : null,
     decimalDigits:
@@ -275,8 +276,15 @@ const USAGE_ENTRIES: Record<string, HoverEntry> = {
   },
 };
 
+function canonicalUsageKey(usage: string): string {
+  return usage
+    .trim()
+    .toUpperCase()
+    .replace(/^COMPUTATIONAL\b/, "COMP");
+}
+
 export function explainUsage(usage: string): HoverEntry | null {
-  const key = usage.trim().toUpperCase();
+  const key = canonicalUsageKey(usage);
   return USAGE_ENTRIES[key] ?? null;
 }
 
@@ -573,7 +581,7 @@ const DATA_DECLARATION = /^\s*(?:\d{2}|77|88|66|FD|SD)\s+[A-Za-z][A-Za-z0-9-]*/;
 const LEVEL_AND_NAME = /^\s*(\d{2}|77|88|66|FD|SD)\s+([A-Za-z][A-Za-z0-9-]*)/;
 const PIC_CLAUSE = /\b(?:PIC|PICTURE)(?:\s+IS)?\s+([X9AVSPZ$+\-,/*B().0-9]+)/i;
 const USAGE_CLAUSE =
-  /\b(?:USAGE\s+(?:IS\s+)?)?(COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|DISPLAY|POINTER|INDEX)\b/i;
+  /\b(?:USAGE\s+(?:IS\s+)?)?(COMPUTATIONAL-[1-5]|COMPUTATIONAL|COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|DISPLAY|POINTER|INDEX)\b/i;
 const VALUE_CLAUSE =
   /\bVALUES?(?:\s+IS)?\s+(['"][^'"]*['"]|[+-]?\d+(?:\.\d+)?|ZEROS?|ZEROES|SPACES?|HIGH-VALUES?|LOW-VALUES?|QUOTES?)/i;
 const OCCURS_CLAUSE =
@@ -593,13 +601,145 @@ function isCommentLine(line: string): boolean {
   return false;
 }
 
+function usesFixedFormatEnvelope(line: string): boolean {
+  if (line.length < 7) return false;
+  const indicator = line[6];
+  return (
+    indicator === " " ||
+    indicator === "*" ||
+    indicator === "/" ||
+    indicator === "-"
+  );
+}
+
+function sourceArea(line: string): string {
+  return usesFixedFormatEnvelope(line) ? line.slice(6) : line;
+}
+
+function stripFloatingComment(line: string): string {
+  const commentStart = floatingCommentStart(line);
+  return commentStart >= 0 ? line.slice(0, commentStart) : line;
+}
+
+function semanticSourceArea(line: string): string {
+  return stripFloatingComment(sourceArea(line));
+}
+
+function normalizePictureText(raw: string): string {
+  return raw.trim().replace(/\.+$/g, "");
+}
+
+function isInsideQuotedString(line: string, index: number): boolean {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < index; i += 1) {
+    const char = line[i];
+    if ((char === "'" || char === '"') && quote === null) {
+      quote = char;
+    } else if (char === quote) {
+      quote = null;
+    }
+  }
+  return quote !== null;
+}
+
+function floatingCommentStart(line: string): number {
+  let searchFrom = 0;
+  while (searchFrom < line.length) {
+    const index = line.indexOf("*>", searchFrom);
+    if (index < 0) {
+      return -1;
+    }
+    if (!isInsideQuotedString(line, index)) {
+      return index;
+    }
+    searchFrom = index + 2;
+  }
+  return -1;
+}
+
+function execOutsideQuotedText(
+  regex: RegExp,
+  line: string,
+): RegExpExecArray | null {
+  const flagged = regex.flags.includes("g")
+    ? regex
+    : new RegExp(regex.source, `${regex.flags}g`);
+  let match: RegExpExecArray | null;
+  while ((match = flagged.exec(line)) !== null) {
+    if (!isInsideQuotedString(line, match.index)) {
+      return match;
+    }
+    if (match.index === flagged.lastIndex) {
+      flagged.lastIndex += 1;
+    }
+  }
+  return null;
+}
+
+function isDivisionBoundary(line: string): boolean {
+  return /\b(?:IDENTIFICATION|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION\b/i.test(
+    line,
+  );
+}
+
+function isSectionBoundary(line: string): boolean {
+  return /\b(?:FILE|WORKING-STORAGE|LOCAL-STORAGE|LINKAGE|REPORT|SCREEN)\s+SECTION\b/i.test(
+    line,
+  );
+}
+
+function hasContinuationClause(line: string): boolean {
+  return (
+    PIC_CLAUSE.test(line) ||
+    USAGE_CLAUSE.test(line) ||
+    VALUE_CLAUSE.test(line) ||
+    OCCURS_CLAUSE.test(line) ||
+    REDEFINES_CLAUSE.test(line)
+  );
+}
+
+function logicalDeclarationText(
+  lines: string[],
+  startIndex: number,
+  firstLine: string,
+): { text: string; endIndex: number } {
+  const parts = [firstLine];
+  let endIndex = startIndex;
+  for (let i = startIndex + 1; i < lines.length; i += 1) {
+    const raw = lines[i] ?? "";
+    if (isCommentLine(raw)) {
+      continue;
+    }
+    const semantic = semanticSourceArea(raw);
+    const trimmed = semantic.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (
+      isDivisionBoundary(semantic) ||
+      isSectionBoundary(semantic) ||
+      DATA_DECLARATION.test(semantic)
+    ) {
+      break;
+    }
+    if (!hasContinuationClause(semantic)) {
+      break;
+    }
+    parts.push(semantic);
+    endIndex = i;
+  }
+  return { text: parts.join(" "), endIndex };
+}
+
 export function extractDataItems(source: string): DataItem[] {
   const items: DataItem[] = [];
   const lines = source.split(/\r?\n/);
   let seenDataDivision = false;
   let inProcedureDivision = false;
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
+    const rawLine = lines[i] ?? "";
+    if (isCommentLine(rawLine)) continue;
+    const line = semanticSourceArea(rawLine);
     if (/\bDATA\s+DIVISION\b/i.test(line)) {
       seenDataDivision = true;
       continue;
@@ -609,21 +749,25 @@ export function extractDataItems(source: string): DataItem[] {
       continue;
     }
     if (!seenDataDivision || inProcedureDivision) continue;
-    if (isCommentLine(line)) continue;
     if (!DATA_DECLARATION.test(line)) continue;
     const head = LEVEL_AND_NAME.exec(line);
     if (!head) continue;
-    const pic = PIC_CLAUSE.exec(line)?.[1] ?? null;
-    const usage = USAGE_CLAUSE.exec(line)?.[1] ?? null;
-    const value = VALUE_CLAUSE.exec(line)?.[1] ?? null;
-    const occursMatch = OCCURS_CLAUSE.exec(line);
+    const declarationLine = i + 1;
+    const logical = logicalDeclarationText(lines, i, line);
+    const logicalLine = logical.text;
+    i = logical.endIndex;
+    const picMatch = execOutsideQuotedText(PIC_CLAUSE, logicalLine);
+    const pic = picMatch?.[1] ? normalizePictureText(picMatch[1]) : null;
+    const usage = execOutsideQuotedText(USAGE_CLAUSE, logicalLine)?.[1] ?? null;
+    const value = execOutsideQuotedText(VALUE_CLAUSE, logicalLine)?.[1] ?? null;
+    const occursMatch = execOutsideQuotedText(OCCURS_CLAUSE, logicalLine);
     const occurs = occursMatch ? occursMatch[0] : null;
-    const redefinesMatch = REDEFINES_CLAUSE.exec(line);
+    const redefinesMatch = execOutsideQuotedText(REDEFINES_CLAUSE, logicalLine);
     const redefines = redefinesMatch
       ? redefinesMatch[0].replace(/^REDEFINES\s+/i, "")
       : null;
     items.push({
-      line: i + 1,
+      line: declarationLine,
       level: head[1] ?? "",
       name: head[2] ?? "",
       picture: pic,
@@ -642,31 +786,37 @@ export function extractDataItems(source: string): DataItem[] {
 export function summariseDataItem(item: DataItem): HoverEntry {
   const safeName = escapeMarkdownContent(item.name);
   const fragments: string[] = [];
+  const mappings: string[] = [];
+  const warnings: string[] = [];
   fragments.push(`Level ${item.level}.`);
   if (item.picture) {
     const pic = explainPicture(item.picture);
     fragments.push(pic.explanation);
-    if (pic.javaMapping) fragments.push(pic.javaMapping);
+    if (pic.javaMapping) mappings.push(pic.javaMapping);
   }
   if (item.usage) {
     const usage = explainUsage(item.usage);
     if (usage) {
       fragments.push(usage.explanation);
-      if (usage.javaMapping) fragments.push(usage.javaMapping);
+      if (usage.javaMapping) mappings.push(usage.javaMapping);
+      if (usage.warning) warnings.push(usage.warning);
     }
   }
   if (item.occurs) {
     const occurs = explainOccurs(item.occurs);
     if (occurs) {
       fragments.push(occurs.explanation);
-      if (occurs.javaMapping) fragments.push(occurs.javaMapping);
+      if (occurs.javaMapping) mappings.push(occurs.javaMapping);
+      if (occurs.warning) warnings.push(occurs.warning);
     }
   }
   if (item.redefines) {
-    const safeTarget = escapeMarkdownContent(item.redefines);
-    fragments.push(
-      `Aliases the storage of \`${safeTarget}\` (REDEFINES) — same bytes, alternate view.`,
-    );
+    const redefines = explainRedefines(`REDEFINES ${item.redefines}`);
+    if (redefines) {
+      fragments.push(redefines.explanation);
+      if (redefines.javaMapping) mappings.push(redefines.javaMapping);
+      if (redefines.warning) warnings.push(redefines.warning);
+    }
   }
   if (item.value) {
     const valueEntry = explainValue(`VALUE ${item.value}`);
@@ -675,5 +825,7 @@ export function summariseDataItem(item: DataItem): HoverEntry {
   return {
     title: `${safeName} — line ${item.line}`,
     explanation: fragments.join(" "),
+    javaMapping: mappings.length > 0 ? mappings.join(" ") : undefined,
+    warning: warnings.length > 0 ? warnings.join(" ") : undefined,
   };
 }

@@ -67,7 +67,7 @@ export function BottomWorkbench() {
         <button
           type="button"
           onClick={() => setBottomPanelOpen(false)}
-          className="p-1.5 text-text-dim hover:text-text rounded hover:bg-bg-3"
+          className="flex min-h-6 min-w-6 items-center justify-center rounded p-1.5 text-text-dim hover:bg-bg-3 hover:text-text"
           aria-label="Close Bottom Panel"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>

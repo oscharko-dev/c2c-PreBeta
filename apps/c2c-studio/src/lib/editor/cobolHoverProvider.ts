@@ -89,6 +89,53 @@ function collectMatches(
   return results;
 }
 
+function isInsideQuotedString(line: string, index: number): boolean {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < index; i += 1) {
+    const char = line[i];
+    if ((char === "'" || char === '"') && quote === null) {
+      quote = char;
+    } else if (char === quote) {
+      quote = null;
+    }
+  }
+  return quote !== null;
+}
+
+function floatingCommentStart(line: string): number {
+  let searchFrom = 0;
+  while (searchFrom < line.length) {
+    const index = line.indexOf("*>", searchFrom);
+    if (index < 0) {
+      return -1;
+    }
+    if (!isInsideQuotedString(line, index)) {
+      return index;
+    }
+    searchFrom = index + 2;
+  }
+  return -1;
+}
+
+function isFixedFormatCommentLine(line: string): boolean {
+  if (line.length < 7) {
+    return false;
+  }
+  const indicator = line[6];
+  return indicator === "*" || indicator === "/";
+}
+
+function semanticLineForMatching(line: string): string {
+  if (isFixedFormatCommentLine(line)) {
+    return "";
+  }
+  const commentStart = floatingCommentStart(line);
+  if (commentStart < 0) {
+    return line;
+  }
+  return line.slice(0, commentStart).padEnd(line.length, " ");
+}
+
 function matchAll(
   line: string,
   regex: RegExp,
@@ -101,6 +148,12 @@ function matchAll(
   const matches: TaggedMatch[] = [];
   let match: RegExpExecArray | null;
   while ((match = flagged.exec(line)) !== null) {
+    if (isInsideQuotedString(line, match.index)) {
+      if (match.index === flagged.lastIndex) {
+        flagged.lastIndex += 1;
+      }
+      continue;
+    }
     const entry = toEntry(match);
     if (entry) {
       const start = match.index + 1;
@@ -132,7 +185,7 @@ function matchPicture(line: string): TaggedMatch[] {
 // ``usage`` bucket so the analyzer can distinguish packed-decimal data
 // layouts from other USAGE families.
 function usageKindFor(operand: string): "comp3" | "usage" {
-  const normalized = operand.toUpperCase();
+  const normalized = operand.toUpperCase().replace(/^COMPUTATIONAL\b/, "COMP");
   if (normalized === "COMP-3" || normalized === "PACKED-DECIMAL") {
     return "comp3";
   }
@@ -141,13 +194,17 @@ function usageKindFor(operand: string): "comp3" | "usage" {
 
 function matchUsage(line: string): TaggedMatch[] {
   const regex =
-    /\b(?:USAGE\s+(?:IS\s+)?)?(COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|POINTER|INDEX|DISPLAY)\b/i;
+    /\b(?:USAGE\s+(?:IS\s+)?)?(COMPUTATIONAL-[1-5]|COMPUTATIONAL|COMP-[1-5]|COMP|PACKED-DECIMAL|BINARY|POINTER|INDEX|DISPLAY)\b/i;
   const flagged = regex.flags.includes("g")
     ? regex
     : new RegExp(regex.source, `${regex.flags}g`);
   const matches: TaggedMatch[] = [];
   let match: RegExpExecArray | null;
   while ((match = flagged.exec(line)) !== null) {
+    if (isInsideQuotedString(line, match.index)) {
+      if (match.index === flagged.lastIndex) flagged.lastIndex += 1;
+      continue;
+    }
     const operand = match[1] ?? "";
     // Filter out the bare ``DISPLAY`` verb (operand not in a USAGE
     // clause). Only accept DISPLAY when the captured match itself
@@ -249,8 +306,9 @@ export function computeHoverFor(
   line: string,
   position: HoverPosition,
 ): ComputedHover | null {
+  const semanticLine = semanticLineForMatching(line);
   const matches = collectMatches(
-    line,
+    semanticLine,
     matchPicture,
     matchUsage,
     matchOccurs,

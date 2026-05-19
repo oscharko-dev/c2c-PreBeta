@@ -12,9 +12,11 @@ import { useMemo } from "react";
 import { useSourceWorkspace } from "@/stores/sourceWorkspace";
 import {
   extractDataItems,
+  hoverEntryToMarkdownString,
   summariseDataItem,
   type DataItem,
 } from "@/lib/editor/cobolKnowledge";
+import { renderSanitizedHtml } from "@/lib/editor/hoverMarkdownSanitizer";
 
 export interface CobolDataDictionaryProps {
   // Optional override used by tests and stories. Production callers
@@ -88,6 +90,7 @@ function DataItemRow({ item }: { item: DataItem }) {
   // earlier wrapping as ineffective since `item` is recreated by the
   // parent map call on every parent render).
   const summary = summariseDataItem(item);
+  const summaryHtml = renderSanitizedHtml(hoverEntryToMarkdownString(summary));
   return (
     <li
       className="rounded border border-line-2 bg-bg-2 p-3"
@@ -116,7 +119,13 @@ function DataItemRow({ item }: { item: DataItem }) {
           REDEFINES {item.redefines}
         </p>
       ) : null}
-      <p className="mt-1 text-xs text-text-dim">{summary.explanation}</p>
+      <div
+        className="prose prose-invert mt-1 max-w-none text-xs text-text-dim [&_code]:text-text [&_p]:my-1"
+        data-testid="cobol-data-dictionary-summary"
+        // `summaryHtml` has crossed the shared marked -> DOMPurify
+        // allow-list used by the hover/assist surfaces.
+        dangerouslySetInnerHTML={{ __html: summaryHtml }}
+      />
     </li>
   );
 }
