@@ -394,11 +394,13 @@ function availableModelGateway(): ModelGatewayClient {
   };
 }
 
+const baseRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "c2c-bff-test-root-"));
+
 const baseConfig: BffConfig = {
   serviceName: "c2c-bff",
   port: 0,
-  repoRoot: "/tmp/c2c-test-root",
-  staticRoot: "/tmp/c2c-test-static-does-not-exist",
+  repoRoot: baseRepoRoot,
+  staticRoot: path.join(baseRepoRoot, "static-does-not-exist"),
   orchestratorUrl: "",
   orchestratorControlToken: "",
   evidenceUrl: "",
