@@ -33,6 +33,20 @@ export interface BffConfig {
   // run cannot pin the BFF process or the browser tab.
   artifactContentMaxBytes: number;
   enableDiagnosticFixtures: boolean;
+  // Issue #272 / ADR-0005 §2 "Named prerequisites": the BFF mints
+  // fixture session identifiers (opaque ``tenantId`` / ``userId``)
+  // via ``POST /api/v0/session/sign-in`` so Studio can satisfy the
+  // bootstrap dependency without a real identity layer behind it.
+  // Operators with a real IdP integration MUST set
+  // ``C2C_ENABLE_FIXTURE_SESSIONS=false`` so the dev-mode mint
+  // endpoint returns 404 in production. Default is ``true`` to keep
+  // W0 single-developer deployments functional out of the box.
+  enableFixtureSessions: boolean;
+  // ``Secure`` flag on the session cookie. Auto-detected per-request
+  // from TLS / ``X-Forwarded-Proto``; this config flag forces it on
+  // for every response. Useful when the BFF is reached over a TLS
+  // proxy that does not set ``X-Forwarded-Proto``.
+  forceSecureSessionCookies: boolean;
 }
 
 const SERVICE_NAME = "c2c-bff";
@@ -157,5 +171,23 @@ export function loadConfig(
       DEFAULT_ARTIFACT_CONTENT_MAX_BYTES,
     ),
     enableDiagnosticFixtures: parseBoolFlag(env.C2C_ENABLE_DIAGNOSTIC_FIXTURES),
+    enableFixtureSessions: parseBoolFlagDefaultTrue(
+      env.C2C_ENABLE_FIXTURE_SESSIONS,
+    ),
+    forceSecureSessionCookies: parseBoolFlag(env.C2C_FORCE_SECURE_COOKIES),
   };
+}
+
+function parseBoolFlagDefaultTrue(raw: string | undefined): boolean {
+  if (raw === undefined || raw.trim() === "") return true;
+  const normalized = raw.trim().toLowerCase();
+  if (
+    normalized === "0" ||
+    normalized === "false" ||
+    normalized === "no" ||
+    normalized === "off"
+  ) {
+    return false;
+  }
+  return true;
 }

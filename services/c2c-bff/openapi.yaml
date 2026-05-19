@@ -70,6 +70,106 @@ paths:
         "415":
           description: unsupported content-type
 
+  /api/v0/session/sign-in:
+    post:
+      summary: Dev-mode session sign-in (mints opaque tenantId / userId + cookie)
+      description: >
+        Issue #272 / ADR-0005 §2 "Named prerequisites": when the BFF
+        is deployed without a real identity layer behind the bootstrap,
+        Studio satisfies the draft-key prerequisite via this endpoint.
+        Mints opaque pseudonymous `tenantId` and `userId` (UUID-shaped
+        random hex), allocates a fresh `draftKeyWrappingSecret` keyed
+        by `sessionId` server-side, and sets the `c2c.sid` cookie
+        (`HttpOnly; SameSite=Lax; Path=/; Secure` when TLS-terminated).
+        The response body intentionally omits the wrapping secret —
+        it is delivered by `POST /api/v0/session/bootstrap` only, so
+        the sign-in request itself is not a vector for key-material
+        exposure in network logs.
+
+        The body accepts optional `tenantId` / `userId` overrides for
+        test fixtures and dev tooling; the server rejects values that
+        contain `@` or whitespace (ADR-0005 §3 defensive check
+        against accidental email leakage into IndexedDB plaintext
+        keys).
+
+        Returns 404 in deployments that have disabled fixture
+        sessions via `C2C_ENABLE_FIXTURE_SESSIONS=false` (production
+        with a real IdP integration).
+      operationId: sessionSignIn
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionSignInRequest"
+      responses:
+        "200":
+          description: session minted; `c2c.sid` cookie set
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: >
+                `c2c.sid=<opaque hex>; Path=/; HttpOnly; SameSite=Lax`
+                (with `Secure` appended when the request was TLS-terminated).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSignInResponse"
+        "400":
+          description: tenantId / userId contained `@` or whitespace
+        "404":
+          description: fixture sessions are disabled in this deployment
+        "413":
+          description: request body exceeded the 1 KiB cap
+
+  /api/v0/session/bootstrap:
+    post:
+      summary: Return the draft-key wrapping secret for the current auth session
+      description: >
+        Issue #272 / ADR-0005 §2 "Encryption at Rest": Studio fetches
+        this endpoint at app start (and on every reload) to obtain the
+        `draftKeyWrappingSecret` it uses as HKDF input keying material
+        for AES-GCM encryption of IndexedDB-backed drafts. The
+        endpoint requires the `c2c.sid` session cookie and returns the
+        **same** wrapping secret for the lifetime of the auth session
+        — a reload re-fetches and can decrypt drafts written earlier
+        in the session. Rotation happens only at the next sign-in;
+        logout deletes the secret and drafts encrypted under it
+        become permanently unreadable.
+
+        Studio holds the wrapping secret in memory only; it must
+        never be written to storage, logged, or re-sent.
+      operationId: sessionBootstrap
+      responses:
+        "200":
+          description: wrapping secret returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionBootstrapResponse"
+        "401":
+          description: >
+            session cookie missing or referenced a session that no
+            longer exists (BFF restart, logout, or forged cookie).
+            On the cookie-mismatch path the response also clears the
+            cookie so the browser stops replaying the dead identifier.
+
+  /api/v0/session/logout:
+    post:
+      summary: Delete the server-side session and clear the cookie
+      description: >
+        Issue #272 / ADR-0005 §2 "Rotation": deletes the server-side
+        session record keyed by the `c2c.sid` cookie and emits a
+        `Set-Cookie` header that clears the cookie. Drafts encrypted
+        under the deleted wrapping secret become permanently
+        unreadable. Idempotent: returns 204 whether or not the
+        cookie / record existed.
+      operationId: sessionLogout
+      responses:
+        "204":
+          description: session deleted (or never existed); cookie cleared
+
   /api/v0/mode:
     get:
       summary: Report upstream reachability (orchestrator and evidence-service)
@@ -653,6 +753,59 @@ components:
       properties:
         orchestrator: { type: string, enum: [live, mock] }
         evidence: { type: string, enum: [live, mock] }
+
+    SessionSignInRequest:
+      description: >
+        Optional identity overrides for fixture / dev tooling. Omit
+        to let the BFF mint opaque identifiers itself. Validation:
+        each value matches `[A-Za-z0-9._-]{1,128}` and contains
+        neither `@` nor whitespace (ADR-0005 §3).
+      type: object
+      additionalProperties: false
+      properties:
+        tenantId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._\\-]+$"
+        userId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._\\-]+$"
+
+    SessionSignInResponse:
+      type: object
+      required: [tenantId, userId]
+      additionalProperties: false
+      properties:
+        tenantId:
+          type: string
+          description: Opaque pseudonymous identifier (no PII).
+        userId:
+          type: string
+          description: Opaque pseudonymous identifier (no PII).
+
+    SessionBootstrapResponse:
+      type: object
+      required: [tenantId, userId, draftKeyWrappingSecret]
+      additionalProperties: false
+      properties:
+        tenantId:
+          type: string
+          description: Opaque pseudonymous identifier (no PII).
+        userId:
+          type: string
+          description: Opaque pseudonymous identifier (no PII).
+        draftKeyWrappingSecret:
+          type: string
+          format: byte
+          description: >
+            Base64-encoded 32 random bytes, fresh per auth session.
+            HKDF-SHA-256 input keying material for the AES-GCM draft
+            encryption key (ADR-0005 §2). Studio MUST keep this in
+            memory only — never logged, never re-sent, never written
+            to local storage.
 
     Sample:
       description: |

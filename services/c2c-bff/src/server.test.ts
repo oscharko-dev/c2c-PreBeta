@@ -405,6 +405,8 @@ const baseConfig: BffConfig = {
   transformSourceMaxBytes: 1_000_000,
   artifactContentMaxBytes: 1_048_576,
   enableDiagnosticFixtures: false,
+  enableFixtureSessions: true,
+  forceSecureSessionCookies: false,
 };
 
 test("loadConfig rejects live orchestrator URL without a control token", () => {

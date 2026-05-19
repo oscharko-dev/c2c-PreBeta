@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "lint": "tsc --noEmit",
-    "test": "npm run build && node --test dist/server.test.js dist/diagnostics.test.js dist/samples.test.js dist/upstream.test.js dist/error-codes.test.js dist/acceptance-fixtures.test.js dist/formatJava.test.js dist/editorExplain.test.js dist/editorTelemetry.test.js dist/cspReport.test.js",
+    "test": "npm run build && node --test dist/server.test.js dist/diagnostics.test.js dist/samples.test.js dist/upstream.test.js dist/error-codes.test.js dist/acceptance-fixtures.test.js dist/formatJava.test.js dist/editorExplain.test.js dist/editorTelemetry.test.js dist/cspReport.test.js dist/sessionStore.test.js dist/sessionCookie.test.js dist/sessionRoutes.test.js dist/rateLimit.test.js",
     "start": "node dist/index.js"
   },
   "devDependencies": {

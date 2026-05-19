@@ -36,7 +36,10 @@ vi.mock("@/lib/editor/editorPersistence", () => {
       clearAll: clearAllMock,
       listDrafts: vi.fn(async () => []),
     },
-    getCurrentDraftScope: () => ({ tenantId: "default", userId: "local" }),
+    getCurrentDraftScope: async () => ({
+      tenantId: "default",
+      userId: "local",
+    }),
   };
 });
 

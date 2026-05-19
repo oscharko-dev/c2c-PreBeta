@@ -1247,7 +1247,7 @@ export function GeneratedJavaEditorPane() {
               computeSha256Hex(rawText),
               computeSha256Hex(redaction.redactedText),
             ]);
-            const scope = getCurrentDraftScope();
+            const scope = await getCurrentDraftScope();
             const runId = stateRunIdRef.current;
             const payload: EditorAssistRequest = {
               schemaVersion: EDITOR_ASSIST_SCHEMA_VERSION,

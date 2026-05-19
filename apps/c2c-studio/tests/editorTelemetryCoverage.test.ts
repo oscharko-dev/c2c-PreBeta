@@ -22,7 +22,23 @@ import {
 import {
   __resetEditorPersistenceForTests,
   createEditorPersistence,
+  type SessionBootstrapProvider,
 } from "@/lib/editor/editorPersistence";
+
+// Issue #272: editorPersistence now derives its AES key from a
+// bootstrap-issued wrapping secret. Tests inject a stub provider so
+// the persistence call path is exercised without standing up a BFF.
+// Identity matches the legacy fixture scope ("default"/"local") that
+// the rest of this file passes to saveDraft.
+const telemetryBootstrap: SessionBootstrapProvider = async () => {
+  const secret = new Uint8Array(new ArrayBuffer(32));
+  for (let i = 0; i < 32; i += 1) secret[i] = i;
+  return {
+    tenantId: "default",
+    userId: "local",
+    draftKeyWrappingSecret: secret,
+  };
+};
 
 interface CapturedEvent {
   eventType: string;
@@ -114,7 +130,10 @@ describe("Issue #251 AC8 — each instrumented slice emits at least one event", 
   it("IDE-3: editorPersistence emits save.local when a draft is saved", async () => {
     const { events, triggerFlush } = setupCapture();
     await __resetEditorPersistenceForTests();
-    const persistence = createEditorPersistence({ ttlMs: 60_000 });
+    const persistence = createEditorPersistence({
+      ttlMs: 60_000,
+      sessionBootstrap: telemetryBootstrap,
+    });
     await persistence.saveDraft(
       { tenantId: "default", userId: "local" },
       { kind: "cobol", programId: "BRNCH01", sourceName: "branch.cbl" },
@@ -262,7 +281,10 @@ describe("Issue #251 AC8 — each instrumented slice emits at least one event", 
     // entire batch in one place.
     lintJava("public class C{}", { filePath: "C.java" });
     await __resetEditorPersistenceForTests();
-    const persistence = createEditorPersistence({ ttlMs: 60_000 });
+    const persistence = createEditorPersistence({
+      ttlMs: 60_000,
+      sessionBootstrap: telemetryBootstrap,
+    });
     await persistence.saveDraft(
       { tenantId: "default", userId: "local" },
       {
