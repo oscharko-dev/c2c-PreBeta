@@ -31,12 +31,18 @@ export function WorkbenchShell() {
   const apiState = useC2cApi();
   const [purgeNotice, setPurgeNotice] = useState<string | null>(null);
 
-  // Studio-IDE-3 (#247) / ADR-2 §1: purge expired drafts on Studio start.
-  // Fire-and-forget; IndexedDB is unavailable in some test environments
-  // and the rest of the workbench should keep functioning if the purge
-  // fails. The purge is scoped to the active session so a shared browser
-  // profile never lets one user delete another user's expired drafts.
+  // Studio-IDE-3 (#247) / ADR-2 §1: purge expired drafts after the BFF is
+  // reachable. Session bootstrap is a BFF-owned surface; standalone Studio
+  // harnesses intentionally run without a BFF, so they must not open a
+  // bootstrap request that can keep the page from reaching network-idle.
+  // Fire-and-forget; IndexedDB is unavailable in some test environments and
+  // the rest of the workbench should keep functioning if the purge fails.
+  // The purge is scoped to the active session so a shared browser profile
+  // never lets one user delete another user's expired drafts.
   useEffect(() => {
+    if (apiState.loading || apiState.health === null) {
+      return;
+    }
     let active = true;
     void (async () => {
       try {
@@ -58,7 +64,7 @@ export function WorkbenchShell() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [apiState.health, apiState.loading]);
 
   return (
     <WorkbenchProvider>
