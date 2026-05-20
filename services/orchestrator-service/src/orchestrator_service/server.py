@@ -827,12 +827,9 @@ class OrchestratorService:
         execution_mode = execution_mode_raw.strip().lower() or EXECUTION_MODE_STANDARD
         if execution_mode not in {EXECUTION_MODE_STANDARD, EXECUTION_MODE_PARITY}:
             raise ValueError("executionMode must be standard or parity")
-        fixture_id_raw = payload.get(
-            "sourceReferenceFixtureId",
-            payload.get("fixtureId", payload.get("trustCaseId")),
-        )
+        fixture_id_raw = payload.get("sourceReferenceFixtureId")
         trust_case_id_raw = payload.get("trustCaseId")
-        reference_mode_raw = payload.get("sourceReferenceMode", payload.get("referenceMode"))
+        reference_mode_raw = payload.get("sourceReferenceMode")
         fixture_id = ""
         if isinstance(fixture_id_raw, str) and fixture_id_raw.strip():
             fixture_id = fixture_id_raw.strip()
