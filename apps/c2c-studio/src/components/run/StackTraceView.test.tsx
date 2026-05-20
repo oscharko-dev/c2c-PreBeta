@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 
 import { StackTraceView } from "./StackTraceView";
 import { clearTraceCache } from "@/lib/editor/traceParser";
+import {
+  REVEAL_COBOL_EVENT,
+  REVEAL_JAVA_EVENT,
+} from "@/lib/editor/revealEvents";
 import type { TraceabilityEnvelope } from "@/types/api";
 
 type FetchFn = typeof fetch;
@@ -133,7 +137,7 @@ describe("StackTraceView", () => {
 
   it("dispatches `c2c:reveal-cobol` when the COBOL-link button is activated", async () => {
     const listener = vi.fn();
-    window.addEventListener("c2c:reveal-cobol", listener);
+    window.addEventListener(REVEAL_COBOL_EVENT, listener);
     try {
       const provider = async (path: string) =>
         path === "src/main/java/com/example/Foo.java" ? SAMPLE_JAVA : null;
@@ -156,13 +160,13 @@ describe("StackTraceView", () => {
       }>;
       expect(event.detail).toEqual({ cobolFile: "PROG1.cbl", cobolLine: 30 });
     } finally {
-      window.removeEventListener("c2c:reveal-cobol", listener);
+      window.removeEventListener(REVEAL_COBOL_EVENT, listener);
     }
   });
 
   it("dispatches `c2c:reveal-java` when the Open Java target link is activated", async () => {
     const listener = vi.fn();
-    window.addEventListener("c2c:reveal-java", listener);
+    window.addEventListener(REVEAL_JAVA_EVENT, listener);
     try {
       const provider = async (path: string) =>
         path === "src/main/java/com/example/Foo.java" ? SAMPLE_JAVA : null;
@@ -188,7 +192,7 @@ describe("StackTraceView", () => {
         javaLine: 8,
       });
     } finally {
-      window.removeEventListener("c2c:reveal-java", listener);
+      window.removeEventListener(REVEAL_JAVA_EVENT, listener);
     }
   });
 
@@ -265,7 +269,7 @@ describe("StackTraceView", () => {
   it("frame buttons are focusable via Tab and activatable via Enter", async () => {
     const user = userEvent.setup();
     const listener = vi.fn();
-    window.addEventListener("c2c:reveal-cobol", listener);
+    window.addEventListener(REVEAL_COBOL_EVENT, listener);
     try {
       const provider = async () => SAMPLE_JAVA;
       render(
@@ -290,7 +294,7 @@ describe("StackTraceView", () => {
       await user.keyboard(" ");
       expect(listener).toHaveBeenCalledTimes(2);
     } finally {
-      window.removeEventListener("c2c:reveal-cobol", listener);
+      window.removeEventListener(REVEAL_COBOL_EVENT, listener);
     }
   });
 

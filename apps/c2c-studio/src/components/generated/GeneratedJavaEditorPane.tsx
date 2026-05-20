@@ -56,6 +56,12 @@ import {
   TraceabilityNotFoundError,
 } from "@/lib/editor/traceParser";
 import { resolveJavaToCobol } from "@/lib/editor/lineageNavigation";
+import { pathSuffixMatches } from "@/lib/editor/pathMatching";
+import {
+  dispatchRevealCobol,
+  REVEAL_JAVA_EVENT,
+  type RevealJavaDetail,
+} from "@/lib/editor/revealEvents";
 import {
   buildTrustPillarDecorations,
   lineageCoveragePct,
@@ -93,27 +99,6 @@ import {
 // feedback (e.g. "lineage stale due to manual edit"). Kept distinct from
 // the diagnostic owners so clearing it never wipes real diagnostics.
 const LINEAGE_FEEDBACK_OWNER = "c2c-lineage-feedback" as const;
-
-// Studio-IDE-6 (#248): a custom DOM event the Java pane dispatches when
-// the user invokes Alt+J on a region with valid lineage. The COBOL pane
-// listens for this and reveals the target line. Decoupling via window
-// events avoids prop-drilling and keeps the two panes loosely coupled.
-export interface RevealCobolDetail {
-  cobolFile: string;
-  cobolLine: number;
-}
-const REVEAL_COBOL_EVENT = "c2c:reveal-cobol";
-
-// Studio-IDE-8 (#253): inverse of REVEAL_COBOL_EVENT. The COBOL pane
-// (Alt+C) and the stack-trace view both emit `c2c:reveal-java` with a
-// (javaFile, javaLine) detail; this pane resolves the path against
-// generated files and reveals the line, switching files first when
-// needed.
-export interface RevealJavaDetail {
-  javaFile: string;
-  javaLine: number;
-}
-const REVEAL_JAVA_EVENT = "c2c:reveal-java";
 
 const SAVE_NOTICE_VISIBLE_MS = 2500;
 const FORMAT_NOTICE_VISIBLE_MS = 4000;
@@ -696,14 +681,7 @@ export function GeneratedJavaEditorPane() {
     const generatedPaths = state.generatedFiles?.files ?? [];
     const matched = generatedPaths.find((file) => {
       if (file.path === revealJavaTarget.filePath) return true;
-      const a = file.path.split(/[\\/]+/).filter(Boolean);
-      const b = revealJavaTarget.filePath.split(/[\\/]+/).filter(Boolean);
-      if (a.length === 0 || b.length === 0) return false;
-      const minLen = Math.min(a.length, b.length);
-      for (let i = 0; i < minLen; i += 1) {
-        if (a[a.length - 1 - i] !== b[b.length - 1 - i]) return false;
-      }
-      return true;
+      return pathSuffixMatches(file.path, revealJavaTarget.filePath);
     });
     if (!matched) return;
     pendingRevealJavaRef.current = {
@@ -1343,14 +1321,10 @@ export function GeneratedJavaEditorPane() {
             ).catch(() => ({ ok: false as const, reason: "no_mapping" }));
             if (result.ok) {
               monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
-              window.dispatchEvent(
-                new CustomEvent<RevealCobolDetail>(REVEAL_COBOL_EVENT, {
-                  detail: {
-                    cobolFile: result.target.cobolFile,
-                    cobolLine: result.target.cobolLine,
-                  },
-                }),
-              );
+              dispatchRevealCobol({
+                cobolFile: result.target.cobolFile,
+                cobolLine: result.target.cobolLine,
+              });
             } else {
               // Studio-IDE-6 (#248 AC6/AC7/AC9): tooltip strings are part of
               // the acceptance contract and must match the issue spec verbatim.
