@@ -15,6 +15,23 @@ fixtures are the source of truth.
 - selected arithmetic covered by corpus fixtures;
 - selected branch/control flow covered by corpus fixtures.
 
+## First Supported Trust Slice
+
+[ADR 0009](../adr/0009-developer-trust-parity-and-repair-contract.md) defines
+the first supported Developer Trust workflow as a controlled trust case over
+this subset. The first supported slice is:
+
+- one repository-owned COBOL source file from the curated corpus;
+- one repository-owned, versioned trust-case input fixture;
+- one fixture-backed reference output or equivalent controlled reference
+  artifact for the same input;
+- one generated Java candidate built and executed through the controlled
+  product pipeline.
+
+Studio and downstream APIs must label the source/reference side honestly as
+`Reference mode: curated fixture`. This first slice does not claim live
+execution of arbitrary customer COBOL.
+
 ## Out of Scope
 
 - copybooks;
@@ -25,6 +42,14 @@ fixtures are the source of truth.
 - file I/O beyond explicit blocked fixtures;
 - multi-program call chains;
 - broad paragraph semantics.
+
+The first trust workflow also excludes:
+
+- arbitrary customer-supplied runtime environments;
+- live mainframe execution presented as the default reference path;
+- unsupported runtime dependencies hidden behind fixture-backed results;
+- automatic parity claims for generated Java that was not built, executed, and
+  compared deterministically.
 
 Unsupported input must be blocked honestly. It must not be converted into a
 successful generated Java claim.
