@@ -31,6 +31,15 @@
       "supplyChainParticipation": ["sbom", "license"],
       "dockerfile": "Dockerfile",
       "openapi": "openapi.yaml",
+      "schemas": [
+        "schemas/acceptance-fixture-v0.json",
+        "schemas/diagnostic-v0.json",
+        "schemas/format-java-request-v0.json",
+        "schemas/format-java-response-v0.json",
+        "schemas/generated-traceability-v0.json",
+        "schemas/java-region-classification-v0.json",
+        "schemas/run-summary-v0.json"
+      ],
       "defaultPort": 8090,
       "runtimeRole": "browser-boundary",
       "ownerArea": "bff",
@@ -51,6 +60,12 @@
       "supplyChainParticipation": ["sbom", "license"],
       "dockerfile": "Dockerfile",
       "openapi": "openapi.yaml",
+      "schemas": [
+        "schemas/agent-invocation-request-v0.json",
+        "schemas/agent-invocation-response-v0.json",
+        "schemas/agent-repair-decision-v0.json",
+        "schemas/agent-repair-input-v0.json"
+      ],
       "defaultPort": 8084,
       "runtimeRole": "workflow-authority",
       "ownerArea": "orchestration",
@@ -166,6 +181,7 @@
       "supplyChainParticipation": ["sbom", "license"],
       "dockerfile": "Dockerfile",
       "schemas": [
+        "schemas/harness-event-envelope-v0.json",
         "services/agentic-harness-core/schemas/capability-catalog.schema.json",
         "services/agentic-harness-core/schemas/mcp-server-registry.schema.json",
         "services/agentic-harness-core/schemas/tool-registry.schema.json"
@@ -187,6 +203,12 @@
       "packageManifest": "go.mod",
       "dependencyManifest": "go.mod",
       "supplyChainParticipation": ["sbom", "license"],
+      "schemas": [
+        "schemas/agent-trajectory-ledger-v0.json",
+        "schemas/editor-telemetry-event-v0.json",
+        "schemas/experience-event-v0.json",
+        "schemas/learning-artifact-registry-v0.json"
+      ],
       "defaultPort": 8084,
       "runtimeRole": "learning-signal-service",
       "ownerArea": "experience-learning",
@@ -204,7 +226,11 @@
       "packageManifest": "go.mod",
       "dependencyManifest": "go.mod",
       "supplyChainParticipation": ["sbom", "license"],
-      "schemas": ["schemas/model-policy-skipped-v0.json"],
+      "schemas": [
+        "schemas/model-gateway-capabilities-v0.json",
+        "schemas/model-invocation-ledger-v0.json",
+        "schemas/model-policy-skipped-v0.json"
+      ],
       "defaultPort": 8085,
       "runtimeRole": "productive-model-boundary",
       "ownerArea": "model-gateway",

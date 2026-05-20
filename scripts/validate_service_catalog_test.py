@@ -93,6 +93,86 @@ class ValidateServiceCatalogTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("openapi does not exist", result.stderr)
 
+    def test_missing_openapi_owner_fails(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        for component in mutated["components"]:
+            if component["id"] == "evidence-service":
+                component.pop("openapi", None)
+                break
+        else:
+            self.fail("evidence-service missing from catalog fixture")
+
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be owned by exactly one catalog component", result.stderr)
+
+    def test_missing_shared_schema_owner_fails(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        for component in mutated["components"]:
+            if component["id"] == "c2c-bff":
+                component["schemas"] = [
+                    path for path in component["schemas"] if path != "schemas/diagnostic-v0.json"
+                ]
+                break
+        else:
+            self.fail("c2c-bff missing from catalog fixture")
+
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shared schema schemas/diagnostic-v0.json", result.stderr)
+
+    def test_duplicate_shared_schema_owner_fails(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        for component in mutated["components"]:
+            if component["id"] == "orchestrator-service":
+                component.setdefault("schemas", []).append("schemas/diagnostic-v0.json")
+                break
+        else:
+            self.fail("orchestrator-service missing from catalog fixture")
+
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shared schema schemas/diagnostic-v0.json", result.stderr)
+
+    def test_service_local_schema_must_remain_local_to_its_component(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        for component in mutated["components"]:
+            if component["id"] == "experience-learning-service":
+                component["schemas"] = [
+                    "services/agentic-harness-core/schemas/capability-catalog.schema.json"
+                ]
+                break
+        else:
+            self.fail("experience-learning-service missing from catalog fixture")
+
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must stay under the owning component's schemas/ folder", result.stderr)
+
     def test_supply_chain_participation_is_required(self) -> None:
         catalog = _load_catalog()
         mutated = copy.deepcopy(catalog)

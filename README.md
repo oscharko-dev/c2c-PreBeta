@@ -72,6 +72,9 @@ language, package manager, validation-relevant contract files, ownership,
 runtime role, and release-gate participation. Each entry keeps a stable `id`
 separate from the current live `path`, which lets the repository describe
 today's layout without pretending that future migration targets already exist.
+For Issue #328, the same catalog is also the ownership map for service
+`openapi` files and shared root schemas declared through `schemas`; see
+[Contract and Schema Ownership](docs/governance/contract-ownership.md).
 Dependency and license visibility is catalog-driven: each component records its
 `packageManifest`, `dependencyManifest`, and `supplyChainParticipation`, and
 `scripts/license-sbom.sh` resolves the live paths from that metadata instead of

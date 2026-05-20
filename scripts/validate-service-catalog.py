@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the repository service catalog for Issue #327."""
+"""Validate the repository service catalog for Issues #327 and #328."""
 
 from __future__ import annotations
 
@@ -225,6 +225,99 @@ def _validate_component(
     return classification
 
 
+def _find_repo_openapi_files(repo_root: Path) -> list[str]:
+    candidates = sorted(
+        {
+            path.relative_to(repo_root).as_posix()
+            for pattern in ("openapi.yaml", "openapi.yml", "openapi-*.yaml", "openapi-*.yml")
+            for path in (repo_root / "services").rglob(pattern)
+            if path.is_file()
+        }
+    )
+    return candidates
+
+
+def _find_repo_shared_schema_files(repo_root: Path) -> list[str]:
+    return sorted(path.relative_to(repo_root).as_posix() for path in (repo_root / "schemas").glob("*.json"))
+
+
+def _find_repo_service_local_schema_files(repo_root: Path) -> list[str]:
+    return sorted(
+        path.relative_to(repo_root).as_posix()
+        for path in (repo_root / "services").rglob("schemas/*.json")
+        if path.is_file()
+    )
+
+
+def _validate_contract_ownership(repo_root: Path, components: list[dict[str, Any]]) -> None:
+    component_paths = {component["id"]: component["path"] for component in components}
+    openapi_owners: dict[str, list[str]] = {}
+    shared_schema_owners: dict[str, list[str]] = {}
+    service_local_schema_owners: dict[str, list[str]] = {}
+
+    for component in components:
+        component_id = component["id"]
+        component_root = _resolve_repo_relative(repo_root, component["path"], "path", component_id)
+
+        if "openapi" in component:
+            openapi_path = _resolve_component_relative(
+                repo_root, component_root, component["openapi"], "openapi", component_id
+            )
+            openapi_owners.setdefault(openapi_path.relative_to(repo_root).as_posix(), []).append(component_id)
+
+        if "schemas" not in component:
+            continue
+
+        for schema_path in _validate_string_array(component["schemas"], "schemas", component_id):
+            resolved = _resolve_repo_relative(repo_root, schema_path, "schemas", component_id)
+            relative_path = resolved.relative_to(repo_root).as_posix()
+            if relative_path.startswith("schemas/"):
+                shared_schema_owners.setdefault(relative_path, []).append(component_id)
+                continue
+
+            service_local_prefix = f"{component['path']}/schemas/"
+            if relative_path.startswith(service_local_prefix):
+                service_local_schema_owners.setdefault(relative_path, []).append(component_id)
+                continue
+
+            if "/schemas/" in relative_path:
+                raise ValueError(
+                    f"{component_id}: schema {relative_path} must stay under the owning component's "
+                    "schemas/ folder or the shared repo-level schemas/ directory"
+                )
+
+    for openapi_path in _find_repo_openapi_files(repo_root):
+        owners = openapi_owners.get(openapi_path, [])
+        if len(owners) != 1:
+            raise ValueError(
+                f"OpenAPI file {openapi_path} must be owned by exactly one catalog component; "
+                f"found {owners or 'none'}"
+            )
+
+    for schema_path in _find_repo_shared_schema_files(repo_root):
+        owners = shared_schema_owners.get(schema_path, [])
+        if len(owners) != 1:
+            raise ValueError(
+                f"shared schema {schema_path} must be owned by exactly one catalog component; "
+                f"found {owners or 'none'}"
+            )
+
+    for schema_path in _find_repo_service_local_schema_files(repo_root):
+        owners = service_local_schema_owners.get(schema_path, [])
+        if len(owners) != 1:
+            raise ValueError(
+                f"service-local schema {schema_path} must be owned by exactly one catalog component; "
+                f"found {owners or 'none'}"
+            )
+        owner_component_id = owners[0]
+        expected_prefix = f"{component_paths[owner_component_id]}/schemas/"
+        if not schema_path.startswith(expected_prefix):
+            raise ValueError(
+                f"{owner_component_id}: service-local schema {schema_path} must remain local to "
+                f"{component_paths[owner_component_id]}"
+            )
+
+
 def validate_catalog(catalog_path: Path, repo_root: Path) -> None:
     catalog = _load_json(catalog_path)
     validate_catalog_data(catalog, repo_root)
@@ -263,6 +356,8 @@ def validate_catalog_data(catalog: dict[str, Any], repo_root: Path) -> None:
             raise ValueError(
                 f"{component_id}: classification must be {expected_classification!r} for Issue #327 coverage"
             )
+
+    _validate_contract_ownership(repo_root, components)
 
 
 def _component_matches(component: dict[str, Any], args: argparse.Namespace) -> bool:
