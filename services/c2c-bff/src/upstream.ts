@@ -235,6 +235,18 @@ export interface OrchestratorClient {
   // Studio-IDE-6 (#248): per-run trust-pillar traceability payload —
   // c2c-trace.json + IR symbol map + per-file Java region classification.
   getTraceability(runId: string): Promise<UpstreamResponse | undefined>;
+  diagnoseManualCompileRepair?(
+    runId: string,
+    payload: unknown,
+  ): Promise<UpstreamResponse | undefined>;
+  applyManualCompileRepair?(
+    runId: string,
+    payload: unknown,
+  ): Promise<UpstreamResponse | undefined>;
+  rejectManualCompileRepair?(
+    runId: string,
+    payload: unknown,
+  ): Promise<UpstreamResponse | undefined>;
 }
 
 export interface EvidenceClient {
@@ -310,6 +322,15 @@ export function createOrchestratorClient(
         return undefined;
       },
       async getTraceability() {
+        return undefined;
+      },
+      async diagnoseManualCompileRepair() {
+        return undefined;
+      },
+      async applyManualCompileRepair() {
+        return undefined;
+      },
+      async rejectManualCompileRepair() {
         return undefined;
       },
     };
@@ -490,6 +511,42 @@ export function createOrchestratorClient(
     },
     async getTraceability(runId: string) {
       return getRunScopedArtifact(runId, "traceability");
+    },
+    async diagnoseManualCompileRepair(runId: string, payload: unknown) {
+      const safe = encodeURIComponent(runId);
+      return http.request(
+        `${baseUrl}/v0/runs/${safe}/manual-compile-repair/diagnose/request`,
+        {
+          method: "POST",
+          headers: controlHeaders,
+          body: payload,
+          timeoutMs,
+        },
+      );
+    },
+    async applyManualCompileRepair(runId: string, payload: unknown) {
+      const safe = encodeURIComponent(runId);
+      return http.request(
+        `${baseUrl}/v0/runs/${safe}/manual-compile-repair/apply/request`,
+        {
+          method: "POST",
+          headers: controlHeaders,
+          body: payload,
+          timeoutMs,
+        },
+      );
+    },
+    async rejectManualCompileRepair(runId: string, payload: unknown) {
+      const safe = encodeURIComponent(runId);
+      return http.request(
+        `${baseUrl}/v0/runs/${safe}/manual-compile-repair/reject/request`,
+        {
+          method: "POST",
+          headers: controlHeaders,
+          body: payload,
+          timeoutMs,
+        },
+      );
     },
   };
 }

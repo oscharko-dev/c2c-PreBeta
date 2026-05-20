@@ -12,8 +12,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from orchestrator_service.artifacts import KIND_GENERATED_PROJECT_FILE
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.server import create_configured_server
+import orchestrator_service.workflow as orchestrator_workflow
 
 
 class MockHarnessState:
@@ -30,6 +32,8 @@ class MockHarnessState:
         self.fail_run_list = False
         self.fail_capability_registration = False
         self.ledgers: dict[str, dict] = {}
+        self.build_test_responses: list[dict] = []
+        self.model_gateway_responses: list[dict] = []
 
         self.capabilities = {
             "cobol.parse": {
@@ -96,6 +100,25 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
     # noinspection PyPep8Naming
     def do_GET(self) -> None:
         parts = self._path_parts()
+        if len(parts) == 2 and parts[0] == "v0" and parts[1] == "capabilities":
+            self._write_json(
+                200,
+                {
+                    "schema": "v0",
+                    "service": "model-gateway",
+                    "status": "ok",
+                    "provider": "foundry-development",
+                    "roles": [
+                        {
+                            "role": "verification-repair",
+                            "status": "ok",
+                            "availableModels": ["gpt-oss-120b"],
+                            "configuredModels": ["gpt-oss-120b"],
+                        }
+                    ],
+                },
+            )
+            return
         if len(parts) == 2 and parts[0] == "v0" and parts[1] == "runs":
             if self.state.fail_run_list:
                 self._write_json(503, {"error": "harness unavailable"})
@@ -245,16 +268,21 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                     },
                 )
             elif capability == "build-test":
-                self._write_json(
-                    200,
-                    {
+                response = (
+                    self.state.build_test_responses.pop(0)
+                    if self.state.build_test_responses
+                    else {
                         "schemaVersion": "v0",
                         "status": "ok",
                         "runId": payload.get("runId", "run-unknown"),
                         "workflowId": payload.get("workflowId", "w0-migration-v0"),
                         "programId": "CASE01",
                         "outputRef": {"uri": "urn:build-output"},
-                    },
+                    }
+                )
+                self._write_json(
+                    200,
+                    response,
                 )
             elif capability == "evidence":
                 self._write_json(
@@ -268,9 +296,10 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                     },
                 )
             elif capability == "model-gateway":
-                self._write_json(
-                    200,
-                    {
+                response = (
+                    self.state.model_gateway_responses.pop(0)
+                    if self.state.model_gateway_responses
+                    else {
                         "invocationId": "mg-integration-1",
                         "runId": payload.get("runId", "run-unknown"),
                         "modelId": payload.get("modelId", "gpt-oss-120b"),
@@ -280,12 +309,16 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                         "status": "completed",
                         "latencyMs": 1,
                         "ledgerRef": {
-                            "uri": "urn:model-gateway/invocations/mg-integration-1",
+                            "uri": "urn:model-gateway/invocation/mg-integration-1",
                             "sha256": "c" * 64,
                             "byteSize": 256,
                         },
                         "output": {"status": "completed"},
-                    },
+                    }
+                )
+                self._write_json(
+                    200,
+                    response,
                 )
             else:
                 self._write_json(404, {"error": "unknown capability"})
@@ -331,6 +364,82 @@ def _start_server(handler_cls) -> tuple[HTTPServer, int, threading.Thread]:
 def _rmtree(path: str) -> None:
     import shutil
     shutil.rmtree(path, ignore_errors=True)
+
+
+def _seed_manual_compile_repair_run(
+    runner,
+    *,
+    run_id: str,
+    program_id: str,
+    java_path: str,
+    java_source: str,
+) -> None:
+    workflow_id = "w0-migration-v0"
+    runner.artifact_store.init_run(run_id, workflow_id, requester="integration")
+    runner.artifact_store.update_summary(
+        run_id,
+        workflow_id,
+        {
+            "runId": run_id,
+            "workflowId": workflow_id,
+            "programId": program_id,
+            "requester": "integration",
+            "status": "completed",
+        },
+    )
+    runner.artifact_store.write_text(
+        run_id,
+        workflow_id,
+        f"generated-project/{java_path}",
+        java_source,
+        kind=KIND_GENERATED_PROJECT_FILE,
+    )
+
+
+def _stub_manual_compile_repair_artifact_refs(runner, *, run_id: str) -> None:
+    snapshot_ref = {
+        "uri": f"urn:c2c/manual-compile-repair/{run_id}/snapshot",
+        "sha256": "b" * 64,
+        "byteSize": 1,
+    }
+    candidate_ref = {
+        "uri": f"urn:c2c/manual-compile-repair/{run_id}/candidate",
+        "sha256": "c" * 64,
+        "byteSize": 1,
+    }
+
+    def _snapshot(*_args, **_kwargs) -> dict:
+        return dict(snapshot_ref)
+
+    def _candidate(*_args, **_kwargs) -> dict:
+        return dict(candidate_ref)
+
+    runner._persist_manual_compile_snapshot = _snapshot
+    runner._persist_manual_compile_candidate = _candidate
+    runner._persist_manual_compile_baseline_diff = lambda *_args, **_kwargs: None
+
+
+def _stub_manual_compile_repair_failure_code() -> None:
+    orchestrator_workflow.FAILURE_JAVA_COMPILE_FAILED = "java_compile_failed"
+
+
+def _stub_manual_compile_repair_reference_payloads() -> None:
+    def _reference_payload(ref):
+        if ref is None:
+            return None
+        if isinstance(ref, dict):
+            return dict(ref)
+        return {
+            "uri": getattr(ref, "uri", ""),
+            "sha256": getattr(ref, "sha256", ""),
+            "byteSize": getattr(ref, "byteSize", getattr(ref, "byte_size", 0)),
+            "mimeType": getattr(ref, "mimeType", None),
+            "kind": getattr(ref, "kind", None),
+            "path": getattr(ref, "path", None),
+            "name": getattr(ref, "name", None),
+        }
+
+    orchestrator_workflow._as_reference_payload = _reference_payload
 
 
 class OrchestratorIntegrationTests(unittest.TestCase):
@@ -472,6 +581,304 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertIn("orchestrator.workflow.accepted", event_types)
             self.assertIn("orchestrator.workflow.completed", event_types)
             self.assertNotIn("orchestrator.workflow.failed", event_types)
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_manual_compile_repair_diagnose_apply_and_reject_cover_success_and_refusal_paths(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.build_test_responses = [
+                {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "compile_failed",
+                    "runId": "manual-run-1",
+                    "workflowId": "w0-migration-v0",
+                    "summary": "compile failed",
+                    "diagnostics": [
+                        {
+                            "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                            "message": "cannot find symbol",
+                        }
+                    ],
+                },
+                {
+                    "schemaVersion": "v0",
+                    "status": "ok",
+                    "runId": "manual-run-1",
+                    "workflowId": "w0-migration-v0",
+                    "programId": "CASE01",
+                    "outputRef": {"uri": "urn:build-output/manual-run-1"},
+                },
+            ]
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-manual-1",
+                    "runId": "manual-run-1",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-1",
+                        "sha256": "f" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fixed the missing semicolon.",
+                        "files": {
+                            "src/main/java/com/c2c/generated/CASE01.java": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"repaired\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "explanation": "Added the missing semicolon.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.92,
+                    },
+                }
+            ]
+            MockHarnessHandler.state = state
+
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="manual-run-1",
+                program_id="CASE01",
+                java_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"broken\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-1")
+            _stub_manual_compile_repair_failure_code()
+            _stub_manual_compile_repair_reference_payloads()
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            diagnose_payload = {
+                "runId": "manual-run-1",
+                "entryClass": "CASE01",
+                "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                "javaFiles": [
+                    {
+                        "path": "src/main/java/com/c2c/generated/CASE01.java",
+                        "content": (
+                            "package com.c2c.generated;\n"
+                            "public class CASE01 {\n"
+                            "    public static void main(String[] args) {\n"
+                            "        System.out.println(\"broken\")\n"
+                            "    }\n"
+                            "}\n"
+                        ),
+                    }
+                ],
+            }
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs/manual-run-1/manual-compile-repair/diagnose/request",
+                    body=json.dumps(diagnose_payload),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                diagnose_response = connection.getresponse()
+                self.assertEqual(diagnose_response.status, 200)
+                diagnose_body = json.loads(diagnose_response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            proposal = diagnose_body["proposal"]
+            self.assertIsNotNone(proposal)
+            self.assertEqual(diagnose_body["schemaVersion"], "v0")
+            self.assertEqual(diagnose_body["runId"], "manual-run-1")
+            self.assertEqual(diagnose_body["buildTest"]["status"], "failed")
+            self.assertEqual(diagnose_body["candidateProject"]["entryClass"], "CASE01")
+            self.assertEqual(
+                state.capability_invocations[-1][0],
+                "model-gateway",
+            )
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs/manual-run-1/manual-compile-repair/reject/request",
+                    body=json.dumps({"runId": "manual-run-1", "proposal": proposal}),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                reject_response = connection.getresponse()
+                self.assertEqual(reject_response.status, 200)
+                reject_body = json.loads(reject_response.read().decode("utf-8"))
+            finally:
+                connection.close()
+            self.assertEqual(reject_body["proposal"]["approvalState"], "rejected")
+            self.assertEqual(reject_body["proposal"]["applicationState"], "rejected")
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs/manual-run-1/manual-compile-repair/apply/request",
+                    body=json.dumps(
+                        {
+                            "runId": "manual-run-1",
+                            "entryClass": "CASE01",
+                            "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                            "javaFiles": diagnose_payload["javaFiles"],
+                            "proposal": proposal,
+                            "candidateProject": diagnose_body["candidateProject"],
+                        }
+                    ),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                apply_response = connection.getresponse()
+                self.assertEqual(apply_response.status, 200)
+                apply_body = json.loads(apply_response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            self.assertEqual(apply_body["proposal"]["approvalState"], "approved")
+            self.assertEqual(apply_body["buildTest"]["status"], "ok")
+            self.assertEqual(
+                [capability for capability, _ in state.capability_invocations],
+                ["build-test", "model-gateway", "build-test"],
+            )
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_manual_compile_repair_diagnose_returns_proposal_none_for_refusal_no_patch_path(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.build_test_responses = [
+                {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "compile_failed",
+                    "runId": "manual-run-2",
+                    "workflowId": "w0-migration-v0",
+                    "summary": "compile failed",
+                }
+            ]
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-manual-2",
+                    "runId": "manual-run-2",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-2",
+                        "sha256": "e" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "refuse",
+                        "rationale": "No safe repair is available.",
+                        "refusalCode": "no_safe_repair",
+                        "confidence": 0.2,
+                    },
+                }
+            ]
+            MockHarnessHandler.state = state
+
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="manual-run-2",
+                program_id="CASE01",
+                java_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"broken\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-2")
+            _stub_manual_compile_repair_failure_code()
+            _stub_manual_compile_repair_reference_payloads()
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {\n"
+                "        System.out.println(\"broken\")\n"
+                "    }\n"
+                "}\n"
+            )
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs/manual-run-2/manual-compile-repair/diagnose/request",
+                    body=json.dumps(
+                        {
+                            "runId": "manual-run-2",
+                            "entryClass": "CASE01",
+                            "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                            "javaFiles": [
+                                {
+                                    "path": "src/main/java/com/c2c/generated/CASE01.java",
+                                    "content": current_java_source,
+                                }
+                            ],
+                        }
+                    ),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                body = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            self.assertIsNone(body["proposal"])
+            self.assertEqual(body["diagnosis"]["likelyRootCause"], "No safe repair is available.")
+            self.assertEqual(
+                body["candidateProject"]["files"]["src/main/java/com/c2c/generated/CASE01.java"],
+                current_java_source,
+            )
+            self.assertEqual(
+                [capability for capability, _ in state.capability_invocations],
+                ["build-test", "model-gateway"],
+            )
         finally:
             mock_server.shutdown()
             mock_server.server_close()

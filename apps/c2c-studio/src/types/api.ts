@@ -717,3 +717,118 @@ export interface VerifyResponse {
   manualEditsCarriedOver: boolean;
   manualDriftRegionCount: number;
 }
+
+export interface ManualCompileRepairJavaFile {
+  path: string;
+  content: string;
+}
+
+export interface ManualCompileRepairProposalFile {
+  path: string;
+  changeType?: string;
+  beforeSha256?: string | null;
+  afterSha256?: string | null;
+  diff?: string;
+}
+
+export interface ManualCompileRepairDiagnosis {
+  schemaVersion?: "v0";
+  diagnosisId?: string;
+  runId: string;
+  workflowId?: string;
+  buildResultRef?: WorkflowArtifactRef | null;
+  sourceRevisionRef?: WorkflowArtifactRef | null;
+  currentHeadRef?: WorkflowArtifactRef | null;
+  failureClass?: string;
+  scopeClass?: string;
+  likelyRootCause?: string;
+  summary?: string;
+  confidence?: {
+    level?: string;
+    basis?: string;
+  };
+  recommendedNextAction?: string;
+  evidenceRefs?: WorkflowArtifactRef[];
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
+export interface ManualCompileRepairProposal {
+  schemaVersion?: "v0";
+  proposalId: string;
+  runId: string;
+  workflowId?: string;
+  diagnosisId?: string;
+  proposedBy?: string;
+  patchSha256?: string;
+  summary?: string;
+  applicationState?: string;
+  approvalState?: string;
+  files: ManualCompileRepairProposalFile[];
+  sourceRevisionRef?: WorkflowArtifactRef | null;
+  currentHeadRef?: WorkflowArtifactRef | null;
+  evidenceRefs?: WorkflowArtifactRef[];
+  createdAt?: string;
+  developerApproval?: {
+    approvedBy?: string;
+    approvedAt?: string;
+    approvedPatchSha256?: string;
+  };
+  approvedAt?: string;
+  appliedAt?: string;
+  [key: string]: unknown;
+}
+
+export interface ManualCompileRepairCandidateProject {
+  entryClass: string;
+  entryFilePath: string;
+  files: Record<string, string>;
+}
+
+export interface ManualCompileRepairDiagnoseRequest {
+  runId: string;
+  entryClass?: string;
+  entryFilePath: string;
+  javaFiles: ManualCompileRepairJavaFile[];
+  manualEditOverlay?: JavaOriginOverlay;
+  manualEditOverlays?: JavaOriginOverlay[];
+}
+
+export interface ManualCompileRepairApplyRequest {
+  runId: string;
+  entryClass?: string;
+  entryFilePath: string;
+  javaFiles: ManualCompileRepairJavaFile[];
+  proposal: ManualCompileRepairProposal;
+  candidateProject: ManualCompileRepairCandidateProject;
+  expectedOutput?: string;
+  oracleInput?: string;
+}
+
+export interface ManualCompileRepairRejectRequest {
+  runId: string;
+  proposal: ManualCompileRepairProposal;
+}
+
+export interface ManualCompileRepairDiagnoseResponse {
+  schemaVersion: "v0";
+  runId: string;
+  diagnosis: ManualCompileRepairDiagnosis;
+  proposal: ManualCompileRepairProposal | null;
+  candidateProject: ManualCompileRepairCandidateProject;
+  buildTest: BuildTestView;
+}
+
+export interface ManualCompileRepairApplyResponse {
+  schemaVersion: "v0";
+  runId: string;
+  proposal: ManualCompileRepairProposal;
+  candidateProject: ManualCompileRepairCandidateProject;
+  buildTest: BuildTestView;
+}
+
+export interface ManualCompileRepairRejectResponse {
+  schemaVersion: "v0";
+  runId: string;
+  proposal: ManualCompileRepairProposal;
+}

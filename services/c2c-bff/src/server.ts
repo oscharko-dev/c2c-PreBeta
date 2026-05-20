@@ -3324,7 +3324,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        if (!orchestrator.enabled) {
+        const startTransformRun = orchestrator.startTransformRun;
+        if (!orchestrator.enabled || !startTransformRun) {
           jsonResponse(res, 503, {
             error: "orchestrator URL is required for /api/v0/transform",
           });
@@ -3382,7 +3383,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             oracleInput,
             useTransformationAgent,
           };
-          const upstream = await orchestrator.startTransformRun(transformInput);
+          const upstream = await startTransformRun(transformInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             const liveRunId = extractLiveRunId(upstream.body);
             const stored = runStore.create(
@@ -3536,7 +3537,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        if (!orchestrator.enabled) {
+        const startTransformRun = orchestrator.startTransformRun;
+        if (!orchestrator.enabled || !startTransformRun) {
           jsonResponse(res, 503, {
             error: "orchestrator URL is required for /api/v0/generate",
           });
@@ -3590,7 +3592,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             // composed Generate & Verify pipeline keeps running unchanged.
             generateOnly: true,
           };
-          const upstream = await orchestrator.startTransformRun(generateInput);
+          const upstream = await startTransformRun(generateInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             const liveRunId = extractLiveRunId(upstream.body);
             const stored = runStore.create(
@@ -4116,6 +4118,206 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
+      }
+
+      if (pathname === "/api/v0/manual-compile-repair/diagnose" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
+        const diagnoseManualCompileRepair =
+          orchestrator.diagnoseManualCompileRepair;
+        if (!orchestrator.enabled || !diagnoseManualCompileRepair) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: orchestrator is not configured",
+          });
+          return;
+        }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const record = body as Record<string, unknown>;
+        const runId = typeof record.runId === "string" ? record.runId : "";
+        if (!runId) {
+          badRequest(res, "runId must be a non-empty string");
+          return;
+        }
+        const manualOverlayEnvelope =
+          Array.isArray(record.manualEditOverlays)
+            ? {
+                schemaVersion: "v0",
+                regions: (record.manualEditOverlays as unknown[]).flatMap((overlay) => {
+                  if (
+                    overlay &&
+                    typeof overlay === "object" &&
+                    !Array.isArray(overlay) &&
+                    Array.isArray((overlay as Record<string, unknown>).regions)
+                  ) {
+                    return (overlay as { regions: unknown[] }).regions;
+                  }
+                  return [];
+                }),
+              }
+            : record.manualEditOverlay;
+        const upstream = await diagnoseManualCompileRepair(runId, {
+          ...record,
+          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+          manualOverlay: manualOverlayEnvelope,
+        });
+        if (!upstream) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: no orchestrator response",
+          });
+          return;
+        }
+        jsonResponse(res, upstream.status || 502, upstream.body);
+        return;
+      }
+
+      if (pathname === "/api/v0/manual-compile-repair/apply" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
+        const applyManualCompileRepair = orchestrator.applyManualCompileRepair;
+        if (!orchestrator.enabled || !applyManualCompileRepair) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: orchestrator is not configured",
+          });
+          return;
+        }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const record = body as Record<string, unknown>;
+        const runId = typeof record.runId === "string" ? record.runId : "";
+        if (!runId) {
+          badRequest(res, "runId must be a non-empty string");
+          return;
+        }
+        const upstream = await applyManualCompileRepair(runId, {
+          ...record,
+          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+        });
+        if (!upstream) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: no orchestrator response",
+          });
+          return;
+        }
+        jsonResponse(res, upstream.status || 502, upstream.body);
+        return;
+      }
+
+      if (pathname === "/api/v0/manual-compile-repair/reject" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
+        const rejectManualCompileRepair =
+          orchestrator.rejectManualCompileRepair;
+        if (!orchestrator.enabled || !rejectManualCompileRepair) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: orchestrator is not configured",
+          });
+          return;
+        }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const record = body as Record<string, unknown>;
+        const runId = typeof record.runId === "string" ? record.runId : "";
+        if (!runId) {
+          badRequest(res, "runId must be a non-empty string");
+          return;
+        }
+        const upstream = await rejectManualCompileRepair(runId, {
+          ...record,
+          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+        });
+        if (!upstream) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: no orchestrator response",
+          });
+          return;
+        }
+        jsonResponse(res, upstream.status || 502, upstream.body);
+        return;
       }
 
       if (pathname === "/api/v0/model-gateway/health" && method === "GET") {

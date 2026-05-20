@@ -38,10 +38,26 @@ import {
   GenerateResponse,
   VerifyRequest,
   VerifyResponse,
+  ManualCompileRepairApplyRequest,
+  ManualCompileRepairApplyResponse,
+  ManualCompileRepairCandidateProject,
+  ManualCompileRepairDiagnoseRequest,
+  ManualCompileRepairDiagnoseResponse,
+  ManualCompileRepairDiagnosis,
+  ManualCompileRepairProposal,
+  ManualCompileRepairProposalFile,
+  ManualCompileRepairRejectRequest,
+  ManualCompileRepairRejectResponse,
   GeneratedTraceability,
   JavaRegionClassification,
   JavaRegionClassificationMap,
 } from "@/types/api";
+import {
+  HarnessReady,
+  ModelGatewayHealth,
+  ModelGatewayModels,
+  RunExperienceView,
+} from "@/types/observability";
 import { TransformRequest } from "@/types/transform-request";
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
 import { clearSessionBootstrap } from "@/lib/editor/sessionBootstrap";
@@ -1360,6 +1376,216 @@ function parseVerifyResponse(payload: unknown): ApiResult<VerifyResponse> {
   return { ok: true, data: normalised };
 }
 
+function isManualCompileRepairFileChange(
+  value: unknown,
+): value is ManualCompileRepairProposalFile {
+  return (
+    isRecord(value) &&
+    isString(value.path) &&
+    (value.changeType === undefined || isString(value.changeType)) &&
+    (value.beforeSha256 === undefined ||
+      value.beforeSha256 === null ||
+      isString(value.beforeSha256)) &&
+    (value.afterSha256 === undefined ||
+      value.afterSha256 === null ||
+      isString(value.afterSha256)) &&
+    (value.diff === undefined || isString(value.diff))
+  );
+}
+
+function isManualCompileRepairCandidateProject(
+  value: unknown,
+): value is ManualCompileRepairCandidateProject {
+  if (!isRecord(value) || !isRecord(value.files)) return false;
+  return (
+    isString(value.entryClass) &&
+    isString(value.entryFilePath) &&
+    Object.values(value.files).every((entry) => typeof entry === "string")
+  );
+}
+
+function isManualCompileRepairProposal(
+  value: unknown,
+): value is ManualCompileRepairProposal {
+  return (
+    isRecord(value) &&
+    (value.schemaVersion === undefined || value.schemaVersion === "v0") &&
+    isString(value.proposalId) &&
+    isString(value.runId) &&
+    (value.workflowId === undefined || isString(value.workflowId)) &&
+    (value.diagnosisId === undefined || isString(value.diagnosisId)) &&
+    (value.proposedBy === undefined || isString(value.proposedBy)) &&
+    (value.patchSha256 === undefined || isString(value.patchSha256)) &&
+    (value.summary === undefined || isString(value.summary)) &&
+    (value.applicationState === undefined ||
+      isString(value.applicationState)) &&
+    (value.approvalState === undefined || isString(value.approvalState)) &&
+    Array.isArray(value.files) &&
+    value.files.every(isManualCompileRepairFileChange) &&
+    (value.sourceRevisionRef === undefined ||
+      value.sourceRevisionRef === null ||
+      isOutputRef(value.sourceRevisionRef)) &&
+    (value.currentHeadRef === undefined ||
+      value.currentHeadRef === null ||
+      isOutputRef(value.currentHeadRef)) &&
+    (value.evidenceRefs === undefined ||
+      (Array.isArray(value.evidenceRefs) &&
+        value.evidenceRefs.every(
+          (entry) => entry === null || isOutputRef(entry),
+        ))) &&
+    (value.createdAt === undefined || isString(value.createdAt)) &&
+    (value.developerApproval === undefined ||
+      (isRecord(value.developerApproval) &&
+        (value.developerApproval.approvedBy === undefined ||
+          isString(value.developerApproval.approvedBy)) &&
+        (value.developerApproval.approvedAt === undefined ||
+          isString(value.developerApproval.approvedAt)) &&
+        (value.developerApproval.approvedPatchSha256 === undefined ||
+          isString(value.developerApproval.approvedPatchSha256)))) &&
+    (value.approvedAt === undefined || isString(value.approvedAt)) &&
+    (value.appliedAt === undefined || isString(value.appliedAt))
+  );
+}
+
+function isManualCompileRepairDiagnosis(
+  value: unknown,
+): value is ManualCompileRepairDiagnosis {
+  return (
+    isRecord(value) &&
+    (value.schemaVersion === undefined || value.schemaVersion === "v0") &&
+    (value.diagnosisId === undefined || isString(value.diagnosisId)) &&
+    isString(value.runId) &&
+    (value.workflowId === undefined || isString(value.workflowId)) &&
+    (value.buildResultRef === undefined ||
+      value.buildResultRef === null ||
+      isOutputRef(value.buildResultRef)) &&
+    (value.sourceRevisionRef === undefined ||
+      value.sourceRevisionRef === null ||
+      isOutputRef(value.sourceRevisionRef)) &&
+    (value.currentHeadRef === undefined ||
+      value.currentHeadRef === null ||
+      isOutputRef(value.currentHeadRef)) &&
+    (value.failureClass === undefined || isString(value.failureClass)) &&
+    (value.scopeClass === undefined || isString(value.scopeClass)) &&
+    (value.likelyRootCause === undefined || isString(value.likelyRootCause)) &&
+    (value.summary === undefined || isString(value.summary)) &&
+    (value.confidence === undefined ||
+      (isRecord(value.confidence) &&
+        (value.confidence.level === undefined ||
+          isString(value.confidence.level)) &&
+        (value.confidence.basis === undefined ||
+          isString(value.confidence.basis)))) &&
+    (value.recommendedNextAction === undefined ||
+      isString(value.recommendedNextAction)) &&
+    (value.evidenceRefs === undefined ||
+      (Array.isArray(value.evidenceRefs) &&
+        value.evidenceRefs.every(
+          (entry) => entry === null || isOutputRef(entry),
+        ))) &&
+    (value.createdAt === undefined || isString(value.createdAt))
+  );
+}
+
+function parseManualCompileRepairDiagnoseResponse(
+  payload: unknown,
+): ApiResult<ManualCompileRepairDiagnoseResponse> {
+  if (
+    !isRecord(payload) ||
+    (payload.schemaVersion !== undefined && payload.schemaVersion !== "v0") ||
+    !isString(payload.runId) ||
+    !isManualCompileRepairDiagnosis(payload.diagnosis) ||
+    (payload.proposal !== null &&
+      payload.proposal !== undefined &&
+      !isManualCompileRepairProposal(payload.proposal)) ||
+    !isManualCompileRepairCandidateProject(payload.candidateProject)
+  ) {
+    return createFailure(
+      "Contract error: manual compile repair diagnose payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  const buildTestResult = isBuildTestViewPayload(payload.buildTest)
+    ? (payload.buildTest as BuildTestView)
+    : null;
+  if (!buildTestResult) {
+    return createFailure(
+      "Contract error: manual compile repair diagnose payload has an invalid buildTest field.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return {
+    ok: true,
+    data: {
+      schemaVersion: "v0",
+      runId: payload.runId,
+      diagnosis: payload.diagnosis,
+      proposal: payload.proposal ?? null,
+      candidateProject: payload.candidateProject,
+      buildTest: buildTestResult,
+    },
+  };
+}
+
+function parseManualCompileRepairApplyResponse(
+  payload: unknown,
+): ApiResult<ManualCompileRepairApplyResponse> {
+  if (
+    !isRecord(payload) ||
+    (payload.schemaVersion !== undefined && payload.schemaVersion !== "v0") ||
+    !isString(payload.runId) ||
+    !isManualCompileRepairProposal(payload.proposal) ||
+    !isManualCompileRepairCandidateProject(payload.candidateProject)
+  ) {
+    return createFailure(
+      "Contract error: manual compile repair apply payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  const buildTestResult = isBuildTestViewPayload(payload.buildTest)
+    ? (payload.buildTest as BuildTestView)
+    : null;
+  if (!buildTestResult) {
+    return createFailure(
+      "Contract error: manual compile repair apply payload has an invalid buildTest field.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return {
+    ok: true,
+    data: {
+      schemaVersion: "v0",
+      runId: payload.runId,
+      proposal: payload.proposal,
+      candidateProject: payload.candidateProject,
+      buildTest: buildTestResult,
+    },
+  };
+}
+
+function parseManualCompileRepairRejectResponse(
+  payload: unknown,
+): ApiResult<ManualCompileRepairRejectResponse> {
+  if (
+    !isRecord(payload) ||
+    (payload.schemaVersion !== undefined && payload.schemaVersion !== "v0") ||
+    !isString(payload.runId) ||
+    !isManualCompileRepairProposal(payload.proposal)
+  ) {
+    return createFailure(
+      "Contract error: manual compile repair reject payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return {
+    ok: true,
+    data: {
+      schemaVersion: "v0",
+      runId: payload.runId,
+      proposal: payload.proposal,
+    },
+  };
+}
+
 function parseRunSummary(payload: unknown): ApiResult<RunSummary> {
   if (!isRunSummaryPayload(payload)) {
     return createFailure(
@@ -1505,13 +1731,6 @@ function encodeGeneratedFilePath(filePath: string): string {
   return segments.map(encodeURIComponent).join("/");
 }
 
-import {
-  RunExperienceView,
-  ModelGatewayHealth,
-  ModelGatewayModels,
-  HarnessReady,
-} from "@/types/observability";
-
 function isRunExperienceViewPayload(
   payload: unknown,
 ): payload is RunExperienceView {
@@ -1642,6 +1861,51 @@ export const apiClient = {
       },
       body: JSON.stringify(request),
     }),
+  manualCompileRepairDiagnose: (request: ManualCompileRepairDiagnoseRequest) =>
+    fetchJson(
+      "/api/v0/manual-compile-repair/diagnose",
+      parseManualCompileRepairDiagnoseResponse,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
+    ),
+  manualCompileRepairApply: (request: ManualCompileRepairApplyRequest) =>
+    fetchJson(
+      "/api/v0/manual-compile-repair/apply",
+      parseManualCompileRepairApplyResponse,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
+    ),
+  manualCompileRepairReject: (request: ManualCompileRepairRejectRequest) =>
+    fetchJson(
+      "/api/v0/manual-compile-repair/reject",
+      parseManualCompileRepairRejectResponse,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
+    ),
+  diagnoseManualCompileRepair: (request: ManualCompileRepairDiagnoseRequest) =>
+    apiClient.manualCompileRepairDiagnose(request),
+  applyManualCompileRepair: (request: ManualCompileRepairApplyRequest) =>
+    apiClient.manualCompileRepairApply(request),
+  rejectManualCompileRepair: (request: ManualCompileRepairRejectRequest) =>
+    apiClient.manualCompileRepairReject(request),
   getRun: (runId: string) =>
     fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}`, parseRunSummary),
   getGenerated: (runId: string) =>
