@@ -645,10 +645,14 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     renderPane();
 
     await screen.findByTestId("code-editor-mock");
+    await waitFor(() => {
+      expect(
+        editorActions.find((entry) => entry.id === "c2c.lineage.javaToCobol"),
+      ).toBeDefined();
+    });
     const action = editorActions.find(
       (entry) => entry.id === "c2c.lineage.javaToCobol",
     );
-    expect(action).toBeDefined();
     const events: CustomEvent[] = [];
     const listener = (ev: Event) => events.push(ev as CustomEvent);
     window.addEventListener("c2c:reveal-cobol", listener);
@@ -687,10 +691,14 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     renderPane();
 
     await screen.findByTestId("code-editor-mock");
+    await waitFor(() => {
+      expect(
+        editorActions.find((entry) => entry.id === "c2c.lineage.javaToCobol"),
+      ).toBeDefined();
+    });
     const action = editorActions.find(
       (entry) => entry.id === "c2c.lineage.javaToCobol",
     );
-    expect(action).toBeDefined();
     await act(async () => {
       await action!.run(fakeEditor);
     });
@@ -709,10 +717,14 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     renderPane();
 
     await screen.findByTestId("code-editor-mock");
+    await waitFor(() => {
+      expect(
+        editorActions.find((entry) => entry.id === "c2c.lineage.javaToCobol"),
+      ).toBeDefined();
+    });
     const action = editorActions.find(
       (entry) => entry.id === "c2c.lineage.javaToCobol",
     );
-    expect(action).toBeDefined();
     await act(async () => {
       await action!.run(fakeEditor);
     });
