@@ -558,16 +558,62 @@ function isBuildTestViewPayload(payload: unknown): payload is BuildTestView {
     return false;
   }
 
+  const comparison = payload.comparison;
+  const validComparison =
+    comparison === undefined ||
+    comparison === null ||
+    (isRecord(comparison) &&
+      (comparison.matched === undefined ||
+        typeof comparison.matched === "boolean") &&
+      (comparison.status === undefined || isString(comparison.status)) &&
+      (comparison.comparisonPolicyVersion === undefined ||
+        isString(comparison.comparisonPolicyVersion)) &&
+      (comparison.mismatchClassification === undefined ||
+        isString(comparison.mismatchClassification)) &&
+      (comparison.diffSummary === undefined ||
+        isString(comparison.diffSummary)) &&
+      (comparison.comparisonPolicyRef === undefined ||
+        comparison.comparisonPolicyRef === null ||
+        isOutputRef(comparison.comparisonPolicyRef)) &&
+      (comparison.comparisonResultRef === undefined ||
+        comparison.comparisonResultRef === null ||
+        isOutputRef(comparison.comparisonResultRef)) &&
+      (comparison.diffRef === undefined ||
+        comparison.diffRef === null ||
+        isOutputRef(comparison.diffRef)) &&
+      (comparison.expectedRef === undefined ||
+        comparison.expectedRef === null ||
+        isOutputRef(comparison.expectedRef)) &&
+      (comparison.actualRef === undefined ||
+        comparison.actualRef === null ||
+        isOutputRef(comparison.actualRef)));
+
   return (
     isString(payload.runId) &&
     isString(payload.programId) &&
     isRunMode(payload.mode) &&
     isRunProductMode(payload.productMode) &&
+    (payload.executionMode === undefined || isString(payload.executionMode)) &&
+    (payload.comparisonPolicy === undefined ||
+      isString(payload.comparisonPolicy)) &&
+    validComparison &&
     isBuildTestStatus(payload.status) &&
     isBuildTestClassification(payload.classification) &&
+    (payload.compileStatus === undefined ||
+      payload.compileStatus === "ok" ||
+      payload.compileStatus === "failed" ||
+      payload.compileStatus === "skipped" ||
+      payload.compileStatus === "unknown") &&
+    (payload.executionStatus === undefined ||
+      payload.executionStatus === "ok" ||
+      payload.executionStatus === "failed" ||
+      payload.executionStatus === "skipped" ||
+      payload.executionStatus === "not-run" ||
+      payload.executionStatus === "unknown") &&
     (payload.expectedOutput === undefined ||
       isString(payload.expectedOutput)) &&
     (payload.actualOutput === undefined || isString(payload.actualOutput)) &&
+    (payload.diffSummary === undefined || isString(payload.diffSummary)) &&
     (payload.outputRef === undefined ||
       payload.outputRef === null ||
       isOutputRef(payload.outputRef)) &&

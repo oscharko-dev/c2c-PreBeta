@@ -63,11 +63,11 @@ describe('Run Panels', () => {
         }
       });
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
-      expect(screen.getByText('COBOL Oracle')).toBeDefined();
+      expect(screen.getAllByText('COBOL Oracle').length).toBeGreaterThan(0);
       expect(screen.getByText('Java Compilation')).toBeDefined();
       expect(screen.getByText('Java Execution')).toBeDefined();
       expect(screen.getByText('Equivalence Check')).toBeDefined();
-      expect(screen.getByText('Match (Equivalent)')).toBeDefined();
+      expect(screen.getByText('Equivalent')).toBeDefined();
     });
 
     it('renders build/test missing golden master', () => {
@@ -222,9 +222,11 @@ describe('Run Panels', () => {
           }} 
         />
       );
-      expect(screen.getByText('Divergence (Unknown)')).toBeDefined();
-      expect(screen.getByText(/Expected output ref: cobol-oracle-stdout #eeeeeeeeeeee/)).toBeDefined();
-      expect(screen.getByText(/Actual output ref: java-stdout #aaaaaaaaaaaa/)).toBeDefined();
+      expect(screen.getByText('Mismatch detected')).toBeDefined();
+      expect(screen.getAllByText('Expected output').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Actual output').length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Cobol Oracle Stdout/).length).toBeGreaterThan(1);
+      expect(screen.getAllByText(/Java Stdout/).length).toBeGreaterThan(0);
       expect(screen.getByText('Line 1')).toBeDefined();
       expect(screen.getByText('Line 2')).toBeDefined();
       expect(screen.getByText('Line A')).toBeDefined();
@@ -249,8 +251,28 @@ describe('Run Panels', () => {
         />
       );
 
-      expect(screen.getByText('Divergence (Known W0 Gap)')).toBeDefined();
-      expect(screen.queryByText('Divergence (Unknown)')).not.toBeInTheDocument();
+      expect(screen.getByText('Known divergence')).toBeDefined();
+      expect(screen.queryByText('Mismatch detected')).not.toBeInTheDocument();
+    });
+
+    it('renders a blocked parity label for compile failures', () => {
+      render(
+        <EquivalencePanel
+          isPending={false}
+          buildTest={{
+            runId: '123',
+            programId: '456',
+            mode: 'live',
+            productMode: 'live',
+            status: 'compile-failed',
+            classification: 'compile-error',
+            generatedArtifactRef: null
+          }}
+        />
+      );
+
+      expect(screen.getAllByText('Blocked by compilation failure').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Mismatch detected')).not.toBeInTheDocument();
     });
   });
 

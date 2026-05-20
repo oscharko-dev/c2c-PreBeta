@@ -384,10 +384,13 @@ describe("Generated Artifacts UI", () => {
     expect(screen.getByText("config.properties")).toBeInTheDocument();
   });
 
-  it("renders traceability metadata only when the DTO is complete", () => {
+  it("renders parity metadata rows and hides traceability until the DTO is complete", () => {
     const { rerender } = render(
       <ArtifactMetadataPanel
         details={{
+          buildState: "compile-failed",
+          oracleParity: "divergence-known-w0-coverage-gap",
+          evidenceStatus: "complete",
           traceability: {
             schemaVersion: "v1",
             programId: "P1",
@@ -398,12 +401,23 @@ describe("Generated Artifacts UI", () => {
       />,
     );
 
+    expect(screen.getByText("Build State:")).toBeInTheDocument();
+    expect(screen.getByText("compile-failed")).toBeInTheDocument();
+    expect(screen.getByText("Oracle Parity:")).toBeInTheDocument();
+    expect(
+      screen.getByText("divergence-known-w0-coverage-gap"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Evidence Status:")).toBeInTheDocument();
+    expect(screen.getByText("complete")).toBeInTheDocument();
     expect(screen.getByText("Traceability:")).toBeInTheDocument();
     expect(screen.getByText("IR ir-P1")).toBeInTheDocument();
 
     rerender(
       <ArtifactMetadataPanel
         details={{
+          buildState: "compile-failed",
+          oracleParity: "divergence-known-w0-coverage-gap",
+          evidenceStatus: "complete",
           traceability: {
             schemaVersion: "v0",
             programId: "P1",

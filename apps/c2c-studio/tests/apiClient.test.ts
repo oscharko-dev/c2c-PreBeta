@@ -362,6 +362,32 @@ describe("apiClient", () => {
     });
   });
 
+  it("rejects malformed build-test payloads with invalid artifact metadata", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: "run-1",
+          programId: "P1",
+          mode: "live",
+          productMode: "live",
+          status: "ok",
+          classification: "match",
+          generatedArtifactRef: {
+            sha256: "a".repeat(64),
+            byteSize: -1,
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.getBuildTest("run-1");
+
+    expect(result).toMatchObject({
+      ok: false,
+      details: { kind: "contract" },
+    });
+  });
+
   it("fetches generated view and generated file index contract payloads", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
