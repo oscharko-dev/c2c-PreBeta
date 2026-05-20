@@ -125,9 +125,12 @@ input model is:
   reference artifact;
 - one generated Java candidate associated with the same run configuration.
 
-Unsupported COBOL or runtime behaviors must be blocked explicitly and recorded
-as unsupported, blocked, or incomplete. They must not be converted into a
-successful parity claim.
+Unsupported COBOL or runtime behaviors must be blocked explicitly and encoded
+through the existing orchestrator classification model. They must surface as a
+supported final classification such as `blocked`, `failed`, or `incomplete`,
+with unsupported semantics carried by the failure family and failure code
+rather than by inventing a new final-classification value. They must not be
+converted into a successful parity claim.
 
 ### 7. IDE-grade behavior is a workflow requirement
 

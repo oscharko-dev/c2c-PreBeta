@@ -102,8 +102,12 @@ The first trust workflow supports the W0 subset defined in
 - one generated Java candidate built and executed through the Build/Test
   Runner.
 
-Unsupported input must classify honestly as blocked, unsupported, failed, or
-incomplete. It must not surface as a successful parity claim.
+Unsupported input must classify honestly through the existing orchestrator
+final-classification set. In the first trust workflow, unsupported behavior is
+expressed as a supported final classification such as `blocked`, `failed`, or
+`incomplete`, with the unsupported condition carried by the failure family and
+failure code rather than a new `unsupported` final-classification value. It
+must not surface as a successful parity claim.
 
 ## Component Responsibilities
 
