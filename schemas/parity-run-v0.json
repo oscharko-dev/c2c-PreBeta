@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oscharko.dev/c2c/schemas/parity-run-v0.json",
   "title": "Parity Run v0",
-  "description": "Stable lifecycle record for one Developer Trust parity run. The record links the curated source revision, the generated Java candidate, the reference artifact, the comparison and build evidence, and any approval-gated repair follow-up. Issue #351.",
+  "description": "Stable lifecycle record for one Developer Trust parity run. The record links the curated source revision, the generated Java candidate, the reference artifact, the build/execution/comparison result refs projected from the deterministic Java runner output, and any approval-gated repair follow-up. Issue #351 / Issue #354.",
   "type": "object",
   "required": [
     "schemaVersion",

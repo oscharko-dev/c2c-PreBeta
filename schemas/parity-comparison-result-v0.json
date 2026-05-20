@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oscharko.dev/c2c/schemas/parity-comparison-result-v0.json",
   "title": "Parity Comparison Result v0",
-  "description": "Deterministic comparison result for a parity run. Records the normalized source and target outputs, diff summary, mismatch classification, comparison policy version, and supporting evidence references. Issue #351.",
+  "description": "Deterministic comparison result for a parity run. Records the normalized source and target outputs, diff summary, mismatch classification, comparison policy version, and the policy/diff refs projected from the deterministic Java runner output. Issue #351 / Issue #354.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -66,9 +66,52 @@
         "content",
         "formatting",
         "line_endings",
+        "stderr",
+        "exit_code",
+        "runtime_failure",
+        "unsupported_input",
         "policy",
         "unknown"
       ]
+    },
+    "sourceStdoutRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceStderrRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "targetStdoutRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "targetStderrRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceNormalizedStderrRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "targetNormalizedStderrRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceOutputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "javaOutputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceNormalizedOutputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "javaNormalizedOutputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "normalizedDiffRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceExitCode": {
+      "type": "integer"
+    },
+    "targetExitCode": {
+      "type": "integer"
     },
     "startedAt": {
       "type": "string",

@@ -426,6 +426,7 @@ class W02RunContractShapeTests(unittest.TestCase):
             "modelInvocationBudget",
             "generatedJavaRef",
             "buildTestResultRef",
+            "parityComparison",
             "evidencePackRef",
             "finalClassification",
             "failureCode",
@@ -459,6 +460,48 @@ class W02RunContractShapeTests(unittest.TestCase):
         )
         self.assertIsNone(payload["finalClassification"])
         self.assertIsNone(payload["failureCode"])
+        self.assertIsNone(payload["parityComparison"])
+
+    def test_set_parity_comparison_records_runner_projection(self):
+        contract = self._build()
+        contract.set_parity_comparison(
+            {
+                "status": "failed",
+                "matched": False,
+                "comparisonPolicyVersion": "trust-5-deterministic-v1",
+                "comparisonPolicyRef": {
+                    "uri": "urn:policy",
+                    "sha256": "1" * 64,
+                    "byteSize": 32,
+                },
+                "executionResultRef": {
+                    "uri": "urn:execution",
+                    "sha256": "2" * 64,
+                    "byteSize": 128,
+                },
+                "comparisonResultRef": {
+                    "uri": "urn:comparison",
+                    "sha256": "3" * 64,
+                    "byteSize": 256,
+                },
+                "diffRef": {
+                    "uri": "urn:diff",
+                    "sha256": "4" * 64,
+                    "byteSize": 64,
+                },
+                "mismatchClassification": "content",
+            }
+        )
+
+        payload = contract.to_dict()
+        self.assertEqual(
+            payload["parityComparison"]["comparisonPolicyVersion"],
+            "trust-5-deterministic-v1",
+        )
+        self.assertEqual(
+            payload["parityComparison"]["comparisonResultRef"]["uri"],
+            "urn:comparison",
+        )
 
     def test_finalize_requires_failure_code_for_non_success(self):
         contract = self._build()

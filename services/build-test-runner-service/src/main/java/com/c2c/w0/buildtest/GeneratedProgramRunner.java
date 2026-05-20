@@ -204,10 +204,7 @@ final class GeneratedProgramRunner {
         }
 
         private static String normalize(String value) {
-            if (value == null) {
-                return "";
-            }
-            return value.replace("\r\n", "\n").trim();
+            return DeterministicComparisonPolicy.normalize(value);
         }
 
         private static String buildLog(String stdout, String stderr, String summary, String errorClass, String errorMessage) {

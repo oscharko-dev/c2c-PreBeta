@@ -60,6 +60,7 @@ class BuildTestRunnerServiceTest {
         assertEquals(false, buildResult.containsKey("classOutputDir"));
         Map<?, ?> execution = (Map<?, ?>) response.get("execution");
         Map<?, ?> executionResult = (Map<?, ?>) response.get("executionResult");
+        Map<?, ?> comparisonResult = (Map<?, ?>) response.get("comparisonResult");
         assertEquals("v0", execution.get("schemaVersion"));
         assertEquals("generated-java", execution.get("executionSurface"));
         assertEquals("passed", execution.get("status"));
@@ -73,7 +74,39 @@ class BuildTestRunnerServiceTest {
         assertEquals("generated-java", executionResult.get("executionSurface"));
         assertEquals(false, executionResult.containsKey("stdout"));
         assertEquals(false, executionResult.containsKey("ok"));
+        assertEquals("passed", comparisonResult.get("status"));
+        assertEquals(true, comparisonResult.get("matched"));
+        assertEquals(DeterministicComparisonPolicy.VERSION, comparisonResult.get("comparisonPolicyVersion"));
+        assertNotNull(comparisonResult.get("comparisonPolicyRef"));
+        assertNotNull(comparisonResult.get("sourceOutputRef"));
+        assertNotNull(comparisonResult.get("javaOutputRef"));
+        assertNotNull(comparisonResult.get("sourceNormalizedOutputRef"));
+        assertNotNull(comparisonResult.get("javaNormalizedOutputRef"));
         assertHashRefValid(response);
+    }
+
+    @Test
+    void mismatchedOutputProducesDiffArtifacts() {
+        Map<String, Object> generatedProject = trivialProject(
+                "sample.WrongOutput",
+                "package sample; public class WrongOutput { "
+                        + "public static void main(String[] a) { System.out.print(\"actually-wrong\"); } }");
+        Map<String, Object> request = Map.of(
+                "runId", "run-wrong-output",
+                "programId", "WRONG-OUTPUT",
+                "generatedProject", generatedProject,
+                "goldenMaster", Map.of(
+                        "expected", "expected-different",
+                        "classification", "synthetic"));
+        Map<String, Object> response = service.runVerification(request);
+        Map<?, ?> comparisonResult = (Map<?, ?>) response.get("comparisonResult");
+        assertEquals("failed", comparisonResult.get("status"));
+        assertEquals("content", comparisonResult.get("mismatchClassification"));
+        assertNotNull(comparisonResult.get("diffSummary"));
+        assertNotNull(comparisonResult.get("diffRef"));
+        assertNotNull(comparisonResult.get("normalizedDiffRef"));
+        assertNotNull(comparisonResult.get("sourceOutputRef"));
+        assertNotNull(comparisonResult.get("javaOutputRef"));
     }
 
     @Test
@@ -116,6 +149,9 @@ class BuildTestRunnerServiceTest {
         Map<String, Object> response = service.runVerification(request);
         assertEquals("run-failed", response.get("status"));
         assertEquals("run-error", response.get("classification"));
+        Map<?, ?> comparisonResult = (Map<?, ?>) response.get("comparisonResult");
+        assertEquals("failed", comparisonResult.get("status"));
+        assertEquals("unknown", comparisonResult.get("mismatchClassification"));
         Map<?, ?> execution = (Map<?, ?>) response.get("execution");
         assertEquals("failed", execution.get("status"));
         Map<?, ?> diagnostic = (Map<?, ?>) ((List<?>) execution.get("diagnostics")).get(0);
@@ -198,6 +234,9 @@ class BuildTestRunnerServiceTest {
         Map<String, Object> response = service.runVerification(request);
         assertEquals("missing-golden-master", response.get("status"));
         assertEquals("missing-golden-master", response.get("classification"));
+        Map<?, ?> comparisonResult = (Map<?, ?>) response.get("comparisonResult");
+        assertEquals("blocked", comparisonResult.get("status"));
+        assertEquals("unknown", comparisonResult.get("mismatchClassification"));
     }
 
     @Test

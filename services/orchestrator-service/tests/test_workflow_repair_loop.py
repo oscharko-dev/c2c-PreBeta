@@ -319,6 +319,88 @@ class RepairLoopRecoveryTests(_BaseRepairLoopFixture):
         )
         self.assertTrue(java_path.is_file())
 
+    def test_repair_agent_receives_runner_projected_diff_ref(self):
+        responses = W0WorkflowRunnerTests._base_responses()
+        gateway = _StubGatewayWithBuildOutcomes(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+            build_outcomes=[
+                {
+                    "schemaVersion": "v0",
+                    "status": "output-divergence",
+                    "reason": "oracle_mismatch",
+                    "classification": "divergence-unknown",
+                    "runId": "run-1",
+                    "workflowId": "w0-migration-v0",
+                    "outputRef": {"uri": "urn:run-1/build/1"},
+                    "executionResult": {
+                        "schemaVersion": "v0",
+                        "executionId": "exec-1",
+                        "runId": "run-1",
+                        "workflowId": "w0-migration-v0",
+                        "executionSurface": "generated-java",
+                        "command": "java -jar generated.jar",
+                        "status": "passed",
+                        "exitCode": 0,
+                        "timedOut": False,
+                        "stdoutRef": {"uri": "urn:stdout", "sha256": "a" * 64, "byteSize": 8},
+                        "stderrRef": {"uri": "urn:stderr", "sha256": "b" * 64, "byteSize": 0},
+                        "normalizedOutputRef": {
+                            "uri": "urn:target-normalized",
+                            "sha256": "c" * 64,
+                            "byteSize": 8,
+                        },
+                        "diagnostics": [],
+                        "createdAt": "2026-05-20T12:00:00Z",
+                    },
+                    "comparisonResult": {
+                        "schemaVersion": "v0",
+                        "comparisonId": "cmp-1",
+                        "runId": "run-1",
+                        "workflowId": "w0-migration-v0",
+                        "status": "failed",
+                        "comparisonPolicyVersion": "trust-5-deterministic-v1",
+                        "sourceNormalizedRef": {
+                            "uri": "urn:source-normalized",
+                            "sha256": "d" * 64,
+                            "byteSize": 8,
+                        },
+                        "targetNormalizedRef": {
+                            "uri": "urn:target-normalized",
+                            "sha256": "c" * 64,
+                            "byteSize": 8,
+                        },
+                        "diffSummary": "first divergence at normalized line 1",
+                        "mismatchClassification": "content",
+                        "createdAt": "2026-05-20T12:00:00Z",
+                    },
+                    "comparison": {
+                        "matched": False,
+                        "normalisation": "trust-5-deterministic-v1",
+                        "diff": "@@ normalized-line-1 @@\n-REFERENCE\n+JAVA\n",
+                    },
+                }
+            ],
+        )
+        invoker = _StubRepairAgentInvoker([_refuse_envelope("unsupported_construct")])
+        runner, _tmp = self._runner(gateway, invoker, repair_budget_max=2)
+
+        runner.run(context=self._context(), input_ref=self._input_ref())
+
+        params = invoker.calls[0]["parameters"]
+        self.assertEqual(
+            params["oracleDiffRef"]["kind"], "parity-comparison-diff"
+        )
+        contract = runner.workflow_contract_payload("run-1")
+        self.assertEqual(
+            contract["parityComparison"]["comparisonPolicyVersion"],
+            "trust-5-deterministic-v1",
+        )
+        self.assertEqual(
+            contract["parityComparison"]["mismatchClassification"],
+            "content",
+        )
+
 
 class RepairLoopRefuseTests(_BaseRepairLoopFixture):
     """Test 2 — refuse maps to the canonical failure code."""

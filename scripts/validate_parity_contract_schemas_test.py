@@ -233,12 +233,28 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         )
         self.assertEqual(
             comparison["properties"]["mismatchClassification"]["enum"],
-            ["none", "content", "formatting", "line_endings", "policy", "unknown"],
+            [
+                "none",
+                "content",
+                "formatting",
+                "line_endings",
+                "stderr",
+                "exit_code",
+                "runtime_failure",
+                "unsupported_input",
+                "policy",
+                "unknown",
+            ],
         )
         _assert_ref_property(self, comparison, "comparisonPolicyRef")
         _assert_ref_property(self, comparison, "sourceNormalizedRef")
         _assert_ref_property(self, comparison, "targetNormalizedRef")
         _assert_ref_property(self, comparison, "diffRef")
+        _assert_ref_property(self, comparison, "sourceStdoutRef")
+        _assert_ref_property(self, comparison, "sourceStderrRef")
+        _assert_ref_property(self, comparison, "targetStdoutRef")
+        _assert_ref_property(self, comparison, "targetStderrRef")
+        _assert_ref_property(self, comparison, "normalizedDiffRef")
         self.assertEqual(comparison["properties"]["evidenceRefs"]["items"]["$ref"], "#/$defs/artifactReference")
 
         diagnosis = bundle["schemas/repair-diagnosis-v0.json"]
@@ -350,6 +366,20 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
 
         with self.assertRaises(AssertionError):
             self._assert_execution_result_contract(execution)
+
+    def test_issue_354_projection_fields_remain_available_on_parity_surfaces(self) -> None:
+        bundle = _load_contract_bundle()
+        parity_run = bundle["schemas/parity-run-v0.json"]
+        comparison = bundle["schemas/parity-comparison-result-v0.json"]
+
+        for field in ("executionResultRef", "comparisonResultRef"):
+            _assert_ref_property(self, parity_run, field)
+
+        self.assertEqual(
+            comparison["properties"]["comparisonPolicyVersion"]["type"], "string"
+        )
+        _assert_ref_property(self, comparison, "comparisonPolicyRef")
+        _assert_ref_property(self, comparison, "diffRef")
 
     def _assert_parity_run_contract(self, schema: dict[str, Any]) -> None:
         _assert_required_fields(
