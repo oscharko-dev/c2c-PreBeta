@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Validate the repository service catalog for Issues #327 and #328."""
+"""Validate the repository service catalog for Issues #327, #328, and #332."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -56,6 +58,94 @@ COMMAND_FIELDS = ("checkCommand", "buildCommand", "testCommand")
 LOCAL_FILE_FIELDS = ("packageManifest", "dependencyManifest", "dockerfile", "openapi")
 REPO_RELATIVE_FIELDS = {"path", "schemas"}
 COMPONENT_RELATIVE_FIELDS = set(LOCAL_FILE_FIELDS)
+ROOT_MANIFEST_FILENAMES = {
+    "Cargo.toml",
+    "build.gradle",
+    "build.gradle.kts",
+    "go.mod",
+    "manifest.json",
+    "package.json",
+    "pom.xml",
+    "pyproject.toml",
+    "requirements.txt",
+}
+IGNORED_DIRECTORY_NAMES = {
+    ".cache",
+    ".codex",
+    ".dart_tool",
+    ".docusaurus",
+    ".git",
+    ".github",
+    ".gradle",
+    ".next",
+    ".nox",
+    ".nuxt",
+    ".parcel-cache",
+    ".pnp",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svelte-kit",
+    ".terraform",
+    ".turbo",
+    ".venv",
+    ".vite",
+    ".vscode",
+    ".yarn",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "obj",
+    "out",
+    "target",
+    "var",
+    "vendor",
+    "venv",
+}
+TEXT_FILE_SUFFIXES = {
+    "",
+    ".adoc",
+    ".cfg",
+    ".css",
+    ".csv",
+    ".gitignore",
+    ".graphql",
+    ".gql",
+    ".go",
+    ".gradle",
+    ".html",
+    ".ini",
+    ".js",
+    ".json",
+    ".jsx",
+    ".lock",
+    ".md",
+    ".mdx",
+    ".mjs",
+    ".py",
+    ".sh",
+    ".sql",
+    ".svg",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+MIGRATION_NOTE_ALLOWLIST = {
+    Path("README.md"),
+    Path("docs/adr/0008-repository-topology-and-service-taxonomy.md"),
+}
+SCAN_EXCLUSION_FILES = {
+    Path("scripts/validate-service-catalog.py"),
+}
+LEGACY_BUCKET_SUGGESTIONS = {
+    "apps/c2c-ui": "apps/c2c-studio",
+    "services/go/model-gateway-service": "services/model-gateway-service",
+}
 
 
 def _default_repo_root() -> Path:
@@ -124,6 +214,157 @@ def _validate_enum_array(
             f"{component_id}: {field} values must be drawn from {sorted(allowed)}; got {invalid!r}"
         )
     return normalized
+
+
+def _is_ignored_path(path: Path) -> bool:
+    return any(part in IGNORED_DIRECTORY_NAMES for part in path.parts)
+
+
+def _is_workflow_path(path: Path) -> bool:
+    return len(path.parts) >= 2 and path.parts[0] == ".github" and path.parts[1] == "workflows"
+
+
+def _run_git(repo_root: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(repo_root), *args], text=True).strip()
+
+
+def _iter_repo_files(repo_root: Path, *roots: str, allow_workflows: bool = False) -> list[Path]:
+    try:
+        output = _run_git(repo_root, "ls-files", "--cached", "--others", "--exclude-standard", "--", *roots)
+    except (OSError, subprocess.CalledProcessError):
+        files: list[Path] = []
+        for root_name in roots or (".",):
+            base = repo_root / root_name
+            if not base.exists():
+                continue
+            if base.is_file():
+                relative = base.relative_to(repo_root)
+                if not _is_ignored_path(relative) or (allow_workflows and _is_workflow_path(relative)):
+                    files.append(relative)
+                continue
+            for dirpath, dirnames, filenames in os.walk(base):
+                current = Path(dirpath)
+                relative_dir = current.relative_to(repo_root)
+                if _is_ignored_path(relative_dir) and not (allow_workflows and _is_workflow_path(relative_dir)):
+                    dirnames[:] = []
+                    continue
+                filtered_dirnames: list[str] = []
+                for name in dirnames:
+                    candidate = relative_dir / name if relative_dir.parts else Path(name)
+                    if allow_workflows and _is_workflow_path(candidate):
+                        filtered_dirnames.append(name)
+                        continue
+                    if name not in IGNORED_DIRECTORY_NAMES:
+                        filtered_dirnames.append(name)
+                dirnames[:] = filtered_dirnames
+                for filename in filenames:
+                    relative_path = relative_dir / filename if relative_dir.parts else Path(filename)
+                    if not _is_ignored_path(relative_path) or (allow_workflows and _is_workflow_path(relative_path)):
+                        files.append(relative_path)
+        return sorted(set(files))
+
+    if not output:
+        return []
+
+    files: list[Path] = []
+    for line in output.splitlines():
+        relative_path = Path(line)
+        if _is_ignored_path(relative_path) and not (allow_workflows and _is_workflow_path(relative_path)):
+            continue
+        resolved = (repo_root / relative_path).resolve()
+        try:
+            resolved.relative_to(repo_root)
+        except ValueError:
+            continue
+        if resolved.is_symlink():
+            continue
+        files.append(relative_path)
+    return sorted(set(files))
+
+
+def _iter_manifest_component_roots(repo_root: Path) -> set[str]:
+    roots: set[str] = set()
+    for relative_path in _iter_repo_files(repo_root, "apps", "services", "libs"):
+        if relative_path.name not in ROOT_MANIFEST_FILENAMES:
+            continue
+        component_root = relative_path.parent
+        if len(component_root.parts) not in {2, 3}:
+            continue
+        roots.add(component_root.as_posix())
+    return roots
+
+
+def _validate_catalog_completeness(repo_root: Path, components: list[dict[str, Any]]) -> None:
+    component_paths = {component["path"] for component in components}
+    discovered_roots = _iter_manifest_component_roots(repo_root)
+    missing_roots = sorted(discovered_roots - component_paths)
+    if missing_roots:
+        raise ValueError(
+            "catalog completeness mismatch; missing component path(s): "
+            + ", ".join(missing_roots)
+            + "; add each path to config/service-catalog.json"
+        )
+
+
+def _suggest_legacy_path_fix(path: str, component_paths: dict[str, str]) -> str:
+    for legacy_root, replacement in LEGACY_BUCKET_SUGGESTIONS.items():
+        if path.startswith(legacy_root):
+            return replacement + path[len(legacy_root) :]
+
+    if path.startswith("services/"):
+        parts = path.split("/")
+        if len(parts) >= 3 and parts[1] in LANGUAGE_TO_PACKAGE_MANAGERS:
+            service_id = parts[2]
+            tail = "/".join(parts[3:])
+            if service_id in component_paths:
+                replacement = component_paths[service_id]
+                return replacement + (f"/{tail}" if tail else "")
+            if service_id.startswith("w0-service-"):
+                replacement = f"services/reference/{service_id}"
+                return replacement + (f"/{tail}" if tail else "")
+        if len(parts) >= 2:
+            service_id = parts[1]
+            tail = "/".join(parts[2:])
+            if service_id in component_paths:
+                replacement = component_paths[service_id]
+                return replacement + (f"/{tail}" if tail else "")
+            if service_id.endswith("-service"):
+                replacement = f"services/{service_id}"
+                return replacement + (f"/{tail}" if tail else "")
+    return ""
+
+
+def _validate_legacy_service_paths(repo_root: Path, components: list[dict[str, Any]]) -> None:
+    component_paths = {component["id"]: component["path"] for component in components}
+    allowed_files = {repo_root / path for path in MIGRATION_NOTE_ALLOWLIST | SCAN_EXCLUSION_FILES}
+    legacy_path_pattern = re.compile(r"(?<![A-Za-z0-9._-])((?:apps|services)/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)")
+    for relative_path in _iter_repo_files(repo_root, ".", allow_workflows=True):
+        full_path = repo_root / relative_path
+        if full_path in allowed_files:
+            continue
+        if relative_path.suffix.lower() not in TEXT_FILE_SUFFIXES and relative_path.name not in {
+            ".gitignore",
+            "Dockerfile",
+            "Makefile",
+            "README",
+        }:
+            continue
+        try:
+            content = full_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+
+        for match in legacy_path_pattern.finditer(content):
+            candidate = match.group(1).rstrip(".,:;!?)]}")
+            if candidate.startswith("apps/c2c-ui") or candidate.startswith("services/"):
+                if any(candidate == path or candidate.startswith(f"{path}/") for path in component_paths.values()):
+                    continue
+                fix = _suggest_legacy_path_fix(candidate, component_paths)
+                if not fix:
+                    fix = "a current catalog path"
+                raise ValueError(
+                    f"stale service path {candidate} found in {relative_path.as_posix()}; expected {fix}"
+                )
 
 
 def _validate_component(
@@ -357,6 +598,8 @@ def validate_catalog_data(catalog: dict[str, Any], repo_root: Path) -> None:
                 f"{component_id}: classification must be {expected_classification!r} for Issue #327 coverage"
             )
 
+    _validate_catalog_completeness(repo_root, components)
+    _validate_legacy_service_paths(repo_root, components)
     _validate_contract_ownership(repo_root, components)
 
 

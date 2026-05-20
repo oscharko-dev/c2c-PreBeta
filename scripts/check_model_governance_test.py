@@ -50,7 +50,7 @@ class CheckModelGovernanceTest(unittest.TestCase):
             repo = Path(tmp)
             subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
 
-            go_service = repo / "services" / "go" / "assistant-service"
+            go_service = repo / "services" / "experience-learning-service"
             go_service.mkdir(parents=True, exist_ok=True)
             (go_service / "main.go").write_text(
                 "\n".join(
@@ -72,12 +72,22 @@ class CheckModelGovernanceTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            java_service = repo / "services" / "java" / "assistant-service" / "src" / "main" / "java" / "com" / "c2c" / "w0" / "assistant"
+            java_service = (
+                repo
+                / "services"
+                / "build-test-runner-service"
+                / "src"
+                / "main"
+                / "java"
+                / "com"
+                / "c2c"
+                / "build_test_runner"
+            )
             java_service.mkdir(parents=True, exist_ok=True)
             (java_service / "App.java").write_text(
                 "\n".join(
                     [
-                        "package com.c2c.w0.assistant;",
+                        "package com.c2c.build_test_runner;",
                         "",
                         "import com.openai.client.OpenAIClient;",
                         "",
@@ -92,7 +102,7 @@ class CheckModelGovernanceTest(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            app = repo / "apps" / "c2c-ui" / "src"
+            app = repo / "apps" / "c2c-studio" / "src"
             app.mkdir(parents=True, exist_ok=True)
             (app / "llm.ts").write_text(
                 "\n".join(
@@ -115,11 +125,11 @@ class CheckModelGovernanceTest(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            (repo / "apps" / "c2c-ui" / "package.json").write_text(
+            (repo / "apps" / "c2c-studio" / "package.json").write_text(
                 '\n'.join(
                     [
                         "{",
-                        '  "name": "c2c-ui",',
+                        '  "name": "c2c-studio",',
                         '  "dependencies": {',
                         '    "@anthropic-ai/sdk": "^0.54.0"',
                         "  }",
@@ -134,11 +144,14 @@ class CheckModelGovernanceTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("direct-model-provider-usage", result.stdout)
-            self.assertIn("services/go/assistant-service/main.go", result.stdout)
-            self.assertIn("services/java/assistant-service/src/main/java/com/c2c/w0/assistant/App.java", result.stdout)
-            self.assertIn("apps/c2c-ui/src/llm.ts", result.stdout)
-            self.assertIn("apps/c2c-ui/src/legacy-llm.js", result.stdout)
-            self.assertIn("apps/c2c-ui/package.json", result.stdout)
+            self.assertIn("services/experience-learning-service/main.go", result.stdout)
+            self.assertIn(
+                "services/build-test-runner-service/src/main/java/com/c2c/build_test_runner/App.java",
+                result.stdout,
+            )
+            self.assertIn("apps/c2c-studio/src/llm.ts", result.stdout)
+            self.assertIn("apps/c2c-studio/src/legacy-llm.js", result.stdout)
+            self.assertIn("apps/c2c-studio/package.json", result.stdout)
 
     def test_ignores_allowed_gateway_and_non_product_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,7 +176,7 @@ class CheckModelGovernanceTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            go_docs = repo / "services" / "go" / "assistant-service" / "docs"
+            go_docs = repo / "services" / "experience-learning-service" / "docs"
             go_docs.mkdir(parents=True, exist_ok=True)
             (go_docs / "client.go").write_text(
                 "\n".join(
@@ -179,12 +192,12 @@ class CheckModelGovernanceTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            java_tests = repo / "services" / "java" / "assistant-service" / "tests"
+            java_tests = repo / "services" / "build-test-runner-service" / "tests"
             java_tests.mkdir(parents=True, exist_ok=True)
             (java_tests / "AppTest.java").write_text(
                 "\n".join(
                     [
-                        "package com.c2c.w0.assistant;",
+                        "package com.c2c.build_test_runner;",
                         "",
                         "import com.openai.client.OpenAIClient;",
                         "",

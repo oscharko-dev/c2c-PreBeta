@@ -18,7 +18,7 @@ W0 backend-for-frontend that brokers Studio calls to the W0 capability mesh.
    route (no error). The current Studio-only setup does not use it.
 
 Migration note: older bundled-UI deployments pointed `C2C_UI_DIST` at
-`../../apps/c2c-ui/dist`. Keep that legacy path only while migrating a
+`../../apps/c2c-studio/dist`. Keep that compatibility path only while migrating a
 bundled UI setup.
 
 The UI never talks to capability services directly; everything routes
