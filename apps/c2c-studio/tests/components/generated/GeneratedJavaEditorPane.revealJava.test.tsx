@@ -16,6 +16,15 @@ import { LineageCoverageProvider } from "@/stores/lineageCoverage";
 import { apiClient } from "@/lib/apiClient";
 import type { ApiResult, GeneratedFileContent } from "@/types/api";
 
+vi.mock("@/stores/sourceWorkspace", () => ({
+  useSourceWorkspace: () => ({
+    statusFlags: {
+      clean: true,
+      pendingReRun: false,
+    },
+  }),
+}));
+
 // Capture editor mount args + reveal calls. The mock's onMount fires a
 // fake editor object whose methods record their arguments so the test
 // can assert against them. Unlike the broad pane test file we do not
