@@ -164,6 +164,10 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
             },
         )
         self.assertEqual(execution["properties"]["executionSurface"]["enum"], ["source-reference", "generated-java"])
+        self.assertEqual(
+            execution["properties"]["referenceMode"]["enum"],
+            ["reference-fixture", "native-cobol"],
+        )
         self.assertNotIn("stdout", execution["properties"])
         self.assertNotIn("stderr", execution["properties"])
         self.assertNotIn("normalizedOutput", execution["properties"])
@@ -172,8 +176,13 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         _assert_ref_property(self, execution, "normalizedOutputRef")
         _assert_ref_property(self, execution, "logRef")
         _assert_ref_property(self, execution, "sourceArtifactRef")
+        _assert_ref_property(self, execution, "inputArtifactRef")
         _assert_ref_property(self, execution, "generatedArtifactRef")
         _assert_ref_property(self, execution, "referenceArtifactRef")
+        self.assertEqual(
+            execution["allOf"][0]["then"]["required"],
+            ["referenceMode"],
+        )
         self.assertEqual(execution["properties"]["diagnostics"]["items"]["$ref"], "#/$defs/diagnostic")
         diagnostic = execution["$defs"]["diagnostic"]
         _assert_required_fields(self, diagnostic, {"severity", "message"})

@@ -84,6 +84,9 @@ class CobolOracleTest {
     void oracleMatchesWhenJavaStdoutEqualsCobolStdout() {
         assumeTrue(CobolRuntimeExecutor.isAvailable(),
                 "GnuCOBOL cobc/cobcrun must be installed for oracle equivalence");
+        Map<String, Object> sourceRefArtifact = sourceRef(
+                "urn:test/oracle-match",
+                COBOL_PRINT_PASS);
         Map<String, Object> generatedProject = trivialProject(
                 "sample.OracleMatch",
                 "package sample; public class OracleMatch { "
@@ -92,13 +95,11 @@ class CobolOracleTest {
                 "runId", "run-oracle-match",
                 "programId", "PASSPRG",
                 "generatedProject", generatedProject,
+                "sourceRef", sourceRefArtifact,
                 "oracle", Map.of(
                         "mode", "cobol-runtime",
                         "sourceText", COBOL_PRINT_PASS,
-                        "sourceRef", Map.of(
-                                "uri", "urn:test/oracle-match",
-                                "sha256", "0000000000000000000000000000000000000000000000000000000000000000",
-                                "byteSize", COBOL_PRINT_PASS.length()),
+                        "sourceRef", sourceRefArtifact,
                         "timeoutMs", 5000));
 
         Map<String, Object> response = service.runVerification(request);
@@ -106,6 +107,7 @@ class CobolOracleTest {
         assertEquals("ok", response.get("status"),
                 () -> "expected ok status; response=" + response);
         assertEquals("match", response.get("classification"));
+        assertEquals(sourceRefArtifact, response.get("sourceRef"));
         Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
         assertNotNull(oracle);
         assertEquals("cobol-runtime", oracle.get("mode"));
@@ -116,8 +118,8 @@ class CobolOracleTest {
         assertEquals(true, oracle.get("runOk"));
         assertEquals("PASSPRG", oracle.get("moduleName"));
         assertTrue(((String) oracle.get("stdoutSha256")).matches("[0-9a-f]{64}"));
-        Map<?, ?> sourceRef = (Map<?, ?>) oracle.get("sourceRef");
-        assertEquals("urn:test/oracle-match", sourceRef.get("uri"));
+        Map<?, ?> oracleSourceRef = (Map<?, ?>) oracle.get("sourceRef");
+        assertEquals(sourceRefArtifact, oracleSourceRef);
         Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
         assertEquals(true, comparison.get("matched"));
         assertEquals("oracle.cobol-runtime", comparison.get("source"));
@@ -197,6 +199,9 @@ class CobolOracleTest {
 
     @Test
     void userProvidedExpectedOutputOverridesCobolStdoutForPasteModeOracle() {
+        Map<String, Object> sourceRefArtifact = sourceRef(
+                "urn:test/user-provided-expected",
+                COBOL_PRINT_PASS);
         Map<String, Object> generatedProject = trivialProject(
                 "sample.UserExpectedMismatch",
                 "package sample; public class UserExpectedMismatch { "
@@ -205,9 +210,11 @@ class CobolOracleTest {
                 "runId", "run-user-expected-mismatch",
                 "programId", "PASSPRG",
                 "generatedProject", generatedProject,
+                "sourceRef", sourceRefArtifact,
                 "oracle", Map.of(
                         "mode", "cobol-runtime",
                         "sourceText", COBOL_PRINT_PASS,
+                        "sourceRef", sourceRefArtifact,
                         "expectedOutput", "FAIL\n",
                         "timeoutMs", 5000));
 
@@ -215,6 +222,7 @@ class CobolOracleTest {
 
         assertEquals("output-divergence", response.get("status"));
         assertEquals("divergence-unknown", response.get("classification"));
+        assertEquals(sourceRefArtifact, response.get("sourceRef"));
         Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
         assertEquals(false, comparison.get("matched"));
         assertEquals("oracle.user-provided", comparison.get("source"));
@@ -224,6 +232,7 @@ class CobolOracleTest {
         assertEquals("user-provided", oracle.get("mode"));
         assertEquals(false, oracle.get("attempted"),
                 "explicit expectedOutput must not require executing the COBOL runtime");
+        assertEquals(sourceRefArtifact, oracle.get("sourceRef"));
     }
 
     @Test
@@ -391,6 +400,9 @@ class CobolOracleTest {
     void oracleJavaRuntimeFailureNeverFabricatesMatch() {
         assumeTrue(CobolRuntimeExecutor.isAvailable(),
                 "GnuCOBOL cobc/cobcrun must be installed");
+        Map<String, Object> sourceRefArtifact = sourceRef(
+                "urn:test/oracle-boom",
+                COBOL_PRINT_PASS);
         Map<String, Object> generatedProject = trivialProject(
                 "sample.OracleBoom",
                 "package sample; public class OracleBoom { "
@@ -401,15 +413,21 @@ class CobolOracleTest {
                 "runId", "run-oracle-boom",
                 "programId", "PASSPRG",
                 "generatedProject", generatedProject,
+                "sourceRef", sourceRefArtifact,
                 "oracle", Map.of(
                         "mode", "cobol-runtime",
                         "sourceText", COBOL_PRINT_PASS,
+                        "sourceRef", sourceRefArtifact,
                         "timeoutMs", 5000));
 
         Map<String, Object> response = service.runVerification(request);
 
         assertEquals("run-failed", response.get("status"));
         assertEquals("run-error", response.get("classification"));
+        assertEquals(sourceRefArtifact, response.get("sourceRef"));
+        Map<?, ?> oracle = (Map<?, ?>) response.get("oracle");
+        assertEquals("cobol-runtime", oracle.get("mode"));
+        assertEquals(sourceRefArtifact, oracle.get("sourceRef"));
         Map<?, ?> comparison = (Map<?, ?>) response.get("comparison");
         assertEquals(false, comparison.get("matched"),
                 "a Java runtime exception must never produce a match against the oracle");
@@ -539,6 +557,13 @@ class CobolOracleTest {
                 .replace("\r", "\\r")
                 .replace("\n", "\\n")
                 + "\"";
+    }
+
+    private static Map<String, Object> sourceRef(String uri, String content) {
+        return Map.of(
+                "uri", uri,
+                "sha256", HashUtil.sha256(content),
+                "byteSize", HashUtil.byteLength(content));
     }
 
     private static void restoreProperty(String key, String previous) {

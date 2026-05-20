@@ -69,6 +69,14 @@ public final class ServiceApp {
 
         server.createContext("/v0/run-verification",
                 exchange -> handleRunVerification(exchange, service, harnessEndpoint, harnessEventToken, experienceEndpoint, controlToken));
+        server.createContext("/v0/source-reference/execute",
+                exchange -> handleSourceReferenceExecute(
+                        exchange,
+                        service,
+                        harnessEndpoint,
+                        harnessEventToken,
+                        experienceEndpoint,
+                        controlToken));
 
         // Studio-IDE-14 (#256): deterministic Java formatter (google-java-format
         // in-process). Stateless per-request handler; no events emitted since
@@ -102,13 +110,55 @@ public final class ServiceApp {
             Map<String, Object> response = service.runVerification(request);
             int status = httpStatus(response);
             sendJson(exchange, status, response);
-            emitEvents(harnessEndpoint, harnessEventToken, experienceEndpoint, response);
+            emitEvents(
+                    harnessEndpoint,
+                    harnessEventToken,
+                    experienceEndpoint,
+                    response,
+                    BuildTestRunnerService.CAPABILITY,
+                    "build-test");
         } catch (RequestBodyTooLargeException e) {
             sendJson(exchange, 413, requestTooLargeBody());
         } catch (IllegalArgumentException e) {
             sendJson(exchange, 400, Map.of("status", "failed", "error", e.getMessage()));
         } catch (Exception e) {
             sendJson(exchange, 500, Map.of("status", "failed",
+                    "error", e.getMessage() == null ? "unknown" : e.getMessage()));
+        }
+    }
+
+    private static void handleSourceReferenceExecute(HttpExchange exchange,
+                                                     BuildTestRunnerService service,
+                                                     String harnessEndpoint,
+                                                     String harnessEventToken,
+                                                     String experienceEndpoint,
+                                                     String controlToken) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            sendText(exchange, 405, "method not allowed");
+            return;
+        }
+        if (!isAuthorized(exchange, controlToken)) {
+            sendJson(exchange, 401, Map.of("status", "failed", "error", "unauthorized"));
+            return;
+        }
+        try {
+            Map<String, Object> request = readJsonRequest(exchange, MAX_REQUEST_BODY_BYTES);
+            Map<String, Object> response = service.runSourceReferenceExecution(request);
+            sendJson(exchange, httpStatus(response), response);
+            emitEvents(
+                    harnessEndpoint,
+                    harnessEventToken,
+                    experienceEndpoint,
+                    response,
+                    BuildTestRunnerService.SOURCE_REFERENCE_CAPABILITY,
+                    "source-reference");
+        } catch (RequestBodyTooLargeException e) {
+            sendJson(exchange, 413, requestTooLargeBody());
+        } catch (IllegalArgumentException e) {
+            sendJson(exchange, 400, Map.of("status", "failed", "error", e.getMessage()));
+        } catch (Exception e) {
+            sendJson(exchange, 500, Map.of(
+                    "status", "failed",
                     "error", e.getMessage() == null ? "unknown" : e.getMessage()));
         }
     }
@@ -246,10 +296,10 @@ public final class ServiceApp {
     }
 
     static void emitEvents(String harnessEndpoint, String harnessEventToken, String experienceEndpoint,
-                           Map<String, Object> response) {
+                           Map<String, Object> response, String capability, String dataClass) {
         try {
-            postIfPresent(harnessEndpoint, harnessEventToken, buildHarnessEvent(response));
-            for (Map<String, Object> experience : buildExperienceEvents(response)) {
+            postIfPresent(harnessEndpoint, harnessEventToken, buildHarnessEvent(response, capability, dataClass));
+            for (Map<String, Object> experience : buildExperienceEvents(response, capability, dataClass)) {
                 postIfPresent(experienceEndpoint, null, experience);
             }
         } catch (Exception ignored) {
@@ -257,60 +307,67 @@ public final class ServiceApp {
         }
     }
 
-    static Map<String, Object> buildHarnessEvent(Map<String, Object> response) {
+    static Map<String, Object> buildHarnessEvent(Map<String, Object> response, String capability, String dataClass) {
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("schemaVersion", "v0");
         event.put("eventId", "evt-" + SERVICE_NAME + "-" + UUID.randomUUID());
-        event.put("eventType", harnessEventType(response));
+        event.put("eventType", harnessEventType(response, dataClass));
         event.put("service", SERVICE_NAME);
         event.put("runId", response.get("runId"));
         event.put("stepId", 1);
         event.put("actor", SERVICE_NAME);
-        event.put("capability", BuildTestRunnerService.CAPABILITY);
-        event.put("dataClass", "build-test");
+        event.put("capability", capability);
+        event.put("dataClass", dataClass);
         event.put("redactionProfile", "agent-managed");
         event.put("policyDecision", "policy allow");
         event.put("status", String.valueOf(response.get("status")));
-        event.put("stateTransition", harnessStateTransition(response));
-        event.put("inputRef", response.get("sourceRef"));
-        event.put("outputRef", response.get("outputRef"));
+        event.put("stateTransition", harnessStateTransition(response, dataClass));
+        event.put("inputRef", response.getOrDefault("sourceArtifactRef", response.get("sourceRef")));
+        event.put("outputRef", response.getOrDefault("normalizedOutputRef", response.get("outputRef")));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("programId", response.get("programId"));
         payload.put("classification", response.get("classification"));
         payload.put("summary", response.get("summary"));
+        if (response.get("referenceMode") != null) {
+            payload.put("referenceMode", response.get("referenceMode"));
+        }
         if (response.get("comparison") instanceof Map<?, ?> comparison) {
             payload.put("matched", comparison.get("matched"));
         }
         if (response.get("execution") instanceof Map<?, ?> execution) {
             payload.put("stdoutSha256", execution.get("stdoutSha256"));
+        } else if (response.get("stdoutRef") instanceof Map<?, ?> stdoutRef) {
+            payload.put("stdoutSha256", stdoutRef.get("sha256"));
         }
         event.put("payload", payload);
         event.put("createdAt", Instant.now().toString());
         return event;
     }
 
-    static List<Map<String, Object>> buildExperienceEvents(Map<String, Object> response) {
+    static List<Map<String, Object>> buildExperienceEvents(Map<String, Object> response,
+                                                           String capability,
+                                                           String dataClass) {
         Object status = response.get("status");
-        if ("ok".equals(status)) {
+        if ("ok".equals(status) || "passed".equals(status)) {
             return List.of();
         }
         Map<String, Object> event = new LinkedHashMap<>();
         Instant now = Instant.now();
         event.put("schemaVersion", "v0");
         event.put("eventId", "exp-" + SERVICE_NAME + "-" + UUID.randomUUID());
-        event.put("eventType", "build-test." + status);
+        event.put("eventType", dataClass + "." + status);
         event.put("service", SERVICE_NAME);
         event.put("runId", response.get("runId"));
         event.put("actor", SERVICE_NAME);
-        event.put("capability", BuildTestRunnerService.CAPABILITY);
-        event.put("dataClass", "build-test");
+        event.put("capability", capability);
+        event.put("dataClass", dataClass);
         event.put("redactionProfile", "agent-managed");
         event.put("policyDecision", "policy allow");
         event.put("status", "observed");
-        event.put("stateTransition", "build-test->" + status);
+        event.put("stateTransition", dataClass + "->" + status);
         event.put("buildTestOutcome", String.valueOf(response.get("classification")));
-        event.put("pattern", patternFor(response));
-        event.put("patternFingerprint", HashUtil.sha256(patternFor(response)));
+        event.put("pattern", patternFor(response, dataClass));
+        event.put("patternFingerprint", HashUtil.sha256(patternFor(response, dataClass)));
         event.put("occurrences", 1);
         event.put("confidence", 0.9);
         event.put("observationOnly", true);
@@ -320,6 +377,11 @@ public final class ServiceApp {
         payload.put("summary", response.get("summary"));
         if (response.get("execution") instanceof Map<?, ?> execution) {
             payload.put("stdoutSha256", execution.get("stdoutSha256"));
+        } else if (response.get("stdoutRef") instanceof Map<?, ?> stdoutRef) {
+            payload.put("stdoutSha256", stdoutRef.get("sha256"));
+        }
+        if (response.get("referenceMode") != null) {
+            payload.put("referenceMode", response.get("referenceMode"));
         }
         if (response.get("goldenMaster") instanceof Map<?, ?> golden) {
             payload.put("goldenMasterClassification", golden.get("classification"));
@@ -331,23 +393,26 @@ public final class ServiceApp {
         return List.of(event);
     }
 
-    private static String harnessEventType(Map<String, Object> response) {
+    private static String harnessEventType(Map<String, Object> response, String dataClass) {
         Object status = response.get("status");
-        return "build-test." + (status == null ? "executed" : status);
+        return dataClass + "." + (status == null ? "executed" : status);
     }
 
-    private static String harnessStateTransition(Map<String, Object> response) {
+    private static String harnessStateTransition(Map<String, Object> response, String dataClass) {
         Object status = response.get("status");
         if ("ok".equals(status)) {
             return "generated->validated";
         }
-        return "generated->" + (status == null ? "unknown" : status);
+        if ("passed".equals(status)) {
+            return dataClass + "->validated";
+        }
+        return dataClass + "->" + (status == null ? "unknown" : status);
     }
 
-    private static String patternFor(Map<String, Object> response) {
+    private static String patternFor(Map<String, Object> response, String dataClass) {
         Object programId = response.getOrDefault("programId", "unknown");
         Object classification = response.getOrDefault("classification", "unknown");
-        return "build-test:" + classification + ":" + programId;
+        return dataClass + ":" + classification + ":" + programId;
     }
 
     private static void postIfPresent(String endpoint, String eventToken, Map<String, Object> event) throws Exception {

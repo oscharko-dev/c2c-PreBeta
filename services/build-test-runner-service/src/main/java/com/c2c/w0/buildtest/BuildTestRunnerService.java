@@ -32,6 +32,7 @@ public final class BuildTestRunnerService {
 
     public static final String SCHEMA_VERSION = "v0";
     public static final String CAPABILITY = "build-test.run";
+    public static final String SOURCE_REFERENCE_CAPABILITY = "build-test.source-reference";
     public static final String SERVICE_NAME = "build-test-runner-service";
 
     private final Path repoRoot;
@@ -268,6 +269,17 @@ public final class BuildTestRunnerService {
             response.put("outputRef", reference(response));
             return response;
         }
+    }
+
+    public Map<String, Object> runSourceReferenceExecution(Map<String, Object> request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        return new Trust3SourceReferenceParityService(repoRoot).execute(request);
+    }
+
+    public Map<String, Object> runParityExecution(Map<String, Object> request) {
+        return runSourceReferenceExecution(request);
     }
 
     private static boolean isCobolRuntimeOracle(Map<String, Object> oracleSpec) {
@@ -510,7 +522,7 @@ public final class BuildTestRunnerService {
         return comparison;
     }
 
-    private static Map<String, Object> outputReference(String kind, String content) {
+    static Map<String, Object> outputReference(String kind, String content) {
         String safeContent = content == null ? "" : content;
         String hash = HashUtil.sha256(safeContent);
         Map<String, Object> ref = new LinkedHashMap<>();
@@ -584,7 +596,7 @@ public final class BuildTestRunnerService {
                         "registryPath", GoldenMaster.REGISTRY_RELATIVE_PATH));
     }
 
-    private static Map<String, Object> reference(Map<String, Object> response) {
+    static Map<String, Object> reference(Map<String, Object> response) {
         String body = HashUtil.canonicalJson(response);
         String hash = HashUtil.sha256(body);
         Map<String, Object> ref = new LinkedHashMap<>();
@@ -673,7 +685,7 @@ public final class BuildTestRunnerService {
         return new LinkedHashMap<>();
     }
 
-    private static Path detectRepoRoot() {
+    static Path detectRepoRoot() {
         Path current = Paths.get("").toAbsolutePath();
         for (int i = 0; i < 8; i++) {
             if (current == null) {
