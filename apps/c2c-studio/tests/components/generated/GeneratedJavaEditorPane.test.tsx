@@ -35,6 +35,15 @@ import { apiClient } from "@/lib/apiClient";
 import { JAVA_FORMAT_ON_SAVE_STORAGE_KEY } from "@/lib/editor/javaFormatOnSave";
 import type { ApiResult, Diagnostic, GeneratedFileContent } from "@/types/api";
 
+vi.mock("@/stores/sourceWorkspace", () => ({
+  useSourceWorkspace: () => ({
+    statusFlags: {
+      clean: true,
+      pendingReRun: false,
+    },
+  }),
+}));
+
 const formatJavaSpy = vi.hoisted(() => vi.fn());
 const lintJavaSpy = vi.hoisted(() => vi.fn(() => []));
 const fetchTraceabilitySpy = vi.hoisted(() => vi.fn());
@@ -636,10 +645,14 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     renderPane();
 
     await screen.findByTestId("code-editor-mock");
+    await waitFor(() => {
+      expect(
+        editorActions.find((entry) => entry.id === "c2c.lineage.javaToCobol"),
+      ).toBeDefined();
+    });
     const action = editorActions.find(
       (entry) => entry.id === "c2c.lineage.javaToCobol",
     );
-    expect(action).toBeDefined();
     const events: CustomEvent[] = [];
     const listener = (ev: Event) => events.push(ev as CustomEvent);
     window.addEventListener("c2c:reveal-cobol", listener);
@@ -678,10 +691,14 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     renderPane();
 
     await screen.findByTestId("code-editor-mock");
+    await waitFor(() => {
+      expect(
+        editorActions.find((entry) => entry.id === "c2c.lineage.javaToCobol"),
+      ).toBeDefined();
+    });
     const action = editorActions.find(
       (entry) => entry.id === "c2c.lineage.javaToCobol",
     );
-    expect(action).toBeDefined();
     await act(async () => {
       await action!.run(fakeEditor);
     });
@@ -700,10 +717,14 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     renderPane();
 
     await screen.findByTestId("code-editor-mock");
+    await waitFor(() => {
+      expect(
+        editorActions.find((entry) => entry.id === "c2c.lineage.javaToCobol"),
+      ).toBeDefined();
+    });
     const action = editorActions.find(
       (entry) => entry.id === "c2c.lineage.javaToCobol",
     );
-    expect(action).toBeDefined();
     await act(async () => {
       await action!.run(fakeEditor);
     });

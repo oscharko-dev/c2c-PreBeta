@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useTransformationRun } from "../../stores/transformationRun";
+import { useSourceWorkspace } from "../../stores/sourceWorkspace";
 import { EquivalencePanel } from "./EquivalencePanel";
 import { RunArtifactsPanel } from "./RunArtifactsPanel";
 import { StackTraceView } from "./StackTraceView";
@@ -25,6 +26,7 @@ export function BuildTestPanel({
   emptyState: { title: string; message: string };
 }) {
   const { state } = useTransformationRun();
+  const { statusFlags } = useSourceWorkspace();
   const [activeView, setActiveView] = useState<"outputs" | "diff">("outputs");
 
   if (state.phase === "idle") {
@@ -36,9 +38,19 @@ export function BuildTestPanel({
     );
   }
 
-  const bt = state.buildTest;
+  const showingHistoricalBuildTest = Boolean(
+    state.previousRun?.buildTest &&
+      !state.buildTest &&
+      (state.phase === "starting" ||
+        state.phase === "running" ||
+        state.phase === "failed" ||
+        state.phase === "unavailable")
+  );
+  const bt =
+    state.buildTest ?? (showingHistoricalBuildTest ? state.previousRun?.buildTest ?? null : null);
   const isPending =
-    !bt || state.phase === "running" || state.phase === "starting";
+    !bt &&
+    (state.phase === "running" || state.phase === "starting");
   const stages = getPipelineStages(bt, isPending, state.progress);
   const result = describeBuildTestResult(bt);
   const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
@@ -69,6 +81,15 @@ export function BuildTestPanel({
           </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col border-l border-line-2 pl-8 pr-2">
+          {statusFlags.pendingReRun || showingHistoricalBuildTest ? (
+            <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
+              {showingHistoricalBuildTest
+                ? state.phase === "failed"
+                  ? "Latest rerun failed. Showing the previous parity results as stale so the last completed comparison remains accessible."
+                  : "Showing the previous parity results while the latest rerun is in progress. These results are stale until the rerun completes."
+                : "COBOL source changed after the last completed parity run. These parity results are stale until you rerun."}
+            </div>
+          ) : null}
           <div className="mb-4 rounded border border-line-2 bg-bg-1 p-4">
             <div className="flex items-start gap-3">
               <StatusChip variant={result.tone} />

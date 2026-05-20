@@ -25,12 +25,22 @@ const mockState = {
   modelGatewayHealth: null,
   harnessReady: null,
   workflow: null,
+  previousRun: null,
 };
 
 const navigateToDiagnosticMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/stores/transformationRun', () => ({
   useTransformationRun: vi.fn(() => ({ state: mockState })),
+}));
+
+vi.mock('../../../src/stores/sourceWorkspace', () => ({
+  useSourceWorkspace: vi.fn(() => ({
+    statusFlags: {
+      clean: true,
+      pendingReRun: false,
+    },
+  })),
 }));
 
 vi.mock('@/lib/editor/markerNavigation', () => ({
@@ -41,11 +51,20 @@ vi.mock('@/lib/editor/markerNavigation', () => ({
 
 describe('Run Panels', () => {
   let useTransformationRunMock: any;
+  let useSourceWorkspaceMock: any;
   
   beforeEach(async () => {
     vi.resetAllMocks();
     const mod = await import('../../../src/stores/transformationRun');
     useTransformationRunMock = mod.useTransformationRun;
+    const sourceMod = await import('../../../src/stores/sourceWorkspace');
+    useSourceWorkspaceMock = sourceMod.useSourceWorkspace;
+    useSourceWorkspaceMock.mockReturnValue({
+      statusFlags: {
+        clean: true,
+        pendingReRun: false,
+      },
+    });
   });
 
   describe('BuildTestPanel', () => {
@@ -325,6 +344,82 @@ describe('Run Panels', () => {
       expect(screen.getByText('Evidence Pack Incomplete')).toBeDefined();
       expect(screen.getByText('Missing1')).toBeDefined();
       expect(screen.getByText('Missing2')).toBeDefined();
+    });
+
+    it('marks current evidence stale after a COBOL edit', () => {
+      useSourceWorkspaceMock.mockReturnValue({
+        statusFlags: {
+          clean: false,
+          pendingReRun: true,
+        },
+      });
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          evidence: {
+            status: 'complete',
+            packId: 'pack-stale',
+            manifestHash: 'manifest-stale',
+            generatedArtifactRef: {
+              sha256: 'abc123',
+            },
+          },
+        },
+      });
+
+      render(<EvidencePackPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(
+        screen.getByText('COBOL source changed after the last completed parity run. The current evidence pack is stale until you rerun.'),
+      ).toBeDefined();
+    });
+
+    it('keeps previous evidence accessible when the latest rerun fails', () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'failed',
+          evidence: null,
+          previousRun: {
+            runId: 'run-prev',
+            orchestratorRunId: 'run-prev-orch',
+            programId: 'P-1',
+            phase: 'completed',
+            summary: null,
+            generated: {
+              artifactRef: {
+                sha256: 'abc123',
+              },
+            },
+            generatedFiles: null,
+            buildTest: {
+              generatedArtifactRef: {
+                sha256: 'abc123',
+              },
+            },
+            evidence: {
+              status: 'complete',
+              packId: 'pack-prev',
+              manifestHash: 'manifest-prev',
+              generatedArtifactRef: {
+                sha256: 'abc123',
+              },
+            },
+            events: null,
+            progress: null,
+            artifacts: null,
+            experience: null,
+            workflow: null,
+          },
+        },
+      });
+
+      render(<EvidencePackPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(screen.getByText('Previous Evidence Pack Complete')).toBeDefined();
+      expect(
+        screen.getByText('Latest rerun failed. Showing the previous evidence pack as stale so the last completed evidence remains accessible.'),
+      ).toBeDefined();
+      expect(screen.getByText('pack-prev')).toBeDefined();
     });
 
     it('does not render a success headline when artifact references are mismatched', () => {

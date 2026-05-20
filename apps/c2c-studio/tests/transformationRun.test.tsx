@@ -292,7 +292,22 @@ function RunHarness() {
       <div data-testid="artifacts-count">
         {state.artifacts?.artifacts.length ?? 0}
       </div>
+      <div data-testid="generated-sha">
+        {state.generated?.artifactRef?.sha256 ?? "none"}
+      </div>
+      <div data-testid="evidence-sha">
+        {state.evidence?.generatedArtifactRef?.sha256 ?? "none"}
+      </div>
       <div data-testid="events-count">{state.events?.events.length ?? 0}</div>
+      <div data-testid="previous-run-id">
+        {state.previousRun?.runId ?? "none"}
+      </div>
+      <div data-testid="previous-generated-sha">
+        {state.previousRun?.generated?.artifactRef?.sha256 ?? "none"}
+      </div>
+      <div data-testid="previous-evidence-sha">
+        {state.previousRun?.evidence?.generatedArtifactRef?.sha256 ?? "none"}
+      </div>
       <div data-testid="experience-summary">
         {state.experience?.summary ?? "none"}
       </div>
@@ -582,6 +597,163 @@ describe("transformation run state machine", () => {
     expect(screen.getByTestId("build-test-status")).toHaveTextContent(
       "output-divergence",
     );
+  });
+
+  it("retains the previous run snapshot when a rerun completes with new artifact identities", async () => {
+    const firstRunId = "run-first";
+    const secondRunId = "run-second";
+    const firstSha = "1".repeat(64);
+    const secondSha = "2".repeat(64);
+    const firstFixtures = makeArtifactFixtures(firstRunId, "P-A", firstSha);
+    const secondFixtures = makeArtifactFixtures(secondRunId, "P-B", secondSha);
+
+    vi.mocked(apiClient.transform)
+      .mockResolvedValueOnce(makeTerminalResponse(firstRunId, "P-A", "completed"))
+      .mockResolvedValueOnce(makeTerminalResponse(secondRunId, "P-B", "completed"));
+    vi.mocked(apiClient.getGenerated)
+      .mockResolvedValueOnce(firstFixtures.generated)
+      .mockResolvedValueOnce(secondFixtures.generated);
+    vi.mocked(apiClient.getGeneratedFiles)
+      .mockResolvedValueOnce(firstFixtures.generatedFiles)
+      .mockResolvedValueOnce(secondFixtures.generatedFiles);
+    vi.mocked(apiClient.getBuildTest)
+      .mockResolvedValueOnce(firstFixtures.buildTest)
+      .mockResolvedValueOnce(secondFixtures.buildTest);
+    vi.mocked(apiClient.getEvidence)
+      .mockResolvedValueOnce(firstFixtures.evidence)
+      .mockResolvedValueOnce(secondFixtures.evidence);
+    vi.mocked(apiClient.getRunEvents)
+      .mockResolvedValueOnce(firstFixtures.events)
+      .mockResolvedValueOnce(secondFixtures.events);
+    vi.mocked(apiClient.getRunArtifacts)
+      .mockResolvedValueOnce(firstFixtures.artifacts)
+      .mockResolvedValueOnce(secondFixtures.artifacts);
+    vi.mocked(apiClient.getRunExperience)
+      .mockResolvedValueOnce(makeExperienceResult(firstRunId, "P-A"))
+      .mockResolvedValueOnce(makeExperienceResult(secondRunId, "P-B"));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() =>
+      Promise.resolve(okResult<ModelGatewayHealth>({ status: "ok" })),
+    );
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() =>
+      Promise.resolve(okResult<HarnessReady>({ status: "ok" })),
+    );
+
+    render(
+      <TransformationRunProvider>
+        <RunHarness />
+      </TransformationRunProvider>,
+    );
+
+    fireEvent.click(screen.getByText("start-a"));
+    await waitFor(() =>
+      expect(screen.getByTestId("run-id")).toHaveTextContent(firstRunId),
+    );
+    expect(screen.getByTestId("generated-sha")).toHaveTextContent(firstSha);
+    expect(screen.getByTestId("previous-run-id")).toHaveTextContent("none");
+
+    fireEvent.click(screen.getByText("start-b"));
+    await waitFor(() =>
+      expect(screen.getByTestId("run-id")).toHaveTextContent(secondRunId),
+    );
+
+    expect(screen.getByTestId("generated-sha")).toHaveTextContent(secondSha);
+    expect(screen.getByTestId("evidence-sha")).toHaveTextContent(secondSha);
+    expect(screen.getByTestId("previous-run-id")).toHaveTextContent(firstRunId);
+    expect(screen.getByTestId("previous-generated-sha")).toHaveTextContent(firstSha);
+    expect(screen.getByTestId("previous-evidence-sha")).toHaveTextContent(firstSha);
+  });
+
+  it("keeps the previous run snapshot accessible when the latest rerun fails", async () => {
+    const firstRunId = "run-stable";
+    const failedRunId = "run-rerun-failed";
+    const firstSha = "3".repeat(64);
+    const firstFixtures = makeArtifactFixtures(firstRunId, "P-A", firstSha);
+    const failedGenerated: ApiResult<GeneratedView> = {
+      ok: false,
+      status: 404,
+      message: "missing generated output",
+    };
+    const failedFiles: ApiResult<GeneratedFilesIndex> = {
+      ok: false,
+      status: 404,
+      message: "missing generated files",
+    };
+    const failedBuild: ApiResult<BuildTestView> = {
+      ok: false,
+      status: 404,
+      message: "missing build/test output",
+    };
+    const failedEvidence: ApiResult<EvidenceView> = {
+      ok: false,
+      status: 404,
+      message: "missing evidence output",
+    };
+
+    vi.mocked(apiClient.transform)
+      .mockResolvedValueOnce(makeTerminalResponse(firstRunId, "P-A", "completed"))
+      .mockResolvedValueOnce(makeTerminalResponse(failedRunId, "P-B", "failed"));
+    vi.mocked(apiClient.getGenerated)
+      .mockResolvedValueOnce(firstFixtures.generated)
+      .mockResolvedValueOnce(failedGenerated);
+    vi.mocked(apiClient.getGeneratedFiles)
+      .mockResolvedValueOnce(firstFixtures.generatedFiles)
+      .mockResolvedValueOnce(failedFiles);
+    vi.mocked(apiClient.getBuildTest)
+      .mockResolvedValueOnce(firstFixtures.buildTest)
+      .mockResolvedValueOnce(failedBuild);
+    vi.mocked(apiClient.getEvidence)
+      .mockResolvedValueOnce(firstFixtures.evidence)
+      .mockResolvedValueOnce(failedEvidence);
+    vi.mocked(apiClient.getRunEvents)
+      .mockResolvedValueOnce(firstFixtures.events)
+      .mockResolvedValueOnce(
+        okResult<RunEventsView>({
+          runId: failedRunId,
+          programId: "P-B",
+          mode: "live",
+          productMode: "live",
+          events: [],
+        }),
+      );
+    vi.mocked(apiClient.getRunArtifacts)
+      .mockResolvedValueOnce(firstFixtures.artifacts)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        message: "missing artifacts",
+      });
+    vi.mocked(apiClient.getRunExperience)
+      .mockResolvedValueOnce(makeExperienceResult(firstRunId, "P-A"))
+      .mockResolvedValueOnce(makeExperienceResult(failedRunId, "P-B"));
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() =>
+      Promise.resolve(okResult<ModelGatewayHealth>({ status: "ok" })),
+    );
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() =>
+      Promise.resolve(okResult<HarnessReady>({ status: "ok" })),
+    );
+
+    render(
+      <TransformationRunProvider>
+        <RunHarness />
+      </TransformationRunProvider>,
+    );
+
+    fireEvent.click(screen.getByText("start-a"));
+    await waitFor(() =>
+      expect(screen.getByTestId("run-id")).toHaveTextContent(firstRunId),
+    );
+
+    fireEvent.click(screen.getByText("start-b"));
+    await waitFor(() =>
+      expect(screen.getByTestId("phase")).toHaveTextContent("failed"),
+    );
+
+    expect(screen.getByTestId("run-id")).toHaveTextContent(failedRunId);
+    expect(screen.getByTestId("generated-sha")).toHaveTextContent("none");
+    expect(screen.getByTestId("evidence-sha")).toHaveTextContent("none");
+    expect(screen.getByTestId("previous-run-id")).toHaveTextContent(firstRunId);
+    expect(screen.getByTestId("previous-generated-sha")).toHaveTextContent(firstSha);
+    expect(screen.getByTestId("previous-evidence-sha")).toHaveTextContent(firstSha);
   });
 
   it("marks a polling run unavailable on backend 503 responses", async () => {

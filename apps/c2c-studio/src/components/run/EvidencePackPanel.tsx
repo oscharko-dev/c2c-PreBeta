@@ -1,10 +1,12 @@
 'use client';
 import { useTransformationRun } from '../../stores/transformationRun';
+import { useSourceWorkspace } from '../../stores/sourceWorkspace';
 import { StatusChip } from '../ui/StatusChip';
 import { buildArtifactAlignment } from './runPanelUtils';
 
 export function EvidencePackPanel({ emptyState }: { emptyState: { title: string; message: string } }) {
   const { state } = useTransformationRun();
+  const { statusFlags } = useSourceWorkspace();
 
   if (state.phase === 'idle' || state.phase === 'starting' || state.phase === 'running') {
     if (state.phase === 'idle') {
@@ -17,7 +19,15 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
     }
   }
 
-  const ev = state.evidence;
+  const showingHistoricalEvidence = Boolean(
+    state.previousRun?.evidence &&
+      !state.evidence &&
+      (state.phase === 'starting' ||
+        state.phase === 'running' ||
+        state.phase === 'failed' ||
+        state.phase === 'unavailable')
+  );
+  const ev = state.evidence ?? (showingHistoricalEvidence ? state.previousRun?.evidence ?? null : null);
   if (!ev) {
     return (
       <div className="p-4 space-y-2 text-sm">
@@ -28,15 +38,35 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
 
   const isComplete = ev.status === 'complete';
   const isInvalid = ev.status === 'invalid';
-  const alignment = buildArtifactAlignment(state);
+  const alignment = buildArtifactAlignment(
+    showingHistoricalEvidence && state.previousRun
+      ? {
+          ...state,
+          generated: state.previousRun.generated,
+          buildTest: state.previousRun.buildTest,
+          evidence: state.previousRun.evidence,
+        }
+      : state,
+  );
   const hasAlignedEvidence = isComplete && alignment.aligned;
+  const previousEvidence =
+    state.evidence && state.previousRun?.evidence ? state.previousRun.evidence : null;
   
   return (
     <div className="p-4 h-full flex flex-col text-sm bg-bg-0">
+      {statusFlags.pendingReRun || showingHistoricalEvidence ? (
+        <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
+          {showingHistoricalEvidence
+            ? state.phase === 'failed'
+              ? 'Latest rerun failed. Showing the previous evidence pack as stale so the last completed evidence remains accessible.'
+              : 'Showing the previous evidence pack while the latest rerun is in progress. This evidence is stale until the rerun completes.'
+            : 'COBOL source changed after the last completed parity run. The current evidence pack is stale until you rerun.'}
+        </div>
+      ) : null}
       <div className="flex items-center gap-4 mb-6">
         <StatusChip variant={hasAlignedEvidence ? 'success' : isInvalid ? 'blocked' : 'error'} />
         <h2 className="text-lg font-medium text-text">
-          Evidence Pack {hasAlignedEvidence ? 'Complete' : isInvalid ? 'Invalid' : isComplete ? 'Mismatch Detected' : 'Incomplete'}
+          {showingHistoricalEvidence ? 'Previous Evidence Pack' : 'Evidence Pack'} {hasAlignedEvidence ? 'Complete' : isInvalid ? 'Invalid' : isComplete ? 'Mismatch Detected' : 'Incomplete'}
         </h2>
       </div>
       
@@ -95,6 +125,20 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
               {ev.note}
             </div>
           )}
+          {previousEvidence ? (
+            <div className="rounded border border-line-2 bg-bg-1 p-4">
+              <h3 className="font-medium text-text mb-2">Previous Run Evidence</h3>
+              <div className="space-y-2 font-mono text-xs text-text">
+                <div>{previousEvidence.packId || 'N/A'}</div>
+                <div className="break-all">
+                  {previousEvidence.manifestHash || previousEvidence.artifactRef?.sha256 || 'N/A'}
+                </div>
+                <div className="break-all">
+                  {previousEvidence.generatedArtifactRef?.sha256 || 'N/A'}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

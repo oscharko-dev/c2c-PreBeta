@@ -49,4 +49,25 @@ export interface TransformationRunState {
   // legacy /runs/{id} summary so the Studio can show agentic workflow
   // progress without re-deriving from artifact views.
   workflow: RunWorkflowView | null;
+  // Issue #358: preserve the immediately previous artifact-bearing run so
+  // Studio can keep stale Java, parity results, and evidence visible while a
+  // rerun is in flight or when the latest rerun fails.
+  previousRun: HistoricalRunSnapshot | null;
+}
+
+export interface HistoricalRunSnapshot {
+  runId: string;
+  orchestratorRunId: string | null;
+  programId: string | null;
+  phase: RunPhase;
+  summary: RunSummary | null;
+  generated: GeneratedView | null;
+  generatedFiles: GeneratedFilesIndex | null;
+  buildTest: BuildTestView | null;
+  evidence: EvidenceView | null;
+  events: RunEventsView | null;
+  progress: RunProgressView | null;
+  artifacts: RunArtifactsView | null;
+  experience: RunExperienceView | null;
+  workflow: RunWorkflowView | null;
 }

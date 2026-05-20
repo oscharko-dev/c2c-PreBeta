@@ -291,6 +291,53 @@ function ConflictStoreHarness() {
   );
 }
 
+function PendingRerunHarness() {
+  const { setSourceText, statusFlags } = useSourceWorkspace();
+  const { setState } = useTransformationRun();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          setSourceText(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PAY01.\n",
+          )
+        }
+      >
+        Seed Source
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setState((prev) => ({
+            ...prev,
+            phase: "completed",
+            runId: "run-completed",
+            orchestratorRunId: "run-completed-orch",
+            programId: "PAY01",
+          }))
+        }
+      >
+        Mark Completed
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setSourceText(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PAY01.\n       DISPLAY 'UPDATED'.\n",
+          )
+        }
+      >
+        Edit Source
+      </button>
+      <output data-testid="pending-rerun">
+        {statusFlags.pendingReRun ? "pending" : "clean"}
+      </output>
+    </>
+  );
+}
+
 describe("COBOL source input", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -509,6 +556,23 @@ describe("COBOL source input", () => {
         useTransformationAgent: true,
       });
     });
+  });
+
+  it("marks parity results pending rerun after a completed run when COBOL changes", async () => {
+    renderSourceWorkbench(<PendingRerunHarness />);
+
+    fireEvent.click(screen.getByText("Seed Source"));
+    fireEvent.click(screen.getByText("Mark Completed"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pending-rerun")).toHaveTextContent("clean"),
+    );
+
+    fireEvent.click(screen.getByText("Edit Source"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pending-rerun")).toHaveTextContent("pending"),
+    );
   });
 
   it("passes synchronous Java dirty state into Start Transformation telemetry", async () => {

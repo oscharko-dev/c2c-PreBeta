@@ -79,6 +79,8 @@ interface GeneratedArtifactsValue {
   isFetchingFile: boolean;
   fileFetchError: { path: string, status: number, message: string } | null;
   unavailableFiles: Set<string>;
+  displayedRunId: string | null;
+  showingHistoricalArtifacts: boolean;
 }
 
 const GeneratedArtifactsContext = createContext<GeneratedArtifactsValue | null>(null);
@@ -93,8 +95,24 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
   const [fileFetchError, setFileFetchError] = useState<{ path: string, status: number, message: string } | null>(null);
   const [unavailableFiles, setUnavailableFiles] = useState<Set<string>>(new Set());
 
-  const { generated, generatedFiles, buildTest, evidence } = state;
-  const finalClassification = state.workflow?.finalClassification ?? state.summary?.finalClassification ?? null;
+  const showingHistoricalArtifacts = Boolean(
+    state.previousRun &&
+      !state.generated &&
+      !state.generatedFiles &&
+      (state.phase === 'starting' ||
+        state.phase === 'running' ||
+        state.phase === 'failed' ||
+        state.phase === 'unavailable')
+  );
+  const artifactSource = showingHistoricalArtifacts && state.previousRun
+    ? state.previousRun
+    : state;
+  const displayedRunId = artifactSource.runId;
+  const { generated, generatedFiles, buildTest, evidence } = artifactSource;
+  const finalClassification =
+    artifactSource.workflow?.finalClassification ??
+    artifactSource.summary?.finalClassification ??
+    null;
 
   useEffect(() => {
     setSelectedFilePath(null);
@@ -103,18 +121,20 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     setIsFetchingFile(false);
     setFileFetchError(null);
     setUnavailableFiles(new Set());
-  }, [state.runId]);
+  }, [displayedRunId]);
 
   const artifactState: GeneratedArtifactState = useMemo(() => {
-    if (state.phase === 'idle' || !state.runId) return 'idle';
-    if (state.phase === 'starting' || state.phase === 'running') return 'pending';
+    if (state.phase === 'idle' || !displayedRunId) return 'idle';
+    if (!showingHistoricalArtifacts && (state.phase === 'starting' || state.phase === 'running')) {
+      return 'pending';
+    }
     if (!generated) return 'pending';
     if (generated.status === 'unsupported') return 'unsupported';
     if (generated.status === 'incomplete') return 'incomplete';
     if (!generatedFiles) return 'pending';
     if (generatedFiles.status === 'incomplete') return 'incomplete';
-    if (state.phase === 'incomplete') return 'incomplete';
-    if (state.phase === 'failed' || state.phase === 'unavailable') {
+    if (!showingHistoricalArtifacts && state.phase === 'incomplete') return 'incomplete';
+    if (!showingHistoricalArtifacts && (state.phase === 'failed' || state.phase === 'unavailable')) {
       return 'failed-verification';
     }
     
@@ -128,7 +148,16 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     }
     
     return 'generated';
-  }, [state.phase, state.runId, generated, generatedFiles, buildTest, evidence, finalClassification]);
+  }, [
+    state.phase,
+    displayedRunId,
+    showingHistoricalArtifacts,
+    generated,
+    generatedFiles,
+    buildTest,
+    evidence,
+    finalClassification,
+  ]);
 
   const fileTree = useMemo(() => {
     return buildFileTree(generatedFiles?.files);
@@ -165,7 +194,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     let active = true;
 
     async function fetchFile() {
-      if (!selectedFilePath || !state.runId || unavailableFiles.has(selectedFilePath)) {
+      if (!selectedFilePath || !displayedRunId || unavailableFiles.has(selectedFilePath)) {
         setFileContent(null);
         setFileContentRunId(null);
         setIsFetchingFile(false);
@@ -173,7 +202,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
         return;
       }
 
-      const requestedRunId = state.runId;
+      const requestedRunId = displayedRunId;
       setIsFetchingFile(true);
       setFileFetchError(null);
 
@@ -201,7 +230,7 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     fetchFile();
 
     return () => { active = false; };
-  }, [selectedFilePath, state.runId, unavailableFiles]);
+  }, [selectedFilePath, displayedRunId, unavailableFiles]);
 
   const selectFile = useCallback((path: string) => {
     if (path !== selectedFilePath) {
@@ -221,6 +250,8 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
     isFetchingFile,
     fileFetchError,
     unavailableFiles,
+    displayedRunId,
+    showingHistoricalArtifacts,
   };
 }
 
