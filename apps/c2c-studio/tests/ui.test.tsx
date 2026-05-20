@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Search } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
@@ -138,6 +138,32 @@ describe('UI Primitives', () => {
       expect(onValueChange).toHaveBeenNthCalledWith(2, 'tab1');
       expect(onValueChange).toHaveBeenNthCalledWith(3, 'tab1');
       expect(onValueChange).toHaveBeenNthCalledWith(4, 'tab3');
+    });
+
+    it('moves focus with keyboard navigation when tabs are wired with an id base', async () => {
+      const onValueChange = vi.fn();
+      render(
+        <Tabs
+          value="tab2"
+          onValueChange={onValueChange}
+          tabs={[
+            { value: 'tab1', label: 'Tab 1' },
+            { value: 'tab2', label: 'Tab 2' },
+            { value: 'tab3', label: 'Tab 3' },
+          ]}
+          idBase="bottom-workbench"
+        />
+      );
+
+      const tabs = screen.getAllByRole('tab');
+      expect(tabs[1]).toHaveAttribute('id', 'bottom-workbench-tab-tab2');
+      expect(tabs[1]).toHaveAttribute('aria-controls', 'bottom-workbench-panel-tab2');
+
+      tabs[1].focus();
+      fireEvent.keyDown(tabs[1], { key: 'ArrowRight' });
+
+      expect(onValueChange).toHaveBeenCalledWith('tab3');
+      await waitFor(() => expect(tabs[2]).toHaveFocus());
     });
   });
 

@@ -133,6 +133,10 @@ export interface RunSummary extends W02RunContractFields {
   schemaVersion?: string;
   runId: string;
   programId: string;
+  executionMode?: string;
+  trustCaseId?: string;
+  sourceReferenceFixtureId?: string;
+  sourceReferenceMode?: string;
   status: "starting" | "updating" | "completed" | "failed";
   mode: "live" | "diagnostic-fixture";
   productMode: "live" | "unavailable";
@@ -277,6 +281,20 @@ export interface BuildTestView {
   programId: string;
   mode: "live" | "diagnostic-fixture";
   productMode: "live" | "unavailable";
+  executionMode?: string;
+  comparisonPolicy?: string;
+  comparison?: {
+    matched?: boolean;
+    status?: string;
+    comparisonPolicyVersion?: string;
+    mismatchClassification?: string;
+    diffSummary?: string;
+    comparisonPolicyRef?: OutputRef | null;
+    comparisonResultRef?: OutputRef | null;
+    diffRef?: OutputRef | null;
+    expectedRef?: OutputRef | null;
+    actualRef?: OutputRef | null;
+  } | null;
   status:
     | "ok"
     | "compile-failed"
@@ -295,8 +313,11 @@ export interface BuildTestView {
     | "compile-error"
     | "run-error"
     | "skipped-no-execution";
+  compileStatus?: "ok" | "failed" | "skipped" | "unknown";
+  executionStatus?: "ok" | "failed" | "skipped" | "not-run" | "unknown";
   expectedOutput?: string;
   actualOutput?: string;
+  diffSummary?: string;
   outputRef?: OutputRef | null;
   expectedOutputRef?: OutputRef | null;
   actualOutputRef?: OutputRef | null;
