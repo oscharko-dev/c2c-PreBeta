@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from 'react';
 
 import { BuildTestView } from '../../types/build-test';
 import { CodeSurface } from '../ui/CodeSurface';
+import { copyToClipboard, useCopyFeedback } from '../ui/copyFeedback';
 import { StatusChip } from '../ui/StatusChip';
 import { Tabs } from '../ui/Tabs';
 import type { BuildTestMetadataItem } from './runPanelUtils';
@@ -19,23 +20,6 @@ import {
 } from './runPanelUtils';
 
 type OutputTab = 'split' | 'diff';
-
-async function copyToClipboard(value: string): Promise<boolean> {
-  if (
-    typeof navigator === 'undefined' ||
-    typeof navigator.clipboard === 'undefined' ||
-    typeof navigator.clipboard.writeText !== 'function'
-  ) {
-    return false;
-  }
-
-  try {
-    await navigator.clipboard.writeText(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function EquivalencePanel({
   buildTest,
@@ -422,7 +406,7 @@ function CopyButton({
   value: string;
   compact?: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, showCopied } = useCopyFeedback();
 
   return (
     <button
@@ -432,8 +416,7 @@ function CopyButton({
           if (!ok) {
             return;
           }
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
+          showCopied();
         });
       }}
       aria-label={label}

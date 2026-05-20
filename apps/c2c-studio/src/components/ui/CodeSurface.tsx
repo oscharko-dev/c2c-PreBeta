@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { copyToClipboard, useCopyFeedback } from './copyFeedback';
 
 export interface CodeSurfaceLine {
   content: React.ReactNode;
@@ -17,26 +18,9 @@ interface CodeSurfaceProps extends React.HTMLAttributes<HTMLDivElement> {
   emptyMessage?: string;
 }
 
-async function copyToClipboard(value: string): Promise<boolean> {
-  if (
-    typeof navigator === 'undefined' ||
-    typeof navigator.clipboard === 'undefined' ||
-    typeof navigator.clipboard.writeText !== 'function'
-  ) {
-    return false;
-  }
-
-  try {
-    await navigator.clipboard.writeText(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export const CodeSurface = React.forwardRef<HTMLDivElement, CodeSurfaceProps>(
   ({ className, label, lines, copyValue, copyLabel, emptyMessage, ...props }, ref) => {
-    const [copied, setCopied] = useState(false);
+    const { copied, showCopied } = useCopyFeedback();
     const canCopy = typeof copyValue === 'string' && copyValue.length > 0;
     const handleCopy = useCallback(() => {
       if (!canCopy) {
@@ -48,10 +32,9 @@ export const CodeSurface = React.forwardRef<HTMLDivElement, CodeSurfaceProps>(
         if (!ok) {
           return;
         }
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
+        showCopied();
       });
-    }, [canCopy, copyValue]);
+    }, [canCopy, copyValue, showCopied]);
 
     return (
       <div

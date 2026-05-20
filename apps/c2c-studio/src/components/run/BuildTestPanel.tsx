@@ -41,12 +41,7 @@ export function BuildTestPanel({
     !bt || state.phase === "running" || state.phase === "starting";
   const stages = getPipelineStages(bt, isPending, state.progress);
   const result = describeBuildTestResult(bt);
-  const metadataItems = bt
-    ? getBuildTestMetadataItems({
-        ...bt,
-        executionMode: bt.executionMode,
-      })
-    : [];
+  const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
   const artifactRefs = getBuildTestArtifactRefs(bt);
 
   return (
