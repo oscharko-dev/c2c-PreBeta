@@ -2,10 +2,15 @@
 
 This directory contains W0 synthetic COBOL programs and deterministic fixture outputs.
 
+Ownership for the shared corpus, golden-master registries, and acceptance
+fixtures is defined in
+[`docs/governance/fixture-ownership.md`](../../docs/governance/fixture-ownership.md).
+
 ## Layout
 - `programs/` contains the sample COBOL inputs.
 - `fixtures/` contains expected deterministic outputs.
-- `generator/` contains generator requirements and conventions.
+- `generator/` contains generator requirements and conventions owned by the
+  target-Java generation surface.
 
 The synthetic corpus is intentionally minimal and excludes customer code and sensitive data categories, including PII, bank data, and insurance data.
 
