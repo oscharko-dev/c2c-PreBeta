@@ -62,6 +62,24 @@ W0 remains Java-first for the target runtime. Target-generation compatibility
 is enforced by service code, schemas, runtime metadata, and tests, not by a
 separate copied contract document.
 
+## Service Catalog
+
+`config/service-catalog.json` is the machine-readable inventory for current
+product components, W0 reference services, and the generated Java runtime. It
+records the current live filesystem path for each component together with
+language, package manager, validation-relevant contract files, ownership,
+runtime role, and release-gate participation. Each entry keeps a stable `id`
+separate from the current live `path`, which lets the repository describe
+today's layout without pretending that future migration targets already exist.
+
+The catalog follows the topology policy in
+[ADR 0008](docs/adr/0008-repository-topology-and-service-taxonomy.md). Validate
+it with:
+
+```bash
+python3 scripts/validate-service-catalog.py
+```
+
 ## Bootstrap (Local)
 
 A clean checkout can be prepared with:
@@ -321,3 +339,7 @@ See CONTRIBUTING.md for issue, branch, PR, and ADR workflow entrypoints.
 - Any change to wave scope, architecture, model participation, agent workflow,
   or release acceptance must update the [c2c Fachkonzept](docs/concept/c2c-fachkonzept.md)
   and the development workflow where applicable.
+- When adding, renaming, or removing a service or component, update
+  `config/service-catalog.json`, related path references, and affected docs or
+  tests in the same change, using the current live filesystem path rather than a
+  planned future path.

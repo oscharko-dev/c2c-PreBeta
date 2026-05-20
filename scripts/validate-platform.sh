@@ -1,24 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REQUIRED_DIRS=(
-  "services/go/w0-service"
-  "services/agentic-harness-core"
-  "services/python/w0-service"
-  "services/typescript/w0-service"
-  "services/java/w0-service"
-  "services/cobol-parser-service"
-  "services/semantic-ir-service"
-)
+python3 scripts/validate-service-catalog.py --worktree
 
-for d in "${REQUIRED_DIRS[@]}"; do
-  if [ ! -d "$d" ]; then
-    echo "Missing required service directory: $d" >&2
-    exit 1
-  fi
- done
-
-echo "Validated service directories."
+echo "Validated service catalog."
 
 python3 scripts/check_model_governance.py --worktree
 
@@ -43,7 +28,6 @@ echo "Validated orchestrator model governance behavior."
   cd services/evidence-service
   go test ./...
 )
-
 echo "Validated evidence-service model governance behavior."
 
 for f in \
@@ -105,9 +89,9 @@ for f in \
   schemas/evidence-pack-manifest-v0.json \
   scripts/w0-2-release-gate.sh \
   scripts/w0-3-release-gate.sh
- do
+do
   if [ ! -f "$f" ]; then
-    echo "Missing required file: $f" >&2
+    echo "Missing required platform file: $f" >&2
     exit 1
   fi
 done
