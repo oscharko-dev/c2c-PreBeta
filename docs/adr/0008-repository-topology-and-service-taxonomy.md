@@ -96,6 +96,18 @@ Issue #324. The approved live paths are:
 
 A new product service belongs directly under `services/<service-id>` when it owns a runtime boundary, a contract, a release gate, or user-visible behavior. If the service exists only as a baseline, fixture, or reference implementation, it belongs under `services/reference/<service-id>`, with language carried as a suffix only when multiple implementations of the same baseline exist. Do not create a new permanent language bucket for a product service unless a later ADR makes that exception explicit.
 
+### Contract and schema placement rule
+
+Service-owned HTTP contracts live with the owning product service at
+`services/<service-id>/openapi.yaml` and must be declared by that service in
+`config/service-catalog.json`. Shared, externally consumed, or cross-service
+JSON schemas live under the repo-level `schemas/` directory and must also be
+declared there by exactly one owning component. Service-local schemas under
+`services/<service-id>/schemas/` remain private implementation detail until a
+later issue explicitly promotes them to a shared contract. See
+[`docs/governance/contract-ownership.md`](../governance/contract-ownership.md)
+for the current ownership inventory.
+
 ### Naming rules
 
 - **Service IDs:** lowercase kebab-case, stable, and domain-first, for example `model-gateway-service` or `target-java-generation-service`. New productive services should end in `-service`. Reference services use the logical baseline name plus a language suffix when needed, for example `w0-service-go`.
