@@ -151,7 +151,7 @@ public final class ServiceApp {
                     experienceEndpoint,
                     response,
                     BuildTestRunnerService.SOURCE_REFERENCE_CAPABILITY,
-                    "source-reference");
+                    "build-test");
         } catch (RequestBodyTooLargeException e) {
             sendJson(exchange, 413, requestTooLargeBody());
         } catch (IllegalArgumentException e) {
@@ -322,8 +322,8 @@ public final class ServiceApp {
         event.put("policyDecision", "policy allow");
         event.put("status", String.valueOf(response.get("status")));
         event.put("stateTransition", harnessStateTransition(response, dataClass));
-        event.put("inputRef", response.getOrDefault("sourceArtifactRef", response.get("sourceRef")));
-        event.put("outputRef", response.getOrDefault("normalizedOutputRef", response.get("outputRef")));
+        event.put("inputRef", selectInputRef(response));
+        event.put("outputRef", selectOutputRef(response));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("programId", response.get("programId"));
         payload.put("classification", response.get("classification"));
@@ -413,6 +413,37 @@ public final class ServiceApp {
         Object programId = response.getOrDefault("programId", "unknown");
         Object classification = response.getOrDefault("classification", "unknown");
         return dataClass + ":" + classification + ":" + programId;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> selectInputRef(Map<String, Object> response) {
+        Object inputRef = response.get("inputArtifactRef");
+        if (!(inputRef instanceof Map<?, ?>)) {
+            inputRef = response.get("sourceArtifactRef");
+        }
+        if (!(inputRef instanceof Map<?, ?>)) {
+            inputRef = response.get("sourceRef");
+        }
+        if (inputRef instanceof Map<?, ?> map) {
+            return new LinkedHashMap<>((Map<String, Object>) map);
+        }
+        String placeholder = String.valueOf(response.getOrDefault("runId", "unknown")) + ":"
+                + String.valueOf(response.getOrDefault("summary", ""));
+        return BuildTestRunnerService.outputReference("event-input-placeholder", placeholder);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> selectOutputRef(Map<String, Object> response) {
+        Object outputRef = response.get("normalizedOutputRef");
+        if (!(outputRef instanceof Map<?, ?>)) {
+            outputRef = response.get("outputRef");
+        }
+        if (outputRef instanceof Map<?, ?> map) {
+            return new LinkedHashMap<>((Map<String, Object>) map);
+        }
+        String placeholder = String.valueOf(response.getOrDefault("runId", "unknown")) + ":"
+                + String.valueOf(response.getOrDefault("status", "unknown"));
+        return BuildTestRunnerService.outputReference("event-output-placeholder", placeholder);
     }
 
     private static void postIfPresent(String endpoint, String eventToken, Map<String, Object> event) throws Exception {

@@ -389,7 +389,7 @@ final class SourceReferenceExecutionService {
             Map<String, Object> sourceArtifactRef,
             Map<String, Object> referenceArtifactRef
     ) {
-        return result(
+        Map<String, Object> payload = result(
                 executionId,
                 runId,
                 workflowId,
@@ -406,6 +406,10 @@ final class SourceReferenceExecutionService {
                 started,
                 Instant.now(),
                 diagnosticMessage);
+        if (!payload.containsKey("inputArtifactRef")) {
+            payload.put("inputArtifactRef", fixtureRequestRef(fixtureId));
+        }
+        return payload;
     }
 
     private Map<String, Object> result(
@@ -445,6 +449,7 @@ final class SourceReferenceExecutionService {
                 BuildTestRunnerService.outputReference("source-reference-normalized-output", normalize(stdout)));
         if (sourceArtifactRef != null) {
             payload.put("sourceArtifactRef", sourceArtifactRef);
+            payload.put("inputArtifactRef", sourceArtifactRef);
         }
         if (referenceArtifactRef != null) {
             payload.put("referenceArtifactRef", referenceArtifactRef);
@@ -459,6 +464,12 @@ final class SourceReferenceExecutionService {
                 "parity-execution-result",
                 payload));
         return payload;
+    }
+
+    private static Map<String, Object> fixtureRequestRef(String fixtureId) {
+        return BuildTestRunnerService.outputReference(
+                "source-reference-fixture-request",
+                fixtureId == null ? "" : fixtureId);
     }
 
     private static Map<String, Object> diagnostic(String severity, String code, String message) {

@@ -130,13 +130,35 @@ class ServiceAppTest {
         Map<String, Object> event = ServiceApp.buildHarnessEvent(
                 response,
                 "source-reference.execute",
-                "source-reference");
+                "build-test");
         assertEquals("source-reference.execute", event.get("capability"));
-        assertEquals("source-reference", event.get("dataClass"));
-        assertEquals("source-reference->validated", event.get("stateTransition"));
+        assertEquals("build-test", event.get("dataClass"));
+        assertEquals("build-test->validated", event.get("stateTransition"));
         @SuppressWarnings("unchecked")
         Map<String, Object> payload = (Map<String, Object>) event.get("payload");
         assertEquals("reference-fixture", payload.get("referenceMode"));
+    }
+
+    @Test
+    void sourceReferenceHarnessEventFallsBackToInputArtifactRef() {
+        SourceReferenceExecutionService service =
+                new SourceReferenceExecutionService(BuildTestRunnerService.detectRepoRoot());
+        Map<String, Object> response = service.execute(Map.of(
+                "runId", "run-missing-fixture",
+                "fixtureId", "DOES-NOT-EXIST",
+                "referenceMode", "reference-fixture"));
+
+        Map<String, Object> event = ServiceApp.buildHarnessEvent(
+                response,
+                "source-reference.execute",
+                "build-test");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> inputRef = (Map<String, Object>) event.get("inputRef");
+        assertEquals("build-test", event.get("dataClass"));
+        assertTrue(inputRef.containsKey("uri"));
+        assertTrue(inputRef.containsKey("sha256"));
+        assertTrue(inputRef.containsKey("byteSize"));
     }
 
     @Test
