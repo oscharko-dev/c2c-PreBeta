@@ -183,7 +183,7 @@ bin/
 # wildcard pattern would risk matching real source paths.
 /services/agentic-harness-core/agentic-harness-core
 /services/evidence-service/evidence-service
-/services/go/model-gateway-service/model-gateway-service
+/services/model-gateway-service/model-gateway-service
 
 # -------------------------------
 # .NET
@@ -262,7 +262,7 @@ artifacts/*.json
 **/dependency-reduced-pom.xml
 
 # TypeScript test transpilation output
-apps/c2c-ui/dist-test/
+apps/c2c-studio/dist-test/
 
 # Markdown link-checker cache (regenerated on every lychee run)
 .lycheecache

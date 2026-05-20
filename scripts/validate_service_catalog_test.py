@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,6 +74,62 @@ class ValidateServiceCatalogTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("path does not exist", result.stderr)
+
+    def test_missing_required_component_fails_catalog_completeness_check(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        mutated["components"] = [
+            component for component in mutated["components"] if component["id"] != "c2c-studio"
+        ]
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("catalog coverage mismatch", result.stderr)
+        self.assertIn("missing ids: c2c-studio", result.stderr)
+
+    def test_missing_manifest_root_fails_catalog_completeness_check(self) -> None:
+        expected_root = "/".join(("services", "issue-332-temp-catalog-gap"))
+        temp_component = REPO_ROOT / expected_root
+        temp_component.mkdir(parents=True, exist_ok=True)
+        (temp_component / "package.json").write_text('{"name":"issue-332-temp-catalog-gap"}\n', encoding="utf-8")
+        try:
+            result = self._run_catalog(CATALOG_PATH)
+        finally:
+            shutil.rmtree(temp_component, ignore_errors=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("catalog completeness mismatch", result.stderr)
+        self.assertIn(expected_root, result.stderr)
+
+    def test_stale_service_path_in_non_allowlisted_file_fails(self) -> None:
+        temp_note = REPO_ROOT / "docs" / "issue-332-temp-stale-path.md"
+        stale_path = "/".join(("apps", "c2c-ui", "dist"))
+        expected_fix = "/".join(("apps", "c2c-studio", "dist"))
+        temp_note.write_text(f"Legacy note: {stale_path}\n", encoding="utf-8")
+        try:
+            result = self._run_catalog(CATALOG_PATH)
+        finally:
+            temp_note.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"stale service path {stale_path}", result.stderr)
+        self.assertIn(f"expected {expected_fix}", result.stderr)
+
+    def test_stale_service_path_under_generated_output_is_ignored(self) -> None:
+        temp_output = REPO_ROOT / "var" / "issue-332-temp-output"
+        temp_output.mkdir(parents=True, exist_ok=True)
+        stale_path = "/".join(("apps", "c2c-ui", "dist"))
+        (temp_output / "scan.txt").write_text(f"Legacy note: {stale_path}\n", encoding="utf-8")
+        try:
+            result = self._run_catalog(CATALOG_PATH)
+        finally:
+            shutil.rmtree(temp_output, ignore_errors=True)
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     def test_missing_declared_file_fails(self) -> None:
         catalog = _load_catalog()

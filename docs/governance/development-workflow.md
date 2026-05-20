@@ -56,6 +56,9 @@ When a service or service-local component is added, moved, renamed, or removed:
 - update any affected path references, contracts, fixtures, or docs;
 - run `python3 scripts/validate-service-catalog.py`;
 - run `make dev-check` if the change touches executable code or service wiring.
+- For path migrations, keep the migration note narrow. The only approved
+  exceptions are the W0 reference namespace and temporary old-path
+  compatibility shims while references are still being moved.
 
 ## Definition of Ready
 

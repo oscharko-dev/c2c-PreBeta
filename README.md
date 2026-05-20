@@ -75,6 +75,14 @@ Validate the catalog with:
 python3 scripts/validate-service-catalog.py
 ```
 
+Run `./scripts/validate-platform.sh` for the full local guardrail pass; it
+includes the service catalog validator and the rest of the platform checks.
+The catalog validator reports stale or missing repo-relative paths, duplicate
+or missing component coverage, missing declared files, OpenAPI and shared-schema
+ownership drift, and service-local schemas that escape their owning component.
+For migration notes, the approved exceptions are the W0 reference namespace and
+temporary old-path compatibility shims while references are being moved.
+
 Repository map and shared references:
 
 - [services/](services/)
