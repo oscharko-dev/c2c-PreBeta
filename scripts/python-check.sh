@@ -18,7 +18,7 @@ subprocess.run(
 )
 
 services = [
-  "services/python/w0-service",
+  "services/reference/w0-service-python",
   "services/orchestrator-service",
 ]
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 SCAN_ROOTS = ("services", "apps")
-ALLOWED_PREFIX = Path("services/go/model-gateway-service")
+ALLOWED_PREFIX = Path("services/model-gateway-service")
 IGNORED_DIRS = {"docs", "fixtures", "tests", "__tests__"}
 TEST_FILE_SUFFIXES = (
     "_test.go",
@@ -237,7 +237,7 @@ def _format_findings(findings: list[Finding]) -> str:
 # noinspection PyTypeHintsInspection
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Scan product code for direct model-provider usage outside services/go/model-gateway-service."
+        description="Scan product code for direct model-provider usage outside services/model-gateway-service."
     )
     parser.add_argument(
         "--worktree",

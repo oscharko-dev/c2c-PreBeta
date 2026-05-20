@@ -34,7 +34,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: services/go/w0-service/go.mod
+          go-version-file: services/reference/w0-service-go/go.mod
 
       - name: Run Go checks
         run: ./scripts/go-check.sh

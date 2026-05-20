@@ -145,7 +145,7 @@ class CheckModelGovernanceTest(unittest.TestCase):
             repo = Path(tmp)
             subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
 
-            gateway = repo / "services" / "go" / "model-gateway-service"
+            gateway = repo / "services" / "model-gateway-service"
             gateway.mkdir(parents=True, exist_ok=True)
             (gateway / "server.go").write_text(
                 "\n".join(

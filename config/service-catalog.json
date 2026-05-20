@@ -176,7 +176,7 @@
     },
     {
       "id": "model-gateway-service",
-      "path": "services/go/model-gateway-service",
+      "path": "services/model-gateway-service",
       "kind": "service",
       "classification": "product",
       "language": "go",
@@ -192,7 +192,7 @@
     },
     {
       "id": "w0-service-go",
-      "path": "services/go/w0-service",
+      "path": "services/reference/w0-service-go",
       "kind": "service",
       "classification": "reference",
       "language": "go",
@@ -207,7 +207,7 @@
     },
     {
       "id": "w0-service-java",
-      "path": "services/java/w0-service",
+      "path": "services/reference/w0-service-java",
       "kind": "service",
       "classification": "reference",
       "language": "java",
@@ -222,7 +222,7 @@
     },
     {
       "id": "w0-service-python",
-      "path": "services/python/w0-service",
+      "path": "services/reference/w0-service-python",
       "kind": "service",
       "classification": "reference",
       "language": "python",
@@ -237,7 +237,7 @@
     },
     {
       "id": "w0-service-typescript",
-      "path": "services/typescript/w0-service",
+      "path": "services/reference/w0-service-typescript",
       "kind": "service",
       "classification": "reference",
       "language": "typescript",

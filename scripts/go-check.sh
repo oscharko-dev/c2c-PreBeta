@@ -6,7 +6,13 @@ if ! command -v go >/dev/null 2>&1; then
   exit 0
 fi
 
-for SERVICEDIR in services/go/* services/agentic-harness-core services/evidence-service services/experience-learning-service; do
+for SERVICEDIR in \
+  services/model-gateway-service \
+  services/reference/w0-service-go \
+  services/agentic-harness-core \
+  services/evidence-service \
+  services/experience-learning-service
+do
   if [ ! -d "$SERVICEDIR" ] || [ ! -f "$SERVICEDIR/go.mod" ]; then
     continue
   fi

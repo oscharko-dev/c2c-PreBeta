@@ -72,22 +72,25 @@ W0 baseline/reference services belong under `services/reference/<service-id>`, w
 
 ### Service taxonomy
 
-| Current path | Target path | Classification |
-| --- | --- | --- |
-| `services/agentic-harness-core` | `services/agentic-harness-core` | Harness / control-plane support |
-| `services/build-test-runner-service` | `services/build-test-runner-service` | Build and test runner |
-| `services/c2c-bff` | `services/c2c-bff` | BFF / API boundary |
-| `services/cobol-parser-service` | `services/cobol-parser-service` | COBOL parser |
-| `services/evidence-service` | `services/evidence-service` | Evidence service |
-| `services/experience-learning-service` | `services/experience-learning-service` | Telemetry and learning service |
-| `services/go/model-gateway-service` | `services/model-gateway-service` | Model Gateway, the only productive model boundary |
-| `services/go/w0-service` | `services/reference/w0-service-go` | W0 Go reference baseline |
-| `services/java/w0-service` | `services/reference/w0-service-java` | W0 Java reference baseline |
-| `services/orchestrator-service` | `services/orchestrator-service` | Orchestrator |
-| `services/python/w0-service` | `services/reference/w0-service-python` | W0 Python reference baseline |
-| `services/semantic-ir-service` | `services/semantic-ir-service` | Semantic IR service |
-| `services/target-java-generation-service` | `services/target-java-generation-service` | Target Java generator |
-| `services/typescript/w0-service` | `services/reference/w0-service-typescript` | W0 TypeScript reference baseline |
+The initial mechanical cutover for the moved services was completed in
+Issue #324. The approved live paths are:
+
+| Live path | Classification |
+| --- | --- |
+| `services/agentic-harness-core` | Harness / control-plane support |
+| `services/build-test-runner-service` | Build and test runner |
+| `services/c2c-bff` | BFF / API boundary |
+| `services/cobol-parser-service` | COBOL parser |
+| `services/evidence-service` | Evidence service |
+| `services/experience-learning-service` | Telemetry and learning service |
+| `services/model-gateway-service` | Model Gateway, the only productive model boundary |
+| `services/orchestrator-service` | Orchestrator |
+| `services/reference/w0-service-go` | W0 Go reference baseline |
+| `services/reference/w0-service-java` | W0 Java reference baseline |
+| `services/reference/w0-service-python` | W0 Python reference baseline |
+| `services/reference/w0-service-typescript` | W0 TypeScript reference baseline |
+| `services/semantic-ir-service` | Semantic IR service |
+| `services/target-java-generation-service` | Target Java generator |
 
 ### New service placement rule
 

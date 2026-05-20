@@ -152,7 +152,7 @@ jobs:
           cache-dependency-path: |
             apps/c2c-studio/package-lock.json
             services/c2c-bff/package-lock.json
-            services/typescript/w0-service/package-lock.json
+            services/reference/w0-service-typescript/package-lock.json
 
       - name: Run TypeScript checks
         run: ./scripts/typescript-check.sh

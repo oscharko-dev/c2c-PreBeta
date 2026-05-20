@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TS_PACKAGES=(
   "apps/c2c-studio"
   "services/c2c-bff"
-  "services/typescript/w0-service"
+  "services/reference/w0-service-typescript"
 )
 
 for pkg in "${TS_PACKAGES[@]}"; do
