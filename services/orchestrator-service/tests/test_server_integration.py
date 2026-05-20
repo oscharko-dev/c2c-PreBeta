@@ -12,7 +12,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from orchestrator_service.artifacts import KIND_GENERATED_PROJECT_FILE
+from orchestrator_service.artifacts import (
+    KIND_BUILD_TEST_RESULT,
+    KIND_GENERATED_PROJECT_FILE,
+)
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.server import create_configured_server
 import orchestrator_service.workflow as orchestrator_workflow
@@ -442,6 +445,21 @@ def _stub_manual_compile_repair_reference_payloads() -> None:
     orchestrator_workflow._as_reference_payload = _reference_payload
 
 
+def _post_json(host: str, port: int, path: str, payload: dict, headers: dict) -> tuple[int, dict]:
+    connection = HTTPConnection(host, port, timeout=3)
+    try:
+        connection.request(
+            "POST",
+            path,
+            body=json.dumps(payload),
+            headers=headers,
+        )
+        response = connection.getresponse()
+        return response.status, json.loads(response.read().decode("utf-8"))
+    finally:
+        connection.close()
+
+
 class OrchestratorIntegrationTests(unittest.TestCase):
     CONTROL_TOKEN = "integration-control-token"
     AUTH_HEADERS = {"Authorization": f"Bearer {CONTROL_TOKEN}"}
@@ -715,11 +733,53 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(diagnose_body["schemaVersion"], "v0")
             self.assertEqual(diagnose_body["runId"], "manual-run-1")
             self.assertEqual(diagnose_body["buildTest"]["status"], "failed")
+            self.assertEqual(
+                diagnose_body["diagnosis"]["failureClass"],
+                "generated_code_defect",
+            )
+            self.assertEqual(
+                diagnose_body["diagnosis"]["recommendedNextAction"],
+                "repair_generated_code",
+            )
             self.assertEqual(diagnose_body["candidateProject"]["entryClass"], "CASE01")
             self.assertEqual(
                 state.capability_invocations[-1][0],
                 "model-gateway",
             )
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs/manual-run-1/manual-compile-repair/apply/request",
+                    body=json.dumps(
+                        {
+                            "runId": "manual-run-1",
+                            "entryClass": "CASE01",
+                            "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                            "javaFiles": diagnose_payload["javaFiles"],
+                            "proposal": proposal,
+                            "candidateProject": {
+                                **diagnose_body["candidateProject"],
+                                "files": {
+                                    **diagnose_body["candidateProject"]["files"],
+                                    "src/main/java/com/c2c/generated/Injected.java": (
+                                        "package com.c2c.generated;\npublic class Injected {}\n"
+                                    ),
+                                },
+                            },
+                        }
+                    ),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                tampered_apply_response = connection.getresponse()
+                self.assertEqual(tampered_apply_response.status, 409)
+                tampered_apply_body = json.loads(
+                    tampered_apply_response.read().decode("utf-8")
+                )
+            finally:
+                connection.close()
+            self.assertIn("unreviewed file changes", tampered_apply_body["error"])
 
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
             try:
@@ -755,16 +815,15 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                     headers=self.JSON_AUTH_HEADERS,
                 )
                 apply_response = connection.getresponse()
-                self.assertEqual(apply_response.status, 200)
+                self.assertEqual(apply_response.status, 409)
                 apply_body = json.loads(apply_response.read().decode("utf-8"))
             finally:
                 connection.close()
 
-            self.assertEqual(apply_body["proposal"]["approvalState"], "approved")
-            self.assertEqual(apply_body["buildTest"]["status"], "ok")
+            self.assertIn("pending approval", apply_body["error"])
             self.assertEqual(
                 [capability for capability, _ in state.capability_invocations],
-                ["build-test", "model-gateway", "build-test"],
+                ["build-test", "model-gateway"],
             )
         finally:
             mock_server.shutdown()
@@ -878,6 +937,561 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 [capability for capability, _ in state.capability_invocations],
                 ["build-test", "model-gateway"],
+            )
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_manual_compile_repair_diagnose_classifies_runtime_and_parity_failures(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            runtime_build_response = {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "runtime_failed",
+                    "runId": "manual-run-3",
+                    "workflowId": "w0-migration-v0",
+                    "summary": "runtime exception",
+                    "executionResultRef": {
+                        "uri": "urn:build/runtime-execution",
+                        "sha256": "6" * 64,
+                        "byteSize": 40,
+                    },
+                    "runtimeErrorRef": {
+                        "uri": "urn:build/runtime-error",
+                        "sha256": "7" * 64,
+                        "byteSize": 24,
+                    },
+                }
+            parity_build_response = {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "oracle_mismatch",
+                    "runId": "manual-run-3",
+                    "workflowId": "w0-migration-v0",
+                    "summary": "parity mismatch",
+                    "executionResultRef": {
+                        "uri": "urn:build/parity-execution",
+                        "sha256": "5" * 64,
+                        "byteSize": 28,
+                    },
+                    "comparisonResultRef": {
+                        "uri": "urn:build/parity-comparison",
+                        "sha256": "4" * 64,
+                        "byteSize": 36,
+                    },
+                    "parityComparison": {
+                        "executionResultRef": {
+                            "uri": "urn:build/parity-execution",
+                            "sha256": "5" * 64,
+                            "byteSize": 28,
+                        },
+                        "comparisonResultRef": {
+                            "uri": "urn:build/parity-comparison",
+                            "sha256": "4" * 64,
+                            "byteSize": 36,
+                        },
+                        "expectedRef": {
+                            "uri": "urn:build/reference-output",
+                            "sha256": "a" * 64,
+                            "byteSize": 18,
+                        },
+                        "actualRef": {
+                            "uri": "urn:build/java-output",
+                            "sha256": "b" * 64,
+                            "byteSize": 18,
+                        },
+                        "diffRef": {
+                            "uri": "urn:build/oracle-diff",
+                            "sha256": "8" * 64,
+                            "byteSize": 32,
+                        }
+                    },
+                    "oracleDiffRef": {
+                        "uri": "urn:build/oracle-diff",
+                        "sha256": "8" * 64,
+                        "byteSize": 32,
+                    },
+                }
+            state.build_test_responses = [runtime_build_response, parity_build_response]
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-manual-3-runtime",
+                    "runId": "manual-run-3",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-3-runtime",
+                        "sha256": "f" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fix the runtime exception.",
+                        "files": {
+                            "src/main/java/com/c2c/generated/CASE01.java": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"runtime fixed\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "explanation": "Runtime exception fixed.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.9,
+                    },
+                },
+                {
+                    "invocationId": "mg-manual-3-parity",
+                    "runId": "manual-run-3",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-3-parity",
+                        "sha256": "e" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fix the parity mismatch.",
+                        "files": {
+                            "src/main/java/com/c2c/generated/CASE01.java": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"parity fixed\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "explanation": "Parity mismatch fixed.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.88,
+                    },
+                },
+            ]
+            MockHarnessHandler.state = state
+
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="manual-run-3",
+                program_id="CASE01",
+                java_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"broken\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+            )
+            runner.artifact_store.write_json(
+                "manual-run-3",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(runtime_build_response),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-3")
+            _stub_manual_compile_repair_failure_code()
+            _stub_manual_compile_repair_reference_payloads()
+            runner._persist_manual_compile_baseline_diff = lambda *_args, **_kwargs: {
+                "uri": "urn:build/manual-edit-diff",
+                "sha256": "d" * 64,
+                "byteSize": 44,
+            }
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            runtime_status, runtime_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-3/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-3",
+                    "entryClass": "CASE01",
+                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                    "javaFiles": [
+                        {
+                            "path": "src/main/java/com/c2c/generated/CASE01.java",
+                            "content": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"runtime manual edit\")\n"
+                                "    }\n"
+                                "}\n"
+                            ),
+                        }
+                    ],
+                    "buildTestContext": {
+                        "status": "run-failed",
+                        "classification": "run-error",
+                        "compileStatus": "ok",
+                        "executionStatus": "failed",
+                        "outputRef": {
+                            "uri": "urn:studio/runtime-execution",
+                            "sha256": "1" * 64,
+                            "byteSize": 32,
+                        },
+                    },
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(runtime_status, 200)
+            self.assertEqual(
+                runtime_body["diagnosis"]["failureClass"],
+                "generated_code_defect",
+            )
+            self.assertEqual(
+                runtime_body["diagnosis"]["recommendedNextAction"],
+                "repair_generated_code",
+            )
+            runtime_prompt = json.loads(state.capability_invocations[-1][1]["prompt"])
+            self.assertEqual(runtime_prompt["runtimeErrorRef"]["uri"], "urn:build/runtime-error")
+            self.assertEqual(
+                runtime_body["diagnosis"]["executionResultRef"]["uri"],
+                "urn:build/runtime-execution",
+            )
+            self.assertEqual(runtime_body["diagnosis"]["scopeClass"], "generated_code")
+            runtime_build_calls = [
+                payload
+                for capability, payload in state.capability_invocations
+                if capability == "build-test"
+            ]
+            self.assertFalse(runtime_build_calls[-1]["options"]["skipExecution"])
+            self.assertFalse(runtime_build_calls[-1]["options"]["compareOutput"])
+
+            runner.artifact_store.write_json(
+                "manual-run-3",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(parity_build_response),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+
+            parity_status, parity_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-3/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-3",
+                    "entryClass": "CASE01",
+                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                    "javaFiles": [
+                        {
+                            "path": "src/main/java/com/c2c/generated/CASE01.java",
+                            "content": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"parity manual edit\")\n"
+                                "    }\n"
+                                "}\n"
+                            ),
+                        }
+                    ],
+                    "buildTestContext": {
+                        "status": "output-divergence",
+                        "classification": "true-golden-master-mismatch",
+                        "compileStatus": "ok",
+                        "executionStatus": "ok",
+                        "comparisonPolicy": "golden-master-v1",
+                        "expectedOutput": "EXPECTED",
+                        "outputRef": {
+                            "uri": "urn:studio/parity-execution",
+                            "sha256": "2" * 64,
+                            "byteSize": 32,
+                        },
+                        "expectedOutputRef": {
+                            "uri": "urn:studio/reference-output",
+                            "sha256": "3" * 64,
+                            "byteSize": 24,
+                        },
+                        "actualOutputRef": {
+                            "uri": "urn:studio/java-output",
+                            "sha256": "4" * 64,
+                            "byteSize": 24,
+                        },
+                        "comparison": {
+                            "status": "failed",
+                            "matched": False,
+                            "comparisonPolicyVersion": "golden-master-v1",
+                            "mismatchClassification": "content",
+                            "comparisonPolicyRef": {
+                                "uri": "urn:studio/comparison-policy",
+                                "sha256": "5" * 64,
+                                "byteSize": 16,
+                            },
+                            "comparisonResultRef": {
+                                "uri": "urn:studio/parity-comparison",
+                                "sha256": "6" * 64,
+                                "byteSize": 16,
+                            },
+                            "diffRef": {
+                                "uri": "urn:studio/oracle-diff",
+                                "sha256": "7" * 64,
+                                "byteSize": 16,
+                            },
+                            "expectedRef": {
+                                "uri": "urn:studio/reference-output",
+                                "sha256": "8" * 64,
+                                "byteSize": 24,
+                            },
+                            "actualRef": {
+                                "uri": "urn:studio/java-output",
+                                "sha256": "9" * 64,
+                                "byteSize": 24,
+                            },
+                        },
+                    },
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(parity_status, 200)
+            self.assertEqual(
+                parity_body["diagnosis"]["failureClass"],
+                "generated_code_defect",
+            )
+            self.assertEqual(parity_body["diagnosis"]["scopeClass"], "generated_code")
+            self.assertEqual(
+                parity_body["diagnosis"]["recommendedNextAction"],
+                "repair_generated_code",
+            )
+            parity_prompt = json.loads(state.capability_invocations[-1][1]["prompt"])
+            self.assertEqual(parity_prompt["oracleDiffRef"]["uri"], "urn:build/oracle-diff")
+            self.assertEqual(
+                parity_prompt["buildTestPayload"]["parityComparison"]["expectedRef"]["uri"],
+                "urn:build/reference-output",
+            )
+            self.assertEqual(
+                parity_prompt["buildTestPayload"]["parityComparison"]["actualRef"]["uri"],
+                "urn:build/java-output",
+            )
+            self.assertTrue(
+                parity_prompt["buildTestPayload"]["manualEditDiffRef"]["sha256"],
+            )
+            self.assertEqual(
+                parity_body["diagnosis"]["comparisonResultRef"]["uri"],
+                "urn:build/parity-comparison",
+            )
+            parity_build_calls = [
+                payload
+                for capability, payload in state.capability_invocations
+                if capability == "build-test"
+            ]
+            self.assertFalse(parity_build_calls[-1]["options"]["skipExecution"])
+            self.assertTrue(parity_build_calls[-1]["options"]["compareOutput"])
+            self.assertEqual(
+                parity_build_calls[-1]["oracle"]["expectedOutput"],
+                "EXPECTED",
+            )
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_manual_compile_repair_diagnose_handles_no_proposal_and_out_of_scope_follow_up(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.build_test_responses = [
+                {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "runtime_failed",
+                    "runId": "manual-run-4",
+                    "workflowId": "w0-migration-v0",
+                    "summary": "runtime exception",
+                },
+                {
+                    "schemaVersion": "v0",
+                    "status": "failed",
+                    "reason": "oracle_mismatch",
+                    "runId": "manual-run-4",
+                    "workflowId": "w0-migration-v0",
+                    "summary": "parity mismatch",
+                    "parityComparison": {
+                        "diffRef": {
+                            "uri": "urn:build/oracle-diff-2",
+                            "sha256": "9" * 64,
+                            "byteSize": 32,
+                        }
+                    },
+                },
+            ]
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-manual-4-refusal",
+                    "runId": "manual-run-4",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-4-refusal",
+                        "sha256": "d" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "refuse",
+                        "rationale": "No safe repair is available.",
+                        "refusalCode": "no_safe_repair",
+                        "confidence": 0.2,
+                    },
+                },
+                {
+                    "invocationId": "mg-manual-4-escalate",
+                    "runId": "manual-run-4",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-4-escalate",
+                        "sha256": "c" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "escalate",
+                        "rationale": "Out of scope for W0.2.",
+                        "escalationCode": "out_of_scope_for_w0_2",
+                    },
+                },
+            ]
+            MockHarnessHandler.state = state
+
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="manual-run-4",
+                program_id="CASE01",
+                java_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"broken\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+            )
+            runner.artifact_store.write_json(
+                "manual-run-4",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(state.build_test_responses[0]),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-4")
+            _stub_manual_compile_repair_failure_code()
+            _stub_manual_compile_repair_reference_payloads()
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            refusal_status, refusal_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-4/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-4",
+                    "entryClass": "CASE01",
+                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                    "javaFiles": [
+                        {
+                            "path": "src/main/java/com/c2c/generated/CASE01.java",
+                            "content": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"broken\")\n"
+                                "    }\n"
+                                "}\n"
+                            ),
+                        }
+                    ],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(refusal_status, 200)
+            self.assertIsNone(refusal_body["proposal"])
+            self.assertEqual(refusal_body["diagnosis"]["recommendedNextAction"], "stop")
+
+            runner.artifact_store.write_json(
+                "manual-run-4",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(state.build_test_responses[1]),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+
+            escalation_status, escalation_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-4/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-4",
+                    "entryClass": "CASE01",
+                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                    "javaFiles": [
+                        {
+                            "path": "src/main/java/com/c2c/generated/CASE01.java",
+                            "content": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"broken\")\n"
+                                "    }\n"
+                                "}\n"
+                            ),
+                        }
+                    ],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(escalation_status, 200)
+            self.assertIsNone(escalation_body["proposal"])
+            self.assertEqual(
+                escalation_body["diagnosis"]["recommendedNextAction"],
+                "escalate",
+            )
+            self.assertEqual(escalation_body["diagnosis"]["failureClass"], "out_of_scope")
+            self.assertEqual(escalation_body["diagnosis"]["scopeClass"], "out_of_scope")
+            self.assertEqual(
+                escalation_body["diagnosis"]["followUpRecommendation"]["suggestedIssueType"],
+                "follow-up",
             )
         finally:
             mock_server.shutdown()

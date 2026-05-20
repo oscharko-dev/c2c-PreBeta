@@ -6782,6 +6782,8 @@ test("POST /api/v0/compile-check returns 503 when build-test-runner returns 5xx"
 
 // ---------------------------------------------------------------------------
 // Studio-IDE-XX (#360): POST /api/v0/manual-compile-repair/*
+// Issue #361 extends this same compatibility lane to generalized
+// manual diagnosis/repair payloads, including runtime/parity failures.
 // ---------------------------------------------------------------------------
 
 test("POST /api/v0/manual-compile-repair routes forward the Studio requester and preserve the upstream payloads", async () => {
@@ -6794,8 +6796,44 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     schemaVersion: "v0",
     runId: "run-1",
     diagnosis: {
-      diagnosisId: "run-1-compile-diagnosis",
-      likelyRootCause: "compile failure in current snapshot",
+      diagnosisId: "run-1-runtime-diagnosis",
+      workflowId: "w0-migration-v0",
+      buildResultRef: {
+        uri: "urn:diagnosis/run-1/build-result",
+        sha256: "1".repeat(64),
+        byteSize: 128,
+        kind: "parity-build-result",
+      },
+      executionResultRef: {
+        uri: "urn:diagnosis/run-1/execution-result",
+        sha256: "2".repeat(64),
+        byteSize: 96,
+        kind: "parity-execution-result",
+      },
+      comparisonResultRef: {
+        uri: "urn:diagnosis/run-1/comparison-result",
+        sha256: "3".repeat(64),
+        byteSize: 80,
+        kind: "parity-comparison-result",
+      },
+      failureClass: "runtime_failure",
+      scopeClass: "generated_code",
+      likelyRootCause: "runtime output diverges from the reference execution",
+      summary: "Parity comparison failed after the generated Java execution completed.",
+      confidence: {
+        level: "high",
+        basis: "The orchestrator observed both runtime output and parity mismatch artifacts.",
+      },
+      recommendedNextAction: "repair_generated_code",
+      evidenceRefs: [
+        {
+          uri: "urn:diagnosis/run-1/evidence",
+          sha256: "4".repeat(64),
+          byteSize: 64,
+          kind: "repair-diagnosis-evidence",
+        },
+      ],
+      createdAt: "2026-05-15T10:00:00Z",
     },
     proposal: {
       proposalId: "proposal-1",
@@ -6862,6 +6900,66 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
         entryClass: "CASE01",
         entryFilePath: currentJavaFile.path,
         javaFiles: [currentJavaFile],
+        buildTestContext: {
+          status: "output-divergence",
+          classification: "true-golden-master-mismatch",
+          comparisonPolicy: "golden-master-v1",
+          expectedOutput: "EXPECTED",
+          outputRef: {
+            uri: "urn:diagnosis/run-1/execution-result",
+            sha256: "2".repeat(64),
+            byteSize: 96,
+            kind: "parity-execution-result",
+          },
+          expectedOutputRef: {
+            uri: "urn:diagnosis/run-1/reference-output",
+            sha256: "7".repeat(64),
+            byteSize: 64,
+            kind: "reference-output",
+          },
+          actualOutputRef: {
+            uri: "urn:diagnosis/run-1/java-output",
+            sha256: "8".repeat(64),
+            byteSize: 64,
+            kind: "java-output",
+          },
+          comparison: {
+            status: "failed",
+            matched: false,
+            comparisonPolicyVersion: "golden-master-v1",
+            mismatchClassification: "content",
+            comparisonPolicyRef: {
+              uri: "urn:diagnosis/run-1/comparison-policy",
+              sha256: "9".repeat(64),
+              byteSize: 32,
+              kind: "comparison-policy",
+            },
+            comparisonResultRef: {
+              uri: "urn:diagnosis/run-1/comparison-result",
+              sha256: "3".repeat(64),
+              byteSize: 80,
+              kind: "parity-comparison-result",
+            },
+            diffRef: {
+              uri: "urn:diagnosis/run-1/oracle-diff",
+              sha256: "a".repeat(64),
+              byteSize: 48,
+              kind: "oracle-diff",
+            },
+            expectedRef: {
+              uri: "urn:diagnosis/run-1/reference-output",
+              sha256: "b".repeat(64),
+              byteSize: 64,
+              kind: "reference-output",
+            },
+            actualRef: {
+              uri: "urn:diagnosis/run-1/java-output",
+              sha256: "c".repeat(64),
+              byteSize: 64,
+              kind: "java-output",
+            },
+          },
+        },
         manualEditOverlays: [
           {
             regions: [
@@ -6889,6 +6987,13 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     assert.equal(diagnose.status, 200);
     const diagnoseBody = diagnose.body as {
       schemaVersion: string;
+      diagnosis: {
+        failureClass?: string;
+        scopeClass?: string;
+        executionResultRef?: { sha256: string; kind?: string };
+        comparisonResultRef?: { sha256: string; kind?: string };
+        recommendedNextAction?: string;
+      };
       proposal: { proposalId: string };
       candidateProject: {
         entryClass: string;
@@ -6900,6 +7005,19 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     assert.equal(calls.manualCompileRepair.diagnose.length, 1);
     const diagnoseCall = calls.manualCompileRepair.diagnose[0];
     assert.equal(diagnoseCall?.runId, "run-1");
+    assert.equal(
+      ((diagnoseCall?.payload as { buildTestContext?: { expectedOutput?: string } })
+        .buildTestContext?.expectedOutput),
+      "EXPECTED",
+    );
+    assert.equal(
+      ((diagnoseCall?.payload as {
+        buildTestContext?: {
+          comparison?: { comparisonResultRef?: { sha256?: string } };
+        };
+      }).buildTestContext?.comparison?.comparisonResultRef?.sha256),
+      "3".repeat(64),
+    );
     assert.deepEqual(
       (diagnoseCall?.payload as { manualOverlay: unknown; requester: string }).manualOverlay,
       {
@@ -6924,6 +7042,17 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       (diagnoseCall?.payload as { requester: string }).requester,
       "studio:tenant-a:user-a",
     );
+    assert.equal(diagnoseBody.diagnosis.failureClass, "runtime_failure");
+    assert.equal(diagnoseBody.diagnosis.scopeClass, "generated_code");
+    assert.equal(
+      diagnoseBody.diagnosis.executionResultRef?.sha256,
+      "2".repeat(64),
+    );
+    assert.equal(
+      diagnoseBody.diagnosis.comparisonResultRef?.sha256,
+      "3".repeat(64),
+    );
+    assert.equal(diagnoseBody.diagnosis.recommendedNextAction, "repair_generated_code");
 
     const reject = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/reject`,

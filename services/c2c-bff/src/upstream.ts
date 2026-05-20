@@ -231,6 +231,8 @@ export interface OrchestratorClient {
   // Issue #96: experience-learning summary view sourced via orchestrator.
   getLearning(runId: string): Promise<UpstreamResponse | undefined>;
   // Issue #172: W0.2 run contract (state machine, repair budget, failure code).
+  // Issue #361 extends the same lane to generalized manual diagnosis/repair
+  // payloads, including runtime/parity-failure diagnosis envelopes.
   getWorkflow(runId: string): Promise<UpstreamResponse | undefined>;
   // Studio-IDE-6 (#248): per-run trust-pillar traceability payload —
   // c2c-trace.json + IR symbol map + per-file Java region classification.
