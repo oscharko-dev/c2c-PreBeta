@@ -216,6 +216,22 @@ export function GeneratedJavaEditorPane() {
     displayedRunId !== null &&
     fileContentRunId === displayedRunId;
   const activeRunFileContent = fileContentMatchesRun ? fileContent : null;
+  const displayedGenerated =
+    showingHistoricalArtifacts && state.previousRun
+      ? state.previousRun.generated
+      : state.generated;
+  const displayedGeneratedFiles =
+    showingHistoricalArtifacts && state.previousRun
+      ? state.previousRun.generatedFiles
+      : state.generatedFiles;
+  const displayedBuildTest =
+    showingHistoricalArtifacts && state.previousRun
+      ? state.previousRun.buildTest
+      : state.buildTest;
+  const displayedWorkflow =
+    showingHistoricalArtifacts && state.previousRun
+      ? state.previousRun.workflow
+      : state.workflow;
 
   useEffect(() => {
     if (!viewMenuOpen) return;
@@ -241,17 +257,21 @@ export function GeneratedJavaEditorPane() {
     if (
       !selectedFilePath ||
       activeRunFileContent === null ||
-      !state.runId ||
+      !displayedRunId ||
       isFetchingFile
     ) {
       return;
     }
-    void ensureJavaBaseline(selectedFilePath, activeRunFileContent, state.runId);
+    void ensureJavaBaseline(
+      selectedFilePath,
+      activeRunFileContent,
+      displayedRunId,
+    );
     void loadJavaDraftFor(selectedFilePath, activeRunFileContent);
   }, [
     selectedFilePath,
     activeRunFileContent,
-    state.runId,
+    displayedRunId,
     isFetchingFile,
     ensureJavaBaseline,
     loadJavaDraftFor,
@@ -276,14 +296,14 @@ export function GeneratedJavaEditorPane() {
     if (
       !selectedFilePath ||
       activeRunFileContent === null ||
-      !state.runId ||
+      !displayedRunId ||
       !state.programId ||
       isFetchingFile
     ) {
       return;
     }
     const programId = state.programId;
-    const runId = state.runId;
+    const runId = displayedRunId;
     const filePath = selectedFilePath;
     const content = activeRunFileContent;
     let cancelled = false;
@@ -301,7 +321,7 @@ export function GeneratedJavaEditorPane() {
   }, [
     selectedFilePath,
     activeRunFileContent,
-    state.runId,
+    displayedRunId,
     state.programId,
     isFetchingFile,
     recordJavaDiffSnapshot,
@@ -320,7 +340,7 @@ export function GeneratedJavaEditorPane() {
     if (
       !selectedFilePath ||
       activeRunFileContent === null ||
-      !state.runId ||
+      !displayedRunId ||
       isFetchingFile
     ) {
       return;
@@ -331,9 +351,9 @@ export function GeneratedJavaEditorPane() {
     // The buffer is dirty AND a fresh run is in scope. Skip if the run
     // that produced the buffer is the same as the current run (no new
     // generator output to compare against).
-    if (entry.generatorBaselineRunId === state.runId) return;
+    if (entry.generatorBaselineRunId === displayedRunId) return;
     if (activeRunFileContent === entry.content) return;
-    const key = `${state.runId}::${selectedFilePath}`;
+    const key = `${displayedRunId}::${selectedFilePath}`;
     if (lastMergeReviewKeyRef.current === key) return;
     lastMergeReviewKeyRef.current = key;
     requestJavaMergeReview({
@@ -341,12 +361,12 @@ export function GeneratedJavaEditorPane() {
       baselineContent: entry.generatorBaselineContent,
       manualContent: entry.content,
       newGeneratorContent: activeRunFileContent,
-      newGeneratorRunId: state.runId,
+      newGeneratorRunId: displayedRunId,
     });
   }, [
     selectedFilePath,
     activeRunFileContent,
-    state.runId,
+    displayedRunId,
     isFetchingFile,
     javaBuffers,
     requestJavaMergeReview,
@@ -362,13 +382,13 @@ export function GeneratedJavaEditorPane() {
   // ``overlayApi.setOverlay`` here because that path is owned by the
   // traceability fetch and would clobber its trust-pillar regions.
   useEffect(() => {
-    if (!selectedFilePath || !state.runId) return;
+    if (!selectedFilePath || !displayedRunId) return;
     const entry = javaBuffers[selectedFilePath];
     if (!entry) return;
     const computed = computeManualEditOverlay({
       baselineContent: entry.generatorBaselineContent,
       currentContent: entry.content,
-      runId: state.runId,
+      runId: displayedRunId,
       javaFile: selectedFilePath,
       generatorBaselineRunId: entry.generatorBaselineRunId,
     });
@@ -390,7 +410,7 @@ export function GeneratedJavaEditorPane() {
         }));
     if (same) return;
     setJavaManualOverlay(selectedFilePath, computed);
-  }, [selectedFilePath, state.runId, javaBuffers, setJavaManualOverlay]);
+  }, [selectedFilePath, displayedRunId, javaBuffers, setJavaManualOverlay]);
 
   useEffect(() => {
     if (saveNoticeAt === null) {
@@ -588,7 +608,7 @@ export function GeneratedJavaEditorPane() {
       // the line jump on the registered editor.
       return;
     }
-    const generatedPaths = state.generatedFiles?.files ?? [];
+    const generatedPaths = displayedGeneratedFiles?.files ?? [];
     // Path-segment suffix match against the list of generated files —
     // the BFF normalizes javac absolute paths but we match defensively
     // against both forms.
@@ -616,7 +636,7 @@ export function GeneratedJavaEditorPane() {
     navigationTarget,
     selectedFilePath,
     selectFile,
-    state.generatedFiles?.files,
+    displayedGeneratedFiles?.files,
   ]);
 
   // Studio-IDE-5 (#244 review): complete the jump once the editor has
@@ -685,7 +705,7 @@ export function GeneratedJavaEditorPane() {
   useEffect(() => {
     if (!revealJavaTarget) return;
     if (revealJavaTarget.filePath === selectedFilePath) return;
-    const generatedPaths = state.generatedFiles?.files ?? [];
+    const generatedPaths = displayedGeneratedFiles?.files ?? [];
     const matched = generatedPaths.find((file) => {
       if (file.path === revealJavaTarget.filePath) return true;
       return pathSuffixMatches(file.path, revealJavaTarget.filePath);
@@ -700,7 +720,7 @@ export function GeneratedJavaEditorPane() {
     revealJavaTarget,
     selectedFilePath,
     selectFile,
-    state.generatedFiles?.files,
+    displayedGeneratedFiles?.files,
   ]);
 
   // Reveal step. Fires when the editor is mounted on the resolved file
@@ -727,8 +747,8 @@ export function GeneratedJavaEditorPane() {
   const javaMarkerGroups: EditorMarkerGroup[] = useMemo(() => {
     if (!monaco) return [];
     const diagnostics = [
-      ...(state.generated?.diagnostics ?? []),
-      ...(state.buildTest?.diagnostics ?? []),
+      ...(displayedGenerated?.diagnostics ?? []),
+      ...(displayedBuildTest?.diagnostics ?? []),
     ];
     const buckets = partitionByOwner(diagnostics);
     const model = editorInstanceRef.current?.getModel() ?? null;
@@ -810,8 +830,8 @@ export function GeneratedJavaEditorPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     monaco,
-    state.generated,
-    state.buildTest,
+    displayedGenerated,
+    displayedBuildTest,
     selectedFilePath,
     editorMountToken,
     lintDiagnostics,
@@ -927,8 +947,8 @@ export function GeneratedJavaEditorPane() {
   // Studio-IDE-6 (#248): ref-based capture of runId so the Alt+J action
   // closure always sees the current runId without re-mounting the command
   // on every state change.
-  const stateRunIdRef = useRef(state.runId);
-  stateRunIdRef.current = state.runId;
+  const stateRunIdRef = useRef(displayedRunId);
+  stateRunIdRef.current = displayedRunId;
   const flushPendingEditRef = useRef(flushPendingEdit);
   flushPendingEditRef.current = flushPendingEdit;
   const formatOnSaveRef = useRef(formatOnSave);
@@ -968,7 +988,7 @@ export function GeneratedJavaEditorPane() {
   // silent — the editor still works without the overlay; absence is
   // surfaced through the StatusBar's "Lineage: —" state.
   useEffect(() => {
-    const runId = state.runId;
+    const runId = displayedRunId;
     const javaFile = selectedFilePath;
     if (!runId || !javaFile) return;
     let cancelled = false;
@@ -1000,7 +1020,7 @@ export function GeneratedJavaEditorPane() {
     return () => {
       cancelled = true;
     };
-  }, [state.runId, productState.state, selectedFilePath, overlayApi]);
+  }, [displayedRunId, productState.state, selectedFilePath, overlayApi]);
 
   // Studio-IDE-6 (#248): paint trust-pillar decorations and publish the
   // file-level lineage-coverage percentage whenever the overlay or file
@@ -1013,7 +1033,7 @@ export function GeneratedJavaEditorPane() {
     if (!editor) return;
     if (monaco && trustPillarRegions.length > 0) {
       const repairCount =
-        state.workflow?.repairAttempts?.filter(
+        displayedWorkflow?.repairAttempts?.filter(
           (a) => a.repairDecision === "propose_candidate",
         ).length ?? 0;
       const decorations = buildTrustPillarDecorations({
@@ -1046,7 +1066,7 @@ export function GeneratedJavaEditorPane() {
     monaco,
     trustPillarRegions,
     selectedFilePath,
-    state.workflow,
+    displayedWorkflow,
     lineageCoverageApi,
     editorMountToken,
   ]);
@@ -1456,10 +1476,6 @@ export function GeneratedJavaEditorPane() {
   //                   repair attempt occurred
   //   Deterministic — everything else (including assistDecision === null
   //                   for runs that have not yet reached the gate)
-  const displayedWorkflow =
-    showingHistoricalArtifacts && state.previousRun
-      ? state.previousRun.workflow
-      : state.workflow;
   const runMode: RunMode = useMemo(() => {
     return deriveRunMode({
       staleJava: staleResultVisible,
@@ -1544,7 +1560,7 @@ export function GeneratedJavaEditorPane() {
     (productState.state === "backend-unavailable" ||
       productState.state === "upstream-unavailable" ||
       productState.state === "validation-error") &&
-    !state.generated
+    !displayedGenerated
   ) {
     return (
       <div className="flex flex-col h-full items-center justify-center p-6">

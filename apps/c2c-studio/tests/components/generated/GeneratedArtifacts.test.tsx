@@ -367,6 +367,81 @@ describe("Generated Artifacts UI", () => {
     ).toBeInTheDocument();
   });
 
+  it("stays on the current run artifacts when a failed rerun still returned generated Java", async () => {
+    mockTransformationState.mockReturnValue({
+      phase: "failed",
+      runId: "run-current-failed",
+      generated: {
+        status: "generated",
+        artifactRef: { sha256: "bbb" },
+        entryClass: "App",
+      },
+      generatedFiles: {
+        status: "complete",
+        entryFilePath: "src/App.java",
+        files: [{ path: "src/App.java" }],
+        fileCount: 1,
+        artifactRef: { sha256: "bbb" },
+      },
+      buildTest: null,
+      evidence: null,
+      previousRun: {
+        runId: "run-previous",
+        orchestratorRunId: "run-previous-orch",
+        programId: "P-1",
+        phase: "completed",
+        summary: null,
+        generated: {
+          status: "generated",
+          artifactRef: { sha256: "aaa" },
+          entryClass: "App",
+        },
+        generatedFiles: {
+          status: "complete",
+          entryFilePath: "src/App.java",
+          files: [{ path: "src/App.java" }],
+          fileCount: 1,
+          artifactRef: { sha256: "aaa" },
+        },
+        buildTest: null,
+        evidence: null,
+        events: null,
+        progress: null,
+        artifacts: null,
+        experience: null,
+        workflow: null,
+      },
+      workflow: null,
+      summary: null,
+    });
+    vi.mocked(apiClient.getGeneratedFile).mockImplementation(async (runId) =>
+      okResult<GeneratedFileContent>({
+        runId,
+        mode: "live",
+        productMode: "live",
+        path: "src/App.java",
+        content:
+          runId === "run-current-failed"
+            ? "class App { int current = 2; }"
+            : "class App { int previous = 1; }",
+        sha256: "b".repeat(64),
+        byteSize: 28,
+        mimeType: "text/x-java-source",
+      }),
+    );
+
+    renderArtifactsUi();
+
+    expect(
+      await screen.findByDisplayValue("class App { int current = 2; }"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /Latest rerun failed\. Showing the previous generated Java as stale/i,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("hands large generated Java files to Monaco without re-implementing virtualization", async () => {
     // Studio-IDE-4 (#245): VirtualizedCodeBlock has been retired. Monaco
     // intrinsically virtualizes its viewport, so the pane forwards the full

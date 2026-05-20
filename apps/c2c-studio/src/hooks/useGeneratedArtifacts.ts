@@ -97,6 +97,8 @@ function useGeneratedArtifactsState(): GeneratedArtifactsValue {
 
   const showingHistoricalArtifacts = Boolean(
     state.previousRun &&
+      !state.generated &&
+      !state.generatedFiles &&
       (state.phase === 'starting' ||
         state.phase === 'running' ||
         state.phase === 'failed' ||

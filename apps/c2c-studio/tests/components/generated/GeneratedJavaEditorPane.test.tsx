@@ -35,6 +35,15 @@ import { apiClient } from "@/lib/apiClient";
 import { JAVA_FORMAT_ON_SAVE_STORAGE_KEY } from "@/lib/editor/javaFormatOnSave";
 import type { ApiResult, Diagnostic, GeneratedFileContent } from "@/types/api";
 
+vi.mock("@/stores/sourceWorkspace", () => ({
+  useSourceWorkspace: () => ({
+    statusFlags: {
+      clean: true,
+      pendingReRun: false,
+    },
+  }),
+}));
+
 const formatJavaSpy = vi.hoisted(() => vi.fn());
 const lintJavaSpy = vi.hoisted(() => vi.fn(() => []));
 const fetchTraceabilitySpy = vi.hoisted(() => vi.fn());
