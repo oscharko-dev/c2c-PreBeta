@@ -137,7 +137,26 @@ final class AcceptanceFixtureRegistry {
         }
 
         Path resolve(Path repoRoot) {
-            return repoRoot.resolve(path).normalize();
+            if (path.startsWith("/") || path.contains("\\") || path.contains("..")) {
+                throw new IllegalArgumentException("unsafe fixture path: " + path);
+            }
+            Path normalizedRoot = repoRoot.toAbsolutePath().normalize();
+            Path resolved = normalizedRoot.resolve(path).normalize();
+            if (!resolved.startsWith(normalizedRoot)) {
+                throw new IllegalArgumentException("fixture path escapes repository root: " + path);
+            }
+            if (Files.exists(resolved)) {
+                try {
+                    Path realRoot = normalizedRoot.toRealPath();
+                    Path realResolved = resolved.toRealPath();
+                    if (!realResolved.startsWith(realRoot)) {
+                        throw new IllegalArgumentException("fixture path escapes repository root via symlink: " + path);
+                    }
+                } catch (IOException e) {
+                    throw new IllegalArgumentException("fixture path could not be resolved safely: " + path, e);
+                }
+            }
+            return resolved;
         }
 
         Map<String, Object> toMap() {

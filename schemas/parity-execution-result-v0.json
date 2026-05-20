@@ -74,6 +74,9 @@
     "normalizedOutputRef": {
       "$ref": "#/$defs/artifactReference"
     },
+    "outputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
     "logRef": {
       "$ref": "#/$defs/artifactReference"
     },

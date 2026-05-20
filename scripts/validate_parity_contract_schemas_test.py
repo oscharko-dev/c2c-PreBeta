@@ -174,6 +174,7 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         _assert_ref_property(self, execution, "stdoutRef")
         _assert_ref_property(self, execution, "stderrRef")
         _assert_ref_property(self, execution, "normalizedOutputRef")
+        _assert_ref_property(self, execution, "outputRef")
         _assert_ref_property(self, execution, "logRef")
         _assert_ref_property(self, execution, "sourceArtifactRef")
         _assert_ref_property(self, execution, "inputArtifactRef")

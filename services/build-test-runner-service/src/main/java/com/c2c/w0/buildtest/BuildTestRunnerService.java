@@ -32,7 +32,7 @@ public final class BuildTestRunnerService {
 
     public static final String SCHEMA_VERSION = "v0";
     public static final String CAPABILITY = "build-test.run";
-    public static final String SOURCE_REFERENCE_CAPABILITY = "build-test.source-reference";
+    public static final String SOURCE_REFERENCE_CAPABILITY = "source-reference.execute";
     public static final String SERVICE_NAME = "build-test-runner-service";
 
     private final Path repoRoot;
@@ -597,14 +597,18 @@ public final class BuildTestRunnerService {
     }
 
     static Map<String, Object> reference(Map<String, Object> response) {
+        return reference("build-test-result", "build-test-result", response);
+    }
+
+    static Map<String, Object> reference(String kind, String uriSegment, Map<String, Object> response) {
         String body = HashUtil.canonicalJson(response);
         String hash = HashUtil.sha256(body);
         Map<String, Object> ref = new LinkedHashMap<>();
-        ref.put("uri", "urn:" + SERVICE_NAME + "/build-test-result/" + hash);
+        ref.put("uri", "urn:" + SERVICE_NAME + "/" + uriSegment + "/" + hash);
         ref.put("sha256", hash);
         ref.put("byteSize", HashUtil.byteLength(body));
         ref.put("mimeType", "application/json");
-        ref.put("kind", "build-test-result");
+        ref.put("kind", kind);
         return ref;
     }
 

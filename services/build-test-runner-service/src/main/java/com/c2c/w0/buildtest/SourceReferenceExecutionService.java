@@ -111,7 +111,22 @@ final class SourceReferenceExecutionService {
                     fixture.sourceCobolArtifactRef().toMap(),
                     null);
         }
-        Path expectedPath = expectedRef.resolve(repoRoot);
+        Path expectedPath;
+        try {
+            expectedPath = expectedRef.resolve(repoRoot);
+        } catch (IllegalArgumentException e) {
+            return failedResult(
+                    executionId,
+                    runId,
+                    workflowId,
+                    MODE_REFERENCE_FIXTURE,
+                    fixture.fixtureId(),
+                    "unsafe-reference-fixture",
+                    e.getMessage(),
+                    started,
+                    fixture.sourceCobolArtifactRef().toMap(),
+                    expectedRef.toMap());
+        }
         if (!Files.isRegularFile(expectedPath)) {
             return failedResult(
                     executionId,
@@ -127,6 +142,21 @@ final class SourceReferenceExecutionService {
         }
         try {
             String output = Files.readString(expectedPath, StandardCharsets.UTF_8);
+            if (!expectedRef.sha256().equalsIgnoreCase(HashUtil.sha256(output))
+                    || expectedRef.byteSize() != HashUtil.byteLength(output)) {
+                return failedResult(
+                        executionId,
+                        runId,
+                        workflowId,
+                        MODE_REFERENCE_FIXTURE,
+                        fixture.fixtureId(),
+                        "reference-fixture-integrity-mismatch",
+                        "Reference fixture " + expectedRef.path()
+                                + " does not match the registry sha256/byteSize declaration.",
+                        started,
+                        fixture.sourceCobolArtifactRef().toMap(),
+                        expectedRef.toMap());
+            }
             Instant completed = Instant.now();
             return successResult(
                     executionId,
@@ -181,7 +211,22 @@ final class SourceReferenceExecutionService {
                     fixture.sourceCobolArtifactRef().toMap(),
                     null);
         }
-        Path sourcePath = fixture.sourceCobolArtifactRef().resolve(repoRoot);
+        Path sourcePath;
+        try {
+            sourcePath = fixture.sourceCobolArtifactRef().resolve(repoRoot);
+        } catch (IllegalArgumentException e) {
+            return failedResult(
+                    executionId,
+                    runId,
+                    workflowId,
+                    MODE_NATIVE_COBOL,
+                    fixture.fixtureId(),
+                    "unsafe-source-cobol",
+                    e.getMessage(),
+                    started,
+                    fixture.sourceCobolArtifactRef().toMap(),
+                    null);
+        }
         if (!Files.isRegularFile(sourcePath)) {
             return failedResult(
                     executionId,
@@ -409,7 +454,10 @@ final class SourceReferenceExecutionService {
         payload.put("completedAt", completed.toString());
         payload.put("createdAt", completed.toString());
         payload.put("summary", summary);
-        payload.put("outputRef", BuildTestRunnerService.reference(payload));
+        payload.put("outputRef", BuildTestRunnerService.reference(
+                "parity-execution-result",
+                "parity-execution-result",
+                payload));
         return payload;
     }
 
