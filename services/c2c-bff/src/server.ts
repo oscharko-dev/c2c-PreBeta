@@ -3324,9 +3324,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const diagnoseManualCompileRepair =
-          orchestrator.diagnoseManualCompileRepair;
-        if (!orchestrator.enabled || !diagnoseManualCompileRepair) {
+        const startTransformRun = orchestrator.startTransformRun;
+        if (!orchestrator.enabled || !startTransformRun) {
           jsonResponse(res, 503, {
             error: "orchestrator URL is required for /api/v0/transform",
           });
@@ -3384,7 +3383,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             oracleInput,
             useTransformationAgent,
           };
-          const upstream = await orchestrator.startTransformRun(transformInput);
+          const upstream = await startTransformRun(transformInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             const liveRunId = extractLiveRunId(upstream.body);
             const stored = runStore.create(
@@ -3538,9 +3537,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const diagnoseManualCompileRepair =
-          orchestrator.diagnoseManualCompileRepair;
-        if (!orchestrator.enabled || !diagnoseManualCompileRepair) {
+        const startTransformRun = orchestrator.startTransformRun;
+        if (!orchestrator.enabled || !startTransformRun) {
           jsonResponse(res, 503, {
             error: "orchestrator URL is required for /api/v0/generate",
           });
@@ -3594,7 +3592,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             // composed Generate & Verify pipeline keeps running unchanged.
             generateOnly: true,
           };
-          const upstream = await orchestrator.startTransformRun(generateInput);
+          const upstream = await startTransformRun(generateInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
             const liveRunId = extractLiveRunId(upstream.body);
             const stored = runStore.create(
