@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/parity-execution-result-v0.json",
+  "title": "Parity Execution Result v0",
+  "description": "Execution result for the source-reference or generated-Java side of a parity run. The result keeps command, timing, stdout, stderr, normalized output, diagnostics, and evidence references content-addressed to avoid leaking secrets. Issue #351.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "executionId",
+    "runId",
+    "executionSurface",
+    "command",
+    "status",
+    "exitCode",
+    "timedOut",
+    "stdoutRef",
+    "stderrRef",
+    "normalizedOutputRef",
+    "diagnostics",
+    "createdAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "executionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "executionSurface": {
+      "type": "string",
+      "enum": ["source-reference", "generated-java"]
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "workingDirectory": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "failed", "timed_out", "skipped"]
+    },
+    "exitCode": {
+      "type": ["integer", "null"]
+    },
+    "timedOut": {
+      "type": "boolean"
+    },
+    "stdoutRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "stderrRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "normalizedOutputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "logRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "generatedArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "referenceArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactReference"
+      }
+    }
+  },
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["severity", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "error"]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "filePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rawLogRef": {
+          "$ref": "#/$defs/artifactReference"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/repair-diagnosis-v0.json",
+  "title": "Repair Diagnosis v0",
+  "description": "Deterministic and model-assisted repair diagnosis for a failed parity run. Captures the failure class, likely root cause, confidence framing, scope classification, and evidence references so a repair proposal can be bounded before any application step. Issue #351.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "diagnosisId",
+    "runId",
+    "failureClass",
+    "scopeClass",
+    "likelyRootCause",
+    "confidence",
+    "evidenceRefs",
+    "createdAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "diagnosisId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "buildResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "executionResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "comparisonResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceRevisionRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "currentHeadRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "failureClass": {
+      "type": "string",
+      "enum": [
+        "build_failure",
+        "runtime_failure",
+        "comparison_mismatch",
+        "policy_block",
+        "fixture_issue",
+        "generated_code_defect",
+        "manual_edit_issue",
+        "out_of_scope",
+        "unknown"
+      ]
+    },
+    "scopeClass": {
+      "type": "string",
+      "enum": [
+        "manual_edit",
+        "generated_code",
+        "fixture_reference",
+        "out_of_scope",
+        "unknown"
+      ]
+    },
+    "likelyRootCause": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "confidence": {
+      "type": "object",
+      "required": ["level"],
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    },
+    "recommendedNextAction": {
+      "type": "string",
+      "enum": ["repair_generated_code", "repair_fixture", "retry_build", "escalate", "stop"]
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactReference"
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

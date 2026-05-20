@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/parity-comparison-result-v0.json",
+  "title": "Parity Comparison Result v0",
+  "description": "Deterministic comparison result for a parity run. Records the normalized source and target outputs, diff summary, mismatch classification, comparison policy version, and supporting evidence references. Issue #351.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "comparisonId",
+    "runId",
+    "status",
+    "comparisonPolicyVersion",
+    "sourceNormalizedRef",
+    "targetNormalizedRef",
+    "diffSummary",
+    "mismatchClassification",
+    "createdAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "comparisonId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "failed", "blocked"]
+    },
+    "comparisonPolicyVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "comparisonPolicyRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceNormalizedRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "targetNormalizedRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "diffRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "diffSummary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "mismatchClassification": {
+      "type": "string",
+      "enum": [
+        "none",
+        "content",
+        "formatting",
+        "line_endings",
+        "policy",
+        "unknown"
+      ]
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactReference"
+      }
+    }
+  },
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

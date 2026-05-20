@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/patch-proposal-v0.json",
+  "title": "Patch Proposal v0",
+  "description": "Reviewable patch proposal for a repair run. The proposal records the file-level diff, hashes, provenance, and explicit developer approval state so application cannot occur without an auditable approval decision. Issue #351.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "proposalId",
+    "runId",
+    "diagnosisId",
+    "patchSha256",
+    "applicationState",
+    "approvalState",
+    "files",
+    "sourceRevisionRef",
+    "currentHeadRef",
+    "evidenceRefs",
+    "createdAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "proposalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "diagnosisId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "proposedBy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "patchSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "applicationState": {
+      "type": "string",
+      "enum": ["draft", "review_pending", "applied", "rejected"]
+    },
+    "approvalState": {
+      "type": "string",
+      "enum": ["pending", "approved", "rejected"]
+    },
+    "developerApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approvedBy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approvedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "approvalNote": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "approvedPatchSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/fileChange"
+      }
+    },
+    "sourceRevisionRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "currentHeadRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactReference"
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "approvedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "appliedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "approvalState": {
+            "const": "approved"
+          }
+        },
+        "required": ["approvalState"]
+      },
+      "then": {
+        "required": ["developerApproval", "approvedAt"],
+        "properties": {
+          "developerApproval": {
+            "required": ["approvedBy", "approvedAt", "approvedPatchSha256"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "applicationState": {
+            "const": "applied"
+          }
+        },
+        "required": ["applicationState"]
+      },
+      "then": {
+        "required": ["developerApproval", "approvedAt", "appliedAt"],
+        "properties": {
+          "approvalState": {
+            "const": "approved"
+          },
+          "developerApproval": {
+            "required": ["approvedBy", "approvedAt", "approvedPatchSha256"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "fileChange": {
+      "type": "object",
+      "required": ["path", "changeType"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+        },
+        "changeType": {
+          "type": "string",
+          "enum": ["add", "modify", "delete"]
+        },
+        "beforeSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "afterSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "diff": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "diffRef": {
+          "$ref": "#/$defs/artifactReference"
+        }
+      }
+    }
+  }
+}

@@ -64,7 +64,13 @@
         "schemas/agent-invocation-request-v0.json",
         "schemas/agent-invocation-response-v0.json",
         "schemas/agent-repair-decision-v0.json",
-        "schemas/agent-repair-input-v0.json"
+        "schemas/agent-repair-input-v0.json",
+        "schemas/parity-build-result-v0.json",
+        "schemas/parity-comparison-result-v0.json",
+        "schemas/parity-execution-result-v0.json",
+        "schemas/parity-run-v0.json",
+        "schemas/patch-proposal-v0.json",
+        "schemas/repair-diagnosis-v0.json"
       ],
       "defaultPort": 8084,
       "runtimeRole": "workflow-authority",
