@@ -152,9 +152,10 @@ established by:
 - [ ] Unit tests cover the security-relevant code paths added by the
       PR (redaction, sanitization, encryption, CSP-related headers).
 - [ ] E2E tests cover XSS payloads where the PR touches a renderer.
-- [ ] CI Qodana / static-analysis checks pass for the touched
-      modules.
-- [ ] Secret-scanning CI passes.
+- [ ] Required CI static checks pass for the touched modules.
+- [ ] Scheduled/manual Qodana is reviewed when the PR is security-sensitive
+      or changes shared control-plane code.
+- [ ] Required secret diff scanning passes.
 
 ## Review Sign-Off
 

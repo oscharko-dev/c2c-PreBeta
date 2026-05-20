@@ -226,10 +226,17 @@ cleaner control model.
 Pull request CI runs:
 
 - Repository hygiene and bootstrap validation
-- Per-language lint and unit-test gate (service touched in W0 layout)
-- Secret scan baseline (`patterns.yaml` + `secret` linter)
-- Dependency manifest generation
-- License + SBOM artifact generation
+- Per-language lint, build, and unit-test gates
+- Secret diff scanning for changed files
+- Monaco lazy-load verification for the Studio bundle
+
+Additional quality workflows are scoped by cost and signal:
+
+- Studio browser quality, performance, memory, and visual gates run only for
+  Studio-relevant changes.
+- Markdown link checks run only for documentation changes.
+- Full platform-baseline, full repository secret scan, and Qodana static
+  analysis run on schedule or manual dispatch.
 
 The baseline is intentionally lightweight for W0 and tuned for predictability.
 
@@ -253,9 +260,9 @@ launcher and Orchestrator.
 ```text
 .github/
   workflows/
-    ci.yml                 # foundational pull checks
-    platform-baseline.yml  # language, supply-chain and artifact gates
-    secret-scan.yml         # credential-pattern guard
+    ci.yml                 # required pull checks
+    platform-baseline.yml  # scheduled/manual full language baseline
+    secret-scan.yml        # scheduled/manual full credential scan
 apps/
   c2c-studio/
   c2c-ui/

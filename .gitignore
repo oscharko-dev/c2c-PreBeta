@@ -240,12 +240,14 @@ vendor/
 # Misc tooling/state
 # -------------------------------
 .claude/
-.codex/
+CODEX.md
 .air/
 .only-for-internal-use/
 .tmp/
 .env.local
-.DS_Store?
+
+# Codex configuration and runtime state are distributed outside Git.
+.codex/
 
 # Runtime data artifacts
 services/agentic-harness-core/data/*.jsonl
@@ -264,5 +266,4 @@ apps/c2c-ui/dist-test/
 
 # Markdown link-checker cache (regenerated on every lychee run)
 .lycheecache
-/qodana/
 /qodana/
