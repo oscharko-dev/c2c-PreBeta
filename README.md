@@ -38,6 +38,9 @@ Minimal concept and roadmap:
 The product path is a deterministic-first capability mesh behind the BFF and
 Studio:
 
+Repository topology policy for the housekeeping migration stream is defined in
+[ADR 0008](docs/adr/0008-repository-topology-and-service-taxonomy.md).
+
 - `apps/c2c-studio` is the current Next.js Studio UI.
 - `apps/c2c-ui` is the older static reference workbench still served by the BFF.
 - `services/c2c-bff` is the browser boundary.
