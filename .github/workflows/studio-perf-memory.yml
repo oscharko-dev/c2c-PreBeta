@@ -25,10 +25,20 @@ on:
     branches:
       - dev
       - main
+    paths:
+      - 'apps/c2c-studio/**'
+      - '.github/workflows/studio-perf-memory.yml'
   pull_request:
     branches:
       - dev
       - main
+    paths:
+      - 'apps/c2c-studio/**'
+      - '.github/workflows/studio-perf-memory.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   perf:

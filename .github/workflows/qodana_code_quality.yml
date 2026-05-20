@@ -6,11 +6,12 @@
 name: Qodana
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - main
-      - dev
+  schedule:
+    - cron: "41 3 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Polyglot coverage: each linter scans the languages it supports. A repo with
 # Java + Python + Go + TypeScript needs four separate Qodana jobs because a
@@ -20,13 +21,11 @@ jobs:
     name: Qodana (JVM)
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       checks: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: 'Qodana Scan (JVM)'
         uses: JetBrains/qodana-action@v2026.1
@@ -36,7 +35,7 @@ jobs:
           args: --linter,jetbrains/qodana-jvm:2026.1
           pr-mode: false
           use-caches: true
-          post-pr-comment: true
+          post-pr-comment: false
           use-annotations: true
           upload-result: true
           artifact-name: qodana-report-jvm
@@ -46,13 +45,11 @@ jobs:
     name: Qodana (Python)
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       checks: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: 'Qodana Scan (Python)'
         uses: JetBrains/qodana-action@v2026.1
@@ -72,13 +69,11 @@ jobs:
     name: Qodana (Go)
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       checks: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: 'Qodana Scan (Go)'
         uses: JetBrains/qodana-action@v2026.1
@@ -98,13 +93,11 @@ jobs:
     name: Qodana (JS/TS)
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       checks: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: 'Qodana Scan (JS/TS)'
         uses: JetBrains/qodana-action@v2026.1

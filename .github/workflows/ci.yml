@@ -10,16 +10,22 @@ on:
       - dev
       - main
 
-jobs:
-  ci:
-    name: ci
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    name: Hygiene, syntax, and secret diff
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Enforce PR source policy for main
         if: github.event_name == 'pull_request'
@@ -38,7 +44,7 @@ jobs:
 
       - name: Validate shell scripts
         run: |
-          sh_files=$(git ls-files | grep -E '\\.(sh|bash)$' || true)
+          sh_files=$(git ls-files | grep -E '\.(sh|bash)$' || true)
           if [ -n "$sh_files" ]; then
             while IFS= read -r file; do
               bash -n "$file"
@@ -49,121 +55,134 @@ jobs:
 
       - name: Validate Python syntax
         run: |
-          if [ -n "$(find . -name '*.py' -print -quit)" ]; then
+          if [ -n "$(find . -name '*.py' -not -path './.git/*' -not -path './.venv/*' -print -quit)" ]; then
             python3 -m compileall -q .
           else
             echo "No Python files to validate"
           fi
 
+      - name: Scan changed files for secrets
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          HEAD_REF: ${{ github.sha }}
+        run: |
+          base_ref="$BASE_REF"
+          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then
+            base_ref="${HEAD_REF}~1"
+          fi
+          echo "Scanning changes from: ${base_ref}..${HEAD_REF}"
+          python3 scripts/scan-secrets.py --base "$base_ref" --head "$HEAD_REF"
+
+  platform:
+    name: Repository platform validation
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run platform validation
+        run: ./scripts/validate-platform.sh
+
+  go:
+    name: Go checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+
+      - name: Run Go checks
+        run: ./scripts/go-check.sh
+
+  python:
+    name: Python checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Python checks
+        run: ./scripts/python-check.sh
+
+  java:
+    name: Java checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up JDK 21
-        if: hashFiles('libs/c2c-target-java-runtime/pom.xml') != ''
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
 
-      - name: Set up Go
-        if: hashFiles('services/agentic-harness-core/go.mod') != '' || hashFiles('services/evidence-service/go.mod') != ''
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23.0'
-
-      - name: Run evidence-service Go tests
-        if: hashFiles('services/evidence-service/go.mod') != ''
-        working-directory: services/evidence-service
-        run: go test ./...
-
-      - name: Run orchestrator-service Python tests
-        if: hashFiles('services/orchestrator-service/pyproject.toml') != ''
-        working-directory: services/orchestrator-service
-        env:
-          PYTHONPATH: src
-        run: |
-          python3 -m venv .venv
-          .venv/bin/pip install --quiet pytest
-          .venv/bin/python -m pytest tests/ -q --no-header
-
-      - name: Set up Node.js
-        if: hashFiles('apps/c2c-studio/package.json') != ''
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: |
-            apps/c2c-studio/package-lock.json
-            services/c2c-bff/package-lock.json
-
       - name: Install GnuCOBOL for true Golden Master verification
-        if: hashFiles('services/build-test-runner-service/pom.xml') != ''
         run: |
           sudo apt-get update
           sudo apt-get install -y gnucobol3
           cobc --version
           cobcrun --version
 
-      - name: Build c2c-target-java-runtime independently
-        if: hashFiles('libs/c2c-target-java-runtime/pom.xml') != ''
-        working-directory: libs/c2c-target-java-runtime
-        run: mvn -B -ntp verify
+      - name: Run Java checks
+        run: ./scripts/java-check.sh
 
-      - name: Install c2c-target-java-runtime to local repo
-        if: hashFiles('services/target-java-generation-service/pom.xml') != ''
-        working-directory: libs/c2c-target-java-runtime
-        run: mvn -B -ntp -DskipTests install
+  typescript:
+    name: TypeScript checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Build target-java-generation-service
-        if: hashFiles('services/target-java-generation-service/pom.xml') != ''
-        working-directory: services/target-java-generation-service
-        run: mvn -B -ntp verify
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            apps/c2c-studio/package-lock.json
+            services/c2c-bff/package-lock.json
+            services/typescript/w0-service/package-lock.json
 
-      - name: Install target-java-generation-service to local repo
-        if: hashFiles('services/build-test-runner-service/pom.xml') != ''
-        working-directory: services/target-java-generation-service
-        run: mvn -B -ntp -DskipTests install
+      - name: Run TypeScript checks
+        run: ./scripts/typescript-check.sh
 
-      - name: Build build-test-runner-service (W0 smoke verification path)
-        if: hashFiles('services/build-test-runner-service/pom.xml') != ''
-        working-directory: services/build-test-runner-service
-        run: mvn -B -ntp verify
-
-      - name: Install c2c-studio dependencies
-        if: hashFiles('apps/c2c-studio/package.json') != ''
-        working-directory: apps/c2c-studio
-        run: npm ci --no-fund --no-audit
-
-      - name: Run c2c-studio lint
-        if: hashFiles('apps/c2c-studio/package.json') != ''
-        working-directory: apps/c2c-studio
-        run: npm run lint
-
-      - name: Run c2c-studio unit and contract tests
-        if: hashFiles('apps/c2c-studio/package.json') != ''
-        working-directory: apps/c2c-studio
-        run: npm test
-
-      - name: Build c2c-studio
-        if: hashFiles('apps/c2c-studio/package.json') != ''
-        working-directory: apps/c2c-studio
-        run: npm run build
-
-      - name: Verify Monaco is lazy-loaded (no Monaco in initial bundle)
-        if: hashFiles('apps/c2c-studio/scripts/verify-monaco-lazy.mjs') != ''
+      - name: Verify Monaco is lazy-loaded
         working-directory: apps/c2c-studio
         run: npm run verify:monaco-lazy
 
-      # Issue #271 / ADR-0005 §6: the BFF carries the CSP-report
-      # receiver (POST /api/v0/csp-report). Run its lint + test suite
-      # so a regression in the parser or PII gate is caught here
-      # instead of in production.
-      - name: Install c2c-bff dependencies
-        if: hashFiles('services/c2c-bff/package.json') != ''
-        working-directory: services/c2c-bff
-        run: npm ci --no-fund --no-audit
-
-      - name: Run c2c-bff lint and tests
-        if: hashFiles('services/c2c-bff/package.json') != ''
-        working-directory: services/c2c-bff
+  ci:
+    name: ci
+    runs-on: ubuntu-24.04
+    needs:
+      - hygiene
+      - platform
+      - go
+      - python
+      - java
+      - typescript
+    if: ${{ always() }}
+    steps:
+      - name: Summarize required gate results
         run: |
-          npm run lint
-          npm test
+          echo "hygiene:    ${{ needs.hygiene.result }}"
+          echo "platform:   ${{ needs.platform.result }}"
+          echo "go:         ${{ needs.go.result }}"
+          echo "python:     ${{ needs.python.result }}"
+          echo "java:       ${{ needs.java.result }}"
+          echo "typescript: ${{ needs.typescript.result }}"
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "At least one required quality gate failed or was cancelled."
+            exit 1
+          fi
+          echo "All required quality gates passed."
