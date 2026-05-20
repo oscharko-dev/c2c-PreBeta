@@ -144,21 +144,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve catalog-backed TypeScript paths
+        id: typescript-catalog
+        run: |
+          {
+            echo 'cache_dependency_paths<<EOF'
+            python3 scripts/validate-service-catalog.py \
+              --worktree \
+              --list-field dependencyManifest \
+              --language typescript \
+              --release-gate ci
+            echo 'EOF'
+            echo "studio_dir=$(python3 scripts/validate-service-catalog.py --worktree --print-field path --component-id c2c-studio)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-          cache-dependency-path: |
-            apps/c2c-studio/package-lock.json
-            services/c2c-bff/package-lock.json
-            services/reference/w0-service-typescript/package-lock.json
+          cache-dependency-path: ${{ steps.typescript-catalog.outputs.cache_dependency_paths }}
 
       - name: Run TypeScript checks
         run: ./scripts/typescript-check.sh
 
       - name: Verify Monaco is lazy-loaded
-        working-directory: apps/c2c-studio
+        working-directory: ${{ steps.typescript-catalog.outputs.studio_dir }}
         run: npm run verify:monaco-lazy
 
   ci:

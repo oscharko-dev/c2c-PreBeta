@@ -31,10 +31,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve W0 Go manifest from service catalog
+        id: go-catalog
+        run: echo "go_version_file=$(python3 scripts/validate-service-catalog.py --worktree --print-field packageManifest --component-id w0-service-go)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: services/reference/w0-service-go/go.mod
+          go-version-file: ${{ steps.go-catalog.outputs.go_version_file }}
 
       - name: Run Go checks
         run: ./scripts/go-check.sh
