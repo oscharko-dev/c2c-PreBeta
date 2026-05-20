@@ -10,7 +10,11 @@ import {
   useCallback,
   useEffect,
 } from "react";
-import { TransformationRunState, RunPhase } from "../types/run";
+import {
+  TransformationRunState,
+  RunPhase,
+  HistoricalRunSnapshot,
+} from "../types/run";
 import { deriveProductState, StateContext } from "../types/state";
 import { apiClient } from "../lib/apiClient";
 import { TransformRequest } from "../types/transform-request";
@@ -224,6 +228,37 @@ export interface TransformationRunContextValue {
 const TransformationRunContext =
   createContext<TransformationRunContextValue | null>(null);
 
+function snapshotHistoricalRun(
+  state: TransformationRunState,
+): HistoricalRunSnapshot | null {
+  if (
+    !state.runId ||
+    (!state.generated &&
+      !state.generatedFiles &&
+      !state.buildTest &&
+      !state.evidence &&
+      !state.summary)
+  ) {
+    return state.previousRun;
+  }
+  return {
+    runId: state.runId,
+    orchestratorRunId: state.orchestratorRunId,
+    programId: state.programId,
+    phase: state.phase,
+    summary: state.summary,
+    generated: state.generated,
+    generatedFiles: state.generatedFiles,
+    buildTest: state.buildTest,
+    evidence: state.evidence,
+    events: state.events,
+    progress: state.progress,
+    artifacts: state.artifacts,
+    experience: state.experience,
+    workflow: state.workflow,
+  };
+}
+
 export function TransformationRunProvider({
   children,
 }: {
@@ -252,6 +287,7 @@ export function TransformationRunProvider({
     modelGatewayHealth: null,
     harnessReady: null,
     workflow: null,
+    previousRun: null,
   });
   const [javaBuffers, setJavaBuffers] = useState<
     Record<string, JavaBufferEntry>
@@ -390,7 +426,7 @@ export function TransformationRunProvider({
     });
     const startedAt = Date.now();
 
-    setState({
+    setState((prev) => ({
       phase: "starting",
       runId: null,
       orchestratorRunId: null,
@@ -406,10 +442,11 @@ export function TransformationRunProvider({
       progress: null,
       artifacts: null,
       experience: null,
-      modelGatewayHealth: state.modelGatewayHealth,
-      harnessReady: state.harnessReady,
+      modelGatewayHealth: prev.modelGatewayHealth,
+      harnessReady: prev.harnessReady,
       workflow: null,
-    });
+      previousRun: snapshotHistoricalRun(prev),
+    }));
 
     const result = await apiClient.transform(request);
 
@@ -499,7 +536,7 @@ export function TransformationRunProvider({
     });
     const startedAt = Date.now();
 
-    setState({
+    setState((prev) => ({
       phase: "starting",
       runId: null,
       orchestratorRunId: null,
@@ -515,10 +552,11 @@ export function TransformationRunProvider({
       progress: null,
       artifacts: null,
       experience: null,
-      modelGatewayHealth: state.modelGatewayHealth,
-      harnessReady: state.harnessReady,
+      modelGatewayHealth: prev.modelGatewayHealth,
+      harnessReady: prev.harnessReady,
       workflow: null,
-    });
+      previousRun: snapshotHistoricalRun(prev),
+    }));
 
     const result = await apiClient.generate(request);
 

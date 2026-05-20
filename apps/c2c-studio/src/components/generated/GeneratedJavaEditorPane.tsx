@@ -16,6 +16,7 @@ import { BlockedState } from "@/components/state/BlockedState";
 import { ErrorNotice } from "@/components/state/ErrorNotice";
 import { Badge } from "@/components/ui/Badge";
 import { useTransformationRun } from "@/stores/transformationRun";
+import { useSourceWorkspace } from "@/stores/sourceWorkspace";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import type { StandaloneEditorMountArgs } from "@/components/editor/CodeEditor";
 import {
@@ -139,6 +140,8 @@ export function GeneratedJavaEditorPane() {
     artifactDetails,
     unavailableFiles,
     selectFile,
+    displayedRunId,
+    showingHistoricalArtifacts,
   } = useGeneratedArtifacts();
 
   const {
@@ -163,6 +166,7 @@ export function GeneratedJavaEditorPane() {
     cobolDiffHistory,
     recordJavaDiffSnapshot,
   } = useTransformationRun();
+  const { statusFlags: cobolStatusFlags } = useSourceWorkspace();
 
   // Studio-IDE-6 (#248): origin-overlay + lineage-coverage wiring. The
   // overlay context (shared with IDE-4/IDE-13) holds per-(runId, javaFile)
@@ -170,7 +174,7 @@ export function GeneratedJavaEditorPane() {
   // separate sibling store the StatusBar reads from.
   const overlayApi = useOriginOverlayApi();
   const lineageCoverageApi = useLineageCoverageApi();
-  const overlay = useOverlay(state.runId ?? null, selectedFilePath ?? null);
+  const overlay = useOverlay(displayedRunId ?? null, selectedFilePath ?? null);
 
   const [showSaveNotice, setShowSaveNotice] = useState(false);
   // Studio-IDE-7 (#252): Compare Runs overlay open/close state.
@@ -209,8 +213,8 @@ export function GeneratedJavaEditorPane() {
 
   const fileContentMatchesRun =
     fileContent !== null &&
-    state.runId !== null &&
-    fileContentRunId === state.runId;
+    displayedRunId !== null &&
+    fileContentRunId === displayedRunId;
   const activeRunFileContent = fileContentMatchesRun ? fileContent : null;
 
   useEffect(() => {
@@ -450,6 +454,8 @@ export function GeneratedJavaEditorPane() {
         staleJava: false,
         manualEditsPresent: false,
       };
+  const staleFromCobolEdit = cobolStatusFlags.pendingReRun;
+  const staleResultVisible = flags.staleJava || staleFromCobolEdit || showingHistoricalArtifacts;
   const javaBufferEntry = selectedFilePath
     ? javaBuffers[selectedFilePath]
     : undefined;
@@ -477,17 +483,17 @@ export function GeneratedJavaEditorPane() {
     if (javaBufferEntry?.manualEditOverlay) {
       return javaBufferEntry.manualEditOverlay;
     }
-    if (!selectedFilePath || !state.runId || !javaBufferEntry) {
+    if (!selectedFilePath || !displayedRunId || !javaBufferEntry) {
       return null;
     }
     return computeManualEditOverlay({
       baselineContent: javaBufferEntry.generatorBaselineContent,
       currentContent: javaBufferEntry.content,
-      runId: state.runId,
+      runId: displayedRunId,
       javaFile: selectedFilePath,
       generatorBaselineRunId: javaBufferEntry.generatorBaselineRunId,
     });
-  }, [javaBufferEntry, selectedFilePath, state.runId]);
+  }, [displayedRunId, javaBufferEntry, selectedFilePath]);
   const openManualDriftWorkspace = useCallback(
     (focusFirstManualRegion: boolean) => {
       setManualDriftFocusLine(
@@ -504,18 +510,19 @@ export function GeneratedJavaEditorPane() {
     () => detectLanguageFromPath(selectedFilePath),
     [selectedFilePath],
   );
-  const isJavaEditable = isEditableLanguage(detectedLanguage);
+  const isJavaEditable =
+    isEditableLanguage(detectedLanguage) && !showingHistoricalArtifacts;
 
   // Stable per-(runId, filePath) URI keeps Monaco's view-state map (cursor,
   // scroll, selection) in `modelLifecycle.ts` partitioned per file. When the
   // user toggles between files in the project explorer, the editor restores
   // each file's last view state automatically.
   const modelUri = useMemo(() => {
-    if (!state.runId || !selectedFilePath) {
+    if (!displayedRunId || !selectedFilePath) {
       return undefined;
     }
-    return `inmemory://c2c-studio/generated/${state.runId}/${selectedFilePath}`;
-  }, [state.runId, selectedFilePath]);
+    return `inmemory://c2c-studio/generated/${displayedRunId}/${selectedFilePath}`;
+  }, [displayedRunId, selectedFilePath]);
 
   // Studio-IDE-5 (#244): typed diagnostics that target the generated
   // Java pane (`sourceKind: generated_java | build | test`).
@@ -1449,14 +1456,18 @@ export function GeneratedJavaEditorPane() {
   //                   repair attempt occurred
   //   Deterministic — everything else (including assistDecision === null
   //                   for runs that have not yet reached the gate)
+  const displayedWorkflow =
+    showingHistoricalArtifacts && state.previousRun
+      ? state.previousRun.workflow
+      : state.workflow;
   const runMode: RunMode = useMemo(() => {
-    const workflow = state.workflow;
     return deriveRunMode({
-      staleJava: flags.staleJava,
-      assistRequired: workflow?.assistDecision?.outcome === "assist_required",
-      hasRepairAttempts: (workflow?.repairAttempts?.length ?? 0) > 0,
+      staleJava: staleResultVisible,
+      assistRequired:
+        displayedWorkflow?.assistDecision?.outcome === "assist_required",
+      hasRepairAttempts: (displayedWorkflow?.repairAttempts?.length ?? 0) > 0,
     });
-  }, [state.workflow, flags.staleJava]);
+  }, [displayedWorkflow, staleResultVisible]);
 
   if (productState.state === "empty") {
     return (
@@ -1467,11 +1478,12 @@ export function GeneratedJavaEditorPane() {
   }
 
   if (
-    productState.state === "running" ||
-    productState.state === "submitting" ||
-    productState.state === "awaiting-agent" ||
-    productState.state === "repairing" ||
-    productState.state === "verifying"
+    !showingHistoricalArtifacts &&
+    (productState.state === "running" ||
+      productState.state === "submitting" ||
+      productState.state === "awaiting-agent" ||
+      productState.state === "repairing" ||
+      productState.state === "verifying")
   ) {
     const inProgressMessage =
       productState.state === "submitting"
@@ -1605,7 +1617,7 @@ export function GeneratedJavaEditorPane() {
           <JavaStatusChips
             clean={flags.clean}
             pendingReRun={flags.pendingReRun}
-            staleJava={flags.staleJava}
+            staleJava={staleResultVisible}
             manualEditsPresent={flags.manualEditsPresent}
             onManualDriftClick={() => openManualDriftWorkspace(true)}
           />
@@ -1760,6 +1772,20 @@ export function GeneratedJavaEditorPane() {
           className="border-b border-success/20 bg-success-soft px-4 py-1.5 text-xs text-success"
         >
           Saved locally — this Java draft stays on your device.
+        </div>
+      ) : null}
+
+      {staleFromCobolEdit || showingHistoricalArtifacts ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="border-b border-orange/20 bg-orange-soft px-4 py-2 text-xs text-orange"
+        >
+          {showingHistoricalArtifacts
+            ? state.phase === "failed"
+              ? "Latest rerun failed. Showing the previous generated Java as stale so the last completed result remains accessible."
+              : "Showing the previous generated Java while the latest rerun is in progress. This content is stale until the rerun completes."
+            : "COBOL source changed after the last completed parity run. Generated Java is stale until you rerun."}
         </div>
       ) : null}
 
