@@ -275,7 +275,7 @@ public final class BuildTestRunnerService {
         if (request == null) {
             throw new IllegalArgumentException("request is required");
         }
-        return new Trust3SourceReferenceParityService(repoRoot).execute(request);
+        return new SourceReferenceExecutionService(repoRoot).execute(request);
     }
 
     public Map<String, Object> runParityExecution(Map<String, Object> request) {
