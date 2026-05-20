@@ -41,23 +41,18 @@ Studio:
 Repository topology policy for the housekeeping migration stream is defined in
 [ADR 0008](docs/adr/0008-repository-topology-and-service-taxonomy.md).
 
-- `apps/c2c-studio` is the current Next.js Studio UI.
-- `apps/c2c-ui` is the older static reference workbench still served by the BFF.
-- `services/c2c-bff` is the browser boundary.
-- `services/orchestrator-service` owns run sequencing, assist decisions,
-  budgets, repair loops, and final classification.
-- `services/cobol-parser-service`, `services/semantic-ir-service`,
-  `services/target-java-generation-service`,
-  `services/build-test-runner-service`, and `services/evidence-service` are the
-  deterministic proof path.
-- `services/agentic-harness-core`, `services/experience-learning-service`, and
-  `services/model-gateway-service` provide registry, policy, ledgers,
-  learning signals, and governed model access.
-- `libs/c2c-target-java-runtime` is linked by generated Java projects.
-- `services/reference/w0-service-java`, `services/reference/w0-service-go`,
-  `services/reference/w0-service-python`, and
-  `services/reference/w0-service-typescript` remain language baseline services
-  for the W0 platform checks.
+- `apps/c2c-studio` is the current Studio UI.
+- Product services live under `services/<service-id>`.
+- Reference services live under `services/reference/<service-id>`.
+- `libs/c2c-target-java-runtime` contains the shared Java runtime used by
+  generated Java projects.
+
+Migration note: the old language-bucket layout (`services/go/*`,
+`services/java/*`, `services/python/*`, `services/typescript/*`) has been
+replaced by `services/<service-id>` for product services and
+`services/reference/<service-id>` for W0 baseline services. The only remaining
+legacy bundled-UI path is documented in
+[services/c2c-bff/README.md](services/c2c-bff/README.md).
 
 W0 remains Java-first for the target runtime. Target-generation compatibility
 is enforced by service code, schemas, runtime metadata, and tests, not by a
@@ -65,30 +60,28 @@ separate copied contract document.
 
 ## Service Catalog
 
-`config/service-catalog.json` is the machine-readable inventory for current
-product components, W0 reference services, and the generated Java runtime. It
-records the current live filesystem path for each component together with
-language, package manager, validation-relevant contract files, ownership,
-runtime role, and release-gate participation. Each entry keeps a stable `id`
-separate from the current live `path`, which lets the repository describe
-today's layout without pretending that future migration targets already exist.
-For Issue #328, the same catalog is also the ownership map for service
-`openapi` files and shared root schemas declared through `schemas`; see
-[Contract and Schema Ownership](docs/governance/contract-ownership.md).
-Fixture and corpus ownership are documented separately in
-[Fixture and Golden-Master Ownership](docs/governance/fixture-ownership.md).
-Dependency and license visibility is catalog-driven: each component records its
-`packageManifest`, `dependencyManifest`, and `supplyChainParticipation`, and
-`scripts/license-sbom.sh` resolves the live paths from that metadata instead of
-relying on hand-maintained path lists.
+`config/service-catalog.json` is the source of truth for component ids, live
+paths, and ownership metadata. Update it in the same change whenever a service
+or runtime component is added, moved, renamed, or removed.
 
-The catalog follows the topology policy in
-[ADR 0008](docs/adr/0008-repository-topology-and-service-taxonomy.md). Validate
-it with:
+For contracts and schemas, see
+[Contract and Schema Ownership](docs/governance/contract-ownership.md). For
+fixtures, see
+[Fixture and Golden-Master Ownership](docs/governance/fixture-ownership.md).
+
+Validate the catalog with:
 
 ```bash
 python3 scripts/validate-service-catalog.py
 ```
+
+Repository map and shared references:
+
+- [services/](services/)
+- [schemas/](schemas/)
+- [fixtures/](fixtures/)
+- [scripts/](scripts/)
+- [docs/contracts/](docs/contracts/)
 
 ## Bootstrap (Local)
 
@@ -113,9 +106,9 @@ The bootstrap script verifies repository health and prints per-service command h
 
 ### Local dev sweet-spot setup (recommended)
 
-Use this setup to keep development fast while retaining reproducible behavior:
+Use this setup to stay close to CI while retaining reproducible behavior:
 
-- Go 1.26+
+- Go 1.23+
 - Java 21 + Maven 3.9+
 - Rust (via `rustup`, usually latest stable)
 - Docker for container/runtime validation
@@ -192,10 +185,10 @@ Start the full local stack from the repository root with one command:
 
 The launcher builds the required artifacts, starts the local capability mesh,
 and brings up the Next.js Studio at `http://127.0.0.1:3000` with the BFF API on
-`http://127.0.0.1:18089`. The BFF still builds the legacy `apps/c2c-ui/dist`
-bundle for the older reference-run surface, but the local product entrypoint
-for W0.1 is the Studio shell. The launcher uses explicit non-conflicting
-defaults and writes all run state under `var/c2c-local/`:
+`http://127.0.0.1:18089`. The BFF still supports a legacy static bundle for
+older reference-run setups, but the local product entrypoint for W0.1 is the
+Studio shell. The launcher uses explicit non-conflicting defaults and writes
+all run state under `var/c2c-local/`:
 
 - Logs: `var/c2c-local/logs/`
 - PIDs: `var/c2c-local/pids/`
@@ -298,7 +291,6 @@ runs are materialized under `var/c2c-local/` by the launcher and Orchestrator.
     secret-scan.yml        # scheduled/manual full credential scan
 apps/
   c2c-studio/
-  c2c-ui/
 services/
   cobol-parser-service/
   semantic-ir-service/
