@@ -46,7 +46,9 @@ LANGUAGE_TO_PACKAGE_MANAGERS = {
     "typescript": {"npm"},
 }
 COMMAND_FIELDS = ("checkCommand", "buildCommand", "testCommand")
-LOCAL_FILE_FIELDS = ("packageManifest", "dockerfile", "openapi")
+LOCAL_FILE_FIELDS = ("packageManifest", "dependencyManifest", "dockerfile", "openapi")
+REPO_RELATIVE_FIELDS = {"path", "schemas"}
+COMPONENT_RELATIVE_FIELDS = set(LOCAL_FILE_FIELDS)
 
 
 def _default_repo_root() -> Path:
@@ -154,6 +156,8 @@ def _validate_component(
         if field not in component:
             if field == "packageManifest":
                 raise ValueError(f"{component_id}: packageManifest is required")
+            if field == "dependencyManifest" and package_manager == "npm":
+                raise ValueError(f"{component_id}: dependencyManifest is required for npm components")
             continue
         file_path = _resolve_component_relative(
             repo_root, component_root, component[field], field, component_id
@@ -188,6 +192,10 @@ def _validate_component(
 
 def validate_catalog(catalog_path: Path, repo_root: Path) -> None:
     catalog = _load_json(catalog_path)
+    validate_catalog_data(catalog, repo_root)
+
+
+def validate_catalog_data(catalog: dict[str, Any], repo_root: Path) -> None:
     schema_version = catalog.get("schemaVersion")
     if schema_version != 1:
         raise ValueError(f"schemaVersion must be 1, got {schema_version!r}")
@@ -222,6 +230,81 @@ def validate_catalog(catalog_path: Path, repo_root: Path) -> None:
             )
 
 
+def _component_matches(component: dict[str, Any], args: argparse.Namespace) -> bool:
+    if args.component_id and component["id"] != args.component_id:
+        return False
+    if args.language and component["language"] != args.language:
+        return False
+    if args.kind and component["kind"] != args.kind:
+        return False
+    if args.classification and component["classification"] != args.classification:
+        return False
+    if args.package_manager and component["packageManager"] != args.package_manager:
+        return False
+    if args.release_gate and args.release_gate not in component["releaseGateParticipation"]:
+        return False
+    return True
+
+
+def _resolve_field_values(
+    repo_root: Path, component: dict[str, Any], field: str
+) -> list[str]:
+    component_id = component["id"]
+    component_root = _resolve_repo_relative(repo_root, component["path"], "path", component_id)
+
+    if field == "path":
+        return [component["path"]]
+    if field in COMPONENT_RELATIVE_FIELDS:
+        if field not in component:
+            return []
+        resolved = _resolve_component_relative(
+            repo_root, component_root, component[field], field, component_id
+        )
+        return [str(resolved.relative_to(repo_root))]
+    if field == "schemas":
+        if field not in component:
+            return []
+        values: list[str] = []
+        for schema_path in _validate_string_array(component[field], field, component_id):
+            resolved = _resolve_repo_relative(repo_root, schema_path, field, component_id)
+            values.append(str(resolved.relative_to(repo_root)))
+        return values
+    if field in component:
+        value = component[field]
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return [str(value)]
+    return []
+
+
+def _emit_query_results(catalog: dict[str, Any], repo_root: Path, args: argparse.Namespace) -> int:
+    components = [component for component in catalog["components"] if _component_matches(component, args)]
+
+    if args.list_field:
+        lines: list[str] = []
+        for component in components:
+            lines.extend(_resolve_field_values(repo_root, component, args.list_field))
+        if not lines:
+            raise ValueError(f"catalog query returned no values for field {args.list_field!r}")
+        print("\n".join(lines))
+        return 0
+
+    if args.print_field:
+        if not args.component_id:
+            raise ValueError("--print-field requires --component-id")
+        if len(components) != 1:
+            raise ValueError(f"component lookup returned {len(components)} matches for {args.component_id!r}")
+        lines = _resolve_field_values(repo_root, components[0], args.print_field)
+        if not lines:
+            raise ValueError(
+                f"component {args.component_id!r} does not define field {args.print_field!r}"
+            )
+        print("\n".join(lines))
+        return 0
+
+    return 0
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -239,6 +322,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Compatibility flag for repository validation scripts.",
     )
+    parser.add_argument(
+        "--list-field",
+        choices=("path", "packageManifest", "dependencyManifest", "dockerfile", "openapi", "schemas"),
+        help="List a field for all matching catalog components after validation.",
+    )
+    parser.add_argument(
+        "--print-field",
+        choices=("path", "packageManifest", "dependencyManifest", "dockerfile", "openapi", "schemas"),
+        help="Print a field for one matching catalog component after validation.",
+    )
+    parser.add_argument("--component-id", help="Filter by component id.")
+    parser.add_argument("--language", choices=sorted(LANGUAGE_TO_PACKAGE_MANAGERS), help="Filter by language.")
+    parser.add_argument("--kind", choices=sorted(ALLOWED_KINDS), help="Filter by component kind.")
+    parser.add_argument(
+        "--classification",
+        choices=sorted(ALLOWED_CLASSIFICATIONS),
+        help="Filter by component classification.",
+    )
+    parser.add_argument(
+        "--package-manager",
+        choices=sorted(ALLOWED_PACKAGE_MANAGERS),
+        help="Filter by package manager.",
+    )
+    parser.add_argument("--release-gate", help="Filter by release gate membership.")
     return parser.parse_args(argv)
 
 
@@ -247,7 +354,10 @@ def main(argv: list[str]) -> int:
     catalog_path = Path(args.catalog).resolve()
     repo_root = Path(args.repo_root).resolve()
     try:
-        validate_catalog(catalog_path, repo_root)
+        catalog = _load_json(catalog_path)
+        validate_catalog_data(catalog, repo_root)
+        if args.list_field or args.print_field:
+            return _emit_query_results(catalog, repo_root, args)
     except Exception as exc:  # pragma: no cover - exercised via CLI
         print(f"service catalog validation failed: {exc}", file=sys.stderr)
         return 1

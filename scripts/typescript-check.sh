@@ -8,12 +8,13 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Every TypeScript package that owns a package.json with build/lint/test
-# scripts.
-TS_PACKAGES=(
-  "apps/c2c-studio"
-  "services/c2c-bff"
-  "services/reference/w0-service-typescript"
+mapfile -t TS_PACKAGES < <(
+  cd "$REPO_ROOT" &&
+    python3 scripts/validate-service-catalog.py \
+      --worktree \
+      --list-field path \
+      --language typescript \
+      --release-gate ci
 )
 
 for pkg in "${TS_PACKAGES[@]}"; do

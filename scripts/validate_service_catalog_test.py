@@ -24,9 +24,9 @@ def _load_catalog() -> dict[str, Any]:
 
 class ValidateServiceCatalogTest(unittest.TestCase):
     @staticmethod
-    def _run_catalog(catalog_path: Path) -> subprocess.CompletedProcess[str]:
+    def _run_catalog(catalog_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(SCRIPT), "--repo-root", str(REPO_ROOT), "--catalog", str(catalog_path)],
+            [sys.executable, str(SCRIPT), "--repo-root", str(REPO_ROOT), "--catalog", str(catalog_path), *args],
             text=True,
             capture_output=True,
             check=False,
@@ -92,6 +92,72 @@ class ValidateServiceCatalogTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("openapi does not exist", result.stderr)
+
+    def test_npm_component_requires_dependency_manifest(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        for component in mutated["components"]:
+            if component["id"] == "c2c-studio":
+                component.pop("dependencyManifest", None)
+                break
+        else:
+            self.fail("c2c-studio missing from catalog fixture")
+
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("dependencyManifest is required for npm components", result.stderr)
+
+    def test_query_lists_ci_typescript_dependency_manifests(self) -> None:
+        result = self._run_catalog(
+            CATALOG_PATH,
+            "--list-field",
+            "dependencyManifest",
+            "--language",
+            "typescript",
+            "--release-gate",
+            "ci",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "apps/c2c-studio/package-lock.json",
+                "services/c2c-bff/package-lock.json",
+                "services/reference/w0-service-typescript/package-lock.json",
+            ],
+        )
+
+    def test_query_prints_component_path(self) -> None:
+        result = self._run_catalog(
+            CATALOG_PATH,
+            "--print-field",
+            "path",
+            "--component-id",
+            "w0-service-go",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), "services/reference/w0-service-go")
+
+    def test_query_requires_non_empty_matches(self) -> None:
+        result = self._run_catalog(
+            CATALOG_PATH,
+            "--list-field",
+            "path",
+            "--language",
+            "go",
+            "--kind",
+            "app",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("catalog query returned no values", result.stderr)
 
 
 if __name__ == "__main__":

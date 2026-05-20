@@ -17,15 +17,31 @@ root = Path(os.environ["C2C_SBOM_ROOT"])
 out_dir = root / "artifacts"
 out_dir.mkdir(exist_ok=True)
 
+def catalog_field(component_id: str, field: str) -> Path:
+    output = subprocess.check_output(
+        [
+            "python3",
+            "scripts/validate-service-catalog.py",
+            "--worktree",
+            "--print-field",
+            field,
+            "--component-id",
+            component_id,
+        ],
+        cwd=root,
+        text=True,
+    )
+    return root / output.strip()
+
 services = {
-    "go": root / "services" / "go" / "w0-service",
-    "python": root / "services" / "python" / "w0-service",
-    "typescript": root / "services" / "typescript" / "w0-service",
-    "typescript-bff": root / "services" / "c2c-bff",
-    "typescript-studio": root / "apps" / "c2c-studio",
-    "java": root / "services" / "java" / "w0-service",
-    "java-cobol-parser": root / "services" / "cobol-parser-service",
-    "java-semantic-ir": root / "services" / "semantic-ir-service",
+    "go": catalog_field("w0-service-go", "path"),
+    "python": catalog_field("w0-service-python", "path"),
+    "typescript": catalog_field("w0-service-typescript", "path"),
+    "typescript-bff": catalog_field("c2c-bff", "path"),
+    "typescript-studio": catalog_field("c2c-studio", "path"),
+    "java": catalog_field("w0-service-java", "path"),
+    "java-cobol-parser": catalog_field("cobol-parser-service", "path"),
+    "java-semantic-ir": catalog_field("semantic-ir-service", "path"),
 }
 
 manifest = {
