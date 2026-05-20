@@ -60,6 +60,14 @@ The consumer-visible parity loop is:
 7. Evidence records the run configuration, artifacts, outputs, hashes,
    diagnostics, comparison, and provenance state.
 
+The current additive orchestrator entrypoint accepts parity runs through the
+existing run-start API by setting `executionMode=parity` and supplying the
+curated `sourceReferenceFixtureId`, `sourceReferenceMode`, and optional
+`trustCaseId`. The orchestrator remains the workflow authority: it drives
+transform, source/reference execution, generated-Java build, generated-Java
+execution, comparison, evidence capture, and completion as recorded progress
+phases for polling consumers.
+
 For Issue #354 consumers must treat the Java runner payload as the comparison
 source of truth. The Orchestrator may persist or relay additive projection
 objects such as workflow-contract `parityComparison` and evidence

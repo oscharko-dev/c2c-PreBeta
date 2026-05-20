@@ -15,10 +15,12 @@ class OrchestratorConfigTests(unittest.TestCase):
             config = load_config()
 
         capability_ids = {capability["id"] for capability in config.w0_capabilities}
+        self.assertIn("source-reference.execute", capability_ids)
         self.assertIn("model-gateway", capability_ids)
         self.assertEqual(config.listen_addr, "127.0.0.1:8084")
         self.assertEqual(config.model_gateway_model_id, "gpt-oss-120b")
         self.assertEqual(config.model_policy_version, "v0")
+        self.assertEqual(config.source_reference_capability_id, "source-reference.execute")
 
     def test_port_only_listen_addr_normalizes_to_loopback(self):
         with patch.dict(os.environ, {"ORCHESTRATOR_LISTEN_ADDR": ":18088"}, clear=True):

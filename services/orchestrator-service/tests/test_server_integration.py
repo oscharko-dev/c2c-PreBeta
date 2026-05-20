@@ -361,6 +361,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             parse_capability_id="cobol.parse",
             ir_capability_id="cobol.ir",
             generator_capability_id="java.generator",
+            source_reference_capability_id="source-reference.execute",
             build_test_capability_id="java.build-test",
             evidence_capability_id="evidence.writer",
             model_gateway_capability_id="model-gateway",
@@ -371,6 +372,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 {"id": "cobol.parse", "name": "COBOL Parser", "owner": "parser-service", "dataClass": "parser", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/parse"},
                 {"id": "cobol.ir", "name": "Semantic IR", "owner": "ir-service", "dataClass": "generator", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/ir"},
                 {"id": "java.generator", "name": "Target Java Generator", "owner": "generator-service", "dataClass": "generator", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/generator"},
+                {"id": "source-reference.execute", "name": "Source Reference", "owner": "build-service", "dataClass": "build-test", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/source-reference"},
                 {"id": "java.build-test", "name": "Build Test", "owner": "build-service", "dataClass": "build-test", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/build-test"},
                 {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "dataClass": "evidence", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/caps/evidence"},
                 {"id": "model-gateway", "name": "Model Gateway", "owner": "model-gateway-service", "dataClass": "model-gateway", "policyProfile": "harness-control-plane", "version": "v0.1.0", "endpoint": f"http://{host}:{mock_port}/v0/invoke"},
@@ -454,7 +456,15 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(model_invocation["ledgerRef"]["sha256"], "c" * 64)
             self.assertEqual(
                 sorted(entry.get("id") for entry in state.capability_registrations),
-                ["cobol.ir", "cobol.parse", "evidence.writer", "java.build-test", "java.generator", "model-gateway"],
+                [
+                    "cobol.ir",
+                    "cobol.parse",
+                    "evidence.writer",
+                    "java.build-test",
+                    "java.generator",
+                    "model-gateway",
+                    "source-reference.execute",
+                ],
             )
             self.assertGreaterEqual(len(state.events), 5)
             self.assertGreater(len(run_state.get("evidenceRefs", [])), 0)
@@ -586,7 +596,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 connection.close()
             self.assertEqual(health["status"], "ok")
             self.assertEqual(health["service"], "orchestrator-service")
-            self.assertEqual(len(state.capability_registrations), 6)
+            self.assertEqual(len(state.capability_registrations), 7)
         finally:
             mock_server.shutdown()
             mock_server.server_close()

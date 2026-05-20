@@ -8,7 +8,7 @@ import threading
 import time
 from dataclasses import dataclass
 from hashlib import sha256
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -83,8 +83,10 @@ from .run_contract import (
     FAILURE_EVIDENCE_INCOMPLETE,
     FAILURE_GENERATE_ONLY_COMPLETE,
     FAILURE_JAVA_GENERATION_FAILED,
+    FAILURE_SOURCE_REFERENCE_FAILED,
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
+    FAILURE_ORACLE_MISMATCH,
     FAILURE_UNSUPPORTED_COBOL,
     IllegalTransitionError,
     ModelInvocationBudgetExhaustedError,
@@ -349,6 +351,10 @@ DEFAULT_PROMPT_TEMPLATE_VERSION = "v1"
 DEFAULT_MODEL_TIMEOUT_MS = 15000
 DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS = 5000
 ORACLE_MODE_COBOL_RUNTIME = "cobol-runtime"
+EXECUTION_MODE_STANDARD = "standard"
+EXECUTION_MODE_PARITY = "parity"
+REFERENCE_MODE_REFERENCE_FIXTURE = "reference-fixture"
+REFERENCE_MODE_NATIVE_COBOL = "native-cobol"
 
 
 # noinspection PyClassHasNoInitInspection
@@ -359,6 +365,10 @@ class W0RunContext:
     requester: str
     evidence_refs: Sequence[str]
     model_prompt: str | None = None
+    execution_mode: str = EXECUTION_MODE_STANDARD
+    trust_case_id: str | None = None
+    source_reference_fixture_id: str | None = None
+    source_reference_mode: str | None = None
     # Issue #169: when ``True``, the orchestrator invokes the productive
     # Transformation Agent after the deterministic baseline succeeds, uses
     # the agent's Java candidate as the artifact fed into build/test, and
@@ -407,6 +417,12 @@ STEP_GENERATE_IR = "generate-ir"
 STEP_GENERATE_JAVA = "generate-java"
 STEP_COMPILE_TEST_JAVA = "compile-test-java"
 STEP_WRITE_EVIDENCE = "write-evidence"
+STEP_TRANSFORM = "transform"
+STEP_SOURCE_REFERENCE = "source-reference-execution"
+STEP_JAVA_BUILD = "java-build"
+STEP_JAVA_EXECUTION = "java-execution"
+STEP_PARITY_COMPARISON = "parity-comparison"
+STEP_PARITY_EVIDENCE_CAPTURE = "parity-evidence-capture"
 STEP_MODEL_GUIDANCE = "model-guidance"
 STEP_MODEL_POLICY_SKIPPED = "model-policy-skipped"
 STEP_COMPLETED = "completed"
@@ -695,6 +711,7 @@ GENERATED_PROJECT_DIR = "generated-project"
 GENERATED_PROJECT_MANIFEST_FILE = "generated-project-manifest.json"
 MANUAL_EDIT_OVERLAY_FILE = "manual-edit-overlay.json"
 PARITY_RESULT_DIR = "parity-results"
+SOURCE_REFERENCE_EXECUTION_RESULT_FILE = "source-reference-execution-result.json"
 PARITY_EXECUTION_RESULT_FILE = "execution-result.json"
 PARITY_COMPARISON_RESULT_FILE = "comparison-result.json"
 PARITY_COMPARISON_DIFF_FILE = "comparison.diff"
@@ -774,6 +791,9 @@ def _failed_step_from_exception(exc: BaseException) -> str | None:
         ("generate-ir", "generate-ir"),
         ("generate-java", "generate-java"),
         ("compile-test-java", "compile-test-java"),
+        ("source-reference-execution", STEP_SOURCE_REFERENCE),
+        ("parity-comparison", STEP_PARITY_COMPARISON),
+        ("parity-evidence-capture", STEP_PARITY_EVIDENCE_CAPTURE),
         ("model-guidance", "model-guidance"),
         ("write-evidence", "write-evidence"),
         # Issue #169: surface productive Transformation Agent failures.
@@ -898,6 +918,55 @@ def _extract_oracle_metadata(raw: Mapping[str, JsonValue]) -> dict[str, str | No
     if isinstance(oracle_value, str) and oracle_value:
         oracle_input = oracle_value
     return {"expectedOutput": expected, "oracleInput": oracle_input}
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _load_acceptance_fixture(fixture_id: str) -> JsonObject | None:
+    if not fixture_id.strip():
+        return None
+    index_path = _repo_root() / "fixtures" / "acceptance" / "index.json"
+    if not index_path.is_file():
+        return None
+    try:
+        parsed = json.loads(index_path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    fixtures = parsed.get("fixtures")
+    if not isinstance(fixtures, list):
+        return None
+    for raw in fixtures:
+        if not isinstance(raw, Mapping):
+            continue
+        if _text(raw.get("fixtureId")) == fixture_id:
+            return dict(raw)
+    return None
+
+
+def _load_fixture_expected_output(fixture: Mapping[str, JsonValue]) -> str | None:
+    ref = fixture.get("expectedOutputArtifactRef")
+    if not isinstance(ref, Mapping):
+        return None
+    path = _text(ref.get("path"))
+    if path is None:
+        return None
+    relative = PurePosixPath(path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise OrchestratorError(f"unsafe acceptance-fixture path: {path}")
+    resolved = (_repo_root() / Path(*relative.parts)).resolve()
+    repo_root = _repo_root().resolve()
+    if not str(resolved).startswith(str(repo_root)):
+        raise OrchestratorError(f"fixture path escapes repository root: {path}")
+    try:
+        return resolved.read_text("utf-8")
+    except OSError as exc:
+        raise OrchestratorError(f"could not read acceptance fixture output {path}: {exc}") from exc
+
+
+def _is_parity_run(context: W0RunContext) -> bool:
+    return context.execution_mode == EXECUTION_MODE_PARITY
 
 
 def _coerce_output_ref(payload: Mapping[str, JsonValue], fallback_uri: str, fallback_payload: Any) -> DataReference:
@@ -1596,6 +1665,13 @@ class W0WorkflowRunner:
             return FAILURE_MODEL_GATEWAY_UNAVAILABLE
         if step_name is None:
             return None
+        parity_step_map = {
+            STEP_SOURCE_REFERENCE: FAILURE_SOURCE_REFERENCE_FAILED,
+            STEP_PARITY_COMPARISON: FAILURE_ORACLE_MISMATCH,
+            STEP_PARITY_EVIDENCE_CAPTURE: FAILURE_EVIDENCE_INCOMPLETE,
+        }
+        if step_name in parity_step_map:
+            return parity_step_map[step_name]
         return STEP_TO_FAILURE_CODE.get(step_name)
 
     def _capability_failure_context(self, capability_id: str) -> tuple[str | None, str]:
@@ -1603,6 +1679,7 @@ class W0WorkflowRunner:
             self.config.parse_capability_id: STEP_PARSE_COBOL,
             self.config.ir_capability_id: STEP_GENERATE_IR,
             self.config.generator_capability_id: STEP_GENERATE_JAVA,
+            getattr(self.config, "source_reference_capability_id", ""): STEP_SOURCE_REFERENCE,
             self.config.build_test_capability_id: STEP_COMPILE_TEST_JAVA,
             self.config.evidence_capability_id: STEP_WRITE_EVIDENCE,
         }
@@ -1716,6 +1793,12 @@ class W0WorkflowRunner:
         # oracleInput. Empty/missing values fall back to the deterministic
         # W0/W0.1 oracle path.
         oracle_metadata = _extract_oracle_metadata(input_ref)
+        parity_run = _is_parity_run(context)
+        parity_fixture = (
+            _load_acceptance_fixture(context.source_reference_fixture_id or "")
+            if parity_run and context.source_reference_fixture_id
+            else None
+        )
         evidence_refs: list[str] = list(context.evidence_refs)
         step_results: list[WorkflowStepResult] = []
         model_output = None
@@ -1780,6 +1863,14 @@ class W0WorkflowRunner:
             parity_comparison = getattr(w02_contract, "parity_comparison", None)
             if isinstance(parity_comparison, Mapping) and parity_comparison:
                 summary["parityComparison"] = dict(parity_comparison)
+            if parity_run:
+                summary["executionMode"] = context.execution_mode
+                if context.source_reference_fixture_id:
+                    summary["fixtureId"] = context.source_reference_fixture_id
+                if context.trust_case_id:
+                    summary["trustCaseId"] = context.trust_case_id
+                if context.source_reference_mode:
+                    summary["referenceMode"] = context.source_reference_mode
             _record_artifact(self.artifact_store.update_summary(context.run_id, context.workflow_id, summary))
 
         def _persist_model_policy_skipped(reason: str) -> ArtifactMetadata:
@@ -1903,6 +1994,14 @@ class W0WorkflowRunner:
                 status=STEP_STATUS_OK,
                 run_status="starting",
             )
+            if parity_run:
+                self._record_step_start(
+                    context,
+                    name=STEP_TRANSFORM,
+                    capability_id=self.config.generator_capability_id,
+                    actor=self.config.service_name,
+                    input_ref=input_reference,
+                )
             self._emit_workflow_decision_event(
                 context,
                 "orchestrator.workflow.accepted",
@@ -1936,6 +2035,11 @@ class W0WorkflowRunner:
             parse_capability = self._require_capability(context.run_id, self.config.parse_capability_id)
             ir_capability = self._require_capability(context.run_id, self.config.ir_capability_id)
             generator_capability = self._require_capability(context.run_id, self.config.generator_capability_id)
+            source_reference_capability = (
+                self._require_capability(context.run_id, self.config.source_reference_capability_id)
+                if parity_run
+                else None
+            )
             build_test_capability = self._require_capability(
                 context.run_id,
                 self.config.build_test_capability_id,
@@ -2149,6 +2253,20 @@ class W0WorkflowRunner:
                 }
             completed_steps.append("generate-java")
             _write_summary("updating", message="generate-java completed")
+            if parity_run and generated_artifact_ref is not None:
+                self._record_step_finish(
+                    context,
+                    name=STEP_TRANSFORM,
+                    capability_id=self.config.generator_capability_id,
+                    actor=self.config.service_name,
+                    status=STEP_STATUS_OK,
+                    input_ref=input_reference,
+                    output_ref=DataReference(
+                        uri=str(generated_artifact_ref.get("uri") or ""),
+                        sha256=str(generated_artifact_ref.get("sha256") or ""),
+                        byte_size=int(generated_artifact_ref.get("byteSize") or 0),
+                    ),
+                )
             baseline_artifact_ref: JsonObject | None = generated_artifact_ref
             baseline_generated_project: Mapping[str, JsonValue] | None = generated_project
             agent_result: TransformationAgentResult | None = None
@@ -2195,7 +2313,7 @@ class W0WorkflowRunner:
                 and w02_contract.assist_decision.selected_agent_role
                 == ASSIST_AGENT_ROLE_TRANSFORMATION
             )
-            if context.use_transformation_agent and assist_authorised:
+            if context.use_transformation_agent and assist_authorised and not parity_run:
                 # Drive the W0.2 state machine through the productive-agent
                 # transition before invoking the agent so the run contract
                 # accurately reflects what the orchestrator is doing.
@@ -2499,6 +2617,7 @@ class W0WorkflowRunner:
             # When the productive Transformation Agent blocked the run we
             # skip build/test entirely so the deterministic gatekeeper does
             # not pass an unverified baseline behind the agent's back.
+            source_reference_output: WorkflowStepResult | None = None
             build_test_output: WorkflowStepResult | None = None
             success = False
             build_failure_code: str | None = w02_failure_code
@@ -2506,6 +2625,90 @@ class W0WorkflowRunner:
             if w02_blocked:
                 pass
             else:
+                if parity_run:
+                    if source_reference_capability is None:
+                        raise OrchestratorError("parity run requires source-reference capability")
+                    fixture_id = _text(context.source_reference_fixture_id)
+                    reference_mode = _text(context.source_reference_mode)
+                    if fixture_id is None or reference_mode is None:
+                        raise OrchestratorError(
+                            "parity run requires source reference fixtureId and referenceMode"
+                        )
+                    self._record_step_start(
+                        context,
+                        name=STEP_SOURCE_REFERENCE,
+                        capability_id=self.config.source_reference_capability_id,
+                        actor=self.config.service_name,
+                        input_ref=input_reference,
+                    )
+                    source_reference_output = self._invoke_step(
+                        context,
+                        STEP_SOURCE_REFERENCE,
+                        source_reference_capability,
+                        DATA_CLASS_BUILD_TEST,
+                        {
+                            "schemaVersion": "v0",
+                            "runId": context.run_id,
+                            "workflowId": context.workflow_id,
+                            "fixtureId": fixture_id,
+                            "referenceMode": reference_mode,
+                        },
+                        input_reference,
+                    )
+                    step_results.append(source_reference_output)
+                    evidence_refs.append(source_reference_output.output_ref.uri)
+                    _record_artifact(
+                        self.artifact_store.write_json(
+                            context.run_id,
+                            context.workflow_id,
+                            SOURCE_REFERENCE_EXECUTION_RESULT_FILE,
+                            dict(source_reference_output.payload),
+                            kind="parity-execution-result",
+                        )
+                    )
+                    self._record_step_finish(
+                        context,
+                        name=STEP_SOURCE_REFERENCE,
+                        capability_id=self.config.source_reference_capability_id,
+                        actor=self.config.service_name,
+                        status=(
+                            STEP_STATUS_OK
+                            if str(source_reference_output.payload.get("status") or "").strip() == "passed"
+                            else STEP_STATUS_FAILED
+                        ),
+                        input_ref=input_reference,
+                        output_ref=source_reference_output.output_ref,
+                        diagnostic=_text(source_reference_output.payload.get("summary")),
+                    )
+                    completed_steps.append(STEP_SOURCE_REFERENCE)
+                    _write_summary("updating", message="source/reference execution completed")
+                    if str(source_reference_output.payload.get("status") or "").strip() != "passed":
+                        diagnostics = source_reference_output.payload.get("diagnostics")
+                        unsupported = False
+                        if isinstance(diagnostics, list):
+                            unsupported = any(
+                                isinstance(entry, Mapping)
+                                and _text(entry.get("code")) == "unsupported-program-shape"
+                                for entry in diagnostics
+                            )
+                        w02_blocked = True
+                        w02_failure_code = (
+                            FAILURE_UNSUPPORTED_COBOL
+                            if unsupported
+                            else FAILURE_SOURCE_REFERENCE_FAILED
+                        )
+                        w02_failure_message = (
+                            _text(source_reference_output.payload.get("summary"))
+                            or "source/reference execution failed"
+                        )
+                        self._advance_w02(
+                            context,
+                            w02_contract,
+                            STATE_RUN_BLOCKED,
+                            active_step=None,
+                            message=w02_failure_message,
+                            failure_code=w02_failure_code,
+                        )
                 build_test_input = {
                     "schemaVersion": "v0",
                     "runId": context.run_id,
@@ -2517,46 +2720,73 @@ class W0WorkflowRunner:
                 }
                 if generated_artifact_ref is not None:
                     build_test_input["generatedArtifactRef"] = generated_artifact_ref
+                oracle_expected_output = oracle_metadata["expectedOutput"]
+                if (
+                    parity_run
+                    and context.source_reference_mode == REFERENCE_MODE_REFERENCE_FIXTURE
+                    and parity_fixture is not None
+                    and not oracle_expected_output
+                ):
+                    oracle_expected_output = _load_fixture_expected_output(parity_fixture)
+                    if not oracle_expected_output:
+                        raise OrchestratorError(
+                            f"parity run {context.run_id} requires fixture output for {context.source_reference_fixture_id}"
+                        )
                 oracle_payload = _build_cobol_oracle_payload(
                     raw_source_text,
                     input_reference,
                     getattr(self.config, "build_test_oracle_timeout_ms", DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS),
-                    expected_output=oracle_metadata["expectedOutput"],
+                    expected_output=oracle_expected_output,
                     oracle_input=oracle_metadata["oracleInput"],
                 )
                 if oracle_payload is not None:
                     build_test_input["oracle"] = oracle_payload
 
-                build_test_output = self._invoke_step(
-                    context,
-                    "compile-test-java",
-                    build_test_capability,
-                    DATA_CLASS_BUILD_TEST,
-                    build_test_input,
-                    generator_output.output_ref,
-                )
-                step_results.append(build_test_output)
-                evidence_refs.append(build_test_output.output_ref.uri)
-                _record_artifact(
-                    self.artifact_store.write_json(
-                        context.run_id,
-                        context.workflow_id,
-                        "build-test-result.json",
-                        dict(build_test_output.payload),
-                        kind=KIND_BUILD_TEST_RESULT,
+                if not w02_blocked:
+                    if parity_run:
+                        self._record_step_start(
+                            context,
+                            name=STEP_JAVA_BUILD,
+                            capability_id=self.config.build_test_capability_id,
+                            actor=self.config.service_name,
+                            input_ref=generator_output.output_ref,
+                        )
+                    build_test_output = self._invoke_step(
+                        context,
+                        "compile-test-java",
+                        build_test_capability,
+                        DATA_CLASS_BUILD_TEST,
+                        build_test_input,
+                        generator_output.output_ref,
                     )
-                )
-                completed_steps.append("compile-test-java")
-                _write_summary("updating", message="compile-test-java completed")
-                w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
-                parity_comparison, parity_artifacts = self._project_parity_comparison(
-                    context=context,
-                    build_test_output=build_test_output,
-                    persist=True,
-                )
-                for meta in parity_artifacts:
-                    _record_artifact(meta)
-                w02_contract.set_parity_comparison(parity_comparison)
+                    step_results.append(build_test_output)
+                    evidence_refs.append(build_test_output.output_ref.uri)
+                    _record_artifact(
+                        self.artifact_store.write_json(
+                            context.run_id,
+                            context.workflow_id,
+                            "build-test-result.json",
+                            dict(build_test_output.payload),
+                            kind=KIND_BUILD_TEST_RESULT,
+                        )
+                    )
+                    completed_steps.append("compile-test-java")
+                    _write_summary("updating", message="compile-test-java completed")
+                    w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
+                    parity_comparison, parity_artifacts = self._project_parity_comparison(
+                        context=context,
+                        build_test_output=build_test_output,
+                        persist=True,
+                    )
+                    for meta in parity_artifacts:
+                        _record_artifact(meta)
+                    w02_contract.set_parity_comparison(parity_comparison)
+                    if parity_run:
+                        self._record_parity_build_steps(
+                            context=context,
+                            build_test_output=build_test_output,
+                            input_ref=generator_output.output_ref,
+                        )
 
             # Issue #166 / Issue #170: W0.2 verification/repair loop. The
             # build-test runner is the deterministic gate; on a failed
@@ -2577,7 +2807,22 @@ class W0WorkflowRunner:
             repair_attempt_counter = 0
             if build_test_output is not None:
                 success, build_failure_code = build_test_outcome(build_test_output.payload)
-            while build_test_output is not None and not success:
+            if parity_run and build_test_output is not None and not success:
+                w02_blocked = True
+                w02_failure_code = build_failure_code or FAILURE_JAVA_COMPILE_FAILED
+                w02_failure_message = (
+                    _text(build_test_output.payload.get("summary"))
+                    or "parity verification failed"
+                )
+                self._advance_w02(
+                    context,
+                    w02_contract,
+                    STATE_RUN_BLOCKED,
+                    active_step=None,
+                    message=w02_failure_message,
+                    failure_code=w02_failure_code,
+                )
+            while build_test_output is not None and not success and not parity_run:
                 if w02_contract.repair_budget.exhausted:
                     w02_blocked = True
                     w02_failure_code = build_failure_code
@@ -3063,7 +3308,7 @@ class W0WorkflowRunner:
                     message="build-test verified java candidate",
                 )
 
-            if context.model_prompt and not w02_blocked:
+            if context.model_prompt and not w02_blocked and not parity_run:
                 model_capability = self._require_capability(
                     context.run_id,
                     self.config.model_gateway_capability_id,
@@ -3161,12 +3406,21 @@ class W0WorkflowRunner:
                 if manual_overlay_meta is not None:
                     _record_artifact(ArtifactMetadata(**manual_overlay_meta))
 
+            if parity_run:
+                self._record_marker_step(
+                    context,
+                    name=STEP_PARITY_EVIDENCE_CAPTURE,
+                    status=STEP_STATUS_RUNNING,
+                    run_status="updating",
+                    diagnostic="capturing parity evidence",
+                )
             evidence_payload = self._build_evidence_payload(
                 context=context,
                 input_ref=input_reference,
                 parse_output=parse_output,
                 ir_output=ir_output,
                 generator_output=generator_output,
+                source_reference_output=source_reference_output,
                 build_test_output=build_test_output,
                 model_output=model_output,
                 model_policy_skipped_meta=model_policy_skipped_meta,
@@ -3194,6 +3448,14 @@ class W0WorkflowRunner:
             )
             step_results.append(evidence_output)
             evidence_refs.append(evidence_output.output_ref.uri)
+            if parity_run:
+                self._record_marker_step(
+                    context,
+                    name=STEP_PARITY_EVIDENCE_CAPTURE,
+                    status=STEP_STATUS_OK,
+                    run_status="updating",
+                    diagnostic="parity evidence captured",
+                )
             _record_artifact(
                 self.artifact_store.write_json(
                     context.run_id,
@@ -3489,6 +3751,75 @@ class W0WorkflowRunner:
             build_test_output.output_ref.uri.encode("utf-8")
         ).hexdigest()
         return f"{PARITY_RESULT_DIR}/{digest[:16]}"
+
+    @staticmethod
+    def _repository_root() -> Path:
+        current = Path(__file__).resolve()
+        for parent in current.parents:
+            if (parent / "fixtures" / "acceptance" / "index.json").is_file():
+                return parent
+        return current.parents[4]
+
+    def _resolve_parity_fixture(self, fixture_id: str) -> JsonObject:
+        fixture_key = fixture_id.strip()
+        if not fixture_key:
+            raise OrchestratorError("fixtureId is required for parity runs")
+        index_path = self._repository_root() / "fixtures" / "acceptance" / "index.json"
+        try:
+            index_payload = json.loads(index_path.read_text("utf-8"))
+        except FileNotFoundError as exc:
+            raise OrchestratorError(f"acceptance fixture index unavailable: {index_path}") from exc
+        except json.JSONDecodeError as exc:
+            raise OrchestratorError(f"acceptance fixture index is invalid: {index_path}") from exc
+        fixtures = index_payload.get("fixtures")
+        if not isinstance(fixtures, list):
+            raise OrchestratorError("acceptance fixture index must declare a fixtures array")
+        matched: Mapping[str, JsonValue] | None = None
+        for entry in fixtures:
+            if not isinstance(entry, Mapping):
+                continue
+            if str(entry.get("fixtureId") or "").strip() == fixture_key:
+                matched = entry
+                break
+        if matched is None:
+            raise OrchestratorError(f"acceptance fixture {fixture_key} not found")
+        expected_ref = _reference_payload_from_metadata(matched.get("expectedOutputArtifactRef"))
+        if expected_ref is None:
+            raise OrchestratorError(
+                f"acceptance fixture {fixture_key} does not declare an expectedOutputArtifactRef"
+            )
+        expected_path_raw = str(matched.get("expectedOutputArtifactRef", {}).get("path") or "").strip() if isinstance(matched.get("expectedOutputArtifactRef"), Mapping) else ""
+        if not expected_path_raw:
+            raise OrchestratorError(
+                f"acceptance fixture {fixture_key} expectedOutputArtifactRef.path is required"
+            )
+        expected_path = (self._repository_root() / expected_path_raw).resolve()
+        if not expected_path.is_file():
+            raise OrchestratorError(
+                f"acceptance fixture {fixture_key} expected output file missing: {expected_path_raw}"
+            )
+        expected_output = expected_path.read_text("utf-8")
+        expected_sha = sha256(expected_output.encode("utf-8")).hexdigest()
+        if expected_ref.get("sha256") and str(expected_ref["sha256"]).lower() != expected_sha:
+            raise OrchestratorError(
+                f"acceptance fixture {fixture_key} expected output sha256 mismatch"
+            )
+        if expected_ref.get("byteSize") is not None and int(expected_ref["byteSize"]) != len(expected_output.encode("utf-8")):
+            raise OrchestratorError(
+                f"acceptance fixture {fixture_key} expected output byteSize mismatch"
+            )
+        source_ref = _reference_payload_from_metadata(matched.get("sourceCobolArtifactRef"))
+        payload: JsonObject = {
+            "fixtureId": fixture_key,
+            "expectedOutput": expected_output,
+            "expectedOutputArtifactRef": {
+                **expected_ref,
+                "path": expected_path_raw,
+            },
+        }
+        if source_ref is not None:
+            payload["sourceCobolArtifactRef"] = source_ref
+        return payload
 
     def _materialise_parity_json_ref(
         self,
@@ -3805,6 +4136,7 @@ class W0WorkflowRunner:
         parse_output: WorkflowStepResult,
         ir_output: WorkflowStepResult,
         generator_output: WorkflowStepResult,
+        source_reference_output: WorkflowStepResult | None = None,
         build_test_output: WorkflowStepResult | None,
         model_output: Mapping[str, JsonValue] | None,
         model_policy_skipped_meta: ArtifactMetadata | None,
@@ -3823,6 +4155,8 @@ class W0WorkflowRunner:
         # invocations that produced Java, not only the optional model-guidance
         # call. Deterministic W0 still emits the policy-skipped ledger entry.
         is_w02 = bool(
+            _is_parity_run(context)
+            or
             getattr(context, "use_transformation_agent", False)
             or (w02_contract is not None and (
                 getattr(w02_contract, "agent_attempt_count", 0) > 0
@@ -3860,7 +4194,17 @@ class W0WorkflowRunner:
             "modelInvocations": model_invocations,
             "trajectoryLedger": _as_reference_payload(trajectory_ref),
         }
-        if not (is_w02 and w02_blocked):
+        if source_reference_output is not None:
+            artifacts["sourceReferenceExecution"] = _as_reference_payload(
+                source_reference_output.output_ref
+            )
+            if context.source_reference_fixture_id:
+                artifacts["trustCase"] = {
+                    "id": context.trust_case_id or context.source_reference_fixture_id,
+                    "fixtureId": context.source_reference_fixture_id,
+                    "referenceMode": context.source_reference_mode or "",
+                }
+        if not (is_w02 and w02_blocked and not _is_parity_run(context)):
             artifacts["generatedJava"] = generated_java_payload
         # Issue #96: when experience-learning is configured, reference its
         # run summary endpoint so the Evidence Pack carries a verifiable
@@ -3936,6 +4280,19 @@ class W0WorkflowRunner:
                 )
             if parity_comparison is not None:
                 artifacts["parityComparison"] = parity_comparison
+            if build_test_output is not None:
+                build_result = _first_non_empty_mapping(build_test_output.payload.get("buildResult"))
+                execution_result = _first_non_empty_mapping(build_test_output.payload.get("executionResult"))
+                build_ref = _reference_payload_from_metadata(build_result.get("outputRef")) or _reference_payload_from_metadata(
+                    build_result.get("buildOutputRef")
+                )
+                execution_ref = _reference_payload_from_metadata(execution_result.get("outputRef")) or _reference_payload_from_metadata(
+                    execution_result.get("logRef")
+                )
+                if build_ref is not None:
+                    artifacts["generatedJavaBuild"] = build_ref
+                if execution_ref is not None:
+                    artifacts["generatedJavaExecution"] = execution_ref
             artifacts["runtimeVersion"] = {
                 "id": f"{self.config.transformation_agent_runtime_library}:{self.config.transformation_agent_java_version}",
                 "ref": _as_reference_payload(
@@ -5246,6 +5603,103 @@ class W0WorkflowRunner:
             failed_step=failed_step,
         )
 
+    def _record_parity_build_steps(
+        self,
+        *,
+        context: W0RunContext,
+        build_test_output: WorkflowStepResult,
+        input_ref: DataReference,
+    ) -> None:
+        payload = build_test_output.payload or {}
+        build_result = _first_non_empty_mapping(payload.get("buildResult")) or _first_non_empty_mapping(
+            payload.get("build")
+        )
+        execution_result = _first_non_empty_mapping(payload.get("executionResult")) or _first_non_empty_mapping(
+            payload.get("execution")
+        )
+        comparison_result = _first_non_empty_mapping(payload.get("comparisonResult")) or _first_non_empty_mapping(
+            payload.get("comparison")
+        )
+
+        build_ref = (
+            _data_reference_from_mapping(build_result.get("outputRef"))
+            or _data_reference_from_mapping(build_result.get("buildOutputRef"))
+            or build_test_output.output_ref
+        )
+        build_status_value = _text(build_result.get("status")) or _text(payload.get("status")) or ""
+        build_ok = build_status_value in {"passed", "ok", "success", "complete", "verified"}
+        self._record_step_finish(
+            context,
+            name=STEP_JAVA_BUILD,
+            capability_id=self.config.build_test_capability_id,
+            actor=self.config.service_name,
+            status=STEP_STATUS_OK if build_ok else STEP_STATUS_FAILED,
+            input_ref=input_ref,
+            output_ref=build_ref,
+            diagnostic=_text(build_result.get("summary")) or _text(payload.get("summary")),
+        )
+
+        execution_ref = _data_reference_from_mapping(execution_result.get("outputRef")) or _data_reference_from_mapping(
+            execution_result.get("logRef")
+        )
+        if build_ok:
+            self._record_step_start(
+                context,
+                name=STEP_JAVA_EXECUTION,
+                capability_id=self.config.build_test_capability_id,
+                actor=self.config.service_name,
+                input_ref=build_ref,
+            )
+            execution_status_value = _text(execution_result.get("status")) or ""
+            execution_ok = execution_status_value == "passed"
+            self._record_step_finish(
+                context,
+                name=STEP_JAVA_EXECUTION,
+                capability_id=self.config.build_test_capability_id,
+                actor=self.config.service_name,
+                status=STEP_STATUS_OK if execution_ok else STEP_STATUS_FAILED,
+                input_ref=build_ref,
+                output_ref=execution_ref,
+                diagnostic=_text(execution_result.get("summary")) or _text(payload.get("summary")),
+            )
+            self._record_step_start(
+                context,
+                name=STEP_PARITY_COMPARISON,
+                capability_id=self.config.build_test_capability_id,
+                actor=self.config.service_name,
+                input_ref=execution_ref or build_ref,
+            )
+            comparison_status_value = _text(comparison_result.get("status")) or ""
+            comparison_ok = comparison_status_value == "passed"
+            comparison_ref = _data_reference_from_mapping(comparison_result.get("outputRef")) or _data_reference_from_mapping(
+                payload.get("comparisonResultRef")
+            )
+            self._record_step_finish(
+                context,
+                name=STEP_PARITY_COMPARISON,
+                capability_id=self.config.build_test_capability_id,
+                actor=self.config.service_name,
+                status=STEP_STATUS_OK if comparison_ok else STEP_STATUS_FAILED,
+                input_ref=execution_ref or build_ref,
+                output_ref=comparison_ref,
+                diagnostic=_text(comparison_result.get("diffSummary")) or _text(payload.get("summary")),
+            )
+        else:
+            self._record_marker_step(
+                context,
+                name=STEP_JAVA_EXECUTION,
+                status=STEP_STATUS_SKIPPED,
+                run_status="updating",
+                diagnostic="java build failed; execution not attempted",
+            )
+            self._record_marker_step(
+                context,
+                name=STEP_PARITY_COMPARISON,
+                status=STEP_STATUS_SKIPPED,
+                run_status="updating",
+                diagnostic="java build failed; comparison not attempted",
+            )
+
     def _record_marker_step(
         self,
         context: W0RunContext,
@@ -5284,7 +5738,7 @@ class W0WorkflowRunner:
         generator_output: WorkflowStepResult,
         build_output: WorkflowStepResult | None,
     ) -> str:
-        return json.dumps({
+        summary: JsonObject = {
             "runId": context.run_id,
             "workflowId": context.workflow_id,
             "requester": context.requester,
@@ -5293,4 +5747,13 @@ class W0WorkflowRunner:
             "irRef": ir_output.output_ref.uri,
             "javaRef": generator_output.output_ref.uri,
             "buildRef": build_output.output_ref.uri if build_output is not None else "",
-        })
+        }
+        if context.execution_mode == EXECUTION_MODE_PARITY:
+            summary["executionMode"] = context.execution_mode
+            if context.source_reference_fixture_id:
+                summary["fixtureId"] = context.source_reference_fixture_id
+            if context.trust_case_id:
+                summary["trustCaseId"] = context.trust_case_id
+            if context.source_reference_mode:
+                summary["referenceMode"] = context.source_reference_mode
+        return json.dumps(summary)
