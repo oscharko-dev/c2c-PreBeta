@@ -225,6 +225,9 @@ final class JavaInMemoryCompiler {
             return new CompileResult(false, dir, List.of(
                     Map.of("severity", "error",
                             "code", "no-sources",
+                            "filePath", "generated-project",
+                            "line", 1L,
+                            "column", 1L,
                             "message", "Generated project contained no .java sources to compile.")),
                     0);
         }
