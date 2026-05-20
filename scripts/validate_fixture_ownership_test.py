@@ -1,4 +1,5 @@
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -21,22 +22,21 @@ DOCUMENTED_PATHS = [
     "services/c2c-bff/src/diagnostic-fixtures/",
 ]
 
-W02_REQUIRED_FIXTURES = [
-    "corpus/synthetic/programs/hello-w02.cbl",
-    "corpus/synthetic/programs/branch-account-guard.cbl",
-    "corpus/synthetic/programs/file-io-unsupported.cbl",
-]
-
-REFERENCE_RUN_FIXTURES = [
-    "corpus/synthetic/programs/branch-account-guard.cbl",
-    "corpus/synthetic/programs/ctrl-decimal-payroll.cbl",
-    "corpus/synthetic/programs/decimal-batch-aggregator.cbl",
-]
-
-
 def _load_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _extract_assignments(script: str, variable_name: str) -> list[str]:
+    pattern = re.compile(rf'^\s*{re.escape(variable_name)}="([^"]*)"$', re.MULTILINE)
+    return pattern.findall(script)
+
+
+def _extract_array_entries(script: str, array_name: str) -> list[str]:
+    match = re.search(rf'^{re.escape(array_name)}=\(\n(?P<body>.*?)^\)', script, re.MULTILINE | re.DOTALL)
+    if not match:
+        return []
+    return re.findall(r'^\s*"([^"]+)"$', match.group("body"), re.MULTILINE)
 
 
 class FixtureOwnershipValidationTests(unittest.TestCase):
@@ -76,14 +76,58 @@ class FixtureOwnershipValidationTests(unittest.TestCase):
             self.assertTrue(output.is_file(), f"{program_id} expected output missing: {output}")
 
     def test_w02_release_gate_uses_documented_acceptance_fixtures(self) -> None:
+        payload = _load_json(ACCEPTANCE_INDEX)
+        fixtures = {fixture["fixtureId"]: fixture for fixture in payload["fixtures"]}
+        hello = fixtures["HELLOW02"]
+        blocked = fixtures["FILEIO-UNSUPPORTED"]
         script = W02_GATE.read_text(encoding="utf-8")
-        for fixture_path in W02_REQUIRED_FIXTURES:
-            self.assertIn(fixture_path, script, f"W0.2 release gate missing fixture path {fixture_path}")
+        positive_sources = _extract_assignments(script, "POSITIVE_SOURCE")
+        positive_expected = _extract_assignments(script, "POSITIVE_EXPECTED")
+        negative_sources = _extract_assignments(script, "NEGATIVE_SOURCE")
+
+        self.assertIn(
+            f"$ROOT_DIR/{hello['sourceCobolArtifactRef']['path']}",
+            positive_sources,
+            "W0.2 release gate foundry positive source must come from HELLOW02",
+        )
+        self.assertIn(
+            f"$ROOT_DIR/{hello['expectedOutputArtifactRef']['path']}",
+            positive_expected,
+            "W0.2 release gate foundry expected output must come from HELLOW02",
+        )
+        self.assertIn(
+            f"$ROOT_DIR/{blocked['sourceCobolArtifactRef']['path']}",
+            negative_sources,
+            "W0.2 release gate negative source must come from FILEIO-UNSUPPORTED",
+        )
+        self.assertIn(
+            "$ROOT_DIR/corpus/synthetic/programs/branch-account-guard.cbl",
+            positive_sources,
+            "W0.2 release gate deterministic positive source must remain BRNCH01",
+        )
 
     def test_reference_run_uses_documented_reference_programs(self) -> None:
+        payload = _load_json(GOLDEN_MASTER_INDEX)
+        entries = {entry["programId"]: entry for entry in payload["entries"]}
         script = W0_REFERENCE_RUN.read_text(encoding="utf-8")
-        for fixture_path in REFERENCE_RUN_FIXTURES:
-            self.assertIn(fixture_path, script, f"reference run missing fixture path {fixture_path}")
+        default_programs = _extract_array_entries(script, "DEFAULT_PROGRAMS")
+        parsed_defaults = dict(entry.split(":", 1) for entry in default_programs)
+
+        self.assertEqual(
+            parsed_defaults.get("BRNCH01"),
+            entries["BRNCH01"]["cobolSource"],
+            "reference run BRNCH01 path must match the golden-master registry",
+        )
+        self.assertEqual(
+            parsed_defaults.get("CTRLDEC01"),
+            entries["CTRLDEC01"]["cobolSource"],
+            "reference run CTRLDEC01 path must match the golden-master registry",
+        )
+        self.assertEqual(
+            parsed_defaults.get("BATCH01"),
+            entries["BATCH01"]["cobolSource"],
+            "reference run BATCH01 path must match the golden-master registry",
+        )
 
 
 if __name__ == "__main__":
