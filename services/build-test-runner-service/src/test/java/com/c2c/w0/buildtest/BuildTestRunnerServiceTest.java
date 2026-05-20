@@ -47,6 +47,7 @@ class BuildTestRunnerServiceTest {
         assertEquals(generatedArtifactRef, response.get("generatedArtifactRef"));
         assertEquals(sourceRef, response.get("inputArtifactRef"));
         Map<?, ?> build = (Map<?, ?>) response.get("build");
+        Map<?, ?> buildResult = (Map<?, ?>) response.get("buildResult");
         assertEquals("v0", build.get("schemaVersion"));
         assertEquals("generated-java", build.get("buildMode"));
         assertEquals("passed", build.get("status"));
@@ -54,7 +55,11 @@ class BuildTestRunnerServiceTest {
         assertNotNull(build.get("buildOutputRef"));
         assertNotNull(build.get("logRef"));
         assertFalse(((List<?>) build.get("evidenceRefs")).isEmpty());
+        assertEquals("generated-java", buildResult.get("buildMode"));
+        assertEquals(false, buildResult.containsKey("compileOk"));
+        assertEquals(false, buildResult.containsKey("classOutputDir"));
         Map<?, ?> execution = (Map<?, ?>) response.get("execution");
+        Map<?, ?> executionResult = (Map<?, ?>) response.get("executionResult");
         assertEquals("v0", execution.get("schemaVersion"));
         assertEquals("generated-java", execution.get("executionSurface"));
         assertEquals("passed", execution.get("status"));
@@ -65,6 +70,9 @@ class BuildTestRunnerServiceTest {
         assertNotNull(execution.get("normalizedOutputRef"));
         assertNotNull(execution.get("logRef"));
         assertFalse(((List<?>) execution.get("evidenceRefs")).isEmpty());
+        assertEquals("generated-java", executionResult.get("executionSurface"));
+        assertEquals(false, executionResult.containsKey("stdout"));
+        assertEquals(false, executionResult.containsKey("ok"));
         assertHashRefValid(response);
     }
 

@@ -107,11 +107,17 @@ source for this endpoint.
   `true-golden-master-mismatch`, or `skipped-no-execution`.
 - `build`: Trust-2 aligned generated-Java build result with `buildId`,
   `buildMode`, content-addressed `buildOutputRef`/`logRef`, structured
-  compiler diagnostics, and compatibility fields such as `compileOk`.
+  compiler diagnostics, `evidenceRefs`, and compatibility fields such as
+  `compileOk`.
+- `buildResult`: exact canonical Trust-2 generated-Java build result without
+  the legacy compatibility fields.
 - `execution`: Trust-2 aligned generated-Java execution result with
   `executionId`, `executionSurface`, content-addressed stdout/stderr/normalized
-  output refs, structured runtime diagnostics, and compatibility fields such
-  as `ran`, `ok`, `stdout`, and `stderr`.
+  output refs, `sourceArtifactRef`/`inputArtifactRef`/`generatedArtifactRef`,
+  structured runtime diagnostics, `evidenceRefs`, and compatibility fields
+  such as `ran`, `ok`, `stdout`, and `stderr`.
+- `executionResult`: exact canonical Trust-2 generated-Java execution result
+  without the legacy compatibility fields.
 - `outputRef`: a hash-stamped reference to the canonical result JSON.
 
 The executable examples are the service tests under `src/test/`; local

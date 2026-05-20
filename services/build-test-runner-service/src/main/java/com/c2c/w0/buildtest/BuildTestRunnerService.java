@@ -68,9 +68,9 @@ public final class BuildTestRunnerService {
 
         Map<String, Object> response = newEnvelope(request, programId);
         List<Map<String, Object>> diagnostics = new ArrayList<>();
-        Map<String, Object> sourceArtifactRef = mapOrEmpty(request.get("sourceRef"));
+        Map<String, Object> sourceArtifactRef = sourceArtifactRef(request);
         Map<String, Object> generatedArtifactRef = generatedArtifactRef(request, generatedProject);
-        Map<String, Object> executionInputRef = controlledInputRef(sourceArtifactRef, oracleSpec);
+        Map<String, Object> executionInputRef = controlledInputRef(sourceArtifactRef, generatedArtifactRef, oracleSpec);
         response.put("generatedArtifactRef", generatedArtifactRef);
         if (!sourceArtifactRef.isEmpty()) {
             response.put("sourceArtifactRef", sourceArtifactRef);
@@ -84,8 +84,12 @@ public final class BuildTestRunnerService {
                     ResultClassifier.STATUS_SKIPPED, ResultClassifier.CLASS_SKIPPED,
                     "No generatedProject payload supplied; nothing to verify."));
             response.put("diagnostics", diagnostics);
-            response.put("build", emptyBuild(response, generatedArtifactRef));
-            response.put("execution", emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef));
+            Map<String, Object> build = emptyBuild(response, generatedArtifactRef);
+            Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+            response.put("build", build);
+            response.put("buildResult", canonicalBuildResult(build));
+            response.put("execution", execution);
+            response.put("executionResult", canonicalExecutionResult(execution));
             response.put("tests", emptyTests());
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
@@ -110,9 +114,13 @@ public final class BuildTestRunnerService {
                     1L,
                     e.getMessage());
             diagnostics.add(buildDiagnostic);
-            response.put("build", failedBuild(response, generatedArtifactRef, diagnostics,
-                    "Generated project could not be materialised safely."));
-            response.put("execution", emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef));
+            Map<String, Object> build = failedBuild(response, generatedArtifactRef, diagnostics,
+                    "Generated project could not be materialised safely.");
+            Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+            response.put("build", build);
+            response.put("buildResult", canonicalBuildResult(build));
+            response.put("execution", execution);
+            response.put("executionResult", canonicalExecutionResult(execution));
             response.put("tests", emptyTests());
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
@@ -127,9 +135,13 @@ public final class BuildTestRunnerService {
                     1L,
                     "Failed to write generated project to a temp directory: " + e.getMessage());
             diagnostics.add(buildDiagnostic);
-            response.put("build", failedBuild(response, generatedArtifactRef, diagnostics,
-                    "Generated project could not be written to the controlled work directory."));
-            response.put("execution", emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef));
+            Map<String, Object> build = failedBuild(response, generatedArtifactRef, diagnostics,
+                    "Generated project could not be written to the controlled work directory.");
+            Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+            response.put("build", build);
+            response.put("buildResult", canonicalBuildResult(build));
+            response.put("execution", execution);
+            response.put("executionResult", canonicalExecutionResult(execution));
             response.put("tests", emptyTests());
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
@@ -154,11 +166,14 @@ public final class BuildTestRunnerService {
                     Instant.now(),
                     classOut);
             response.put("build", buildSection);
+            response.put("buildResult", canonicalBuildResult(buildSection));
             diagnostics.addAll(compile.diagnostics());
 
             if (!compile.ok()) {
                 applyClassification(response, ResultClassifier.compileFailure());
-                response.put("execution", emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef));
+                Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+                response.put("execution", execution);
+                response.put("executionResult", canonicalExecutionResult(execution));
                 response.put("tests", emptyTests());
                 if (oracleEnabled) {
                     response.put("oracle", oracleSkippedMap(oracleSpec,
@@ -183,13 +198,15 @@ public final class BuildTestRunnerService {
             GeneratedProgramRunner.RunResult run;
             if (skipExecution) {
                 run = null;
-                response.put("execution", skippedExecutionSection(
+                Map<String, Object> execution = skippedExecutionSection(
                         response,
                         generatedArtifactRef,
                         executionInputRef,
                         sourceArtifactRef,
                         entryClass,
-                        "options.skipExecution=true"));
+                        "options.skipExecution=true");
+                response.put("execution", execution);
+                response.put("executionResult", canonicalExecutionResult(execution));
             } else {
                 Instant executionStarted = Instant.now();
                 run = GeneratedProgramRunner.run(classOut, entryClass, timeoutMs);
@@ -203,6 +220,7 @@ public final class BuildTestRunnerService {
                         executionStarted,
                         Instant.now());
                 response.put("execution", executionSection);
+                response.put("executionResult", canonicalExecutionResult(executionSection));
                 diagnostics.addAll(executionDiagnostics(executionSection));
                 if (!run.ran()) {
                     applyClassification(response, ResultClassifier.runFailure(run.errorClass()));
@@ -661,6 +679,7 @@ public final class BuildTestRunnerService {
             Path classOutputDir) {
         String buildLog = renderBuildLog(compile.diagnostics(), compile.ok(), compile.sourceCount(), fileCount);
         Map<String, Object> logRef = outputReference("generated-java-build-log", buildLog);
+        Map<String, Object> buildOutputRef = classDirectoryReference(classOutputDir);
         List<Map<String, Object>> schemaDiagnostics = diagnosticsWithRawLogRef(compile.diagnostics(), logRef);
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("schemaVersion", SCHEMA_VERSION);
@@ -672,9 +691,9 @@ public final class BuildTestRunnerService {
         map.put("toolchain", runtimeToolchain());
         map.put("status", compile.ok() ? "passed" : "failed");
         map.put("inputArtifactRef", generatedArtifactRef);
-        map.put("buildOutputRef", classDirectoryReference(classOutputDir));
+        map.put("buildOutputRef", buildOutputRef);
         map.put("logRef", logRef);
-        map.put("evidenceRefs", evidenceRefs(generatedArtifactRef, classDirectoryReference(classOutputDir), logRef));
+        map.put("evidenceRefs", evidenceRefs(generatedArtifactRef, buildOutputRef, logRef));
         map.put("diagnostics", schemaDiagnostics);
         map.put("startedAt", started.toString());
         map.put("completedAt", completed.toString());
@@ -905,7 +924,7 @@ public final class BuildTestRunnerService {
         response.put("service", SERVICE_NAME);
         response.put("runId", string(request.get("runId"), "run-unknown"));
         response.put("workflowId", string(request.get("workflowId"), "w0-migration-v0"));
-        response.put("sourceRef", mapOrEmpty(request.get("sourceRef")));
+        response.put("sourceRef", sourceArtifactRef(request));
         response.put("programId", programId);
         return response;
     }
@@ -933,14 +952,92 @@ public final class BuildTestRunnerService {
         return reference("generated-java-project", "generated-java-project", generatedProject);
     }
 
+    private static Map<String, Object> sourceArtifactRef(Map<String, Object> request) {
+        Map<String, Object> sourceRef = mapOrEmpty(request.get("sourceRef"));
+        if (!sourceRef.isEmpty()) {
+            return sourceRef;
+        }
+        Object envelope = request.get("generationResponse");
+        if (envelope instanceof Map<?, ?> outer) {
+            Map<String, Object> generatedSourceRef = mapOrEmpty(((Map<String, Object>) outer).get("sourceRef"));
+            if (!generatedSourceRef.isEmpty()) {
+                return generatedSourceRef;
+            }
+        }
+        return new LinkedHashMap<>();
+    }
+
     private static Map<String, Object> controlledInputRef(
             Map<String, Object> sourceArtifactRef,
+            Map<String, Object> generatedArtifactRef,
             Map<String, Object> oracleSpec) {
         Map<String, Object> oracleSourceRef = mapOrEmpty(oracleSpec.get("sourceRef"));
         if (!oracleSourceRef.isEmpty()) {
             return oracleSourceRef;
         }
-        return sourceArtifactRef;
+        if (!sourceArtifactRef.isEmpty()) {
+            return sourceArtifactRef;
+        }
+        return generatedArtifactRef;
+    }
+
+    private static Map<String, Object> canonicalBuildResult(Map<String, Object> build) {
+        return selectKeys(build,
+                "schemaVersion",
+                "buildId",
+                "runId",
+                "workflowId",
+                "buildMode",
+                "command",
+                "toolchain",
+                "status",
+                "inputArtifactRef",
+                "buildOutputRef",
+                "logRef",
+                "startedAt",
+                "completedAt",
+                "createdAt",
+                "diagnostics",
+                "summary",
+                "evidenceRefs");
+    }
+
+    private static Map<String, Object> canonicalExecutionResult(Map<String, Object> execution) {
+        return selectKeys(execution,
+                "schemaVersion",
+                "executionId",
+                "runId",
+                "workflowId",
+                "executionSurface",
+                "command",
+                "status",
+                "exitCode",
+                "timedOut",
+                "stdoutRef",
+                "stderrRef",
+                "normalizedOutputRef",
+                "outputRef",
+                "logRef",
+                "sourceArtifactRef",
+                "inputArtifactRef",
+                "generatedArtifactRef",
+                "referenceArtifactRef",
+                "startedAt",
+                "completedAt",
+                "createdAt",
+                "diagnostics",
+                "summary",
+                "evidenceRefs");
+    }
+
+    private static Map<String, Object> selectKeys(Map<String, Object> source, String... keys) {
+        Map<String, Object> selected = new LinkedHashMap<>();
+        for (String key : keys) {
+            if (source.containsKey(key)) {
+                selected.put(key, source.get(key));
+            }
+        }
+        return selected;
     }
 
     private static Map<String, Object> classDirectoryReference(Path classOutputDir) {

@@ -93,8 +93,11 @@ class W0SmokeIntegrationTest {
         request.put("workflowId", "w0-build-test-smoke");
         request.put("programId", programId);
         request.put("generationResponse", generation);
+        request.put("sourceRef", BuildTestRunnerService.outputReference("source-cobol", relativePath));
         request.put("options", Map.of("timeoutMs", CI_SAFE_GNUCOBOL_TIMEOUT_MS));
         Map<String, Object> result = runner.runVerification(request);
+        assertNotNull(result.get("generatedArtifactRef"), "generatedArtifactRef must be present for " + programId);
+        assertNotNull(result.get("inputArtifactRef"), "inputArtifactRef must be present for " + programId);
 
         // Build must succeed: the W0 generator emits compilable Java.
         Map<?, ?> build = (Map<?, ?>) result.get("build");

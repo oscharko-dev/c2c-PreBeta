@@ -347,8 +347,12 @@ components:
             - oracle-invalid-request
         build:
           $ref: "#/components/schemas/GeneratedJavaBuildResult"
+        buildResult:
+          $ref: "#/components/schemas/CanonicalGeneratedJavaBuildResult"
         execution:
           $ref: "#/components/schemas/GeneratedJavaExecutionResult"
+        executionResult:
+          $ref: "#/components/schemas/CanonicalGeneratedJavaExecutionResult"
         tests:
           type: object
         goldenMaster:
@@ -631,6 +635,12 @@ components:
           minimum: 0
         classOutputDir:
           type: string
+    CanonicalGeneratedJavaBuildResult:
+      allOf:
+        - $ref: "#/components/schemas/GeneratedJavaBuildResult"
+      description: >
+        Exact Trust-2 generated-Java build result without the legacy
+        compatibility fields carried in `build`.
     GeneratedJavaExecutionResult:
       type: object
       description: >
@@ -729,6 +739,12 @@ components:
           type: string
         errorMessage:
           type: string
+    CanonicalGeneratedJavaExecutionResult:
+      allOf:
+        - $ref: "#/components/schemas/GeneratedJavaExecutionResult"
+      description: >
+        Exact Trust-2 generated-Java execution result without the legacy
+        compatibility fields carried in `execution`.
     ArtifactReference:
       type: object
       required: [uri, sha256, byteSize]
