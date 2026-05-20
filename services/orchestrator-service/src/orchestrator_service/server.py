@@ -274,11 +274,30 @@ class OrchestratorService:
                         status_code, response_body = service._start_run(payload)
                         self._write_json(status_code, response_body)
                         return
+                    if (
+                        len(parts) == 6
+                        and parts[0] == "v0"
+                        and parts[1] == "runs"
+                        and parts[3] == "manual-compile-repair"
+                    ):
+                        run_id = parts[2]
+                        payload = self._read_json()
+                        if parts[4] == "diagnose" and parts[5] == "request":
+                            self._write_json(200, service._manual_compile_repair_diagnose(run_id, payload))
+                            return
+                        if parts[4] == "apply" and parts[5] == "request":
+                            self._write_json(200, service._manual_compile_repair_apply(run_id, payload))
+                            return
+                        if parts[4] == "reject" and parts[5] == "request":
+                            self._write_json(200, service._manual_compile_repair_reject(run_id, payload))
+                            return
                     self._write_json(404, {"error": "not found"})
                 except json.JSONDecodeError:
                     self._write_json(400, {"error": "invalid JSON body"})
                 except ValueError as exc:
                     self._write_json(400, {"error": str(exc)})
+                except OrchestratorError as exc:
+                    self._write_json(409, {"error": str(exc)})
                 except Exception as exc:
                     service.logger.error("POST handling failed", exc_info=exc)
                     self._write_json(500, {"error": "internal server error"})
@@ -350,6 +369,100 @@ class OrchestratorService:
         if action == "traceability":
             return 200, self._traceability_view(run_id, envelope_base)
         return 404, {"error": "not found"}
+
+    @staticmethod
+    def _request_java_files(payload: Mapping[str, Any]) -> dict[str, str]:
+        raw = payload.get("javaFiles")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("javaFiles must be a non-empty array")
+        files: dict[str, str] = {}
+        for index, entry in enumerate(raw):
+            if not isinstance(entry, Mapping):
+                raise ValueError(f"javaFiles[{index}] must be an object")
+            path = str(entry.get("path") or "").strip()
+            content = entry.get("content")
+            if not path:
+                raise ValueError(f"javaFiles[{index}].path must be a non-empty string")
+            if not isinstance(content, str):
+                raise ValueError(f"javaFiles[{index}].content must be a string")
+            normalized = path.replace("\\", "/").strip().lstrip("/")
+            if not normalized or ".." in PurePosixPath(normalized).parts or not normalized.endswith(".java"):
+                raise ValueError(f"javaFiles[{index}].path must be a safe relative .java path")
+            if normalized in files:
+                raise ValueError(f"javaFiles[{index}].path must be unique")
+            files[normalized] = content
+        return files
+
+    def _manual_compile_repair_diagnose(
+        self,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        java_files = self._request_java_files(payload)
+        entry_file_path = str(payload.get("entryFilePath") or "").strip()
+        if not entry_file_path:
+            entry_file_path = next(iter(sorted(java_files)))
+        if entry_file_path not in java_files:
+            raise ValueError("entryFilePath must reference one of the provided javaFiles")
+        entry_class = str(payload.get("entryClass") or "").strip()
+        manual_overlay_regions = _extract_manual_overlay_regions(payload.get("manualOverlay"))
+        requester = str(payload.get("requester") or self.config.service_name).strip()
+        return self.runner.manual_compile_repair_diagnose(
+            run_id=run_id,
+            requester=requester,
+            java_files=java_files,
+            entry_class=entry_class,
+            entry_file_path=entry_file_path,
+            manual_overlay_regions=manual_overlay_regions,
+        )
+
+    def _manual_compile_repair_apply(
+        self,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        java_files = self._request_java_files(payload)
+        entry_file_path = str(payload.get("entryFilePath") or "").strip()
+        if not entry_file_path:
+            entry_file_path = next(iter(sorted(java_files)))
+        if entry_file_path not in java_files:
+            raise ValueError("entryFilePath must reference one of the provided javaFiles")
+        entry_class = str(payload.get("entryClass") or "").strip()
+        proposal = payload.get("proposal")
+        candidate_project = payload.get("candidateProject")
+        if not isinstance(proposal, Mapping):
+            raise ValueError("proposal must be an object")
+        if not isinstance(candidate_project, Mapping):
+            raise ValueError("candidateProject must be an object")
+        requester = str(payload.get("requester") or self.config.service_name).strip()
+        expected_output = payload.get("expectedOutput")
+        oracle_input = payload.get("oracleInput")
+        return self.runner.manual_compile_repair_apply(
+            run_id=run_id,
+            requester=requester,
+            current_java_files=java_files,
+            entry_class=entry_class,
+            entry_file_path=entry_file_path,
+            proposal=proposal,
+            candidate_project=candidate_project,
+            expected_output=str(expected_output) if isinstance(expected_output, str) else None,
+            oracle_input=str(oracle_input) if isinstance(oracle_input, str) else None,
+        )
+
+    def _manual_compile_repair_reject(
+        self,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        proposal = payload.get("proposal")
+        if not isinstance(proposal, Mapping):
+            raise ValueError("proposal must be an object")
+        requester = str(payload.get("requester") or self.config.service_name).strip()
+        return self.runner.manual_compile_repair_reject(
+            run_id=run_id,
+            requester=requester,
+            proposal=proposal,
+        )
 
     def _artifact_payload(
         self,

@@ -49,7 +49,10 @@ import {
   useJavaEditorActions,
   useRegisterCompileCheckHandler,
 } from "@/stores/javaEditorActions";
-import type { Diagnostic, JavaOriginRegion } from "@/types/api";
+import type {
+  Diagnostic,
+  JavaOriginRegion,
+} from "@/types/api";
 import { useOriginOverlayApi, useOverlay } from "@/lib/editor/originOverlay";
 import { useLineageCoverageApi } from "@/stores/lineageCoverage";
 import {
@@ -82,6 +85,7 @@ import {
   ThreeWayMergeDialog,
   type MergeChoice,
 } from "@/components/diff/ThreeWayMergeDialog";
+import { ManualCompileRepairPanel } from "@/components/generated/ManualCompileRepairPanel";
 // Studio-IDE-7 (#252): synchronized Java + COBOL diff workspace.
 import { DiffWorkspace } from "@/components/diff/DiffWorkspace";
 import { ManualDriftWorkspace } from "@/components/diff/ManualDriftWorkspace";
@@ -171,6 +175,9 @@ export function GeneratedJavaEditorPane() {
     javaDiffHistory,
     cobolDiffHistory,
     recordJavaDiffSnapshot,
+    manualCompileRepair: manualCompileRepairSession,
+    startManualCompileRepairDiagnose,
+    clearManualCompileRepair,
   } = useTransformationRun();
   const { statusFlags: cobolStatusFlags } = useSourceWorkspace();
 
@@ -186,6 +193,8 @@ export function GeneratedJavaEditorPane() {
   // Studio-IDE-7 (#252): Compare Runs overlay open/close state.
   const [showDiffWorkspace, setShowDiffWorkspace] = useState(false);
   const [showManualDriftWorkspace, setShowManualDriftWorkspace] =
+    useState(false);
+  const [showManualCompileRepairPanel, setShowManualCompileRepairPanel] =
     useState(false);
   const [manualDriftFocusLine, setManualDriftFocusLine] = useState<
     number | null
@@ -1232,6 +1241,71 @@ export function GeneratedJavaEditorPane() {
   const performCompileCheckRef = useRef(performCompileCheck);
   performCompileCheckRef.current = performCompileCheck;
 
+  const currentJavaFiles = useCallback(() => {
+    const generatedFilePaths =
+      state.generatedFiles?.files.map((file) => file.path) ?? [];
+    const entries =
+      generatedFilePaths.length > 0
+        ? generatedFilePaths.flatMap((path) => {
+            const entry = javaBuffers[path];
+            return entry ? ([[path, entry]] as Array<[string, typeof entry]>) : [];
+          })
+        : Object.entries(javaBuffers);
+    return entries;
+  }, [javaBuffers, state.generatedFiles]);
+
+  const canAskCodingAgent =
+    state.runId !== null &&
+    selectedFilePath !== null &&
+    (compileCheckDiagnostics.some((d) => d.severity === "error") ||
+      state.buildTest?.classification === "compile-error" ||
+      state.buildTest?.classification === "run-error" ||
+      state.buildTest?.status === "compile-failed" ||
+      state.buildTest?.status === "run-failed");
+
+  const manualCompileRepairPending =
+    manualCompileRepairSession?.status === "loading" ||
+    manualCompileRepairSession?.status === "applying" ||
+    manualCompileRepairSession?.status === "rejecting";
+
+  const diagnoseManualCompileRepair = useCallback(async (): Promise<void> => {
+    if (!state.runId || !selectedFilePath) return;
+    const entries = currentJavaFiles();
+    if (entries.length === 0) return;
+    setShowManualCompileRepairPanel(true);
+    const javaFiles = entries.map(([path, entry]) => ({
+      path,
+      content: entry.content,
+    }));
+    const manualEditOverlays = entries.flatMap(([, entry]) =>
+      entry.manualEditOverlay ? [entry.manualEditOverlay] : [],
+    );
+    const result = await startManualCompileRepairDiagnose({
+      runId: state.runId,
+      javaFiles,
+      ...(state.generated?.entryClass
+        ? { entryClass: state.generated.entryClass }
+        : {}),
+      entryFilePath: selectedFilePath,
+      ...(manualEditOverlays.length === 1
+        ? { manualEditOverlay: manualEditOverlays[0] }
+        : {}),
+      ...(manualEditOverlays.length > 1 ? { manualEditOverlays } : {}),
+    });
+    if (!result.ok) {
+      setFormatNotice({
+        tone: "error",
+        message: `Coding Agent diagnosis unavailable - ${result.message}`,
+      });
+    }
+  }, [
+    currentJavaFiles,
+    selectedFilePath,
+    startManualCompileRepairDiagnose,
+    state.generated,
+    state.runId,
+  ]);
+
   const saveCurrentJavaDraft = useCallback(async (
     requestedFilePath?: string,
     contentOverride?: string,
@@ -1699,6 +1773,18 @@ export function GeneratedJavaEditorPane() {
               {compileCheckPending ? "Compile…" : "Compile Check"}
             </button>
           ) : null}
+          {isJavaEditable && selectedFilePath && canAskCodingAgent ? (
+            <button
+              type="button"
+              onClick={() => void diagnoseManualCompileRepair()}
+              data-testid="java-manual-compile-repair-button"
+              aria-label="Ask Coding Agent to diagnose the compile failure"
+              className="rounded border border-line px-2 py-0.5 text-[10px] font-medium text-text-dim hover:bg-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={manualCompileRepairPending}
+            >
+              {manualCompileRepairPending ? "Diagnosing…" : "Ask Coding Agent"}
+            </button>
+          ) : null}
           {selectedFilePath && state.programId ? (
             <button
               type="button"
@@ -1879,6 +1965,24 @@ export function GeneratedJavaEditorPane() {
             message={verificationNoticeMessage}
             failureCode={productState.failureCode ?? null}
           />
+          {canAskCodingAgent ? (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void diagnoseManualCompileRepair()}
+                data-testid="java-manual-compile-repair-inline-button"
+                className="rounded border border-line px-3 py-1 text-xs font-medium text-text hover:bg-bg-2 disabled:opacity-50"
+                disabled={manualCompileRepairPending}
+              >
+                {manualCompileRepairPending
+                  ? "Diagnosing compile failure…"
+                  : "Ask Coding Agent"}
+              </button>
+              <p className="text-xs text-text-dim">
+                The diagnosis runs through the governed repair workflow and returns a reviewable patch proposal.
+              </p>
+            </div>
+          ) : null}
           {productState.state === "evidence-incomplete" ? (
             <MissingArtifactsPanel
               artifacts={productState.missingArtifacts || []}
@@ -2061,6 +2165,14 @@ export function GeneratedJavaEditorPane() {
           }}
         />
       ) : null}
+
+      <ManualCompileRepairPanel
+        open={showManualCompileRepairPanel}
+        onClose={() => {
+          setShowManualCompileRepairPanel(false);
+          clearManualCompileRepair();
+        }}
+      />
     </div>
   );
 }

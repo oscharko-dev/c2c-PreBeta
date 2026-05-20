@@ -30,6 +30,14 @@ import {
   GenerateResponse,
   VerifyRequest,
   VerifyResponse,
+  ManualCompileRepairApplyRequest,
+  ManualCompileRepairApplyResponse,
+  ManualCompileRepairCandidateProject,
+  ManualCompileRepairDiagnoseRequest,
+  ManualCompileRepairDiagnoseResponse,
+  ManualCompileRepairDiagnosis,
+  ManualCompileRepairProposal,
+  ManualCompileRepairRejectResponse,
 } from "../types/api";
 import { deriveSourceHash } from "../lib/sourceAnalysis";
 import {
@@ -109,6 +117,18 @@ export interface ManualDriftSummary {
   fileCount: number;
   regionCount: number;
   baselineRunIds: string[];
+}
+
+export interface ManualCompileRepairSession {
+  status: "idle" | "loading" | "ready" | "applying" | "rejecting" | "error";
+  runId: string | null;
+  entryFilePath: string | null;
+  entryClass: string | null;
+  diagnosis: ManualCompileRepairDiagnosis | null;
+  proposal: ManualCompileRepairProposal | null;
+  candidateProject: ManualCompileRepairCandidateProject | null;
+  buildTest: ManualCompileRepairApplyResponse["buildTest"] | null;
+  error: string | null;
 }
 
 // Studio-IDE-13 (#255): pending 3-Way Merge state. When non-null, the
@@ -213,6 +233,14 @@ export interface TransformationRunContextValue {
   // Latest VerifyResponse — surfaces the manual-edit summary fields to UI
   // consumers without re-fetching.
   latestVerifyResult: VerifyResponse | null;
+  // Manual compile repair session state for the generated Java pane.
+  manualCompileRepair: ManualCompileRepairSession | null;
+  startManualCompileRepairDiagnose: (
+    request: ManualCompileRepairDiagnoseRequest,
+  ) => Promise<ApiResult<ManualCompileRepairDiagnoseResponse>>;
+  applyManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairApplyResponse>>;
+  rejectManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairRejectResponse>>;
+  clearManualCompileRepair: () => void;
   // ----- Studio-IDE-7 (#252) synchronized-diff history ------------------
   // In-memory, session-scoped accumulator. Keyed by ``sourceKey`` (the
   // active programId; same convention as the BFF / ADR-0007). Java
@@ -274,6 +302,7 @@ export function TransformationRunProvider({
 }) {
   const isMountedRef = useRef(true);
   const activeTransformRequestRef = useRef(0);
+  const activeManualCompileRepairRequestRef = useRef(0);
   const pendingGenerateTelemetryRef =
     useRef<PendingGenerateTelemetry | null>(null);
   const [state, setState] = useState<TransformationRunState>({
@@ -308,6 +337,8 @@ export function TransformationRunProvider({
     useState<JavaMergeReview | null>(null);
   const [latestVerifyResult, setLatestVerifyResult] =
     useState<VerifyResponse | null>(null);
+  const [manualCompileRepair, setManualCompileRepair] =
+    useState<ManualCompileRepairSession | null>(null);
   // Studio-IDE-7 (#252): per-program / per-file diff history. Held as
   // React state (not refs) so consumers re-render when a new snapshot
   // shifts the previous entry — the Compare Runs button needs to flip
@@ -363,6 +394,55 @@ export function TransformationRunProvider({
           return prev;
         }
         return { ...prev, [sourceKey]: next };
+      });
+    },
+    [],
+  );
+
+  const upsertJavaBuffersFromCandidateProject = useCallback(
+    async (
+      candidateProject: ManualCompileRepairCandidateProject,
+      runId: string,
+    ) => {
+      const hashedFiles = await Promise.all(
+        Object.entries(candidateProject.files).map(async ([filePath, content]) => {
+          const hash = await deriveSourceHash(content);
+          return { filePath, content, hash };
+        }),
+      );
+      if (!isMountedRef.current) {
+        return;
+      }
+      setJavaBuffers((prev) => {
+        let next = prev;
+        for (const { filePath, content, hash } of hashedFiles) {
+          const existing = next[filePath];
+          const updated = existing
+            ? {
+                ...existing,
+                content,
+                bufferHash: hash,
+                isDirty: true,
+              }
+            : {
+                content,
+                bufferHash: hash,
+                lastRunInputHash: null,
+                lastRunInputContent: null,
+                displayedArtifactSourceHash: hash,
+                generatorBaselineContent: content,
+                generatorBaselineHash: hash,
+                generatorBaselineRunId: runId,
+                manualEditOverlay: null,
+                isDirty: true,
+                lastSavedAt: null,
+              };
+          if (next === prev) {
+            next = { ...prev };
+          }
+          next[filePath] = updated;
+        }
+        return next;
       });
     },
     [],
@@ -683,6 +763,182 @@ export function TransformationRunProvider({
     setLatestVerifyResult(result.data);
     return result;
   };
+
+  const clearManualCompileRepair = useCallback(() => {
+    setManualCompileRepair(null);
+  }, []);
+
+  const startManualCompileRepairDiagnose = useCallback(
+    async (
+      request: ManualCompileRepairDiagnoseRequest,
+    ): Promise<ApiResult<ManualCompileRepairDiagnoseResponse>> => {
+      const requestId = ++activeManualCompileRepairRequestRef.current;
+      setManualCompileRepair({
+        status: "loading",
+        runId: request.runId,
+        entryFilePath: request.entryFilePath,
+        entryClass: request.entryClass ?? null,
+        diagnosis: null,
+        proposal: null,
+        candidateProject: null,
+        buildTest: null,
+        error: null,
+      });
+      const result = await apiClient.manualCompileRepairDiagnose(request);
+      if (requestId !== activeManualCompileRepairRequestRef.current) {
+        return result;
+      }
+      if (!result.ok) {
+        setManualCompileRepair((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "error",
+                error: result.message,
+              }
+            : prev,
+        );
+        return result;
+      }
+      setManualCompileRepair({
+        status: "ready",
+        runId: result.data.runId,
+        entryFilePath: request.entryFilePath,
+        entryClass: request.entryClass ?? null,
+        diagnosis: result.data.diagnosis,
+        proposal: result.data.proposal,
+        candidateProject: result.data.candidateProject,
+        buildTest: result.data.buildTest,
+        error: null,
+      });
+      return result;
+    },
+    [],
+  );
+
+  const applyManualCompileRepair = useCallback(async (): Promise<
+    ApiResult<ManualCompileRepairApplyResponse>
+  > => {
+    const session = manualCompileRepair;
+    if (
+      !session ||
+      session.status !== "ready" ||
+      !session.proposal ||
+      !session.candidateProject ||
+      !session.runId ||
+      !session.entryFilePath
+    ) {
+      return { ok: false, message: "Manual compile repair is not ready." };
+    }
+    const currentJavaFiles = Object.entries(javaBuffers)
+      .map(([path, entry]) => ({ path, content: entry.content }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    if (currentJavaFiles.length === 0) {
+      return {
+        ok: false,
+        message: "No Java buffers are available for manual compile repair.",
+      };
+    }
+    setManualCompileRepair((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "applying",
+            error: null,
+          }
+        : prev,
+    );
+    const request: ManualCompileRepairApplyRequest = {
+      runId: session.runId,
+      entryFilePath: session.entryFilePath,
+      entryClass: session.entryClass ?? undefined,
+      javaFiles: currentJavaFiles,
+      proposal: session.proposal,
+      candidateProject: session.candidateProject,
+    };
+    const result = await apiClient.manualCompileRepairApply(request);
+    if (!result.ok) {
+      setManualCompileRepair((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "error",
+              error: result.message,
+            }
+          : prev,
+      );
+      return result;
+    }
+    void upsertJavaBuffersFromCandidateProject(
+      result.data.candidateProject,
+      result.data.runId,
+    );
+    setState((prev) => {
+      const nextBuildTest = result.data.buildTest;
+      if (prev.runId === result.data.runId) {
+        return {
+          ...prev,
+          buildTest: nextBuildTest,
+          previousRun:
+            prev.previousRun?.runId === result.data.runId
+              ? {
+                  ...prev.previousRun,
+                  buildTest: nextBuildTest,
+                }
+              : prev.previousRun,
+        };
+      }
+      if (prev.previousRun?.runId === result.data.runId) {
+        return {
+          ...prev,
+          previousRun: {
+            ...prev.previousRun,
+            buildTest: nextBuildTest,
+          },
+        };
+      }
+      return prev;
+    });
+    setLatestVerifyResult(null);
+    setManualCompileRepair(null);
+    return result;
+  }, [javaBuffers, manualCompileRepair, setState, upsertJavaBuffersFromCandidateProject]);
+
+  const rejectManualCompileRepair = useCallback(async (): Promise<
+    ApiResult<ManualCompileRepairRejectResponse>
+  > => {
+    const session = manualCompileRepair;
+    if (!session || !session.proposal || !session.runId) {
+      return { ok: false, message: "Manual compile repair is not ready." };
+    }
+    setManualCompileRepair((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "rejecting",
+            error: null,
+          }
+        : prev,
+    );
+    const result = await apiClient.manualCompileRepairReject({
+      runId: session.runId,
+      proposal: session.proposal,
+    });
+    if (!result.ok) {
+      setManualCompileRepair((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "error",
+              error: result.message,
+            }
+          : prev,
+      );
+      return result;
+    }
+    setManualCompileRepair(null);
+    return result;
+  }, [manualCompileRepair]);
 
   // ----- Studio-IDE-13 3-Way Merge -------------------------------------
 
@@ -1296,6 +1552,11 @@ export function TransformationRunProvider({
         recordJavaDiffSnapshot,
         recordCobolDiffSnapshot,
         latestVerifyResult,
+        manualCompileRepair,
+        startManualCompileRepairDiagnose,
+        applyManualCompileRepair,
+        rejectManualCompileRepair,
+        clearManualCompileRepair,
       }}
     >
       {children}

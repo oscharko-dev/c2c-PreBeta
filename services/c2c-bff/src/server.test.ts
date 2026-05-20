@@ -103,6 +103,11 @@ interface ArtifactStubResponses {
     | UpstreamResponse
     | ((path: string) => UpstreamResponse | undefined);
   buildTest?: UpstreamResponse;
+  manualCompileRepair?: {
+    diagnose?: UpstreamResponse;
+    apply?: UpstreamResponse;
+    reject?: UpstreamResponse;
+  };
   evidence?: UpstreamResponse;
   events?: UpstreamResponse;
   artifacts?: UpstreamResponse;
@@ -143,6 +148,11 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getGeneratedFiles: number;
     getGeneratedFile: Array<{ runId: string; path: string }>;
     getBuildTest: number;
+    manualCompileRepair: {
+      diagnose: Array<{ runId: string; payload: unknown }>;
+      apply: Array<{ runId: string; payload: unknown }>;
+      reject: Array<{ runId: string; payload: unknown }>;
+    };
     getEvidence: number;
     getEvents: number;
     getArtifacts: number;
@@ -179,6 +189,11 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getGeneratedFiles: 0,
     getGeneratedFile: [] as Array<{ runId: string; path: string }>,
     getBuildTest: 0,
+    manualCompileRepair: {
+      diagnose: [] as Array<{ runId: string; payload: unknown }>,
+      apply: [] as Array<{ runId: string; payload: unknown }>,
+      reject: [] as Array<{ runId: string; payload: unknown }>,
+    },
     getEvidence: 0,
     getEvents: 0,
     getArtifacts: 0,
@@ -264,6 +279,18 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     async getBuildTest() {
       calls.getBuildTest += 1;
       return artifactResponses.buildTest;
+    },
+    async diagnoseManualCompileRepair(runId: string, payload: unknown) {
+      calls.manualCompileRepair.diagnose.push({ runId, payload });
+      return artifactResponses.manualCompileRepair?.diagnose;
+    },
+    async applyManualCompileRepair(runId: string, payload: unknown) {
+      calls.manualCompileRepair.apply.push({ runId, payload });
+      return artifactResponses.manualCompileRepair?.apply;
+    },
+    async rejectManualCompileRepair(runId: string, payload: unknown) {
+      calls.manualCompileRepair.reject.push({ runId, payload });
+      return artifactResponses.manualCompileRepair?.reject;
     },
     async getEvidence() {
       calls.getEvidence += 1;
@@ -6747,6 +6774,187 @@ test("POST /api/v0/compile-check returns 503 when build-test-runner returns 5xx"
     assert.equal(
       (response.body as { failureCode: string }).failureCode,
       "service_unavailable",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Studio-IDE-XX (#360): POST /api/v0/manual-compile-repair/*
+// ---------------------------------------------------------------------------
+
+test("POST /api/v0/manual-compile-repair routes forward the Studio requester and preserve the upstream payloads", async () => {
+  const auth = createRouteAuth();
+  const currentJavaFile = {
+    path: "src/main/java/com/c2c/generated/CASE01.java",
+    content: "package com.c2c.generated;\npublic class CASE01 {}\n",
+  };
+  const diagnoseResponse = {
+    schemaVersion: "v0",
+    runId: "run-1",
+    diagnosis: {
+      diagnosisId: "run-1-compile-diagnosis",
+      likelyRootCause: "compile failure in current snapshot",
+    },
+    proposal: {
+      proposalId: "proposal-1",
+      patchSha256: "a".repeat(64),
+      applicationState: "review_pending",
+      approvalState: "pending",
+    },
+    candidateProject: {
+      entryClass: "CASE01",
+      entryFilePath: currentJavaFile.path,
+      files: {
+        [currentJavaFile.path]: currentJavaFile.content,
+      },
+    },
+    buildTest: {
+      status: "failed",
+      reason: "compile_failed",
+    },
+  };
+  const applyResponse = {
+    schemaVersion: "v0",
+    runId: "run-1",
+    proposal: {
+      ...diagnoseResponse.proposal,
+      applicationState: "applied",
+      approvalState: "approved",
+    },
+    candidateProject: diagnoseResponse.candidateProject,
+    buildTest: {
+      status: "ok",
+      outputRef: { uri: "urn:build-output/run-1" },
+    },
+  };
+  const rejectResponse = {
+    schemaVersion: "v0",
+    runId: "run-1",
+    proposal: {
+      ...diagnoseResponse.proposal,
+      applicationState: "rejected",
+      approvalState: "rejected",
+    },
+  };
+  const { client: orch, calls } = stubOrchestrator({
+    manualCompileRepair: {
+      diagnose: { status: 200, body: diagnoseResponse },
+      apply: { status: 200, body: applyResponse },
+      reject: { status: 200, body: rejectResponse },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const diagnose = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
+      auth.post({
+        runId: "run-1",
+        entryClass: "CASE01",
+        entryFilePath: currentJavaFile.path,
+        javaFiles: [currentJavaFile],
+        manualEditOverlays: [
+          {
+            regions: [
+              {
+                filePath: currentJavaFile.path,
+                originClass: "manual_modified",
+                startLine: 1,
+                endLine: 2,
+              },
+            ],
+          },
+          {
+            regions: [
+              {
+                filePath: currentJavaFile.path,
+                originClass: "manual_edit",
+                startLine: 3,
+                endLine: 4,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    assert.equal(diagnose.status, 200);
+    const diagnoseBody = diagnose.body as {
+      schemaVersion: string;
+      proposal: { proposalId: string };
+      candidateProject: {
+        entryClass: string;
+        entryFilePath: string;
+        files: Record<string, string>;
+      };
+    };
+    assert.equal(diagnoseBody.schemaVersion, "v0");
+    assert.equal(calls.manualCompileRepair.diagnose.length, 1);
+    const diagnoseCall = calls.manualCompileRepair.diagnose[0];
+    assert.equal(diagnoseCall?.runId, "run-1");
+    assert.deepEqual(
+      (diagnoseCall?.payload as { manualOverlay: unknown; requester: string }).manualOverlay,
+      {
+        schemaVersion: "v0",
+        regions: [
+          {
+            filePath: currentJavaFile.path,
+            originClass: "manual_modified",
+            startLine: 1,
+            endLine: 2,
+          },
+          {
+            filePath: currentJavaFile.path,
+            originClass: "manual_edit",
+            startLine: 3,
+            endLine: 4,
+          },
+        ],
+      },
+    );
+    assert.equal(
+      (diagnoseCall?.payload as { requester: string }).requester,
+      "studio:tenant-a:user-a",
+    );
+
+    const reject = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/reject`,
+      auth.post({
+        runId: "run-1",
+        proposal: diagnoseBody.proposal,
+      }),
+    );
+    assert.equal(reject.status, 200);
+    assert.equal(calls.manualCompileRepair.reject.length, 1);
+    assert.equal(
+      (calls.manualCompileRepair.reject[0]?.payload as { requester: string }).requester,
+      "studio:tenant-a:user-a",
+    );
+
+    const apply = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/apply`,
+      auth.post({
+        runId: "run-1",
+        entryClass: diagnoseBody.candidateProject.entryClass,
+        entryFilePath: diagnoseBody.candidateProject.entryFilePath,
+        javaFiles: [currentJavaFile],
+        proposal: diagnoseBody.proposal,
+        candidateProject: diagnoseBody.candidateProject,
+      }),
+    );
+    assert.equal(apply.status, 200);
+    assert.equal(calls.manualCompileRepair.apply.length, 1);
+    assert.equal(
+      (calls.manualCompileRepair.apply[0]?.payload as { requester: string }).requester,
+      "studio:tenant-a:user-a",
     );
   } finally {
     await server.close();
