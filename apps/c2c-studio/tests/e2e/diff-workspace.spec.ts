@@ -30,31 +30,33 @@ async function expectReadyWorkbench(page: Page) {
 }
 
 function topBarStartButton(page: Page) {
+  return page.getByRole("button", { name: "Start Transformation" });
+}
+
+function cobolEditorSurface(page: Page) {
   return page
-    .getByLabel("Workbench Top Bar")
-    .getByRole("button", { name: "Start Transformation" });
+    .getByTestId("code-editor-standalone")
+    .filter({ has: page.getByLabel(COBOL_EDITOR_LABEL) })
+    .locator(".monaco-editor")
+    .first();
 }
 
 async function enterCobolSource(page: Page, content: string) {
   await page.getByRole("button", { name: "Start Typing" }).click();
-  const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-  await editor.fill(content);
-  await expect(
-    page
-      .locator(".view-line")
-      .filter({ hasText: /PROGRAM-ID\. BRNCH01\./ })
-      .first(),
-  ).toBeVisible();
+  const editor = cobolEditorSurface(page);
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
+  await page.keyboard.insertText(content);
 }
 
 async function replaceCobolSource(page: Page, content: string) {
-  const editor = page.getByRole("textbox", { name: COBOL_EDITOR_LABEL });
-  await editor.focus();
+  const editor = cobolEditorSurface(page);
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
   // Select all + replace. Cmd+A on macOS, Ctrl+A elsewhere — Monaco honors
   // both. We use ControlOrMeta which Playwright maps platform-appropriately.
   await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.press("Delete");
-  await editor.fill(content);
+  await page.keyboard.insertText(content);
 }
 
 async function waitForJsonResponse(
