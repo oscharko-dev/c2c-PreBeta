@@ -141,11 +141,40 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
                 ]
             )
 
+    def test_unsafe_file_path_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "safe relative Java path"):
+            _extract_manual_overlay_regions(
+                [
+                    _manual_region(filePath="../secrets.txt"),
+                ]
+            )
+
+    def test_non_java_file_path_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"\.java"):
+            _extract_manual_overlay_regions(
+                [
+                    _manual_region(filePath="src/main/resources/config.yaml"),
+                ]
+            )
+
     def test_missing_common_provenance_rejected(self) -> None:
         region = _manual_region()
         del region["lastModifiedBy"]
         with self.assertRaisesRegex(ValueError, "lastModifiedBy"):
             _extract_manual_overlay_regions([region])
+
+    def test_email_like_actor_ids_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "userId"):
+            _extract_manual_overlay_regions(
+                [
+                    _manual_region(
+                        lastModifiedBy={
+                            "userId": "alice@example.com",
+                            "tenantId": "tenant-A",
+                        }
+                    ),
+                ]
+            )
 
     def test_manual_modified_missing_region_hash_rejected(self) -> None:
         region = _manual_region()

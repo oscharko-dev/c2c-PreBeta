@@ -18,6 +18,7 @@ import {
   getBuildTestMetadataItems,
   getBuildTestReferenceSummary,
   getPipelineStages,
+  describeManualDriftSummary,
 } from "./runPanelUtils";
 
 export function BuildTestPanel({
@@ -25,7 +26,15 @@ export function BuildTestPanel({
 }: {
   emptyState: { title: string; message: string };
 }) {
-  const { state } = useTransformationRun();
+  const {
+    state,
+    manualDriftSummary = () => ({
+      hasManualEdits: false,
+      fileCount: 0,
+      regionCount: 0,
+      baselineRunIds: [],
+    }),
+  } = useTransformationRun();
   const { statusFlags } = useSourceWorkspace();
   const [activeView, setActiveView] = useState<"outputs" | "diff">("outputs");
 
@@ -51,6 +60,8 @@ export function BuildTestPanel({
   const isPending =
     !bt &&
     (state.phase === "running" || state.phase === "starting");
+  const manualDrift = manualDriftSummary();
+  const manualDriftMessage = describeManualDriftSummary(manualDrift);
   const stages = getPipelineStages(bt, isPending, state.progress);
   const result = describeBuildTestResult(bt);
   const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
@@ -81,12 +92,16 @@ export function BuildTestPanel({
           </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col border-l border-line-2 pl-8 pr-2">
-          {statusFlags.pendingReRun || showingHistoricalBuildTest ? (
+          {statusFlags.pendingReRun ||
+          showingHistoricalBuildTest ||
+          manualDriftMessage ? (
             <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
               {showingHistoricalBuildTest
                 ? state.phase === "failed"
                   ? "Latest rerun failed. Showing the previous parity results as stale so the last completed comparison remains accessible."
                   : "Showing the previous parity results while the latest rerun is in progress. These results are stale until the rerun completes."
+                : manualDriftMessage
+                  ? manualDriftMessage
                 : "COBOL source changed after the last completed parity run. These parity results are stale until you rerun."}
             </div>
           ) : null}
@@ -101,6 +116,11 @@ export function BuildTestPanel({
                   {result.label}
                 </p>
                 <p className="mt-1 text-sm text-text-dim">{result.detail}</p>
+                {manualDriftMessage ? (
+                  <p className="mt-3 text-xs text-orange">
+                    {manualDriftMessage}
+                  </p>
+                ) : null}
               </div>
             </div>
             {artifactRefs.length > 0 ? (

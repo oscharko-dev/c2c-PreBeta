@@ -104,6 +104,13 @@ export interface JavaStatusFlags {
   manualEditsPresent: boolean;
 }
 
+export interface ManualDriftSummary {
+  hasManualEdits: boolean;
+  fileCount: number;
+  regionCount: number;
+  baselineRunIds: string[];
+}
+
 // Studio-IDE-13 (#255): pending 3-Way Merge state. When non-null, the
 // GeneratedJavaEditorPane mounts the ThreeWayMergeDialog and the user
 // resolves it through ``applyMergeSelectionsAction`` or
@@ -182,6 +189,7 @@ export interface TransformationRunContextValue {
   ) => void;
   dismissJavaConflict: () => void;
   javaStatusFlags: (filePath: string) => JavaStatusFlags;
+  manualDriftSummary: () => ManualDriftSummary;
   // ----- Studio-IDE-13 3-Way Merge state -------------------------------
   // Pending merge review (when non-null, the dialog is open).
   javaMergeReview: JavaMergeReview | null;
@@ -1232,6 +1240,32 @@ export function TransformationRunProvider({
     [javaBuffers],
   );
 
+  const manualDriftSummary = useCallback((): ManualDriftSummary => {
+    const driftEntries = Object.values(javaBuffers).filter(
+      (entry) =>
+        entry.generatorBaselineHash.length > 0 &&
+        entry.bufferHash !== entry.generatorBaselineHash,
+    );
+    const baselineRunIds = Array.from(
+      new Set(driftEntries.map((entry) => entry.generatorBaselineRunId)),
+    ).sort();
+    const regionCount = driftEntries.reduce((count, entry) => {
+      const manualRegions =
+        entry.manualEditOverlay?.regions.filter(
+          (region) =>
+            region.originClass === "manual_modified" ||
+            region.originClass === "manual_edit",
+        ).length ?? 0;
+      return count + manualRegions;
+    }, 0);
+    return {
+      hasManualEdits: driftEntries.length > 0,
+      fileCount: driftEntries.length,
+      regionCount,
+      baselineRunIds,
+    };
+  }, [javaBuffers]);
+
   return (
     <TransformationRunContext.Provider
       value={{
@@ -1252,6 +1286,7 @@ export function TransformationRunProvider({
         resolveJavaConflict,
         dismissJavaConflict,
         javaStatusFlags,
+        manualDriftSummary,
         javaMergeReview,
         requestJavaMergeReview,
         applyJavaMergeSelections,

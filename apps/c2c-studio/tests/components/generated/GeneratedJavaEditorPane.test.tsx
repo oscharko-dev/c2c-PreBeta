@@ -305,6 +305,12 @@ const javaStatusFlagsSpy = vi.fn().mockReturnValue({
   staleJava: false,
   manualEditsPresent: false,
 });
+const manualDriftSummarySpy = vi.fn().mockReturnValue({
+  hasManualEdits: false,
+  fileCount: 0,
+  regionCount: 0,
+  baselineRunIds: [],
+});
 const javaBuffersSpy = vi.fn().mockReturnValue({});
 const javaDiffHistorySpy = vi.fn().mockReturnValue({});
 const cobolDiffHistorySpy = vi.fn().mockReturnValue({});
@@ -331,6 +337,7 @@ vi.mock("@/stores/transformationRun", async (importOriginal) => {
         resolveJavaConflict: vi.fn(),
         dismissJavaConflict: vi.fn(),
         javaStatusFlags: javaStatusFlagsSpy,
+        manualDriftSummary: manualDriftSummarySpy,
         javaMergeReview: null,
         requestJavaMergeReview: requestJavaMergeReviewSpy,
         applyJavaMergeSelections: vi.fn(),
@@ -527,6 +534,13 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     setJavaManualOverlaySpy.mockClear();
     recordJavaDiffSnapshotSpy.mockClear();
     requestJavaMergeReviewSpy.mockClear();
+    manualDriftSummarySpy.mockReset();
+    manualDriftSummarySpy.mockReturnValue({
+      hasManualEdits: false,
+      fileCount: 0,
+      regionCount: 0,
+      baselineRunIds: [],
+    });
     javaBuffersSpy.mockReset();
     javaBuffersSpy.mockReturnValue({});
     javaDiffHistorySpy.mockReset();
@@ -1114,6 +1128,50 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     // Stale wins over AI-Assisted even when both signals are present.
     expect(badge).toHaveAttribute("data-run-mode", "stale");
     expect(badge.textContent).toMatch(/Stale/);
+  });
+
+  it("announces stale Java when the current buffer differs from the generated baseline", async () => {
+    manualDriftSummarySpy.mockReturnValue({
+      hasManualEdits: true,
+      fileCount: 1,
+      regionCount: 1,
+      baselineRunIds: ["run-123"],
+    });
+    javaStatusFlagsSpy.mockReturnValue({
+      clean: false,
+      pendingReRun: false,
+      staleJava: false,
+      manualEditsPresent: true,
+    });
+    javaBuffersSpy.mockReturnValue({
+      "src/App.java": {
+        content: "public class App { int localEdit; }",
+        bufferHash: "buffer-hash",
+        lastRunInputHash: "last-run-hash",
+        lastRunInputContent: "public class App {}",
+        displayedArtifactSourceHash: "last-run-hash",
+        generatorBaselineContent: "public class App {}",
+        generatorBaselineHash: "baseline-hash",
+        generatorBaselineRunId: "run-123",
+        manualEditOverlay: null,
+        isDirty: true,
+        lastSavedAt: null,
+      },
+    });
+    mockTransformationState.mockReturnValue(completedRunWith(["src/App.java"]));
+    mockGeneratedFileContents({ "src/App.java": "public class App {}" });
+
+    renderPane();
+
+    const badge = await screen.findByTestId("java-run-mode-badge");
+    expect(badge).toHaveAttribute("data-run-mode", "stale");
+    expect(
+      screen.getByTestId("manual-drift-stale-banner"),
+    ).toHaveTextContent(
+      "Current Java differs from Generator Baseline run run-123",
+    );
+    expect(screen.getByTestId("java-status-chips")).toBeInTheDocument();
+    expect(screen.getByTestId("java-status-chip-manual-edits")).toBeInTheDocument();
   });
 
   it("renders a short SHA-256 chip from the selected file ref", async () => {
