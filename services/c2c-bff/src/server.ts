@@ -1162,6 +1162,22 @@ function deriveCompileStatus(
   if (build && typeof build.compileOk === "boolean") {
     return build.compileOk ? "ok" : "failed";
   }
+  if (build) {
+    const buildStatus = asString(build.status).toLowerCase();
+    if (buildStatus === "ok" || buildStatus === "success" || buildStatus === "passed") {
+      return "ok";
+    }
+    if (
+      buildStatus === "failed" ||
+      buildStatus === "failure" ||
+      buildStatus === "error"
+    ) {
+      return "failed";
+    }
+    if (buildStatus === "skipped") {
+      return "skipped";
+    }
+  }
   if (status === "compile-failed") return "failed";
   if (status === "skipped") return "skipped";
   return "unknown";
@@ -1178,6 +1194,27 @@ function deriveExecutionStatus(
     }
     if (typeof execution.ok === "boolean")
       return execution.ok ? "ok" : "failed";
+    const executionStatus = asString(execution.status).toLowerCase();
+    if (
+      executionStatus === "ok" ||
+      executionStatus === "success" ||
+      executionStatus === "passed"
+    ) {
+      return "ok";
+    }
+    if (
+      executionStatus === "failed" ||
+      executionStatus === "failure" ||
+      executionStatus === "error"
+    ) {
+      return "failed";
+    }
+    if (executionStatus === "skipped") return "skipped";
+    if (executionStatus === "not-run") return "not-run";
+    const exitCode = execution.exitCode;
+    if (typeof exitCode === "number" && Number.isFinite(exitCode)) {
+      return exitCode === 0 ? "ok" : "failed";
+    }
   }
   if (status === "run-failed") return "failed";
   if (status === "skipped") return "skipped";
@@ -1189,8 +1226,12 @@ function deriveActualOutput(data: Record<string, unknown> | undefined): string {
   if (!data) return "";
   if (typeof data.actualOutput === "string") return data.actualOutput;
   const execution = asRecord(data.execution);
+  if (execution && typeof execution.actualOutput === "string")
+    return execution.actualOutput;
   if (execution && typeof execution.stdout === "string")
     return execution.stdout;
+  if (execution && typeof execution.output === "string")
+    return execution.output;
   return "";
 }
 
@@ -1200,11 +1241,18 @@ function deriveExpectedOutput(
 ): string {
   if (!data) return fallback;
   if (typeof data.expectedOutput === "string") return data.expectedOutput;
+  const execution = asRecord(data.execution);
+  if (execution && typeof execution.expectedOutput === "string")
+    return execution.expectedOutput;
   const golden = asRecord(data.goldenMaster);
   if (golden && typeof golden.expected === "string") return golden.expected;
+  if (golden && typeof golden.expectedOutput === "string")
+    return golden.expectedOutput;
   const comparison = asRecord(data.comparison);
   if (comparison && typeof comparison.expected === "string")
     return comparison.expected;
+  if (comparison && typeof comparison.expectedOutput === "string")
+    return comparison.expectedOutput;
   return fallback;
 }
 

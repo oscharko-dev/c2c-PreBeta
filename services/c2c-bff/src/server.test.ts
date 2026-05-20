@@ -1998,6 +1998,97 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
   }
 });
 
+test("live build-test accepts Trust-2 shared build and execution fields", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const buildResult = {
+    status: "ok",
+    classification: "match",
+    build: { status: "ok", sourceCount: 1, diagnostics: [] },
+    execution: {
+      exitCode: 0,
+      actualOutput: "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+      expectedOutput: "APPROVED-COUNT=2\nREJECTED-COUNT=2\n",
+      stderr: "",
+      durationMs: 12,
+    },
+    goldenMaster: null,
+    comparison: {
+      matched: true,
+      expectedRef: {
+        uri: "urn:build-test/expected",
+        sha256: "e".repeat(64),
+        byteSize: 36,
+        kind: "cobol-oracle-stdout",
+      },
+      actualRef: {
+        uri: "urn:build-test/actual",
+        sha256: "a".repeat(64),
+        byteSize: 36,
+        kind: "java-stdout",
+      },
+    },
+    diagnostics: [],
+    outputRef: {
+      uri: "file:///run/build-test-result.json",
+      sha256: "c".repeat(64),
+      byteSize: 256,
+    },
+    programId: "CASE01",
+  };
+  const { client: orch } = stubOrchestrator({
+    buildTest: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
+        missingArtifacts: [],
+        kind: "build-test-result",
+        data: buildResult,
+        artifactRef: {
+          uri: "file:///run/build-test-result.json",
+          sha256: "c".repeat(64),
+          byteSize: 256,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+    );
+    assert.equal(buildTest.status, 200);
+    const body = buildTest.body as {
+      compileStatus: string;
+      executionStatus: string;
+      expectedOutput: string;
+      actualOutput: string;
+    };
+    assert.equal(body.compileStatus, "ok");
+    assert.equal(body.executionStatus, "ok");
+    assert.match(body.actualOutput, /APPROVED-COUNT=2/);
+    assert.match(body.expectedOutput, /APPROVED-COUNT=2/);
+  } finally {
+    await server.close();
+  }
+});
+
 test("live build-test surfaces compile failure as compileStatus=failed and executionStatus=not-run", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();

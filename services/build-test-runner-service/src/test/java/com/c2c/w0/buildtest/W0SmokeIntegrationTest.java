@@ -100,6 +100,9 @@ class W0SmokeIntegrationTest {
         Map<?, ?> build = (Map<?, ?>) result.get("build");
         assertEquals(true, build.get("compileOk"),
                 "compile failed for " + programId + ": " + build.get("diagnostics"));
+        assertNotNull(build.get("buildOutputRef"));
+        assertNotNull(build.get("logRef"));
+        assertNotNull(build.get("evidenceRefs"));
 
         Map<?, ?> golden = (Map<?, ?>) result.get("goldenMaster");
         assertNotNull(golden, "goldenMaster section must be present for " + programId);
@@ -130,6 +133,10 @@ class W0SmokeIntegrationTest {
         assertEquals(true, execution.get("ran"),
                 "generated program should execute for " + programId);
         assertNotNull(execution.get("stdoutSha256"));
+        assertNotNull(execution.get("stdoutRef"));
+        assertNotNull(execution.get("stderrRef"));
+        assertNotNull(execution.get("normalizedOutputRef"));
+        assertNotNull(execution.get("logRef"));
 
         return result;
     }
