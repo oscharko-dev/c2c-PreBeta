@@ -179,6 +179,15 @@ Both fields are optional on the wire (per the additive-only rule in
 that sees them absent treats them as `false` / `0` respectively, which
 matches the pre-ADR-0007 run shape.
 
+Studio may compute local drift against the cached Generator Baseline
+before a rerun is submitted. In that state the current Java buffer is
+treated as **stale relative to the last verified artifact**, and the
+Build/Test + Evidence views must communicate that the displayed parity
+results still belong to the previous generated artifact until Verify
+re-enters the Orchestrator. Persisted evidence remains immutable; only a
+new run may stamp updated `manualEditsCarriedOver` /
+`manualDriftRegionCount` fields or a new `manualEditOverlay` artifact.
+
 ### 5. Assist-interaction rule
 
 A region with `originClass` `manual_modified` or `manual_edit` gates

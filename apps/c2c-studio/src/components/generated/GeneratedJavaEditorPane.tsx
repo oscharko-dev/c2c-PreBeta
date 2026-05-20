@@ -158,6 +158,12 @@ export function GeneratedJavaEditorPane() {
     resolveJavaConflict,
     dismissJavaConflict,
     javaStatusFlags,
+    manualDriftSummary = () => ({
+      hasManualEdits: false,
+      fileCount: 0,
+      regionCount: 0,
+      baselineRunIds: [],
+    }),
     javaMergeReview,
     requestJavaMergeReview,
     applyJavaMergeSelections,
@@ -474,8 +480,14 @@ export function GeneratedJavaEditorPane() {
         staleJava: false,
         manualEditsPresent: false,
       };
+  const driftSummary = manualDriftSummary();
+  const hasManualJavaDrift = driftSummary.hasManualEdits;
   const staleFromCobolEdit = cobolStatusFlags.pendingReRun;
-  const staleResultVisible = flags.staleJava || staleFromCobolEdit || showingHistoricalArtifacts;
+  const staleResultVisible =
+    flags.staleJava ||
+    staleFromCobolEdit ||
+    showingHistoricalArtifacts ||
+    hasManualJavaDrift;
   const javaBufferEntry = selectedFilePath
     ? javaBuffers[selectedFilePath]
     : undefined;
@@ -1612,6 +1624,12 @@ export function GeneratedJavaEditorPane() {
                   : productState.message;
 
   const fileSha = selectedFileRef?.sha256 ?? null;
+  const selectedBaselineRunId = javaBufferEntry?.generatorBaselineRunId ?? null;
+  const selectedBaselineSha = javaBufferEntry?.generatorBaselineHash ?? null;
+  const currentBufferSha = javaBufferEntry?.bufferHash ?? null;
+  const selectedFileHasManualDrift = Boolean(
+    selectedFilePath && flags.manualEditsPresent,
+  );
 
   return (
     <div
@@ -1729,10 +1747,23 @@ export function GeneratedJavaEditorPane() {
             </div>
           ) : null}
           {selectedFilePath ? <RunModeBadge mode={runMode} /> : null}
+          {selectedBaselineRunId ? (
+            <span
+              data-testid="java-baseline-run-chip"
+              title={
+                selectedBaselineSha
+                  ? `Generator Baseline run ${selectedBaselineRunId} · artifact hash ${selectedBaselineSha}`
+                  : `Generator Baseline run ${selectedBaselineRunId}`
+              }
+              className="inline-flex items-center rounded bg-bg-2 px-2 py-0.5 text-[10px] font-mono text-text-dim border border-line"
+            >
+              baseline {selectedBaselineRunId.slice(0, SHA_CHIP_LENGTH)}
+            </span>
+          ) : null}
           {fileSha ? (
             <span
               data-testid="java-file-sha-chip"
-              title={`File SHA-256 ${fileSha}`}
+              title={`Generated file SHA-256 ${fileSha}`}
               className="inline-flex items-center rounded bg-bg-2 px-2 py-0.5 text-[10px] font-mono text-text-dim border border-line"
             >
               sha {fileSha.slice(0, SHA_CHIP_LENGTH)}
@@ -1802,6 +1833,25 @@ export function GeneratedJavaEditorPane() {
               ? "Latest rerun failed. Showing the previous generated Java as stale so the last completed result remains accessible."
               : "Showing the previous generated Java while the latest rerun is in progress. This content is stale until the rerun completes."
             : "COBOL source changed after the last completed parity run. Generated Java is stale until you rerun."}
+        </div>
+      ) : null}
+
+      {hasManualJavaDrift ? (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="manual-drift-stale-banner"
+          className="border-b border-orange/20 bg-orange-soft px-4 py-2 text-xs text-orange"
+        >
+          {selectedFileHasManualDrift && selectedBaselineRunId
+            ? `Current Java differs from Generator Baseline run ${selectedBaselineRunId.slice(0, 8)}`
+            : `Current Java differs from the Generator Baseline in ${driftSummary.fileCount} ${driftSummary.fileCount === 1 ? "file" : "files"}`}
+          {selectedFileHasManualDrift &&
+          selectedBaselineSha &&
+          currentBufferSha
+            ? ` (baseline ${selectedBaselineSha.slice(0, SHA_CHIP_LENGTH)} -> current ${currentBufferSha.slice(0, SHA_CHIP_LENGTH)}).`
+            : "."}{" "}
+          Parity results and evidence remain anchored to the last verified generated artifact until you rerun Verify.
         </div>
       ) : null}
 

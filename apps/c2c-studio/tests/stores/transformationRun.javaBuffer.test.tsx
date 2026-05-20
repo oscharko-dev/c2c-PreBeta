@@ -229,6 +229,59 @@ describe("transformationRun: Java buffer lifecycle (current behavior)", () => {
     });
   });
 
+  it("tracks manual edits independently across multiple Java buffers and clears only the reverted file", async () => {
+    const { result } = renderHook(() => useTransformationRun(), { wrapper });
+
+    await act(async () => {
+      await result.current.ensureJavaBaseline(
+        "src/App.java",
+        "public class App {}",
+        "run-1",
+      );
+      await result.current.ensureJavaBaseline(
+        "src/Helper.java",
+        "public class Helper {}",
+        "run-1",
+      );
+    });
+
+    act(() => {
+      result.current.setJavaBufferContent(
+        "src/App.java",
+        "public class App { int appEdit; }",
+      );
+      result.current.setJavaBufferContent(
+        "src/Helper.java",
+        "public class Helper { int helperEdit; }",
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        result.current.javaStatusFlags("src/App.java").manualEditsPresent,
+      ).toBe(true);
+      expect(
+        result.current.javaStatusFlags("src/Helper.java").manualEditsPresent,
+      ).toBe(true);
+    });
+
+    act(() => {
+      result.current.setJavaBufferContent(
+        "src/App.java",
+        "public class App {}",
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        result.current.javaStatusFlags("src/App.java").manualEditsPresent,
+      ).toBe(false);
+      expect(
+        result.current.javaStatusFlags("src/Helper.java").manualEditsPresent,
+      ).toBe(true);
+    });
+  });
+
   it("javaStatusFlags returns false for all flags when the file path has no entry", () => {
     const { result } = renderHook(() => useTransformationRun(), { wrapper });
     const flags = result.current.javaStatusFlags("unknown.java");

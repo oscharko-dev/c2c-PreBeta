@@ -202,6 +202,34 @@ describe('Run Panels', () => {
       expect(screen.getByText('Skipped: Step skipped by workflow policy.')).toBeDefined();
     });
 
+    it('marks parity results stale when the source workspace has pending re-run state', () => {
+      useSourceWorkspaceMock.mockReturnValue({
+        statusFlags: {
+          clean: false,
+          pendingReRun: true,
+        },
+      });
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          buildTest: {
+            status: 'ok',
+            classification: 'match',
+            expectedOutput: 'OK',
+            actualOutput: 'OK',
+          },
+        },
+      });
+
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(
+        screen.getByText(
+          'COBOL source changed after the last completed parity run. These parity results are stale until you rerun.',
+        ),
+      ).toBeDefined();
+    });
+
     it('renders compile failure stages and failure note', () => {
       useTransformationRunMock.mockReturnValue({
         state: {
@@ -372,6 +400,36 @@ describe('Run Panels', () => {
       expect(
         screen.getByText('COBOL source changed after the last completed parity run. The current evidence pack is stale until you rerun.'),
       ).toBeDefined();
+    });
+
+    it('marks current evidence stale when Java buffers diverge from the generator baseline', () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          evidence: {
+            status: 'complete',
+            packId: 'pack-drift',
+            manifestHash: 'manifest-drift',
+            generatedArtifactRef: {
+              sha256: 'abc123',
+            },
+          },
+        },
+        manualDriftSummary: () => ({
+          hasManualEdits: true,
+          fileCount: 2,
+          regionCount: 3,
+          baselineRunIds: ['run-123'],
+        }),
+      });
+
+      render(<EvidencePackPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(
+        screen.getAllByText(
+          'Current Java diverges from run run-123. 2 files and 3 regions carry manual edit provenance, so build/test and evidence are stale until you rerun.',
+        ).length,
+      ).toBeGreaterThan(0);
     });
 
     it('keeps previous evidence accessible when the latest rerun fails', () => {

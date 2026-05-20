@@ -4,6 +4,7 @@ import {
   RunProgressStep,
   RunProgressView,
 } from '@/types/api';
+import type { ManualDriftSummary } from '@/stores/transformationRun';
 import { TransformationRunState } from '@/types/run';
 import { StatusVariant, mapBuildTestClassificationToVariant } from '@/types/design';
 
@@ -445,6 +446,25 @@ export function buildArtifactAlignment(state: TransformationRunState): ArtifactA
     expectedSha: aligned ? distinctShas[0] : null,
     distinctShas,
   };
+}
+
+export function describeManualDriftSummary(summary: ManualDriftSummary | null): string | null {
+  if (!summary || !summary.hasManualEdits) {
+    return null;
+  }
+
+  const baselineRunIds = summary.baselineRunIds.slice(0, 3);
+  const hasMoreBaselineRuns = summary.baselineRunIds.length > baselineRunIds.length;
+  const runLabel =
+    baselineRunIds.length === 1
+      ? `run ${baselineRunIds[0]}`
+      : baselineRunIds.length > 1
+        ? `runs ${baselineRunIds.join(', ')}${hasMoreBaselineRuns ? ', …' : ''}`
+        : 'the Generator Baseline';
+  const fileLabel = summary.fileCount === 1 ? 'file' : 'files';
+  const regionLabel = summary.regionCount === 1 ? 'region' : 'regions';
+
+  return `Current Java diverges from ${runLabel}. ${summary.fileCount} ${fileLabel} and ${summary.regionCount} ${regionLabel} carry manual edit provenance, so build/test and evidence are stale until you rerun.`;
 }
 
 export function describeClassification(classification?: BuildTestView['classification']): string {

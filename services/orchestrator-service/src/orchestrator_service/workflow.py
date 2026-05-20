@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -149,6 +150,33 @@ def _required_manual_overlay_string(value: Any, field: str) -> str:
     return value.strip()
 
 
+_SAFE_MANUAL_OVERLAY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._\-]{1,128}$")
+
+
+def _required_manual_overlay_safe_id(value: Any, field: str) -> str:
+    text = _required_manual_overlay_string(value, field)
+    if not _SAFE_MANUAL_OVERLAY_ID_PATTERN.fullmatch(text):
+        raise OrchestratorError(
+            f"{field} must match ^[A-Za-z0-9._-]{{1,128}}$"
+        )
+    return text
+
+
+def _required_manual_overlay_file_path(value: Any, field: str) -> str:
+    text = _required_manual_overlay_string(value, field)
+    if "\x00" in text:
+        raise OrchestratorError(f"{field} must be a safe relative Java path")
+    normalized = text.replace("\\", "/").strip().lstrip("/")
+    if not normalized:
+        raise OrchestratorError(f"{field} must be a safe relative Java path")
+    parts = PurePosixPath(normalized).parts
+    if any(segment in ("", ".", "..") for segment in parts):
+        raise OrchestratorError(f"{field} must be a safe relative Java path")
+    if not normalized.endswith(".java"):
+        raise OrchestratorError(f"{field} must point at a .java file")
+    return "/".join(parts)
+
+
 def _required_manual_overlay_timestamp(value: Any, field: str) -> str:
     text = _required_manual_overlay_string(value, field)
     if "T" not in text:
@@ -174,10 +202,10 @@ def _required_manual_overlay_author(value: Any, field: str) -> JsonObject:
     if not isinstance(value, Mapping):
         raise OrchestratorError(f"{field} must be an object")
     return {
-        "userId": _required_manual_overlay_string(
+        "userId": _required_manual_overlay_safe_id(
             value.get("userId"), f"{field}.userId"
         ),
-        "tenantId": _required_manual_overlay_string(
+        "tenantId": _required_manual_overlay_safe_id(
             value.get("tenantId"), f"{field}.tenantId"
         ),
     }
@@ -214,7 +242,7 @@ def normalise_manual_edit_overlay_region(
     regions before writing ``manual-edit-overlay.json``.
     """
     file_path_value = raw.get("filePath") or default_file_path
-    file_path = _required_manual_overlay_string(
+    file_path = _required_manual_overlay_file_path(
         file_path_value,
         _manual_overlay_field(field_prefix, index, "filePath"),
     )

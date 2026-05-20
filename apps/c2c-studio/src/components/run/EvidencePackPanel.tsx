@@ -2,11 +2,24 @@
 import { useTransformationRun } from '../../stores/transformationRun';
 import { useSourceWorkspace } from '../../stores/sourceWorkspace';
 import { StatusChip } from '../ui/StatusChip';
-import { buildArtifactAlignment } from './runPanelUtils';
+import {
+  buildArtifactAlignment,
+  describeManualDriftSummary,
+} from './runPanelUtils';
 
 export function EvidencePackPanel({ emptyState }: { emptyState: { title: string; message: string } }) {
-  const { state } = useTransformationRun();
+  const {
+    state,
+    manualDriftSummary = () => ({
+      hasManualEdits: false,
+      fileCount: 0,
+      regionCount: 0,
+      baselineRunIds: [],
+    }),
+  } = useTransformationRun();
   const { statusFlags } = useSourceWorkspace();
+  const manualDrift = manualDriftSummary();
+  const manualDriftMessage = describeManualDriftSummary(manualDrift);
 
   if (state.phase === 'idle' || state.phase === 'starting' || state.phase === 'running') {
     if (state.phase === 'idle') {
@@ -54,12 +67,14 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
   
   return (
     <div className="p-4 h-full flex flex-col text-sm bg-bg-0">
-      {statusFlags.pendingReRun || showingHistoricalEvidence ? (
+      {statusFlags.pendingReRun || showingHistoricalEvidence || manualDriftMessage ? (
         <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
           {showingHistoricalEvidence
             ? state.phase === 'failed'
               ? 'Latest rerun failed. Showing the previous evidence pack as stale so the last completed evidence remains accessible.'
               : 'Showing the previous evidence pack while the latest rerun is in progress. This evidence is stale until the rerun completes.'
+            : manualDriftMessage
+              ? manualDriftMessage
             : 'COBOL source changed after the last completed parity run. The current evidence pack is stale until you rerun.'}
         </div>
       ) : null}
@@ -97,6 +112,11 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
                 ? 'Displayed Java, build/test, and evidence all reference the same generated artifact.'
                 : 'Artifact references are not aligned across generated Java, build/test, and evidence.'}
             </div>
+            {manualDriftMessage ? (
+              <div className="mb-3 rounded border border-orange/20 bg-orange-soft px-3 py-2 text-xs text-orange">
+                {manualDriftMessage}
+              </div>
+            ) : null}
             <div className="space-y-3 font-mono text-xs">
               {alignment.entries.map((entry) => (
                 <div key={entry.label} className="rounded border border-line-2 p-3">
