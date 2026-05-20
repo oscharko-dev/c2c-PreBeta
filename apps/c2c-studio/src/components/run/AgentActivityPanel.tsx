@@ -25,8 +25,14 @@ import type {
   WorkflowArtifactRef,
 } from "../../types/api";
 
+const UNLIMITED_AI_BUDGET = 2_147_483_647;
+
 interface AgentActivityPanelProps {
   emptyState: { title: string; message: string };
+}
+
+function isUnlimitedBudget(limit: number): boolean {
+  return limit >= UNLIMITED_AI_BUDGET;
 }
 
 export function AgentActivityPanel({ emptyState }: AgentActivityPanelProps) {
@@ -313,6 +319,9 @@ function RepairBudgetRow({ budget }: { budget: RepairBudget | null }) {
       </div>
     );
   }
+  if (isUnlimitedBudget(budget.limit)) {
+    return null;
+  }
 
   const exhausted = budget.remaining === 0;
   const ratio = budget.limit > 0 ? Math.min(1, budget.used / budget.limit) : 0;
@@ -359,6 +368,9 @@ function AssistBudgetRow({ budget }: { budget: AssistBudget | null }) {
         Assist budget not yet allocated.
       </div>
     );
+  }
+  if (isUnlimitedBudget(budget.limit)) {
+    return null;
   }
   const exhausted = budget.remaining === 0;
   const ratio = budget.limit > 0 ? Math.min(1, budget.used / budget.limit) : 0;
@@ -407,6 +419,9 @@ function ModelInvocationBudgetRow({
         Model invocation budget not yet allocated.
       </div>
     );
+  }
+  if (isUnlimitedBudget(budget.limit)) {
+    return null;
   }
   const exhausted = budget.remaining === 0;
   const ratio = budget.limit > 0 ? Math.min(1, budget.used / budget.limit) : 0;

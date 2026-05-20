@@ -58,6 +58,7 @@ import type {
 // (per ADR 0006 §3) and the panel renders no banner for them.
 const MANUAL_EDIT_ORIGIN_CLASSES = ["manual_modified", "manual_edit"] as const;
 type ManualEditOriginClass = (typeof MANUAL_EDIT_ORIGIN_CLASSES)[number];
+const UNLIMITED_AI_BUDGET = 2_147_483_647;
 
 function isManualEditOriginClass(
   value: string | null | undefined,
@@ -169,6 +170,13 @@ function BudgetBadge({ snapshot }: BudgetBadgeProps) {
     return (
       <span className="inline-flex items-center rounded border border-line bg-bg-1 px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-faint">
         budget: unknown
+      </span>
+    );
+  }
+  if (snapshot.limit >= UNLIMITED_AI_BUDGET) {
+    return (
+      <span className="inline-flex items-center rounded border border-line bg-bg-1 px-2 py-0.5 text-[10px] uppercase tracking-wider text-text">
+        unlimited
       </span>
     );
   }

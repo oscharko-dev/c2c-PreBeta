@@ -256,7 +256,7 @@ class TransformationAgentRequestAssemblyTests(unittest.TestCase):
         self.assertEqual(parameters["runId"], "run-1")
         self.assertEqual(parameters["attemptNumber"], 1)
         self.assertEqual(parameters["temperature"], 0)
-        self.assertEqual(parameters["max_tokens"], 8192)
+        self.assertNotIn("max_tokens", parameters)
         self.assertEqual(parameters["sourceRef"]["uri"], "urn:src/main.cob")
         self.assertEqual(parameters["semanticIrRef"]["uri"], "urn:ir/HELLO")
         self.assertEqual(parameters["baselineJavaRef"]["uri"], "urn:baseline/HELLO")
@@ -500,12 +500,15 @@ class TransformationAgentRejectionTests(unittest.TestCase):
     contract via :class:`AgentContractInvalidAgentError`."""
 
     @staticmethod
-    def _agent_for_response(response_or_exc: Mapping[str, JsonValue] | Exception) -> TransformationAgent:
+    def _agent_for_response(
+        response_or_exc: Mapping[str, JsonValue] | Exception,
+        **config_overrides: Any,
+    ) -> TransformationAgent:
         tmp = tempfile.mkdtemp()
         store = RunArtifactStore(tmp)
         store.init_run("run-1", "w0-migration-v0")
         return TransformationAgent(
-            config=_config(),
+            config=_config(**config_overrides),
             artifact_store=store,
             model_invoker=_StubInvoker(response_or_exc),
         )
@@ -514,7 +517,9 @@ class TransformationAgentRejectionTests(unittest.TestCase):
         gateway_response = _ok_gateway_response(
             files={"src/main/java/com/c2c/generated/Hello.java": "This is not Java at all."}
         )
-        agent = self._agent_for_response(gateway_response)
+        agent = self._agent_for_response(
+            gateway_response, transformation_agent_max_output_bytes=1024
+        )
         with self.assertRaises(AgentContractInvalidAgentError) as ctx:
             agent.invoke(_request())
         self.assertIn("Java type declaration", str(ctx.exception))
@@ -523,7 +528,9 @@ class TransformationAgentRejectionTests(unittest.TestCase):
     def test_missing_entry_class_is_derived_from_entry_file(self) -> None:
         gateway_response = _ok_gateway_response()
         gateway_response["output"].pop("entryClass")
-        agent = self._agent_for_response(gateway_response)
+        agent = self._agent_for_response(
+            gateway_response, transformation_agent_max_output_bytes=1024
+        )
         result = agent.invoke(_request())
         self.assertEqual(result.candidate.entry_class, "Hello")
 
@@ -531,7 +538,9 @@ class TransformationAgentRejectionTests(unittest.TestCase):
     def test_missing_modelInvocationId_is_rejected(self) -> None:
         gateway_response = _ok_gateway_response()
         gateway_response.pop("invocationId", None)
-        agent = self._agent_for_response(gateway_response)
+        agent = self._agent_for_response(
+            gateway_response, transformation_agent_max_output_bytes=1024
+        )
         with self.assertRaises(AgentContractInvalidAgentError) as ctx:
             agent.invoke(_request())
         self.assertIn("missing invocationId", str(ctx.exception))
@@ -578,8 +587,12 @@ class TransformationAgentRejectionTests(unittest.TestCase):
             files={"src/main/java/com/c2c/generated/Big.java": big}
         )
         gateway_response["output"]["entryClass"] = "Big"
-        gateway_response["output"]["entryFilePath"] = "src/main/java/com/c2c/generated/Big.java"
-        agent = self._agent_for_response(gateway_response)
+        gateway_response["output"]["entryFilePath"] = (
+            "src/main/java/com/c2c/generated/Big.java"
+        )
+        agent = self._agent_for_response(
+            gateway_response, transformation_agent_max_output_bytes=1024
+        )
         with self.assertRaises(AgentContractInvalidAgentError) as ctx:
             agent.invoke(_request())
         self.assertIn("size limit", str(ctx.exception))

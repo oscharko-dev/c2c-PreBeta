@@ -14,6 +14,7 @@ import {
   EDITOR_ASSIST_DEFAULT_TENANT_DAILY_CAP,
   EDITOR_ASSIST_REDACTED_BYTES_MAX,
   EDITOR_ASSIST_SCHEMA_VERSION,
+  UNLIMITED_AI_BUDGET,
   buildEditorAssistRef,
   buildLedgerEntry,
   buildLocalLedgerRef,
@@ -62,21 +63,25 @@ function validRequest(overrides: Record<string, unknown> = {}): unknown {
 // Constants & helpers
 // ---------------------------------------------------------------------------
 
-test("module exposes the ADR 0004 budget bounds", () => {
+test("module exposes the enterprise default editor-assist budget posture", () => {
   assert.equal(EDITOR_ASSIST_BUDGET_MIN, 1);
-  assert.equal(EDITOR_ASSIST_BUDGET_MAX, 10);
-  assert.equal(DEFAULT_EDITOR_ASSIST_BUDGET, 3);
-  assert.equal(EDITOR_ASSIST_DEFAULT_TENANT_DAILY_CAP, 100);
+  assert.equal(EDITOR_ASSIST_BUDGET_MAX, UNLIMITED_AI_BUDGET);
+  assert.equal(DEFAULT_EDITOR_ASSIST_BUDGET, UNLIMITED_AI_BUDGET);
+  assert.equal(EDITOR_ASSIST_DEFAULT_TENANT_DAILY_CAP, UNLIMITED_AI_BUDGET);
   assert.equal(EDITOR_ASSIST_SCHEMA_VERSION, "v0");
 });
 
-test("clampEditorAssistBudget enforces the ADR 0004 range", () => {
+test("clampEditorAssistBudget preserves the unlimited default while rejecting non-positive values", () => {
   assert.equal(clampEditorAssistBudget(0), EDITOR_ASSIST_BUDGET_MIN);
   assert.equal(clampEditorAssistBudget(-7), EDITOR_ASSIST_BUDGET_MIN);
   assert.equal(clampEditorAssistBudget(1), 1);
   assert.equal(clampEditorAssistBudget(3), 3);
-  assert.equal(clampEditorAssistBudget(10), EDITOR_ASSIST_BUDGET_MAX);
-  assert.equal(clampEditorAssistBudget(99), EDITOR_ASSIST_BUDGET_MAX);
+  assert.equal(clampEditorAssistBudget(10), 10);
+  assert.equal(clampEditorAssistBudget(99), 99);
+  assert.equal(
+    clampEditorAssistBudget(UNLIMITED_AI_BUDGET + 99),
+    EDITOR_ASSIST_BUDGET_MAX,
+  );
 });
 
 test("statusForErrorCode maps each closed-set code to its HTTP status", () => {
@@ -357,11 +362,19 @@ test("budget store consume decrements remaining and returns the new snapshot", a
   const first = await store.consume(scope);
   assert.equal(first.ok, true);
   if (!first.ok) return;
-  assert.deepEqual(first.snapshot, { limit: 3, used: 1, remaining: 2 });
+  assert.deepEqual(first.snapshot, {
+    limit: DEFAULT_EDITOR_ASSIST_BUDGET,
+    used: 1,
+    remaining: DEFAULT_EDITOR_ASSIST_BUDGET - 1,
+  });
 
   const second = await store.consume(scope);
   if (!second.ok) return;
-  assert.deepEqual(second.snapshot, { limit: 3, used: 2, remaining: 1 });
+  assert.deepEqual(second.snapshot, {
+    limit: DEFAULT_EDITOR_ASSIST_BUDGET,
+    used: 2,
+    remaining: DEFAULT_EDITOR_ASSIST_BUDGET - 2,
+  });
 });
 
 test("budget store reports budget_exhausted with snapshot when session is empty", async () => {

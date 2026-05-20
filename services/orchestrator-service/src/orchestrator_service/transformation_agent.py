@@ -855,7 +855,7 @@ def _decode_candidate(
             )
         encoded_bytes = raw_content.encode("utf-8")
         total_bytes += len(encoded_bytes)
-        if total_bytes > max_output_bytes:
+        if max_output_bytes > 0 and total_bytes > max_output_bytes:
             raise AgentContractInvalidAgentError(
                 f"generated files exceed size limit ({total_bytes} > {max_output_bytes} bytes)"
             )
@@ -1691,7 +1691,6 @@ class TransformationAgent:
                 "promptTemplateId": self._config.transformation_agent_prompt_template_id,
                 "sourceRef": _coerce_artifact_ref(request.source_ref),
                 "temperature": 0,
-                "max_tokens": 8192,
             },
             "timeoutMs": int(request.deadline_ms),
         }

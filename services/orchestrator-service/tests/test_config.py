@@ -69,7 +69,7 @@ class OrchestratorConfigTests(unittest.TestCase):
         )
         self.assertEqual(config.repair_agent_prompt_template_version, "v0")
         self.assertEqual(config.repair_agent_deadline_ms, 60000)
-        self.assertEqual(config.repair_agent_max_output_bytes, 256 * 1024)
+        self.assertEqual(config.repair_agent_max_output_bytes, 0)
         # By default the repair agent reuses the transformation agent's
         # package base.
         self.assertEqual(
