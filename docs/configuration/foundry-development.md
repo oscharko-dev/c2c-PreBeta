@@ -1,6 +1,6 @@
 # Foundry Development Configuration
 
-All productive model calls go through `services/go/model-gateway-service`.
+All productive model calls go through `services/model-gateway-service`.
 
 ## Required Environment
 

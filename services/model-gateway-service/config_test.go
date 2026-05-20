@@ -6,7 +6,7 @@ import (
 )
 
 func TestExampleModelRegistrySupportsW02PromptTemplates(t *testing.T) {
-	registry, err := LoadModelRegistry("../../../config/model-registry.example.yaml")
+	registry, err := LoadModelRegistry("../../config/model-registry.example.yaml")
 	if err != nil {
 		t.Fatalf("LoadModelRegistry() error = %v", err)
 	}

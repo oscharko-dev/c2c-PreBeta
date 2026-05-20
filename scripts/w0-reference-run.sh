@@ -282,7 +282,7 @@ start_btr() {
 
 start_model_gateway() {
   local bin
-  bin="$(build_go_binary model-gateway services/go/model-gateway-service)"
+  bin="$(build_go_binary model-gateway services/model-gateway-service)"
   start_go_service model-gateway "$bin" "$LOG_DIR/model-gateway.log" \
     "MODEL_GATEWAY_LISTEN_ADDR=127.0.0.1:$MODEL_GATEWAY_PORT" \
     "MODEL_GATEWAY_CONTROL_TOKEN=$INTERNAL_CONTROL_TOKEN" \

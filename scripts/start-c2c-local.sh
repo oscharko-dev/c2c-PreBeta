@@ -507,7 +507,7 @@ start_model_gateway() {
     return 0
   fi
   local bin
-  bin="$(build_go_binary model-gateway "$ROOT_DIR/services/go/model-gateway-service")"
+  bin="$(build_go_binary model-gateway "$ROOT_DIR/services/model-gateway-service")"
   start_bg model-gateway "$LOG_DIR/model-gateway.log" \
     MODEL_GATEWAY_LISTEN_ADDR="127.0.0.1:$MODEL_GATEWAY_PORT" \
     MODEL_GATEWAY_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \

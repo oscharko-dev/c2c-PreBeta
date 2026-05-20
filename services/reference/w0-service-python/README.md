@@ -5,6 +5,6 @@ A minimal FastAPI-free Python service scaffold (stdlib-first) used as a determin
 Build and run commands:
 
 ```bash
-cd services/python/w0-service
+cd services/reference/w0-service-python
 python -m unittest
 ```

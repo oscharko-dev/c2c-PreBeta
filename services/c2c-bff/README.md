@@ -95,7 +95,7 @@ npm run start
 ```
 
 `npm run test` compiles with `tsc` and runs `node --test` against the
-`dist/` output, matching the `services/typescript/w0-service` convention.
+`dist/` output, matching the `services/reference/w0-service-typescript` convention.
 
 ## Product mode vs diagnostic fixtures
 

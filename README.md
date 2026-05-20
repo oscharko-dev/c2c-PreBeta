@@ -51,12 +51,13 @@ Repository topology policy for the housekeeping migration stream is defined in
   `services/build-test-runner-service`, and `services/evidence-service` are the
   deterministic proof path.
 - `services/agentic-harness-core`, `services/experience-learning-service`, and
-  `services/go/model-gateway-service` provide registry, policy, ledgers,
+  `services/model-gateway-service` provide registry, policy, ledgers,
   learning signals, and governed model access.
 - `libs/c2c-target-java-runtime` is linked by generated Java projects.
-- `services/java/w0-service`, `services/go/w0-service`,
-  `services/python/w0-service`, and `services/typescript/w0-service` remain
-  language baseline services for the W0 platform checks.
+- `services/reference/w0-service-java`, `services/reference/w0-service-go`,
+  `services/reference/w0-service-python`, and
+  `services/reference/w0-service-typescript` remain language baseline services
+  for the W0 platform checks.
 
 W0 remains Java-first for the target runtime. Target-generation compatibility
 is enforced by service code, schemas, runtime metadata, and tests, not by a
@@ -297,11 +298,12 @@ services/
   c2c-bff/
   agentic-harness-core/
   experience-learning-service/
-  go/model-gateway-service/
-  go/w0-service/
-  java/w0-service/
-  python/w0-service/
-  typescript/w0-service/
+  model-gateway-service/
+  reference/
+    w0-service-go/
+    w0-service-java/
+    w0-service-python/
+    w0-service-typescript/
 libs/
   c2c-target-java-runtime/
 config/

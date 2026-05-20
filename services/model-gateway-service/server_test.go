@@ -301,7 +301,7 @@ func TestModelGatewayService_InvokeSuccessCreatesLedgerAndEvent(t *testing.T) {
 
 func TestModelInvocationLedgerSchemaPresence(t *testing.T) {
 	for _, candidate := range []string{
-		filepath.Join("..", "..", "..", "schemas", "model-invocation-ledger-v0.json"),
+		filepath.Join("..", "..", "schemas", "model-invocation-ledger-v0.json"),
 	} {
 		body, err := os.ReadFile(candidate)
 		if err != nil {

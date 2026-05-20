@@ -10,7 +10,7 @@ if ! command -v mvn >/dev/null 2>&1; then
 fi
 
 SERVICES=(
-  "services/java/w0-service"
+  "services/reference/w0-service-java"
   "services/cobol-parser-service"
   "services/semantic-ir-service"
   "services/target-java-generation-service"
