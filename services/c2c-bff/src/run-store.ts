@@ -45,10 +45,16 @@ export interface StoredModelInvocationBudget {
 // It is never a product result and is contained out of product-facing DTOs by
 // `productMode` in server responses.
 export type RunMode = "live" | "diagnostic-fixture";
+export type RunExecutionMode = "standard" | "parity";
+export type SourceReferenceMode = "reference-fixture" | "native-cobol";
 
 export interface StoredRun {
   runId: string;
   programId: string;
+  executionMode?: RunExecutionMode;
+  trustCaseId?: string;
+  sourceReferenceFixtureId?: string;
+  sourceReferenceMode?: SourceReferenceMode;
   status: RunStatus;
   mode: RunMode;
   message: string;
@@ -105,6 +111,10 @@ export function createRunStore(
       const stored: StoredRun = {
         runId,
         programId: sample.programId,
+        executionMode: initial?.executionMode,
+        trustCaseId: initial?.trustCaseId,
+        sourceReferenceFixtureId: initial?.sourceReferenceFixtureId,
+        sourceReferenceMode: initial?.sourceReferenceMode,
         status: initial?.status ?? "starting",
         mode,
         message:

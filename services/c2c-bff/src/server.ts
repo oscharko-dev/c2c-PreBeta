@@ -39,6 +39,8 @@ import {
   type RunStore,
   type StoredRun,
   type RunFinalClassification,
+  type RunExecutionMode,
+  type SourceReferenceMode,
   type StoredAssistBudget,
   type StoredModelInvocationBudget,
   type StoredRepairBudget,
@@ -1256,6 +1258,58 @@ function deriveExpectedOutput(
   return fallback;
 }
 
+const BUILD_TEST_TEXT_FIELD_MAX_CHARS = 16_384;
+const PARITY_DIFF_SUMMARY_MAX_CHARS = 4_000;
+
+function boundedStudioText(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n[truncated for Studio payload boundary]`;
+}
+
+function normalizeParityComparison(
+  data: Record<string, unknown> | undefined,
+): Record<string, unknown> | null {
+  const comparisonResult = asRecord(data?.comparisonResult);
+  const comparison = comparisonResult ?? asRecord(data?.comparison);
+  if (!comparison) return null;
+  const result: Record<string, unknown> = {};
+  const matched = asBoolean(comparison.matched);
+  if (matched !== undefined) result.matched = matched;
+  const status = asString(comparison.status);
+  if (status.length > 0) result.status = status;
+  const comparisonPolicyVersion = asString(comparison.comparisonPolicyVersion);
+  if (comparisonPolicyVersion.length > 0) {
+    result.comparisonPolicyVersion = comparisonPolicyVersion;
+  }
+  const mismatchClassification = asString(comparison.mismatchClassification);
+  if (mismatchClassification.length > 0) {
+    result.mismatchClassification = mismatchClassification;
+  }
+  const diffSummary = asString(comparison.diffSummary);
+  if (diffSummary.length > 0) {
+    result.diffSummary = boundedStudioText(
+      diffSummary,
+      PARITY_DIFF_SUMMARY_MAX_CHARS,
+    );
+  }
+  for (const key of [
+    "comparisonPolicyRef",
+    "comparisonResultRef",
+    "diffRef",
+    "expectedRef",
+    "actualRef",
+    "sourceOutputRef",
+    "javaOutputRef",
+    "sourceNormalizedOutputRef",
+    "javaNormalizedOutputRef",
+    "normalizedDiffRef",
+  ] as const) {
+    const ref = normalizeOutputRef(comparison[key]);
+    if (ref) result[key] = ref;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 async function liveBuildTestView(
   stored: StoredRun,
   orchestrator: OrchestratorClient,
@@ -1313,6 +1367,7 @@ async function liveBuildTestView(
       data,
     );
     const outputRef = normalizeOutputRef(data?.outputRef);
+    const comparison = normalizeParityComparison(data);
     const diagnostics = normalizeDiagnostics(data?.diagnostics, {
       defaultSourceKind: "build",
     });
@@ -1325,8 +1380,19 @@ async function liveBuildTestView(
       classification,
       compileStatus: deriveCompileStatus(data, status),
       executionStatus: deriveExecutionStatus(data, status),
-      expectedOutput: deriveExpectedOutput(data, stored.sample.expectedOutput),
-      actualOutput: deriveActualOutput(data),
+      expectedOutput: boundedStudioText(
+        deriveExpectedOutput(data, stored.sample.expectedOutput),
+        BUILD_TEST_TEXT_FIELD_MAX_CHARS,
+      ),
+      actualOutput: boundedStudioText(
+        deriveActualOutput(data),
+        BUILD_TEST_TEXT_FIELD_MAX_CHARS,
+      ),
+      comparison,
+      diffSummary:
+        typeof comparison?.diffSummary === "string"
+          ? comparison.diffSummary
+          : "",
       outputRef,
       expectedOutputRef: deriveComparisonOutputRef(data, "expectedRef"),
       actualOutputRef: deriveComparisonOutputRef(data, "actualRef"),
@@ -4210,11 +4276,88 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "request body must be a JSON object");
           return;
         }
-        const programIdRaw = (body as Record<string, unknown>).programId;
-        const requesterRaw = (body as Record<string, unknown>).requester;
+        const requestBody = body as Record<string, unknown>;
+        const programIdRaw = requestBody.programId;
+        const requesterRaw = requestBody.requester;
         if (typeof programIdRaw !== "string" || programIdRaw.length === 0) {
           badRequest(res, "programId is required");
           return;
+        }
+        let executionMode: RunExecutionMode = "standard";
+        if (requestBody.executionMode !== undefined) {
+          if (typeof requestBody.executionMode !== "string") {
+            badRequest(res, "executionMode must be standard or parity");
+            return;
+          }
+          const normalized = requestBody.executionMode.trim().toLowerCase();
+          if (normalized !== "standard" && normalized !== "parity") {
+            badRequest(res, "executionMode must be standard or parity");
+            return;
+          }
+          executionMode = normalized;
+        }
+        let sourceReferenceMode: SourceReferenceMode | undefined;
+        if (requestBody.sourceReferenceMode !== undefined) {
+          if (typeof requestBody.sourceReferenceMode !== "string") {
+            badRequest(
+              res,
+              "sourceReferenceMode must be reference-fixture or native-cobol",
+            );
+            return;
+          }
+          const normalized = requestBody.sourceReferenceMode
+            .trim()
+            .toLowerCase();
+          if (
+            normalized !== "reference-fixture" &&
+            normalized !== "native-cobol"
+          ) {
+            badRequest(
+              res,
+              "sourceReferenceMode must be reference-fixture or native-cobol",
+            );
+            return;
+          }
+          sourceReferenceMode = normalized;
+        }
+        const trustCaseId =
+          typeof requestBody.trustCaseId === "string" &&
+          requestBody.trustCaseId.trim().length > 0
+            ? requestBody.trustCaseId.trim()
+            : undefined;
+        if (
+          requestBody.trustCaseId !== undefined &&
+          requestBody.trustCaseId !== null &&
+          trustCaseId === undefined
+        ) {
+          badRequest(res, "trustCaseId must be a non-empty string");
+          return;
+        }
+        const sourceReferenceFixtureId =
+          typeof requestBody.sourceReferenceFixtureId === "string" &&
+          requestBody.sourceReferenceFixtureId.trim().length > 0
+            ? requestBody.sourceReferenceFixtureId.trim()
+            : undefined;
+        if (
+          requestBody.sourceReferenceFixtureId !== undefined &&
+          requestBody.sourceReferenceFixtureId !== null &&
+          sourceReferenceFixtureId === undefined
+        ) {
+          badRequest(res, "sourceReferenceFixtureId must be a non-empty string");
+          return;
+        }
+        const parityRequested =
+          executionMode === "parity" ||
+          trustCaseId !== undefined ||
+          sourceReferenceFixtureId !== undefined ||
+          sourceReferenceMode !== undefined;
+        if (parityRequested) {
+          executionMode = "parity";
+          sourceReferenceMode = sourceReferenceMode ?? "reference-fixture";
+          if (!sourceReferenceFixtureId) {
+            badRequest(res, "sourceReferenceFixtureId is required for parity runs");
+            return;
+          }
         }
         const sample = samples.get(programIdRaw);
         if (!sample) {
@@ -4229,10 +4372,18 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               cobolSourcePath: sample.cobolSourcePath,
               requester:
                 typeof requesterRaw === "string" ? requesterRaw : undefined,
+              executionMode,
+              trustCaseId,
+              sourceReferenceFixtureId,
+              sourceReferenceMode,
             });
             if (upstream && upstream.status >= 200 && upstream.status < 300) {
               const liveRunId = extractLiveRunId(upstream.body);
               const stored = runStore.create(sample, "live", liveRunId, {
+                executionMode,
+                trustCaseId,
+                sourceReferenceFixtureId,
+                sourceReferenceMode,
                 status: "starting",
                 message: "run accepted by orchestrator",
               });
@@ -4262,6 +4413,14 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             });
             return;
           }
+        }
+
+        if (parityRequested) {
+          jsonResponse(res, 503, {
+            error:
+              "orchestrator URL is required for parity runs; the BFF delegates parity workflow authority to the Orchestrator",
+          });
+          return;
         }
 
         if (!config.enableDiagnosticFixtures) {

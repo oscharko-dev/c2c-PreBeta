@@ -117,6 +117,15 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
   client: OrchestratorClient;
   calls: {
     startRun: number;
+    startRunInputs: Array<{
+      programId: string;
+      cobolSourcePath: string;
+      requester?: string;
+      executionMode?: "standard" | "parity";
+      trustCaseId?: string;
+      sourceReferenceFixtureId?: string;
+      sourceReferenceMode?: "reference-fixture" | "native-cobol";
+    }>;
     getRun: number;
     startTransformRun: Array<{
       programId: string;
@@ -145,6 +154,15 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
 } {
   const calls = {
     startRun: 0,
+    startRunInputs: [] as Array<{
+      programId: string;
+      cobolSourcePath: string;
+      requester?: string;
+      executionMode?: "standard" | "parity";
+      trustCaseId?: string;
+      sourceReferenceFixtureId?: string;
+      sourceReferenceMode?: "reference-fixture" | "native-cobol";
+    }>,
     getRun: 0,
     startTransformRun: [] as Array<{
       programId: string;
@@ -171,8 +189,9 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
   };
   const client: OrchestratorClient = {
     enabled: true,
-    async startRun() {
+    async startRun(input) {
       calls.startRun += 1;
+      calls.startRunInputs.push({ ...input });
       const response: UpstreamResponse = {
         status: 201,
         body: {
@@ -1356,6 +1375,130 @@ test("starting a run in live mode proxies the orchestrator, syncs status, and re
   }
 });
 
+test("starting a parity run forwards curated reference configuration to the orchestrator and preserves mode metadata", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: {
+        programId: "BRNCH01",
+        requester: "studio",
+        executionMode: "parity",
+        trustCaseId: "trust-branch-approval",
+        sourceReferenceFixtureId: "branch-account-guard-v0",
+        sourceReferenceMode: "reference-fixture",
+      },
+    });
+    assert.equal(started.status, 201);
+    const startedBody = started.body as {
+      runId: string;
+      executionMode: string;
+      trustCaseId: string;
+      sourceReferenceFixtureId: string;
+      sourceReferenceMode: string;
+    };
+    assert.equal(startedBody.executionMode, "parity");
+    assert.equal(startedBody.trustCaseId, "trust-branch-approval");
+    assert.equal(
+      startedBody.sourceReferenceFixtureId,
+      "branch-account-guard-v0",
+    );
+    assert.equal(startedBody.sourceReferenceMode, "reference-fixture");
+    assert.deepEqual(calls.startRunInputs[0], {
+      programId: "BRNCH01",
+      cobolSourcePath: "corpus/synthetic/programs/branch-account-guard.cbl",
+      requester: "studio",
+      executionMode: "parity",
+      trustCaseId: "trust-branch-approval",
+      sourceReferenceFixtureId: "branch-account-guard-v0",
+      sourceReferenceMode: "reference-fixture",
+    });
+
+    const fetched = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+    );
+    assert.equal(fetched.status, 200);
+    const fetchedBody = fetched.body as { executionMode: string };
+    assert.equal(fetchedBody.executionMode, "parity");
+  } finally {
+    await server.close();
+  }
+});
+
+test("starting a parity run rejects unsupported mode and missing fixture before dispatch", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const unsupported = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01", executionMode: "repair" },
+    });
+    assert.equal(unsupported.status, 400);
+    assert.match(
+      (unsupported.body as { error: string }).error,
+      /executionMode must be standard or parity/,
+    );
+
+    const missingFixture = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01", executionMode: "parity" },
+    });
+    assert.equal(missingFixture.status, 400);
+    assert.match(
+      (missingFixture.body as { error: string }).error,
+      /sourceReferenceFixtureId is required/,
+    );
+    assert.equal(calls.startRun, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("starting a parity run requires a configured orchestrator instead of diagnostic fixture fallback", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const handler = createApp({
+    config: { ...baseConfig, enableDiagnosticFixtures: true },
+    samples,
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: {
+        programId: "BRNCH01",
+        executionMode: "parity",
+        sourceReferenceFixtureId: "branch-account-guard-v0",
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.match((response.body as { error: string }).error, /Orchestrator/i);
+  } finally {
+    await server.close();
+  }
+});
+
 test("live generated/build-test/evidence endpoints return real artifact contents when orchestrator has persisted them", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
@@ -1881,6 +2024,9 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     },
     comparison: {
       matched: true,
+      status: "passed",
+      comparisonPolicyVersion: "deterministic-output-v1",
+      diffSummary: "Outputs matched after deterministic normalization.",
       expectedRef: {
         uri: "urn:build-test/expected",
         sha256: "e".repeat(64),
@@ -1961,6 +2107,15 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
       outputRef: { sha256: string } | null;
       expectedOutputRef: { sha256: string; kind: string } | null;
       actualOutputRef: { sha256: string; kind: string } | null;
+      comparison: {
+        matched: boolean;
+        status: string;
+        comparisonPolicyVersion: string;
+        diffSummary: string;
+        expectedRef: { sha256: string; kind: string };
+        actualRef: { sha256: string; kind: string };
+      } | null;
+      diffSummary: string;
       diagnostics: Array<{
         schemaVersion?: string;
         severity?: string;
@@ -1982,6 +2137,18 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     assert.equal(body.expectedOutputRef?.kind, "cobol-oracle-stdout");
     assert.equal(body.actualOutputRef?.sha256, "a".repeat(64));
     assert.equal(body.actualOutputRef?.kind, "java-stdout");
+    assert.equal(body.comparison?.matched, true);
+    assert.equal(body.comparison?.status, "passed");
+    assert.equal(
+      body.comparison?.comparisonPolicyVersion,
+      "deterministic-output-v1",
+    );
+    assert.equal(
+      body.diffSummary,
+      "Outputs matched after deterministic normalization.",
+    );
+    assert.equal(body.comparison?.expectedRef.sha256, "e".repeat(64));
+    assert.equal(body.comparison?.actualRef.sha256, "a".repeat(64));
     assert.equal(body.diagnostics.length, 2);
     assert.equal(body.diagnostics[0]?.schemaVersion, "v0");
     assert.equal(body.diagnostics[0]?.severity, "warning");
