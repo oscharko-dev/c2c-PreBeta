@@ -39,7 +39,7 @@ change contract behavior or version semantics.
 | Owning component | Shared schemas |
 | --- | --- |
 | `c2c-bff` | `schemas/acceptance-fixture-v0.json`, `schemas/diagnostic-v0.json`, `schemas/format-java-request-v0.json`, `schemas/format-java-response-v0.json`, `schemas/generated-traceability-v0.json`, `schemas/java-region-classification-v0.json`, `schemas/run-summary-v0.json` |
-| `orchestrator-service` | `schemas/agent-invocation-request-v0.json`, `schemas/agent-invocation-response-v0.json`, `schemas/agent-repair-decision-v0.json`, `schemas/agent-repair-input-v0.json` |
+| `orchestrator-service` | `schemas/agent-invocation-request-v0.json`, `schemas/agent-invocation-response-v0.json`, `schemas/agent-repair-decision-v0.json`, `schemas/agent-repair-input-v0.json`, `schemas/parity-run-v0.json`, `schemas/parity-execution-result-v0.json`, `schemas/parity-build-result-v0.json`, `schemas/parity-comparison-result-v0.json`, `schemas/repair-diagnosis-v0.json`, `schemas/patch-proposal-v0.json` |
 | `semantic-ir-service` | `schemas/semantic-ir-v0.json` |
 | `build-test-runner-service` | `schemas/build-test-result-v0.json` |
 | `evidence-service` | `schemas/evidence-pack-manifest-v0.json` |

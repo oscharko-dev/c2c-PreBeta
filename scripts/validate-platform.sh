@@ -25,6 +25,14 @@ python3 scripts/validate-service-catalog.py --worktree
 
 echo "Validated service catalog."
 
+python3 scripts/validate_parity_contract_schemas.py
+
+echo "Validated parity contract schema gate."
+
+python3 -m unittest scripts/validate_parity_contract_schemas_test.py
+
+echo "Validated parity contract schema regression tests."
+
 python3 scripts/check_model_governance.py --worktree
 
 echo "Validated model governance scan."

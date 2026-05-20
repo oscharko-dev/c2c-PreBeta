@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/parity-run-v0.json",
+  "title": "Parity Run v0",
+  "description": "Stable lifecycle record for one Developer Trust parity run. The record links the curated source revision, the generated Java candidate, the reference artifact, the comparison and build evidence, and any approval-gated repair follow-up. Issue #351.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "trustCaseId",
+    "executionMode",
+    "status",
+    "sourceArtifactRef",
+    "generatedArtifactRef",
+    "referenceArtifactRef",
+    "sourceRevisionRef",
+    "currentHeadRef",
+    "evidenceRefs",
+    "createdAt",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trustCaseId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "executionMode": {
+      "type": "string",
+      "const": "parity"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["requested", "running", "passed", "failed", "blocked", "cancelled"]
+    },
+    "sourceArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "generatedArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "referenceArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sourceRevisionRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "currentHeadRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "buildResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "executionResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "comparisonResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "repairDiagnosisRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "patchProposalRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactReference"
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4000
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "buildResultRef",
+          "executionResultRef",
+          "comparisonResultRef",
+          "completedAt"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

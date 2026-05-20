@@ -57,6 +57,20 @@ Optional fields cover `corpusMetadata`, `transformationPasses`,
 `experienceEvents`. Open semantic assumptions and unsupported features can be
 attached to the manifest at any point in the run.
 
+## Parity and repair evidence
+
+For the W0.4 parity/repair workflow, evidence-service persists durable
+references and decision metadata, not working copies of the review session.
+The manifest may include `assistDecision`, `budgetSummary`,
+`oracleComparison`, `repairAttempts`, `manualEditOverlay`,
+`modelInvocations`, `agentTrajectories`, and the relevant artifact refs when
+those fields are needed for audit or replay.
+
+Raw model prompts, completions, patch bodies, reviewer commentary, and any
+secret-bearing text must stay upstream or be redacted before ingestion. The
+service enforces conservative secret-like checks on string fields so values
+that look like credentials are rejected rather than normalized into the pack.
+
 ## Configuration
 
 | Variable | Default | Purpose |

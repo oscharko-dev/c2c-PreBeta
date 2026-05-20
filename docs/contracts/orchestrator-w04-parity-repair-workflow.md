@@ -158,6 +158,39 @@ The first trust workflow must preserve at least these evidence classes:
   rejection decision, and any applied patch provenance;
 - final run classification and any evidence completeness warnings.
 
+## Evidence Storage Boundary
+
+Evidence service stores durable proof, not working scratch space. For this
+workflow, the following fields may be persisted in Evidence when they are
+required for audit, replay, or deterministic verification:
+
+| Contract area | May be stored in Evidence |
+| --- | --- |
+| Run identity and status | trust-case identifiers and versions, run identifiers, workflow identifiers, mode labels, completeness status, final classification, and evidence-completeness warnings |
+| Deterministic artifacts | source COBOL references, input fixture references, reference artifact references, generated Java candidate references, build/test result references, runtime version references, harness event references, trajectory ledger references, and unsupported-feature references |
+| Comparison results | normalized comparison outputs, parity status, oracle comparison references, matched/mismatched outcome, and the hashes or byte sizes needed to verify the referenced artifacts |
+| Assist lineage | `assistDecision` outcome, reason code, selected agent role, decision timestamp, budget snapshots, and affected artifact references |
+| Repair lineage | `repairAttempts` metadata, decision refs, model invocation refs, approved patch payload hash, approval or rejection decision, and applied patch provenance |
+| Manual-edit provenance | `manualEditsCarriedOver`, `manualDriftRegionCount`, and the `manualEditOverlay` reference when manual edits are present |
+| Governance context | open assumptions that are safe to retain, validation summaries, and other non-secret audit metadata that can be represented as references or bounded text |
+
+The following inputs must remain transient, upstream-only, or redacted before
+they reach Evidence storage:
+
+- raw model prompts, completions, and chain-of-thought style reasoning;
+- review comments or patch text that includes credentials, secrets, or other
+  sensitive source material;
+- unbounded stdout/stderr, stack traces, and failure dumps when they contain
+  secret-bearing content;
+- inline copies of source code, generated code, or fixture payloads when a
+  content-addressed reference is sufficient;
+- any field value rejected by the evidence-service secret/credential checks.
+
+When a value must be retained for audit but is too sensitive or too large to
+store inline, Evidence should keep the content-addressed reference and hash
+only, while the full payload remains in the originating system or a redacted
+artifact store.
+
 ## Security and Sandboxing Assumptions
 
 The trust workflow relies on these assumptions:

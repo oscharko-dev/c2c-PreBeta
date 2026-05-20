@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/parity-build-result-v0.json",
+  "title": "Parity Build Result v0",
+  "description": "Build result for the generated-Java side of a parity run. Captures compiler diagnostics, build logs, toolchain metadata, and evidence references without exposing unredacted raw output. Issue #351.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "buildId",
+    "runId",
+    "buildMode",
+    "command",
+    "status",
+    "inputArtifactRef",
+    "buildOutputRef",
+    "logRef",
+    "diagnostics",
+    "createdAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "buildId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "buildMode": {
+      "type": "string",
+      "const": "generated-java"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "toolchain": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "failed", "skipped"]
+    },
+    "inputArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "buildOutputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "logRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/buildDiagnostic"
+      }
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactReference"
+      }
+    }
+  },
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "buildDiagnostic": {
+      "type": "object",
+      "required": ["filePath", "line", "column", "severity", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "error"]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "filePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rawLogRef": {
+          "$ref": "#/$defs/artifactReference"
+        }
+      }
+    }
+  }
+}
