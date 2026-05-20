@@ -220,11 +220,15 @@ def _is_ignored_path(path: Path) -> bool:
     return any(part in IGNORED_DIRECTORY_NAMES for part in path.parts)
 
 
+def _is_workflow_path(path: Path) -> bool:
+    return len(path.parts) >= 2 and path.parts[0] == ".github" and path.parts[1] == "workflows"
+
+
 def _run_git(repo_root: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(repo_root), *args], text=True).strip()
 
 
-def _iter_repo_files(repo_root: Path, *roots: str) -> list[Path]:
+def _iter_repo_files(repo_root: Path, *roots: str, allow_workflows: bool = False) -> list[Path]:
     try:
         output = _run_git(repo_root, "ls-files", "--cached", "--others", "--exclude-standard", "--", *roots)
     except (OSError, subprocess.CalledProcessError):
@@ -235,19 +239,27 @@ def _iter_repo_files(repo_root: Path, *roots: str) -> list[Path]:
                 continue
             if base.is_file():
                 relative = base.relative_to(repo_root)
-                if not _is_ignored_path(relative):
+                if not _is_ignored_path(relative) or (allow_workflows and _is_workflow_path(relative)):
                     files.append(relative)
                 continue
             for dirpath, dirnames, filenames in os.walk(base):
                 current = Path(dirpath)
                 relative_dir = current.relative_to(repo_root)
-                if _is_ignored_path(relative_dir):
+                if _is_ignored_path(relative_dir) and not (allow_workflows and _is_workflow_path(relative_dir)):
                     dirnames[:] = []
                     continue
-                dirnames[:] = [name for name in dirnames if name not in IGNORED_DIRECTORY_NAMES]
+                filtered_dirnames: list[str] = []
+                for name in dirnames:
+                    candidate = relative_dir / name if relative_dir.parts else Path(name)
+                    if allow_workflows and _is_workflow_path(candidate):
+                        filtered_dirnames.append(name)
+                        continue
+                    if name not in IGNORED_DIRECTORY_NAMES:
+                        filtered_dirnames.append(name)
+                dirnames[:] = filtered_dirnames
                 for filename in filenames:
                     relative_path = relative_dir / filename if relative_dir.parts else Path(filename)
-                    if not _is_ignored_path(relative_path):
+                    if not _is_ignored_path(relative_path) or (allow_workflows and _is_workflow_path(relative_path)):
                         files.append(relative_path)
         return sorted(set(files))
 
@@ -257,7 +269,7 @@ def _iter_repo_files(repo_root: Path, *roots: str) -> list[Path]:
     files: list[Path] = []
     for line in output.splitlines():
         relative_path = Path(line)
-        if _is_ignored_path(relative_path):
+        if _is_ignored_path(relative_path) and not (allow_workflows and _is_workflow_path(relative_path)):
             continue
         resolved = (repo_root / relative_path).resolve()
         try:
@@ -326,7 +338,7 @@ def _validate_legacy_service_paths(repo_root: Path, components: list[dict[str, A
     component_paths = {component["id"]: component["path"] for component in components}
     allowed_files = {repo_root / path for path in MIGRATION_NOTE_ALLOWLIST | SCAN_EXCLUSION_FILES}
     legacy_path_pattern = re.compile(r"(?<![A-Za-z0-9._-])((?:apps|services)/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)")
-    for relative_path in _iter_repo_files(repo_root, "."):
+    for relative_path in _iter_repo_files(repo_root, ".", allow_workflows=True):
         full_path = repo_root / relative_path
         if full_path in allowed_files:
             continue

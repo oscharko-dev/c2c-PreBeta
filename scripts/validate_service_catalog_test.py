@@ -131,6 +131,21 @@ class ValidateServiceCatalogTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
+    def test_stale_service_path_in_workflow_file_fails(self) -> None:
+        temp_workflow = REPO_ROOT / ".github" / "workflows" / "issue-332-temp-stale-path.yml"
+        stale_path = "/".join(("apps", "c2c-ui", "dist"))
+        expected_fix = "/".join(("apps", "c2c-studio", "dist"))
+        temp_workflow.write_text(f"name: temp\njobs:\n  scan:\n    run: echo '{stale_path}'\n", encoding="utf-8")
+        try:
+            result = self._run_catalog(CATALOG_PATH)
+        finally:
+            temp_workflow.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"stale service path {stale_path}", result.stderr)
+        self.assertIn(".github/workflows/issue-332-temp-stale-path.yml", result.stderr)
+        self.assertIn(f"expected {expected_fix}", result.stderr)
+
     def test_missing_declared_file_fails(self) -> None:
         catalog = _load_catalog()
         mutated = copy.deepcopy(catalog)
