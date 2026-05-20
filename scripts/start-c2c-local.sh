@@ -125,6 +125,23 @@ require python3
 resolve_model_gateway_enabled
 log "model gateway enabled: $MODEL_GATEWAY_ENABLED"
 
+catalog_path() {
+  python3 scripts/validate-service-catalog.py --worktree --print-field path --component-id "$1"
+}
+
+component_dir() {
+  printf '%s/%s\n' "$ROOT_DIR" "$(catalog_path "$1")"
+}
+
+TARGET_JAVA_RUNTIME_DIR="$(component_dir c2c-target-java-runtime)"
+HARNESS_SERVICE_DIR="$(component_dir agentic-harness-core)"
+EVIDENCE_SERVICE_DIR="$(component_dir evidence-service)"
+EXPERIENCE_SERVICE_DIR="$(component_dir experience-learning-service)"
+MODEL_GATEWAY_SERVICE_DIR="$(component_dir model-gateway-service)"
+ORCHESTRATOR_SERVICE_DIR="$(component_dir orchestrator-service)"
+BFF_DIR="$(component_dir c2c-bff)"
+STUDIO_DIR="$(component_dir c2c-studio)"
+
 launcher_pid_file="$PID_DIR/launcher.pid"
 
 pid_is_running() {
@@ -286,8 +303,10 @@ build_go_binary() {
 
 shaded_jar() {
   local svc="$1"
+  local svc_dir
   local jar
-  jar="$(find "$ROOT_DIR/services/$svc/target" -maxdepth 1 -type f -name "${svc}-*.jar" ! -name 'original-*' -print0 \
+  svc_dir="$(component_dir "$svc")"
+  jar="$(find "$svc_dir/target" -maxdepth 1 -type f -name "${svc}-*.jar" ! -name 'original-*' -print0 \
     | xargs -0 ls -1t 2>/dev/null \
     | head -n1 || true)"
   [[ -n "$jar" && -f "$jar" ]] || fail "could not locate shaded jar for $svc"
@@ -297,7 +316,7 @@ shaded_jar() {
 build_java_runtime() {
   log "building c2c-target-java-runtime"
   (
-    cd "$ROOT_DIR/libs/c2c-target-java-runtime"
+    cd "$TARGET_JAVA_RUNTIME_DIR"
     mvn -B -ntp -DskipTests clean install
   ) >"$LOG_DIR/mvn-runtime.log" 2>&1 || fail "c2c-target-java-runtime install failed (see $LOG_DIR/mvn-runtime.log)"
 }
@@ -311,8 +330,10 @@ build_java_services() {
     if [[ "$svc" == "target-java-generation-service" ]]; then
       goal="install"
     fi
+    local svc_dir
+    svc_dir="$(component_dir "$svc")"
     (
-      cd "$ROOT_DIR/services/$svc"
+      cd "$svc_dir"
       mvn -B -ntp -DskipTests clean "$goal"
     ) >"$LOG_DIR/mvn-${svc}.log" 2>&1 || fail "services/$svc package failed (see $LOG_DIR/mvn-${svc}.log)"
   done
@@ -321,21 +342,21 @@ build_java_services() {
 build_bff() {
   log "building services/c2c-bff"
   (
-    cd "$ROOT_DIR/services/c2c-bff"
+    cd "$BFF_DIR"
     npm ci --no-fund --no-audit
     npm run build
   ) >"$LOG_DIR/c2c-bff.log" 2>&1 || fail "services/c2c-bff build failed (see $LOG_DIR/c2c-bff.log)"
-  [[ -f "$ROOT_DIR/services/c2c-bff/dist/index.js" ]] || fail "c2c-bff dist/index.js was not built"
+  [[ -f "$BFF_DIR/dist/index.js" ]] || fail "c2c-bff dist/index.js was not built"
 }
 
 build_studio() {
   log "building apps/c2c-studio"
   (
-    cd "$ROOT_DIR/apps/c2c-studio"
+    cd "$STUDIO_DIR"
     npm ci --no-fund --no-audit
     NEXT_PUBLIC_C2C_BFF_BASE_URL="$BFF_URL" npm run build
   ) >"$LOG_DIR/c2c-studio.log" 2>&1 || fail "apps/c2c-studio build failed (see $LOG_DIR/c2c-studio.log)"
-  [[ -d "$ROOT_DIR/apps/c2c-studio/.next" ]] || fail "c2c-studio .next was not built"
+  [[ -d "$STUDIO_DIR/.next" ]] || fail "c2c-studio .next was not built"
 }
 
 build_orchestrator_capabilities_json() {
@@ -462,7 +483,7 @@ build_orchestrator_capabilities_json() {
 
 start_harness() {
   local bin
-  bin="$(build_go_binary harness "$ROOT_DIR/services/agentic-harness-core")"
+  bin="$(build_go_binary harness "$HARNESS_SERVICE_DIR")"
   start_bg harness "$LOG_DIR/harness.log" \
     HARNESS_PORT="$HARNESS_PORT" \
     HARNESS_EVENT_LOG_PATH="$VAR_DIR/harness-events.jsonl" \
@@ -475,7 +496,7 @@ start_harness() {
 
 start_evidence() {
   local bin
-  bin="$(build_go_binary evidence "$ROOT_DIR/services/evidence-service")"
+  bin="$(build_go_binary evidence "$EVIDENCE_SERVICE_DIR")"
   start_bg evidence "$LOG_DIR/evidence.log" \
     EVIDENCE_LISTEN_ADDR="127.0.0.1:$EVIDENCE_PORT" \
     EVIDENCE_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
@@ -489,7 +510,7 @@ start_evidence() {
 
 start_experience_learning() {
   local bin
-  bin="$(build_go_binary experience-learning "$ROOT_DIR/services/experience-learning-service")"
+  bin="$(build_go_binary experience-learning "$EXPERIENCE_SERVICE_DIR")"
   start_bg experience-learning "$LOG_DIR/experience-learning.log" \
     EXPERIENCE_LEARNING_LISTEN_ADDR=":$EXPERIENCE_PORT" \
     EXPERIENCE_LEARNING_HARNESS_EVENTS_PATH="$VAR_DIR/experience-harness-events.jsonl" \
@@ -507,7 +528,7 @@ start_model_gateway() {
     return 0
   fi
   local bin
-  bin="$(build_go_binary model-gateway "$ROOT_DIR/services/model-gateway-service")"
+  bin="$(build_go_binary model-gateway "$MODEL_GATEWAY_SERVICE_DIR")"
   start_bg model-gateway "$LOG_DIR/model-gateway.log" \
     MODEL_GATEWAY_LISTEN_ADDR="127.0.0.1:$MODEL_GATEWAY_PORT" \
     MODEL_GATEWAY_CONTROL_TOKEN="$INTERNAL_CONTROL_TOKEN" \
@@ -594,7 +615,7 @@ start_orchestrator() {
     ORCHESTRATOR_MODEL_GATEWAY_MODEL_ID="${C2C_LOCAL_MODEL_GATEWAY_MODEL_ID:-gpt-oss-120b}" \
     ORCHESTRATOR_EXPERIENCE_LEARNING_BASE_URL="$EXPERIENCE_URL" \
     C2C_RUN_ARTIFACT_ROOT="${C2C_RUN_ARTIFACT_ROOT:-$VAR_DIR/runs}" \
-    PYTHONPATH="$ROOT_DIR/services/orchestrator-service/src" \
+    PYTHONPATH="$ORCHESTRATOR_SERVICE_DIR/src" \
     -- \
     python3 -m orchestrator_service.main
   wait_http orchestrator "$ORCHESTRATOR_URL/health"
@@ -618,7 +639,7 @@ start_bff() {
     C2C_HARNESS_URL="$HARNESS_URL" \
     C2C_STUDIO_CORS_ORIGINS="$STUDIO_URL,http://localhost:${STUDIO_PORT}" \
     -- \
-    node "$ROOT_DIR/services/c2c-bff/dist/index.js"
+    node "$BFF_DIR/dist/index.js"
   wait_http c2c-bff "$BFF_URL/api/v0/health"
 }
 
@@ -627,7 +648,7 @@ start_studio() {
     PORT="$STUDIO_PORT" \
     NEXT_PUBLIC_C2C_BFF_BASE_URL="$BFF_URL" \
     -- \
-    npm start --prefix "$ROOT_DIR/apps/c2c-studio"
+    npm start --prefix "$STUDIO_DIR"
   wait_http c2c-studio "$STUDIO_URL"
 }
 

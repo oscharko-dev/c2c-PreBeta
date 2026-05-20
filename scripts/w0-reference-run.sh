@@ -106,6 +106,20 @@ require java
 require mvn
 require shasum
 
+catalog_path() {
+  python3 scripts/validate-service-catalog.py --worktree --print-field path --component-id "$1"
+}
+
+component_dir() {
+  printf '%s/%s\n' "$ROOT_DIR" "$(catalog_path "$1")"
+}
+
+TARGET_JAVA_RUNTIME_DIR="$(component_dir c2c-target-java-runtime)"
+HARN_DIR="$(component_dir agentic-harness-core)"
+EVIDENCE_DIR="$(component_dir evidence-service)"
+EXPERIENCE_DIR="$(component_dir experience-learning-service)"
+MODEL_GATEWAY_DIR="$(component_dir model-gateway-service)"
+
 cleanup() {
   local exit_code=$?
   log "shutting down background services"
@@ -132,12 +146,14 @@ trap cleanup EXIT INT TERM
 
 build_java() {
   log "building c2c-target-java-runtime"
-  (cd libs/c2c-target-java-runtime && mvn -B -ntp -DskipTests install >"$LOG_DIR/mvn-runtime.log" 2>&1) \
+  (cd "$TARGET_JAVA_RUNTIME_DIR" && mvn -B -ntp -DskipTests install >"$LOG_DIR/mvn-runtime.log" 2>&1) \
     || fail "c2c-target-java-runtime install failed (see $LOG_DIR/mvn-runtime.log)"
 
   for svc in cobol-parser-service semantic-ir-service target-java-generation-service build-test-runner-service; do
     log "packaging services/$svc (skipping tests; CI gates them)"
-    (cd "services/$svc" && mvn -B -ntp -DskipTests package >"$LOG_DIR/mvn-${svc}.log" 2>&1) \
+    local svc_dir
+    svc_dir="$(component_dir "$svc")"
+    (cd "$svc_dir" && mvn -B -ntp -DskipTests package >"$LOG_DIR/mvn-${svc}.log" 2>&1) \
       || fail "services/$svc package failed (see $LOG_DIR/mvn-${svc}.log)"
   done
 }
@@ -147,8 +163,10 @@ build_java() {
 # under target/.
 shaded_jar() {
   local svc="$1"
+  local svc_dir
   local jar
-  jar="$(ls "services/$svc/target/${svc}-"*.jar 2>/dev/null | grep -v 'original-' | head -n1 || true)"
+  svc_dir="$(component_dir "$svc")"
+  jar="$(ls "$svc_dir/target/${svc}-"*.jar 2>/dev/null | grep -v 'original-' | head -n1 || true)"
   [[ -n "$jar" && -f "$jar" ]] || fail "could not locate shaded jar for $svc"
   printf '%s' "$jar"
 }
@@ -211,7 +229,7 @@ start_go_service() {
 
 start_harness() {
   local bin
-  bin="$(build_go_binary harness services/agentic-harness-core)"
+  bin="$(build_go_binary harness "$HARN_DIR")"
   start_go_service harness "$bin" "$LOG_DIR/harness.log" \
     "HARNESS_PORT=$HARNESS_PORT" \
     "HARNESS_EVENT_LOG_PATH=$EVENT_DIR/harness-events.jsonl" \
@@ -221,7 +239,7 @@ start_harness() {
 
 start_evidence() {
   local bin
-  bin="$(build_go_binary evidence services/evidence-service)"
+  bin="$(build_go_binary evidence "$EVIDENCE_DIR")"
   start_go_service evidence "$bin" "$LOG_DIR/evidence.log" \
     "EVIDENCE_LISTEN_ADDR=127.0.0.1:$EVIDENCE_PORT" \
     "EVIDENCE_CONTROL_TOKEN=$INTERNAL_CONTROL_TOKEN" \
@@ -232,7 +250,7 @@ start_evidence() {
 
 start_experience() {
   local bin
-  bin="$(build_go_binary experience services/experience-learning-service)"
+  bin="$(build_go_binary experience "$EXPERIENCE_DIR")"
   start_go_service experience "$bin" "$LOG_DIR/experience.log" \
     "EXPERIENCE_LEARNING_LISTEN_ADDR=:$EXPERIENCE_PORT" \
     "EXPERIENCE_LEARNING_HARNESS_EVENTS_PATH=$EVENT_DIR/experience-harness-events.jsonl" \
@@ -282,7 +300,7 @@ start_btr() {
 
 start_model_gateway() {
   local bin
-  bin="$(build_go_binary model-gateway services/model-gateway-service)"
+  bin="$(build_go_binary model-gateway "$MODEL_GATEWAY_DIR")"
   start_go_service model-gateway "$bin" "$LOG_DIR/model-gateway.log" \
     "MODEL_GATEWAY_LISTEN_ADDR=127.0.0.1:$MODEL_GATEWAY_PORT" \
     "MODEL_GATEWAY_CONTROL_TOKEN=$INTERNAL_CONTROL_TOKEN" \
