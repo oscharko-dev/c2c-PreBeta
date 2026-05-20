@@ -14,10 +14,13 @@ verification result for the c2c Evidence Pack v0.
 4. Compare captured stdout to a documented Golden Master output (true
    `GnuCOBOL` execution where it exists, otherwise a clearly labelled
    synthetic fixture) and classify the outcome.
-5. Emit a Harness Event (`build-test.executed`) and an Experience Event for
+5. Execute one approved source/reference context for Trust-3 through an
+   explicit `reference-fixture` or `native-cobol` mode and return the shared
+   parity execution result contract.
+6. Emit a Harness Event (`build-test.executed` or `source-reference.*`) and an Experience Event for
    compile failures, run failures, output divergence, and repeated divergence
    patterns. Output is also returned synchronously to the caller.
-6. Reference build/test outputs by SHA-256 hash so they can be linked from
+7. Reference build/test and source/reference outputs by SHA-256 hash so they can be linked from
    the Evidence Pack v0.
 
 The service is intentionally Java-first per the W0 engineering notes; a Go
@@ -30,6 +33,10 @@ worker hardening pass is a future-wave concern.
   [`openapi.yaml`](./openapi.yaml)) describing the generated project and an
   optional Golden Master hint. Returns a `BuildTestResult` envelope conforming
   to [`schemas/build-test-result-v0.json`](../../schemas/build-test-result-v0.json).
+- `POST /v0/source-reference/execute` — accept an approved acceptance-fixture
+  id plus an explicit `referenceMode` (`reference-fixture` or `native-cobol`).
+  Returns the shared parity execution result contract described in
+  [`schemas/parity-execution-result-v0.json`](../../schemas/parity-execution-result-v0.json).
 
 ## Toolchain requirements
 
@@ -72,6 +79,15 @@ The service accepts either:
 A `programId` is required and is used to look up the Golden Master entry from
 [`fixtures/golden-master/index.json`](../../fixtures/golden-master/index.json)
 unless an inline Golden Master is provided.
+
+For Trust-3 source/reference execution, the service accepts only:
+
+- `fixtureId` from [`fixtures/acceptance/index.json`](../../fixtures/acceptance/index.json)
+- explicit `referenceMode`
+- optional `executionId`, `workflowId`, and `timeoutMs`
+
+It does not accept arbitrary raw file paths, command lines, or inline COBOL
+source for this endpoint.
 
 ## Outputs
 

@@ -82,7 +82,7 @@ Consumers must expose the first trust workflow with explicit mode labels:
 
 | Surface | Canonical label | Contract meaning |
 | --- | --- | --- |
-| Source/reference output | `Reference mode: curated fixture` | The source-side result is a controlled fixture-backed reference, not live mainframe execution. |
+| Source/reference output | `Reference mode: curated fixture` | The source-side result is a controlled fixture-backed reference, not live mainframe execution. Trust-3 additionally stamps the adapter result with an explicit source mode such as `reference-fixture` or `native-cobol`. |
 | Generated target output | `Target mode: generated Java` | The target-side result is produced by generated Java built and executed by the product pipeline. |
 | Comparison | `Comparison authority: deterministic` | Deterministic normalization, comparison, and evidence decide parity status. |
 | Repair proposals | `Repair mode: developer-approved sandbox` | Repair suggestions are reviewed in a sandbox and require explicit approval before application. |

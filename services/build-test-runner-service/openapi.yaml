@@ -99,6 +99,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /v0/source-reference/execute:
+    post:
+      summary: Execute a controlled source/reference context for Trust-3
+      operationId: executeSourceReference
+      description: >
+        Trust-3 controlled source/reference adapter. The request must identify
+        an approved acceptance fixture and an explicit reference mode. The
+        service returns the shared parity execution result contract for either
+        `reference-fixture` or `native-cobol`; it does not accept arbitrary
+        commands, file paths, or inline COBOL source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceReferenceExecutionRequest"
+      responses:
+        "200":
+          description: Source/reference execution completed with a structured result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceReferenceExecutionResult"
+        "400":
+          description: Malformed or unsafe request payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorised
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthResponse:
@@ -403,6 +444,141 @@ components:
           type: array
           items:
             type: object
+    SourceReferenceExecutionRequest:
+      type: object
+      required: [runId, fixtureId, referenceMode]
+      properties:
+        executionId:
+          type: string
+          description: Optional stable identifier for the source/reference execution record.
+        runId:
+          type: string
+        workflowId:
+          type: string
+        fixtureId:
+          type: string
+          description: Approved fixture identifier from fixtures/acceptance/index.json.
+        referenceMode:
+          type: string
+          enum: [reference-fixture, native-cobol]
+          description: >
+            reference-fixture reads the checked-in expected output artifact.
+            native-cobol executes the approved COBOL source with GnuCOBOL.
+        timeoutMs:
+          type: integer
+          minimum: 100
+          maximum: 30000
+          description: Timeout budget used only for native-cobol mode.
+    SourceReferenceExecutionResult:
+      type: object
+      description: >
+        Shared parity execution result contract for the source/reference side.
+        The executable schema source of truth is schemas/parity-execution-result-v0.json.
+      required:
+        - schemaVersion
+        - executionId
+        - runId
+        - executionSurface
+        - referenceMode
+        - command
+        - status
+        - exitCode
+        - timedOut
+        - stdoutRef
+        - stderrRef
+        - normalizedOutputRef
+        - diagnostics
+        - createdAt
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        executionId:
+          type: string
+        runId:
+          type: string
+        workflowId:
+          type: string
+        executionSurface:
+          type: string
+          enum: [source-reference]
+        referenceMode:
+          type: string
+          enum: [reference-fixture, native-cobol]
+        command:
+          type: string
+        status:
+          type: string
+          enum: [passed, failed, timed_out, skipped]
+        exitCode:
+          type: integer
+          nullable: true
+        timedOut:
+          type: boolean
+        stdoutRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        stderrRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        normalizedOutputRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        sourceArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        inputArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        referenceArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        diagnostics:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionDiagnostic"
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        outputRef:
+          $ref: "#/components/schemas/ArtifactReference"
+    ArtifactReference:
+      type: object
+      required: [uri, sha256, byteSize]
+      properties:
+        uri:
+          type: string
+        sha256:
+          type: string
+        byteSize:
+          type: integer
+        mimeType:
+          type: string
+        kind:
+          type: string
+    ExecutionDiagnostic:
+      type: object
+      required: [severity, message]
+      properties:
+        severity:
+          type: string
+          enum: [info, warning, error]
+        code:
+          type: string
+        message:
+          type: string
+        filePath:
+          type: string
+        line:
+          type: integer
+          minimum: 1
+        column:
+          type: integer
+          minimum: 1
+        rawLogRef:
+          $ref: "#/components/schemas/ArtifactReference"
     ErrorResponse:
       type: object
       properties:

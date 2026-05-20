@@ -41,6 +41,10 @@
       "type": "string",
       "enum": ["source-reference", "generated-java"]
     },
+    "referenceMode": {
+      "type": "string",
+      "enum": ["reference-fixture", "native-cobol"]
+    },
     "command": {
       "type": "string",
       "minLength": 1,
@@ -70,10 +74,16 @@
     "normalizedOutputRef": {
       "$ref": "#/$defs/artifactReference"
     },
+    "outputRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
     "logRef": {
       "$ref": "#/$defs/artifactReference"
     },
     "sourceArtifactRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "inputArtifactRef": {
       "$ref": "#/$defs/artifactReference"
     },
     "generatedArtifactRef": {
@@ -111,6 +121,21 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "executionSurface": {
+            "const": "source-reference"
+          }
+        },
+        "required": ["executionSurface"]
+      },
+      "then": {
+        "required": ["referenceMode"]
+      }
+    }
+  ],
   "$defs": {
     "artifactReference": {
       "type": "object",
