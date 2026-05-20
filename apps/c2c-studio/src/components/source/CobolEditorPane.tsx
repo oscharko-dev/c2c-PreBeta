@@ -48,6 +48,12 @@ import {
   resolveCobolToJava,
   type JavaSourceProvider,
 } from "@/lib/editor/lineageNavigation";
+import { pathBasename, pathSuffixMatches } from "@/lib/editor/pathMatching";
+import {
+  dispatchRevealJava,
+  REVEAL_COBOL_EVENT,
+  type RevealCobolDetail,
+} from "@/lib/editor/revealEvents";
 import { useEditorAssist } from "@/stores/editorAssist";
 import { getOrCreateEditorAssistSessionId } from "@/lib/editor/editorAssistSession";
 import { computeSha256Hex, redactRegion } from "@/lib/editor/preRedaction";
@@ -57,40 +63,7 @@ import {
   type EditorAssistRequest,
 } from "@/types/editor-assist";
 
-// Studio-IDE-6 (#248): match the event name emitted by the Java pane on
-// Alt+J. Keeping the constant local avoids a cross-component import cycle —
-// the contract is the event name string, not a shared module.
-const REVEAL_COBOL_EVENT = "c2c:reveal-cobol" as const;
-const REVEAL_JAVA_EVENT = "c2c:reveal-java" as const;
 const LINEAGE_FEEDBACK_OWNER = "c2c-lineage-feedback" as const;
-interface RevealCobolDetail {
-  cobolFile: string;
-  cobolLine: number;
-}
-interface RevealJavaDetail {
-  javaFile: string;
-  javaLine: number;
-}
-
-function pathSegments(value: string): string[] {
-  return value.split(/[\\/]+/).filter(Boolean);
-}
-
-function pathBasename(value: string): string {
-  const segments = pathSegments(value);
-  return (segments.at(-1) ?? value).toLowerCase();
-}
-
-function suffixPathMatches(left: string, right: string): boolean {
-  const a = pathSegments(left);
-  const b = pathSegments(right);
-  if (a.length === 0 || b.length === 0) return false;
-  const minLen = Math.min(a.length, b.length);
-  for (let i = 0; i < minLen; i += 1) {
-    if (a[a.length - 1 - i] !== b[b.length - 1 - i]) return false;
-  }
-  return true;
-}
 
 function cobolFileMatches(
   activeCobolFile: string,
@@ -98,7 +71,7 @@ function cobolFileMatches(
   programId: string | null,
 ): boolean {
   if (activeCobolFile === requestedCobolFile) return true;
-  if (suffixPathMatches(activeCobolFile, requestedCobolFile)) return true;
+  if (pathSuffixMatches(activeCobolFile, requestedCobolFile)) return true;
   const activeBase = pathBasename(activeCobolFile);
   const requestedBase = pathBasename(requestedCobolFile);
   const programBase = programId ? `${programId.toLowerCase()}.cbl` : "";
@@ -117,7 +90,7 @@ function javaBufferContentFor(
     return direct;
   }
   for (const [path, entry] of Object.entries(buffers)) {
-    if (suffixPathMatches(path, javaFile)) {
+    if (pathSuffixMatches(path, javaFile)) {
       return entry.content;
     }
   }
@@ -469,14 +442,10 @@ export function CobolEditorPane() {
             if (result.ok && result.target.length > 0) {
               monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, []);
               const first = result.target[0];
-              window.dispatchEvent(
-                new CustomEvent<RevealJavaDetail>(REVEAL_JAVA_EVENT, {
-                  detail: {
-                    javaFile: first.javaFile,
-                    javaLine: first.javaStartLine,
-                  },
-                }),
-              );
+              dispatchRevealJava({
+                javaFile: first.javaFile,
+                javaLine: first.javaStartLine,
+              });
             } else {
               monaco.editor.setModelMarkers(model, LINEAGE_FEEDBACK_OWNER, [
                 {

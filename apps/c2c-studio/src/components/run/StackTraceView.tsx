@@ -22,22 +22,10 @@ import {
   type JavaSourceProvider,
   type ResolvedStackFrame,
 } from "@/lib/editor/stackTraceMapper";
-
-// Window-event contract with the editor panes. The COBOL pane (#248)
-// already listens for `c2c:reveal-cobol`; the Java pane listener is
-// added in this slice (#253) to mirror the bidirectional contract.
-const REVEAL_COBOL_EVENT = "c2c:reveal-cobol" as const;
-const REVEAL_JAVA_EVENT = "c2c:reveal-java" as const;
-
-interface RevealCobolDetail {
-  cobolFile: string;
-  cobolLine: number;
-}
-
-interface RevealJavaDetail {
-  javaFile: string;
-  javaLine: number;
-}
+import {
+  dispatchRevealCobol,
+  dispatchRevealJava,
+} from "@/lib/editor/revealEvents";
 
 export interface StackTraceViewProps {
   /** Raw stack trace text from the build/test failure surface. */
@@ -67,20 +55,6 @@ function defaultSourceProvider(runId: string): JavaSourceProvider {
     }
     return null;
   };
-}
-
-function dispatchRevealCobol(detail: RevealCobolDetail) {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent<RevealCobolDetail>(REVEAL_COBOL_EVENT, { detail }),
-  );
-}
-
-function dispatchRevealJava(detail: RevealJavaDetail) {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent<RevealJavaDetail>(REVEAL_JAVA_EVENT, { detail }),
-  );
 }
 
 type LoadState =
