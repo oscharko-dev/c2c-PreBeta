@@ -110,6 +110,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             parse_capability_id="cobol.parse",
             ir_capability_id="cobol.ir",
             generator_capability_id="java.generator",
+            source_reference_capability_id="source-reference.execute",
             build_test_capability_id="java.build-test",
             evidence_capability_id="evidence.writer",
             model_gateway_capability_id="model-gateway",
@@ -117,6 +118,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 {"id": "cobol.parse", "name": "COBOL Parser", "owner": "parser-service", "endpoint": "http://parser"},
                 {"id": "cobol.ir", "name": "Semantic IR", "owner": "ir-service", "endpoint": "http://ir"},
                 {"id": "java.generator", "name": "Java Generator", "owner": "generator-service", "endpoint": "http://generator"},
+                {"id": "source-reference.execute", "name": "Source Reference", "owner": "build-service", "endpoint": "http://source-reference"},
                 {"id": "java.build-test", "name": "Build Test", "owner": "build-service", "endpoint": "http://build-test"},
                 {"id": "evidence.writer", "name": "Evidence Writer", "owner": "evidence-service", "endpoint": "http://evidence"},
                 {
@@ -136,6 +138,7 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             "cobol.parse": {"id": "cobol.parse", "owner": "parser-service", "endpoint": "http://parser"},
             "cobol.ir": {"id": "cobol.ir", "owner": "ir-service", "endpoint": "http://ir"},
             "java.generator": {"id": "java.generator", "owner": "gen-service", "endpoint": "http://gen"},
+            "source-reference.execute": {"id": "source-reference.execute", "owner": "build-service", "endpoint": "http://source-reference"},
             "java.build-test": {"id": "java.build-test", "owner": "build-service", "endpoint": "http://build"},
             "evidence.writer": {"id": "evidence.writer", "owner": "evidence", "endpoint": "http://evidence"},
             "model-gateway": {
@@ -202,12 +205,65 @@ class W0WorkflowRunnerTests(unittest.TestCase):
                 "traceability": {},
                 "outputRef": {"uri": "urn:orchestrator/run-1/generator"},
             },
+            "source-reference.execute": {
+                "schemaVersion": "v0",
+                "executionId": "src-ref-1",
+                "runId": "run-1",
+                "workflowId": "w0-migration-v0",
+                "executionSurface": "source-reference",
+                "referenceMode": "reference-fixture",
+                "command": "fixture-read corpus/synthetic/fixtures/hello-w02-output.txt",
+                "status": "passed",
+                "exitCode": 0,
+                "timedOut": False,
+                "stdoutRef": {
+                    "uri": "urn:source-reference/stdout",
+                    "sha256": "d" * 64,
+                    "byteSize": 32,
+                },
+                "stderrRef": {
+                    "uri": "urn:source-reference/stderr",
+                    "sha256": "e" * 64,
+                    "byteSize": 0,
+                },
+                "normalizedOutputRef": {
+                    "uri": "urn:source-reference/normalized",
+                    "sha256": "f" * 64,
+                    "byteSize": 32,
+                },
+                "diagnostics": [],
+                "createdAt": "2026-05-20T00:00:00Z",
+                "summary": "Resolved repository-owned reference fixture for HELLOW02.",
+                "outputRef": {
+                    "uri": "urn:orchestrator/run-1/source-reference",
+                    "sha256": "1" * 64,
+                    "byteSize": 64,
+                },
+            },
             "java.build-test": {
                 "schemaVersion": "v0",
                 "status": "ok",
                 "runId": "run-1",
                 "workflowId": "w0-migration-v0",
                 "programId": "CASE01",
+                "buildResult": {
+                    "status": "passed",
+                    "summary": "javac completed",
+                    "outputRef": {"uri": "urn:orchestrator/run-1/build-result", "sha256": "2" * 64, "byteSize": 32},
+                },
+                "executionResult": {
+                    "status": "passed",
+                    "summary": "java execution completed",
+                    "outputRef": {"uri": "urn:orchestrator/run-1/execution-result", "sha256": "3" * 64, "byteSize": 32},
+                },
+                "comparisonResult": {
+                    "status": "passed",
+                    "matched": True,
+                    "comparisonPolicyVersion": "trust-5-deterministic-v1",
+                    "mismatchClassification": "none",
+                    "diffSummary": "Outputs match after deterministic normalization.",
+                    "outputRef": {"uri": "urn:orchestrator/run-1/comparison-result", "sha256": "4" * 64, "byteSize": 32},
+                },
                 "outputRef": {"uri": "urn:orchestrator/run-1/build"},
             },
             "evidence.writer": {
@@ -259,8 +315,86 @@ class W0WorkflowRunnerTests(unittest.TestCase):
             resolved,
             ["cobol.parse", "cobol.ir", "java.generator", "java.build-test", "evidence.writer"],
         )
+
+    def test_parity_run_invokes_source_reference_before_build_test(self):
+        gateway = StubGateway(self._base_capabilities(), self._base_responses())
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02",
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+        )
+
+        result = runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        self.assertEqual(result["status"], "completed")
+        invoked = [entry[1] for entry in gateway.calls if entry[0] == "invoke"]
+        self.assertEqual(
+            invoked,
+            [
+                "cobol.parse",
+                "cobol.ir",
+                "java.generator",
+                "source-reference.execute",
+                "java.build-test",
+                "evidence.writer",
+            ],
+        )
+        build_test_call = next(
+            entry for entry in gateway.calls
+            if entry[0] == "invoke" and entry[1] == "java.build-test"
+        )
+        oracle_payload = build_test_call[2]["oracle"]
+        self.assertEqual(oracle_payload["mode"], "cobol-runtime")
+        self.assertIn("expectedOutput", oracle_payload)
+
+    def test_parity_run_blocks_on_source_reference_failure(self):
+        responses = self._base_responses()
+        responses["source-reference.execute"] = {
+            **responses["source-reference.execute"],
+            "status": "failed",
+            "summary": "Reference fixture is missing.",
+            "diagnostics": [
+                {
+                    "severity": "error",
+                    "code": "missing-reference-fixture",
+                    "message": "Reference fixture is missing.",
+                }
+            ],
+        }
+        gateway = StubGateway(self._base_capabilities(), responses)
+        runner = W0WorkflowRunner(config=self._base_config(), gateway=gateway)
+        context = W0RunContext(
+            run_id="run-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02",
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+        )
+
+        result = runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        self.assertEqual(result["status"], "blocked")
+        workflow_contract = result["workflowContract"]
+        self.assertEqual(workflow_contract["failureCode"], "source_reference_failed")
+        invoked = [entry[1] for entry in gateway.calls if entry[0] == "invoke"]
+        self.assertNotIn("java.build-test", invoked)
         self.assertEqual(gateway.updated_runs[0][1], "updating")
-        self.assertEqual(gateway.updated_runs[-1][1], "completed")
+        self.assertEqual(gateway.updated_runs[-1][1], "failed")
         self.assertGreater(len(gateway.posted_events), 0)
         evidence_call = next(entry for entry in gateway.calls if entry[0] == "invoke" and entry[1] == "evidence.writer")
         model_invocation = evidence_call[2]["artifacts"]["modelInvocations"][0]

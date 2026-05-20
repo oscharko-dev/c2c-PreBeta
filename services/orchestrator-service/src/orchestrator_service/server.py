@@ -28,6 +28,10 @@ from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import HarnessFailure, HarnessGateway
 from . import region_classification
 from .workflow import (
+    EXECUTION_MODE_PARITY,
+    EXECUTION_MODE_STANDARD,
+    REFERENCE_MODE_NATIVE_COBOL,
+    REFERENCE_MODE_REFERENCE_FIXTURE,
     OrchestratorError,
     W0RunContext,
     W0WorkflowRunner,
@@ -817,6 +821,40 @@ class OrchestratorService:
         model_prompt = payload.get("modelPrompt")
         if model_prompt is not None and not isinstance(model_prompt, str):
             raise ValueError("modelPrompt must be a string")
+        execution_mode_raw = payload.get("executionMode", EXECUTION_MODE_STANDARD)
+        if not isinstance(execution_mode_raw, str):
+            raise ValueError("executionMode must be a string")
+        execution_mode = execution_mode_raw.strip().lower() or EXECUTION_MODE_STANDARD
+        if execution_mode not in {EXECUTION_MODE_STANDARD, EXECUTION_MODE_PARITY}:
+            raise ValueError("executionMode must be standard or parity")
+        fixture_id_raw = payload.get("sourceReferenceFixtureId")
+        trust_case_id_raw = payload.get("trustCaseId")
+        reference_mode_raw = payload.get("sourceReferenceMode")
+        fixture_id = ""
+        if isinstance(fixture_id_raw, str) and fixture_id_raw.strip():
+            fixture_id = fixture_id_raw.strip()
+        elif fixture_id_raw is not None:
+            raise ValueError("sourceReferenceFixtureId must be a string")
+        trust_case_id = ""
+        if isinstance(trust_case_id_raw, str) and trust_case_id_raw.strip():
+            trust_case_id = trust_case_id_raw.strip()
+        elif trust_case_id_raw is not None:
+            raise ValueError("trustCaseId must be a string")
+        if reference_mode_raw is None:
+            reference_mode = REFERENCE_MODE_REFERENCE_FIXTURE
+        elif isinstance(reference_mode_raw, str):
+            reference_mode = reference_mode_raw.strip().lower()
+        else:
+            raise ValueError("sourceReferenceMode must be a string")
+        if reference_mode not in {REFERENCE_MODE_REFERENCE_FIXTURE, REFERENCE_MODE_NATIVE_COBOL}:
+            raise ValueError("sourceReferenceMode must be reference-fixture or native-cobol")
+        parity_mode = execution_mode == EXECUTION_MODE_PARITY or bool(fixture_id or trust_case_id)
+        if parity_mode:
+            execution_mode = EXECUTION_MODE_PARITY
+            if not fixture_id:
+                raise ValueError("sourceReferenceFixtureId is required for parity runs")
+            if not trust_case_id:
+                trust_case_id = fixture_id
         # Issue #169: optional opt-in for the productive Transformation
         # Agent. Defaults to ``False`` so existing W0 deterministic-only
         # callers retain their behaviour.
@@ -882,6 +920,10 @@ class OrchestratorService:
             requester=requester,
             evidence_refs=[str(value) for value in evidence_refs],
             model_prompt=str(model_prompt).strip() if model_prompt else None,
+            execution_mode=execution_mode,
+            trust_case_id=trust_case_id or None,
+            source_reference_fixture_id=fixture_id or None,
+            source_reference_mode=reference_mode if parity_mode else None,
             use_transformation_agent=use_transformation_agent,
             generate_only=generate_only,
             manual_overlay_regions=manual_overlay_regions,

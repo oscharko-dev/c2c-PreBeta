@@ -23,9 +23,14 @@ from orchestrator_service.workflow import (
     STEP_ACCEPTED,
     STEP_COMPLETED,
     STEP_FAILED,
+    STEP_JAVA_BUILD,
+    STEP_JAVA_EXECUTION,
     STEP_MODEL_POLICY_SKIPPED,
+    STEP_PARITY_COMPARISON,
     STEP_STATUS_FAILED,
     STEP_STATUS_OK,
+    STEP_SOURCE_REFERENCE,
+    STEP_TRANSFORM,
     StepExecutionError,
     W0RunContext,
     W0WorkflowRunner,
@@ -174,6 +179,46 @@ class StepProgressContractTests(unittest.TestCase):
         # Pipeline steps after the failure are absent (they never ran).
         self.assertNotIn("compile-test-java", by_name)
         self.assertNotIn("write-evidence", by_name)
+
+    def test_parity_run_records_distinct_parity_phase_steps(self):
+        gateway = StubGateway(
+            W0WorkflowRunnerTests._base_capabilities(),
+            W0WorkflowRunnerTests._base_responses(),
+        )
+        runner = self._runner(gateway)
+        context = W0RunContext(
+            run_id="run-parity-1",
+            workflow_id="w0-migration-v0",
+            requester="ui",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02",
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+        )
+
+        runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        steps = runner.progress_payload("run-parity-1")
+        by_name = {entry["name"]: entry for entry in steps}
+        for required in (
+            STEP_TRANSFORM,
+            STEP_SOURCE_REFERENCE,
+            STEP_JAVA_BUILD,
+            STEP_JAVA_EXECUTION,
+            STEP_PARITY_COMPARISON,
+            "write-evidence",
+            STEP_COMPLETED,
+        ):
+            self.assertIn(required, by_name, f"missing parity step {required}")
+        self.assertEqual(by_name[STEP_TRANSFORM]["status"], STEP_STATUS_OK)
+        self.assertEqual(by_name[STEP_SOURCE_REFERENCE]["status"], STEP_STATUS_OK)
+        self.assertEqual(by_name[STEP_JAVA_BUILD]["status"], STEP_STATUS_OK)
+        self.assertEqual(by_name[STEP_JAVA_EXECUTION]["status"], STEP_STATUS_OK)
+        self.assertEqual(by_name[STEP_PARITY_COMPARISON]["status"], STEP_STATUS_OK)
 
 
 class ExperienceLearningForwardingTests(unittest.TestCase):

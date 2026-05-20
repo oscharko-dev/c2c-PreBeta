@@ -172,6 +172,7 @@ FAILURE_MODEL_GATEWAY_UNAVAILABLE = "model_gateway_unavailable"
 FAILURE_MODEL_POLICY_DENIED = "model_policy_denied"
 FAILURE_AGENT_TIMEOUT = "agent_timeout"
 FAILURE_JAVA_GENERATION_FAILED = "java_generation_failed"
+FAILURE_SOURCE_REFERENCE_FAILED = "source_reference_failed"
 FAILURE_JAVA_COMPILE_FAILED = "java_compile_failed"
 FAILURE_JAVA_RUNTIME_FAILED = "java_runtime_failed"
 FAILURE_ORACLE_MISMATCH = "oracle_mismatch"
@@ -197,6 +198,7 @@ FAILURE_CODES: tuple[str, ...] = (
     FAILURE_AGENT_TIMEOUT,
     FAILURE_AGENT_CONTRACT_INVALID,
     FAILURE_JAVA_GENERATION_FAILED,
+    FAILURE_SOURCE_REFERENCE_FAILED,
     FAILURE_JAVA_COMPILE_FAILED,
     FAILURE_JAVA_RUNTIME_FAILED,
     FAILURE_ORACLE_MISMATCH,
@@ -1265,6 +1267,8 @@ BUILD_TEST_SUCCESS_STATUSES = frozenset({"ok", "passed", "success", "complete", 
 # runner uses this map to pick the failure code attached to a blocked run
 # when the build-test runner returns a structured reason.
 BUILD_TEST_FAILURE_REASONS: dict[str, str] = {
+    "source_reference_failed": FAILURE_SOURCE_REFERENCE_FAILED,
+    "source-reference-failed": FAILURE_SOURCE_REFERENCE_FAILED,
     "compile_failed": FAILURE_JAVA_COMPILE_FAILED,
     "compile-failed": FAILURE_JAVA_COMPILE_FAILED,
     "compile_error": FAILURE_JAVA_COMPILE_FAILED,

@@ -342,6 +342,41 @@ components:
         modelPrompt:
           type: string
           description: Optional model assistance prompt routed through model-gateway capability
+        executionMode:
+          type: string
+          enum: [standard, parity]
+          description: >
+            Optional additive run mode. `standard` preserves the existing
+            transformation flow. `parity` enables orchestrator-owned
+            source/reference execution plus parity-phase progress and evidence.
+        trustCaseId:
+          type: string
+          description: Optional curated trust-case identifier for parity runs.
+        sourceReferenceFixtureId:
+          type: string
+          description: >
+            Approved acceptance-fixture identifier used for the source/reference
+            side of a parity run.
+        sourceReferenceMode:
+          type: string
+          enum: [reference-fixture, native-cobol]
+          description: Controlled source/reference execution mode for parity runs.
+        useTransformationAgent:
+          type: boolean
+          description: Optional opt-in for the productive transformation agent.
+        generateOnly:
+          type: boolean
+          description: >
+            Optional generator-only mode. When true, the orchestrator stops
+            after Java generation and does not run deterministic verification.
+        manualOverlay:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
         evidenceRefs:
           type: array
           items:
@@ -616,6 +651,7 @@ components:
                 - agent_timeout
                 - agent_contract_invalid
                 - java_generation_failed
+                - source_reference_failed
                 - java_compile_failed
                 - java_runtime_failed
                 - oracle_mismatch

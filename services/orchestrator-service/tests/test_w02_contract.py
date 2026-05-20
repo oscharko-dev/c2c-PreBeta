@@ -709,6 +709,7 @@ class W02RunContractShapeTests(unittest.TestCase):
             # contract doc lists the full set.
             "agent_contract_invalid",
             "java_generation_failed",
+            "source_reference_failed",
             "java_compile_failed",
             "java_runtime_failed",
             "oracle_mismatch",

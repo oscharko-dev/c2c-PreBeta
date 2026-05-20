@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -21,6 +21,7 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS = 5
 DEFAULT_PARSE_CAPABILITY = "cobol.parse"
 DEFAULT_IR_CAPABILITY = "cobol.ir"
 DEFAULT_GENERATOR_CAPABILITY = "target.java.generate"
+DEFAULT_SOURCE_REFERENCE_CAPABILITY = "source-reference.execute"
 DEFAULT_BUILD_TEST_CAPABILITY = "build-test.run"
 DEFAULT_EVIDENCE_CAPABILITY = "evidence.writer"
 DEFAULT_MODEL_GATEWAY_CAPABILITY = "model-gateway"
@@ -121,6 +122,16 @@ DEFAULT_W0_CAPABILITIES = [
         "description": "Generates Java projects from Semantic IR.",
     },
     {
+        "id": DEFAULT_SOURCE_REFERENCE_CAPABILITY,
+        "name": "Source Reference Executor",
+        "owner": "build-test-runner-service",
+        "endpoint": f"http://{DEFAULT_BUILD_TEST_SERVICE_HOST}:{DEFAULT_BUILD_TEST_SERVICE_PORT}/v0/source-reference/execute",
+        "dataClass": "build-test",
+        "policyProfile": DEFAULT_CAPABILITY_POLICY_PROFILE,
+        "version": DEFAULT_CAPABILITY_VERSION,
+        "description": "Executes the controlled source/reference side of a parity run.",
+    },
+    {
         "id": DEFAULT_BUILD_TEST_CAPABILITY,
         "name": "Build/Test Runner",
         "owner": "build-test-runner-service",
@@ -162,13 +173,16 @@ class OrchestratorConfig:
     max_retries: int
     retry_delay_ms: int
     request_timeout_seconds: int
-    parse_capability_id: str
-    ir_capability_id: str
-    generator_capability_id: str
-    build_test_capability_id: str
-    evidence_capability_id: str
-    model_gateway_capability_id: str
-    w0_capabilities: tuple[JsonObject, ...]
+    parse_capability_id: str = DEFAULT_PARSE_CAPABILITY
+    ir_capability_id: str = DEFAULT_IR_CAPABILITY
+    generator_capability_id: str = DEFAULT_GENERATOR_CAPABILITY
+    source_reference_capability_id: str = DEFAULT_SOURCE_REFERENCE_CAPABILITY
+    build_test_capability_id: str = DEFAULT_BUILD_TEST_CAPABILITY
+    evidence_capability_id: str = DEFAULT_EVIDENCE_CAPABILITY
+    model_gateway_capability_id: str = DEFAULT_MODEL_GATEWAY_CAPABILITY
+    w0_capabilities: tuple[JsonObject, ...] = field(
+        default_factory=lambda: tuple(dict(capability) for capability in DEFAULT_W0_CAPABILITIES)
+    )
     harness_token: str = ""
     control_token: str = ""
     capability_control_token: str = ""
@@ -247,6 +261,10 @@ def load_config() -> OrchestratorConfig:
     parse_capability_id = os.environ.get("ORCHESTRATOR_PARSE_CAPABILITY_ID", DEFAULT_PARSE_CAPABILITY).strip()
     ir_capability_id = os.environ.get("ORCHESTRATOR_IR_CAPABILITY_ID", DEFAULT_IR_CAPABILITY).strip()
     generator_capability_id = os.environ.get("ORCHESTRATOR_GENERATOR_CAPABILITY_ID", DEFAULT_GENERATOR_CAPABILITY).strip()
+    source_reference_capability_id = os.environ.get(
+        "ORCHESTRATOR_SOURCE_REFERENCE_CAPABILITY_ID",
+        DEFAULT_SOURCE_REFERENCE_CAPABILITY,
+    ).strip()
     build_test_capability_id = os.environ.get("ORCHESTRATOR_BUILD_TEST_CAPABILITY_ID", DEFAULT_BUILD_TEST_CAPABILITY).strip()
     evidence_capability_id = os.environ.get("ORCHESTRATOR_EVIDENCE_CAPABILITY_ID", DEFAULT_EVIDENCE_CAPABILITY).strip()
     model_gateway_capability_id = os.environ.get(
@@ -316,7 +334,15 @@ def load_config() -> OrchestratorConfig:
         run_artifact_root_raw = DEFAULT_RUN_ARTIFACT_ROOT
     run_artifact_root = str(Path(run_artifact_root_raw).expanduser())
 
-    if not parse_capability_id or not ir_capability_id or not generator_capability_id or not build_test_capability_id or not evidence_capability_id or not model_gateway_capability_id:
+    if (
+        not parse_capability_id
+        or not ir_capability_id
+        or not generator_capability_id
+        or not source_reference_capability_id
+        or not build_test_capability_id
+        or not evidence_capability_id
+        or not model_gateway_capability_id
+    ):
         raise ValueError("capability ids are required")
 
     w0_capabilities = _load_w0_capabilities(
@@ -324,6 +350,7 @@ def load_config() -> OrchestratorConfig:
             parse_capability_id,
             ir_capability_id,
             generator_capability_id,
+            source_reference_capability_id,
             build_test_capability_id,
             evidence_capability_id,
             model_gateway_capability_id,
@@ -430,6 +457,7 @@ def load_config() -> OrchestratorConfig:
         parse_capability_id=parse_capability_id,
         ir_capability_id=ir_capability_id,
         generator_capability_id=generator_capability_id,
+        source_reference_capability_id=source_reference_capability_id,
         build_test_capability_id=build_test_capability_id,
         evidence_capability_id=evidence_capability_id,
         model_gateway_capability_id=model_gateway_capability_id,
@@ -503,17 +531,21 @@ def _default_w0_capabilities_from_env(required_ids: Iterable[str]) -> tuple[Json
             "ORCHESTRATOR_GENERATOR_CAPABILITY_ENDPOINT",
             DEFAULT_W0_CAPABILITIES[2]["endpoint"],
         ).strip(),
+        DEFAULT_SOURCE_REFERENCE_CAPABILITY: os.environ.get(
+            "ORCHESTRATOR_SOURCE_REFERENCE_CAPABILITY_ENDPOINT",
+            DEFAULT_W0_CAPABILITIES[3]["endpoint"],
+        ).strip(),
         DEFAULT_BUILD_TEST_CAPABILITY: os.environ.get(
             "ORCHESTRATOR_BUILD_TEST_CAPABILITY_ENDPOINT",
-            DEFAULT_W0_CAPABILITIES[3]["endpoint"],
+            DEFAULT_W0_CAPABILITIES[4]["endpoint"],
         ).strip(),
         DEFAULT_EVIDENCE_CAPABILITY: os.environ.get(
             "ORCHESTRATOR_EVIDENCE_CAPABILITY_ENDPOINT",
-            DEFAULT_W0_CAPABILITIES[4]["endpoint"],
+            DEFAULT_W0_CAPABILITIES[5]["endpoint"],
         ).strip(),
         DEFAULT_MODEL_GATEWAY_CAPABILITY: os.environ.get(
             "ORCHESTRATOR_MODEL_GATEWAY_CAPABILITY_ENDPOINT",
-            os.environ.get("ORCHESTRATOR_MODEL_GATEWAY_ENDPOINT", DEFAULT_W0_CAPABILITIES[5]["endpoint"]),
+            os.environ.get("ORCHESTRATOR_MODEL_GATEWAY_ENDPOINT", DEFAULT_W0_CAPABILITIES[6]["endpoint"]),
         ).strip(),
     }
 
