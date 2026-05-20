@@ -93,12 +93,12 @@ class ValidateServiceCatalogTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("openapi does not exist", result.stderr)
 
-    def test_npm_component_requires_dependency_manifest(self) -> None:
+    def test_supply_chain_participation_is_required(self) -> None:
         catalog = _load_catalog()
         mutated = copy.deepcopy(catalog)
         for component in mutated["components"]:
             if component["id"] == "c2c-studio":
-                component.pop("dependencyManifest", None)
+                component.pop("supplyChainParticipation", None)
                 break
         else:
             self.fail("c2c-studio missing from catalog fixture")
@@ -110,17 +110,56 @@ class ValidateServiceCatalogTest(unittest.TestCase):
             temp_catalog.unlink(missing_ok=True)
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("dependencyManifest is required for npm components", result.stderr)
+        self.assertIn("supplyChainParticipation must be a non-empty array", result.stderr)
 
-    def test_query_lists_ci_typescript_dependency_manifests(self) -> None:
+    def test_supply_chain_participation_rejects_unknown_values(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        for component in mutated["components"]:
+            if component["id"] == "c2c-studio":
+                component["supplyChainParticipation"] = ["sbom", "export"]
+                break
+        else:
+            self.fail("c2c-studio missing from catalog fixture")
+
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("supplyChainParticipation values must be drawn from", result.stderr)
+
+    def test_supply_chain_participant_requires_dependency_manifest(self) -> None:
+        catalog = _load_catalog()
+        mutated = copy.deepcopy(catalog)
+        for component in mutated["components"]:
+            if component["id"] == "c2c-target-java-runtime":
+                component.pop("dependencyManifest", None)
+                break
+        else:
+            self.fail("c2c-target-java-runtime missing from catalog fixture")
+
+        temp_catalog = self._write_temp_catalog(mutated)
+        try:
+            result = self._run_catalog(temp_catalog)
+        finally:
+            temp_catalog.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "dependencyManifest is required for supply-chain participating components",
+            result.stderr,
+        )
+
+    def test_query_lists_npm_dependency_manifests(self) -> None:
         result = self._run_catalog(
             CATALOG_PATH,
             "--list-field",
             "dependencyManifest",
-            "--language",
-            "typescript",
-            "--release-gate",
-            "ci",
+            "--package-manager",
+            "npm",
         )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
@@ -132,6 +171,32 @@ class ValidateServiceCatalogTest(unittest.TestCase):
                 "services/reference/w0-service-typescript/package-lock.json",
             ],
         )
+
+    def test_query_prints_dependency_manifest_path(self) -> None:
+        result = self._run_catalog(
+            CATALOG_PATH,
+            "--print-field",
+            "dependencyManifest",
+            "--component-id",
+            "c2c-studio",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), "apps/c2c-studio/package-lock.json")
+
+    def test_query_filters_supply_chain_participants(self) -> None:
+        result = self._run_catalog(
+            CATALOG_PATH,
+            "--list-field",
+            "path",
+            "--supply-chain",
+            "sbom",
+            "--kind",
+            "library",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["libs/c2c-target-java-runtime"])
 
     def test_query_prints_component_path(self) -> None:
         result = self._run_catalog(
