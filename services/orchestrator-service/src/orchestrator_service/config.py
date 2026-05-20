@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -173,14 +173,16 @@ class OrchestratorConfig:
     max_retries: int
     retry_delay_ms: int
     request_timeout_seconds: int
-    parse_capability_id: str
-    ir_capability_id: str
-    generator_capability_id: str
-    source_reference_capability_id: str
-    build_test_capability_id: str
-    evidence_capability_id: str
-    model_gateway_capability_id: str
-    w0_capabilities: tuple[JsonObject, ...]
+    parse_capability_id: str = DEFAULT_PARSE_CAPABILITY
+    ir_capability_id: str = DEFAULT_IR_CAPABILITY
+    generator_capability_id: str = DEFAULT_GENERATOR_CAPABILITY
+    source_reference_capability_id: str = DEFAULT_SOURCE_REFERENCE_CAPABILITY
+    build_test_capability_id: str = DEFAULT_BUILD_TEST_CAPABILITY
+    evidence_capability_id: str = DEFAULT_EVIDENCE_CAPABILITY
+    model_gateway_capability_id: str = DEFAULT_MODEL_GATEWAY_CAPABILITY
+    w0_capabilities: tuple[JsonObject, ...] = field(
+        default_factory=lambda: tuple(dict(capability) for capability in DEFAULT_W0_CAPABILITIES)
+    )
     harness_token: str = ""
     control_token: str = ""
     capability_control_token: str = ""
