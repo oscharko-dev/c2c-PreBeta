@@ -9,8 +9,10 @@ verification result for the c2c Evidence Pack v0.
    isolated working directory.
 2. Compile the project's Java sources in-memory using the `javax.tools`
    `JavaCompiler` API.
-3. Execute the generated entry class with a captured stdout/stderr through a
-   sandboxed in-process classloader. No `Runtime.exec` of generated code.
+3. Execute the generated entry class with captured stdout/stderr through a
+   controlled in-process classloader. The runner preserves per-run hashes,
+   timeouts, diagnostics, and artifact references, but it is not a
+   container-grade isolation boundary.
 4. Compare captured stdout to a documented Golden Master output (true
    `GnuCOBOL` execution where it exists, otherwise a clearly labelled
    synthetic fixture) and classify the outcome.
@@ -31,8 +33,14 @@ worker hardening pass is a future-wave concern.
 - `GET /health` — service health probe.
 - `POST /v0/run-verification` — accept a request payload (see
   [`openapi.yaml`](./openapi.yaml)) describing the generated project and an
-  optional Golden Master hint. Returns a `BuildTestResult` envelope conforming
-  to [`schemas/build-test-result-v0.json`](../../schemas/build-test-result-v0.json).
+  optional Golden Master hint. Returns the legacy `BuildTestResult` envelope,
+  with nested generated-Java `build` and `execution` sections aligned to the
+  Trust-2 shared parity contracts
+  [`schemas/parity-build-result-v0.json`](../../schemas/parity-build-result-v0.json)
+  and
+  [`schemas/parity-execution-result-v0.json`](../../schemas/parity-execution-result-v0.json),
+  plus compatibility fields that current BFF/orchestrator consumers still
+  expect.
 - `POST /v0/source-reference/execute` — accept an approved acceptance-fixture
   id plus an explicit `referenceMode` (`reference-fixture` or `native-cobol`).
   Returns the shared parity execution result contract described in
@@ -97,6 +105,19 @@ source for this endpoint.
   `divergence-known-w0-coverage-gap`, `divergence-unknown`, `compile-error`,
   `run-error`, `true-golden-master-reproduction-error`,
   `true-golden-master-mismatch`, or `skipped-no-execution`.
+- `build`: Trust-2 aligned generated-Java build result with `buildId`,
+  `buildMode`, content-addressed `buildOutputRef`/`logRef`, structured
+  compiler diagnostics, `evidenceRefs`, and compatibility fields such as
+  `compileOk`.
+- `buildResult`: exact canonical Trust-2 generated-Java build result without
+  the legacy compatibility fields.
+- `execution`: Trust-2 aligned generated-Java execution result with
+  `executionId`, `executionSurface`, content-addressed stdout/stderr/normalized
+  output refs, `sourceArtifactRef`/`inputArtifactRef`/`generatedArtifactRef`,
+  structured runtime diagnostics, `evidenceRefs`, and compatibility fields
+  such as `ran`, `ok`, `stdout`, and `stderr`.
+- `executionResult`: exact canonical Trust-2 generated-Java execution result
+  without the legacy compatibility fields.
 - `outputRef`: a hash-stamped reference to the canonical result JSON.
 
 The executable examples are the service tests under `src/test/`; local

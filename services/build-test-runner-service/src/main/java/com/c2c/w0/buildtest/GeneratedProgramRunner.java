@@ -8,6 +8,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -133,6 +134,7 @@ final class GeneratedProgramRunner {
                      String stdout,
                      String stderr,
                      long durationMs,
+                     String summary,
                      String errorClass,
                      String errorMessage) {
 
@@ -144,39 +146,112 @@ final class GeneratedProgramRunner {
             map.put("stdout", stdout);
             map.put("stderr", stderr);
             map.put("durationMs", durationMs);
+            map.put("summary", summary);
             if (errorClass != null) {
                 map.put("errorClass", errorClass);
             }
             if (errorMessage != null) {
                 map.put("errorMessage", errorMessage);
             }
+            map.put("stdoutRef", BuildTestRunnerService.outputReference("generated-java-stdout",
+                    stdout == null ? "" : stdout));
+            map.put("stderrRef", BuildTestRunnerService.outputReference("generated-java-stderr",
+                    stderr == null ? "" : stderr));
+            map.put("normalizedOutputRef", BuildTestRunnerService.outputReference("generated-java-normalized-output",
+                    normalize(stdout)));
+            map.put("logRef", BuildTestRunnerService.outputReference("generated-java-log",
+                    buildLog(stdout, stderr, summary, errorClass, errorMessage)));
+            map.put("evidenceRefs", List.of(
+                    map.get("stdoutRef"),
+                    map.get("stderrRef"),
+                    map.get("normalizedOutputRef"),
+                    map.get("logRef")));
             map.put("stdoutSha256", HashUtil.sha256(stdout == null ? "" : stdout));
             return map;
         }
 
         static RunResult success(String stdout, String stderr, long durationMs) {
-            return new RunResult(true, true, 0, stdout, stderr, durationMs, null, null);
+            return new RunResult(true, true, 0, stdout, stderr, durationMs,
+                    "Generated program completed successfully.",
+                    null, null);
         }
 
         static RunResult timeout(long timeoutMs, String stdout, String stderr) {
             return new RunResult(true, false, 124, stdout, stderr, timeoutMs,
+                    "Generated program exceeded " + timeoutMs + "ms wall-clock budget.",
                     "timeout",
                     "Generated program exceeded " + timeoutMs + "ms wall-clock budget");
         }
 
         static RunResult runtimeFailure(Throwable cause, String stdout, String stderr) {
             return new RunResult(true, false, 1, stdout, stderr, 0,
+                    safeRuntimeSummary(cause),
                     cause.getClass().getName(),
                     cause.getMessage() == null ? cause.toString() : cause.getMessage());
         }
 
         static RunResult runError(String errorClass, Throwable cause) {
-            return new RunResult(false, false, -1, "", "", 0, errorClass,
+            return new RunResult(false, false, -1, "", "", 0,
+                    "Execution could not start: " + errorClass,
+                    errorClass,
                     cause == null ? errorClass : (cause.getMessage() == null ? cause.toString() : cause.getMessage()));
         }
 
         static RunResult skipped(String errorClass, String message) {
-            return new RunResult(false, false, -1, "", "", 0, errorClass, message);
+            return new RunResult(false, false, -1, "", "", 0,
+                    message,
+                    errorClass, message);
+        }
+
+        private static String normalize(String value) {
+            if (value == null) {
+                return "";
+            }
+            return value.replace("\r\n", "\n").trim();
+        }
+
+        private static String buildLog(String stdout, String stderr, String summary, String errorClass, String errorMessage) {
+            StringBuilder log = new StringBuilder();
+            if (summary != null && !summary.isBlank()) {
+                log.append(summary.trim());
+            }
+            if (errorClass != null) {
+                if (log.length() > 0) {
+                    log.append(" | ");
+                }
+                log.append(errorClass);
+            }
+            if (errorMessage != null && !errorMessage.isBlank()) {
+                if (log.length() > 0) {
+                    log.append(" | ");
+                }
+                log.append(errorMessage.trim());
+            }
+            if (stderr != null && !stderr.isBlank()) {
+                if (log.length() > 0) {
+                    log.append(" | ");
+                }
+                log.append("stderr-bytes=").append(HashUtil.byteLength(stderr));
+            }
+            if (stdout != null && !stdout.isBlank()) {
+                if (log.length() > 0) {
+                    log.append(" | ");
+                }
+                log.append("stdout-bytes=").append(HashUtil.byteLength(stdout));
+            }
+            return log.toString();
+        }
+
+        private static String safeRuntimeSummary(Throwable cause) {
+            if (cause == null) {
+                return "Generated program failed with an unknown runtime exception.";
+            }
+            String className = cause.getClass().getName();
+            String message = cause.getMessage();
+            if (message == null || message.isBlank()) {
+                return "Generated program failed with " + className + ".";
+            }
+            return "Generated program failed with " + className + ": " + message.trim();
         }
     }
 }

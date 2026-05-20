@@ -35,6 +35,7 @@ class GeneratedProgramRunnerTest {
         assertTrue(result.ran());
         assertFalse(result.ok());
         assertEquals("timeout", result.errorClass());
+        assertTrue(result.summary().contains("wall-clock budget"));
     }
 
     @Test
@@ -55,6 +56,12 @@ class GeneratedProgramRunnerTest {
         assertTrue(result.ran());
         assertFalse(result.ok());
         assertTrue(result.errorMessage().contains("boom"));
+        assertTrue(result.summary().contains("RuntimeException"));
+        assertFalse(result.summary().contains("at sample."));
+        Map<String, Object> map = result.toMap();
+        assertTrue(map.containsKey("stderrRef"));
+        assertTrue(map.containsKey("normalizedOutputRef"));
+        assertTrue(map.containsKey("evidenceRefs"));
     }
 
     private static Path compileSnippet(String fqn, String source) throws Exception {

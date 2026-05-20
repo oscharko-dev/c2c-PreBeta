@@ -290,6 +290,11 @@ components:
           default: 5000
     BuildTestResult:
       type: object
+      description: >
+        Legacy build-test envelope retained for current W0 callers. The nested
+        generated-Java `build` and `execution` payloads follow the Trust-2
+        shared parity result shape, with a small compatibility superset for
+        existing BFF/orchestrator consumers.
       required: [schemaVersion, capability, status, classification, outputRef]
       properties:
         schemaVersion:
@@ -304,6 +309,12 @@ components:
           type: string
         programId:
           type: string
+        sourceArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        generatedArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        inputArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
         status:
           type: string
           enum:
@@ -335,9 +346,13 @@ components:
             - oracle-cobol-run-error
             - oracle-invalid-request
         build:
-          type: object
+          $ref: "#/components/schemas/GeneratedJavaBuildResult"
+        buildResult:
+          $ref: "#/components/schemas/CanonicalGeneratedJavaBuildResult"
         execution:
-          type: object
+          $ref: "#/components/schemas/GeneratedJavaExecutionResult"
+        executionResult:
+          $ref: "#/components/schemas/CanonicalGeneratedJavaExecutionResult"
         tests:
           type: object
         goldenMaster:
@@ -544,9 +559,196 @@ components:
           type: string
         outputRef:
           $ref: "#/components/schemas/ArtifactReference"
+    GeneratedJavaBuildResult:
+      type: object
+      description: >
+        Trust-2 aligned generated-Java build result. The executable schema
+        source of truth is schemas/parity-build-result-v0.json; legacy fields
+        such as `compileOk` remain for compatibility.
+      required:
+        - schemaVersion
+        - buildId
+        - runId
+        - buildMode
+        - command
+        - status
+        - inputArtifactRef
+        - buildOutputRef
+        - logRef
+        - diagnostics
+        - createdAt
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        buildId:
+          type: string
+        runId:
+          type: string
+        workflowId:
+          type: string
+        buildMode:
+          type: string
+          enum: [generated-java]
+        command:
+          type: string
+        toolchain:
+          type: string
+        status:
+          type: string
+          enum: [passed, failed, skipped]
+        inputArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        buildOutputRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        logRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        diagnostics:
+          type: array
+          items:
+            $ref: "#/components/schemas/BuildDiagnostic"
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        evidenceRefs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactReference"
+        outputRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        compileOk:
+          type: boolean
+          description: Compatibility field for current W0 consumers.
+        sourceCount:
+          type: integer
+          minimum: 0
+        fileCount:
+          type: integer
+          minimum: 0
+        classOutputDir:
+          type: string
+    CanonicalGeneratedJavaBuildResult:
+      allOf:
+        - $ref: "#/components/schemas/GeneratedJavaBuildResult"
+      description: >
+        Exact Trust-2 generated-Java build result without the legacy
+        compatibility fields carried in `build`.
+    GeneratedJavaExecutionResult:
+      type: object
+      description: >
+        Trust-2 aligned generated-Java execution result. The executable schema
+        source of truth is schemas/parity-execution-result-v0.json; legacy
+        fields such as `ran`, `ok`, `stdout`, and `stderr` remain for
+        compatibility.
+      required:
+        - schemaVersion
+        - executionId
+        - runId
+        - executionSurface
+        - command
+        - status
+        - exitCode
+        - timedOut
+        - stdoutRef
+        - stderrRef
+        - normalizedOutputRef
+        - diagnostics
+        - createdAt
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        executionId:
+          type: string
+        runId:
+          type: string
+        workflowId:
+          type: string
+        executionSurface:
+          type: string
+          enum: [generated-java]
+        command:
+          type: string
+        status:
+          type: string
+          enum: [passed, failed, timed_out, skipped]
+        exitCode:
+          type: integer
+          nullable: true
+        timedOut:
+          type: boolean
+        stdoutRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        stderrRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        normalizedOutputRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        outputRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        logRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        sourceArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        inputArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        generatedArtifactRef:
+          $ref: "#/components/schemas/ArtifactReference"
+        diagnostics:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionDiagnostic"
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        evidenceRefs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactReference"
+        ran:
+          type: boolean
+          description: Compatibility field for current W0 consumers.
+        ok:
+          type: boolean
+          description: Compatibility field for current W0 consumers.
+        stdout:
+          type: string
+        stderr:
+          type: string
+        durationMs:
+          type: integer
+          minimum: 0
+        stdoutSha256:
+          type: string
+        errorClass:
+          type: string
+        errorMessage:
+          type: string
+    CanonicalGeneratedJavaExecutionResult:
+      allOf:
+        - $ref: "#/components/schemas/GeneratedJavaExecutionResult"
+      description: >
+        Exact Trust-2 generated-Java execution result without the legacy
+        compatibility fields carried in `execution`.
     ArtifactReference:
       type: object
       required: [uri, sha256, byteSize]
+      description: Content-addressed artifact reference shared across build and execution payloads.
       properties:
         uri:
           type: string
@@ -561,6 +763,27 @@ components:
     ExecutionDiagnostic:
       type: object
       required: [severity, message]
+      properties:
+        severity:
+          type: string
+          enum: [info, warning, error]
+        code:
+          type: string
+        message:
+          type: string
+        filePath:
+          type: string
+        line:
+          type: integer
+          minimum: 1
+        column:
+          type: integer
+          minimum: 1
+        rawLogRef:
+          $ref: "#/components/schemas/ArtifactReference"
+    BuildDiagnostic:
+      type: object
+      required: [filePath, line, column, severity, message]
       properties:
         severity:
           type: string

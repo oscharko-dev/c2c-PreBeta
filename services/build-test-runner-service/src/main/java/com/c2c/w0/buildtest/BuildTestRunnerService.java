@@ -4,11 +4,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Orchestrates the verification pipeline:
@@ -65,14 +68,28 @@ public final class BuildTestRunnerService {
 
         Map<String, Object> response = newEnvelope(request, programId);
         List<Map<String, Object>> diagnostics = new ArrayList<>();
+        Map<String, Object> sourceArtifactRef = sourceArtifactRef(request);
+        Map<String, Object> generatedArtifactRef = generatedArtifactRef(request, generatedProject);
+        Map<String, Object> executionInputRef = controlledInputRef(sourceArtifactRef, generatedArtifactRef, oracleSpec);
+        response.put("generatedArtifactRef", generatedArtifactRef);
+        if (!sourceArtifactRef.isEmpty()) {
+            response.put("sourceArtifactRef", sourceArtifactRef);
+        }
+        if (!executionInputRef.isEmpty()) {
+            response.put("inputArtifactRef", executionInputRef);
+        }
 
         if (generatedProject.isEmpty()) {
             applyClassification(response, ResultClassifier.classification(
                     ResultClassifier.STATUS_SKIPPED, ResultClassifier.CLASS_SKIPPED,
                     "No generatedProject payload supplied; nothing to verify."));
             response.put("diagnostics", diagnostics);
-            response.put("build", emptyBuild());
-            response.put("execution", emptyExecution());
+            Map<String, Object> build = emptyBuild(response, generatedArtifactRef);
+            Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+            response.put("build", build);
+            response.put("buildResult", canonicalBuildResult(build));
+            response.put("execution", execution);
+            response.put("executionResult", canonicalExecutionResult(execution));
             response.put("tests", emptyTests());
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
@@ -89,9 +106,21 @@ public final class BuildTestRunnerService {
             materialised = GeneratedProjectMaterializer.materialise(files);
         } catch (IllegalArgumentException e) {
             applyClassification(response, ResultClassifier.compileFailure());
-            diagnostics.add(diagnostic("error", "materialise-failed", e.getMessage()));
-            response.put("build", failedBuild(diagnostics));
-            response.put("execution", emptyExecution());
+            Map<String, Object> buildDiagnostic = diagnostic(
+                    "error",
+                    "materialise-failed",
+                    entryFilePath == null ? "generated-project" : entryFilePath,
+                    1L,
+                    1L,
+                    e.getMessage());
+            diagnostics.add(buildDiagnostic);
+            Map<String, Object> build = failedBuild(response, generatedArtifactRef, diagnostics,
+                    "Generated project could not be materialised safely.");
+            Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+            response.put("build", build);
+            response.put("buildResult", canonicalBuildResult(build));
+            response.put("execution", execution);
+            response.put("executionResult", canonicalExecutionResult(execution));
             response.put("tests", emptyTests());
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
@@ -100,10 +129,19 @@ public final class BuildTestRunnerService {
             return response;
         } catch (IOException e) {
             applyClassification(response, ResultClassifier.compileFailure());
-            diagnostics.add(diagnostic("error", "materialise-io",
-                    "Failed to write generated project to a temp directory: " + e.getMessage()));
-            response.put("build", failedBuild(diagnostics));
-            response.put("execution", emptyExecution());
+            Map<String, Object> buildDiagnostic = diagnostic("error", "materialise-io",
+                    entryFilePath == null ? "generated-project" : entryFilePath,
+                    1L,
+                    1L,
+                    "Failed to write generated project to a temp directory: " + e.getMessage());
+            diagnostics.add(buildDiagnostic);
+            Map<String, Object> build = failedBuild(response, generatedArtifactRef, diagnostics,
+                    "Generated project could not be written to the controlled work directory.");
+            Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+            response.put("build", build);
+            response.put("buildResult", canonicalBuildResult(build));
+            response.put("execution", execution);
+            response.put("executionResult", canonicalExecutionResult(execution));
             response.put("tests", emptyTests());
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
@@ -114,22 +152,28 @@ public final class BuildTestRunnerService {
 
         try (materialised) {
             Path classOut = materialised.root().resolve("target/classes");
+            Instant buildStarted = Instant.now();
 
             // -- Compile -----------------------------------------------------
             JavaInMemoryCompiler.CompileResult compile =
-                    JavaInMemoryCompiler.compile(materialised.javaSources(), classOut);
-            Map<String, Object> buildSection = new LinkedHashMap<>();
-            buildSection.put("compileOk", compile.ok());
-            buildSection.put("sourceCount", compile.sourceCount());
-            buildSection.put("fileCount", files.size());
-            buildSection.put("diagnostics", compile.diagnostics());
-            buildSection.put("classOutputDir", "target/classes");
+                    JavaInMemoryCompiler.compile(materialised, classOut);
+            Map<String, Object> buildSection = buildSection(
+                    response,
+                    generatedArtifactRef,
+                    compile,
+                    files.size(),
+                    buildStarted,
+                    Instant.now(),
+                    classOut);
             response.put("build", buildSection);
+            response.put("buildResult", canonicalBuildResult(buildSection));
             diagnostics.addAll(compile.diagnostics());
 
             if (!compile.ok()) {
                 applyClassification(response, ResultClassifier.compileFailure());
-                response.put("execution", emptyExecution());
+                Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+                response.put("execution", execution);
+                response.put("executionResult", canonicalExecutionResult(execution));
                 response.put("tests", emptyTests());
                 if (oracleEnabled) {
                     response.put("oracle", oracleSkippedMap(oracleSpec,
@@ -154,17 +198,32 @@ public final class BuildTestRunnerService {
             GeneratedProgramRunner.RunResult run;
             if (skipExecution) {
                 run = null;
-                response.put("execution", Map.of(
-                        "ran", false,
-                        "skipped", true,
-                        "reason", "options.skipExecution=true"));
+                Map<String, Object> execution = skippedExecutionSection(
+                        response,
+                        generatedArtifactRef,
+                        executionInputRef,
+                        sourceArtifactRef,
+                        entryClass,
+                        "options.skipExecution=true");
+                response.put("execution", execution);
+                response.put("executionResult", canonicalExecutionResult(execution));
             } else {
+                Instant executionStarted = Instant.now();
                 run = GeneratedProgramRunner.run(classOut, entryClass, timeoutMs);
-                response.put("execution", run.toMap());
+                Map<String, Object> executionSection = executionSection(
+                        response,
+                        generatedArtifactRef,
+                        executionInputRef,
+                        sourceArtifactRef,
+                        entryClass,
+                        run,
+                        executionStarted,
+                        Instant.now());
+                response.put("execution", executionSection);
+                response.put("executionResult", canonicalExecutionResult(executionSection));
+                diagnostics.addAll(executionDiagnostics(executionSection));
                 if (!run.ran()) {
                     applyClassification(response, ResultClassifier.runFailure(run.errorClass()));
-                    diagnostics.add(diagnostic("error", "run-not-started",
-                            run.errorMessage() == null ? "execution did not start" : run.errorMessage()));
                     response.put("tests", emptyTests());
                     if (oracleEnabled) {
                         response.put("oracle", oracleSkippedMap(oracleSpec,
@@ -186,8 +245,6 @@ public final class BuildTestRunnerService {
                 }
                 if (!run.ok()) {
                     applyClassification(response, ResultClassifier.runFailure(run.errorClass()));
-                    diagnostics.add(diagnostic("error", "run-failed",
-                            run.errorMessage() == null ? "generated program failed" : run.errorMessage()));
                 }
             }
 
@@ -612,34 +669,223 @@ public final class BuildTestRunnerService {
         return ref;
     }
 
-    private static Map<String, Object> failedBuild(List<Map<String, Object>> diagnostics) {
+    private static Map<String, Object> buildSection(
+            Map<String, Object> response,
+            Map<String, Object> generatedArtifactRef,
+            JavaInMemoryCompiler.CompileResult compile,
+            int fileCount,
+            Instant started,
+            Instant completed,
+            Path classOutputDir) {
+        String buildLog = renderBuildLog(compile.diagnostics(), compile.ok(), compile.sourceCount(), fileCount);
+        Map<String, Object> logRef = outputReference("generated-java-build-log", buildLog);
+        Map<String, Object> buildOutputRef = classDirectoryReference(classOutputDir);
+        List<Map<String, Object>> schemaDiagnostics = diagnosticsWithRawLogRef(compile.diagnostics(), logRef);
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("compileOk", false);
-        map.put("sourceCount", 0);
-        map.put("fileCount", 0);
-        map.put("diagnostics", diagnostics);
+        map.put("schemaVersion", SCHEMA_VERSION);
+        map.put("buildId", "generated-java-build-" + UUID.randomUUID());
+        map.put("runId", string(response.get("runId"), "run-unknown"));
+        map.put("workflowId", string(response.get("workflowId"), null));
+        map.put("buildMode", "generated-java");
+        map.put("command", "javac(in-process)");
+        map.put("toolchain", runtimeToolchain());
+        map.put("status", compile.ok() ? "passed" : "failed");
+        map.put("inputArtifactRef", generatedArtifactRef);
+        map.put("buildOutputRef", buildOutputRef);
+        map.put("logRef", logRef);
+        map.put("evidenceRefs", evidenceRefs(generatedArtifactRef, buildOutputRef, logRef));
+        map.put("diagnostics", schemaDiagnostics);
+        map.put("startedAt", started.toString());
+        map.put("completedAt", completed.toString());
+        map.put("createdAt", completed.toString());
+        map.put("summary", compile.ok()
+                ? "Generated Java compiled successfully in the controlled build runner."
+                : "Generated Java compilation failed in the controlled build runner.");
+        map.put("outputRef", reference("parity-build-result", "parity-build-result", map));
+        // Compatibility fields kept while downstream consumers move to the
+        // shared build schema.
+        map.put("compileOk", compile.ok());
+        map.put("sourceCount", compile.sourceCount());
+        map.put("fileCount", fileCount);
+        map.put("classOutputDir", "target/classes");
         return map;
     }
 
-    private static Map<String, Object> emptyBuild() {
+    private static Map<String, Object> failedBuild(
+            Map<String, Object> response,
+            Map<String, Object> generatedArtifactRef,
+            List<Map<String, Object>> diagnostics,
+            String summary) {
+        Instant now = Instant.now();
         Map<String, Object> map = new LinkedHashMap<>();
+        Map<String, Object> logRef = outputReference("generated-java-build-log", renderBuildLog(diagnostics, false, 0, 0));
+        map.put("schemaVersion", SCHEMA_VERSION);
+        map.put("buildId", "generated-java-build-" + UUID.randomUUID());
+        map.put("runId", string(response.get("runId"), "run-unknown"));
+        map.put("workflowId", string(response.get("workflowId"), null));
+        map.put("buildMode", "generated-java");
+        map.put("command", "javac(in-process)");
+        map.put("toolchain", runtimeToolchain());
+        map.put("status", "failed");
+        map.put("inputArtifactRef", generatedArtifactRef);
+        Map<String, Object> buildOutputRef = outputReference("generated-java-build-output", "");
+        map.put("buildOutputRef", buildOutputRef);
+        map.put("logRef", logRef);
+        map.put("evidenceRefs", evidenceRefs(generatedArtifactRef, buildOutputRef, logRef));
+        map.put("diagnostics", diagnosticsWithRawLogRef(diagnostics, logRef));
+        map.put("startedAt", now.toString());
+        map.put("completedAt", now.toString());
+        map.put("createdAt", now.toString());
+        map.put("summary", summary);
+        map.put("outputRef", reference("parity-build-result", "parity-build-result", map));
         map.put("compileOk", false);
         map.put("sourceCount", 0);
         map.put("fileCount", 0);
+        return map;
+    }
+
+    private static Map<String, Object> emptyBuild(Map<String, Object> response, Map<String, Object> generatedArtifactRef) {
+        return failedBuild(response, generatedArtifactRef, List.of(),
+                "No generated project payload supplied; build did not run.");
+    }
+
+    private static Map<String, Object> executionSection(
+            Map<String, Object> response,
+            Map<String, Object> generatedArtifactRef,
+            Map<String, Object> inputArtifactRef,
+            Map<String, Object> sourceArtifactRef,
+            String entryClass,
+            GeneratedProgramRunner.RunResult run,
+            Instant started,
+            Instant completed) {
+        String stdout = run.stdout() == null ? "" : run.stdout();
+        String stderr = run.stderr() == null ? "" : run.stderr();
+        Map<String, Object> stdoutRef = outputReference("generated-java-stdout", stdout);
+        Map<String, Object> stderrRef = outputReference("generated-java-stderr", stderr);
+        Map<String, Object> normalizedOutputRef =
+                outputReference("generated-java-normalized-output", normalise(stdout));
+        String executionLog = renderExecutionLog(entryClass, run, stdout, stderr);
+        Map<String, Object> logRef = outputReference("generated-java-execution-log", executionLog);
+        List<Map<String, Object>> executionDiagnostics = new ArrayList<>();
+        if (!run.ok() || !run.ran()) {
+            executionDiagnostics.add(runtimeDiagnostic(entryClass, run, stderrRef));
+        }
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("schemaVersion", SCHEMA_VERSION);
+        map.put("executionId", "generated-java-execution-" + UUID.randomUUID());
+        map.put("runId", string(response.get("runId"), "run-unknown"));
+        map.put("workflowId", string(response.get("workflowId"), null));
+        map.put("executionSurface", "generated-java");
+        map.put("command", entryClass == null ? "java <missing-entry-class>" : ("java " + entryClass));
+        map.put("status", run.ok() ? "passed" : (isTimeout(run.errorClass()) ? "timed_out" : "failed"));
+        map.put("exitCode", run.ran() ? run.exitCode() : null);
+        map.put("timedOut", isTimeout(run.errorClass()));
+        map.put("stdoutRef", stdoutRef);
+        map.put("stderrRef", stderrRef);
+        map.put("normalizedOutputRef", normalizedOutputRef);
+        map.put("logRef", logRef);
+        if (!sourceArtifactRef.isEmpty()) {
+            map.put("sourceArtifactRef", sourceArtifactRef);
+        }
+        if (!inputArtifactRef.isEmpty()) {
+            map.put("inputArtifactRef", inputArtifactRef);
+        }
+        if (!generatedArtifactRef.isEmpty()) {
+            map.put("generatedArtifactRef", generatedArtifactRef);
+        }
+        map.put("diagnostics", executionDiagnostics);
+        map.put("startedAt", started.toString());
+        map.put("completedAt", completed.toString());
+        map.put("createdAt", completed.toString());
+        map.put("summary", run.ok()
+                ? "Generated Java executed successfully in the controlled runner."
+                : safeRuntimeSummary(run));
+        map.put("evidenceRefs", evidenceRefs(sourceArtifactRef, inputArtifactRef, generatedArtifactRef,
+                stdoutRef, stderrRef, normalizedOutputRef, logRef));
+        map.put("outputRef", normalizedOutputRef);
+        // Compatibility fields kept while downstream consumers move to the
+        // shared execution schema.
+        map.put("ran", run.ran());
+        map.put("ok", run.ok());
+        map.put("stdout", stdout);
+        map.put("stderr", stderr);
+        map.put("durationMs", run.durationMs());
+        map.put("stdoutSha256", HashUtil.sha256(stdout));
+        if (run.errorClass() != null) {
+            map.put("errorClass", run.errorClass());
+        }
+        if (run.errorMessage() != null) {
+            map.put("errorMessage", run.errorMessage());
+        }
+        return map;
+    }
+
+    private static Map<String, Object> skippedExecutionSection(
+            Map<String, Object> response,
+            Map<String, Object> generatedArtifactRef,
+            Map<String, Object> inputArtifactRef,
+            Map<String, Object> sourceArtifactRef,
+            String entryClass,
+            String reason) {
+        Instant now = Instant.now();
+        Map<String, Object> map = new LinkedHashMap<>();
+        Map<String, Object> stdoutRef = outputReference("generated-java-stdout", "");
+        Map<String, Object> stderrRef = outputReference("generated-java-stderr", "");
+        map.put("schemaVersion", SCHEMA_VERSION);
+        map.put("executionId", "generated-java-execution-" + UUID.randomUUID());
+        map.put("runId", string(response.get("runId"), "run-unknown"));
+        map.put("workflowId", string(response.get("workflowId"), null));
+        map.put("executionSurface", "generated-java");
+        map.put("command", entryClass == null ? "java <missing-entry-class>" : ("java " + entryClass));
+        map.put("status", "skipped");
+        map.put("exitCode", null);
+        map.put("timedOut", false);
+        map.put("stdoutRef", stdoutRef);
+        map.put("stderrRef", stderrRef);
+        Map<String, Object> normalizedOutputRef = outputReference("generated-java-normalized-output", "");
+        Map<String, Object> logRef = outputReference("generated-java-execution-log", reason);
+        map.put("normalizedOutputRef", normalizedOutputRef);
+        map.put("logRef", logRef);
+        if (!sourceArtifactRef.isEmpty()) {
+            map.put("sourceArtifactRef", sourceArtifactRef);
+        }
+        if (!inputArtifactRef.isEmpty()) {
+            map.put("inputArtifactRef", inputArtifactRef);
+        }
+        if (!generatedArtifactRef.isEmpty()) {
+            map.put("generatedArtifactRef", generatedArtifactRef);
+        }
         map.put("diagnostics", List.of());
-        return map;
-    }
-
-    private static Map<String, Object> emptyExecution() {
-        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("startedAt", now.toString());
+        map.put("completedAt", now.toString());
+        map.put("createdAt", now.toString());
+        map.put("summary", "Generated Java execution was skipped: " + reason + ".");
+        map.put("evidenceRefs", evidenceRefs(sourceArtifactRef, inputArtifactRef, generatedArtifactRef,
+                stdoutRef, stderrRef, normalizedOutputRef, logRef));
+        map.put("outputRef", normalizedOutputRef);
         map.put("ran", false);
         map.put("ok", false);
-        map.put("exitCode", -1);
         map.put("stdout", "");
         map.put("stderr", "");
         map.put("durationMs", 0);
         map.put("stdoutSha256", HashUtil.sha256(""));
+        map.put("skipped", true);
+        map.put("reason", reason);
         return map;
+    }
+
+    private static Map<String, Object> emptyExecution(
+            Map<String, Object> response,
+            Map<String, Object> generatedArtifactRef,
+            Map<String, Object> inputArtifactRef,
+            Map<String, Object> sourceArtifactRef) {
+        return skippedExecutionSection(
+                response,
+                generatedArtifactRef,
+                inputArtifactRef,
+                sourceArtifactRef,
+                null,
+                "build did not produce an executable generated Java candidate");
     }
 
     private static Map<String, Object> emptyTests() {
@@ -655,6 +901,22 @@ public final class BuildTestRunnerService {
         return map;
     }
 
+    private static List<Map<String, Object>> executionDiagnostics(Map<String, Object> executionSection) {
+        Object value = executionSection.get("diagnostics");
+        if (value instanceof List<?> list) {
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> typed = (Map<String, Object>) map;
+                    out.add(new LinkedHashMap<>(typed));
+                }
+            }
+            return out;
+        }
+        return List.of();
+    }
+
     private static Map<String, Object> newEnvelope(Map<String, Object> request, String programId) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("schemaVersion", SCHEMA_VERSION);
@@ -662,7 +924,7 @@ public final class BuildTestRunnerService {
         response.put("service", SERVICE_NAME);
         response.put("runId", string(request.get("runId"), "run-unknown"));
         response.put("workflowId", string(request.get("workflowId"), "w0-migration-v0"));
-        response.put("sourceRef", mapOrEmpty(request.get("sourceRef")));
+        response.put("sourceRef", sourceArtifactRef(request));
         response.put("programId", programId);
         return response;
     }
@@ -671,6 +933,248 @@ public final class BuildTestRunnerService {
         response.put("status", result.get("status"));
         response.put("classification", result.get("classification"));
         response.put("summary", result.get("summary"));
+    }
+
+    private static Map<String, Object> generatedArtifactRef(
+            Map<String, Object> request,
+            Map<String, Object> generatedProject) {
+        Map<String, Object> explicit = mapOrEmpty(request.get("generatedArtifactRef"));
+        if (!explicit.isEmpty()) {
+            return explicit;
+        }
+        Object envelope = request.get("generationResponse");
+        if (envelope instanceof Map<?, ?> outer) {
+            Map<String, Object> outputRef = mapOrEmpty(((Map<String, Object>) outer).get("outputRef"));
+            if (!outputRef.isEmpty()) {
+                return outputRef;
+            }
+        }
+        return reference("generated-java-project", "generated-java-project", generatedProject);
+    }
+
+    private static Map<String, Object> sourceArtifactRef(Map<String, Object> request) {
+        Map<String, Object> sourceRef = mapOrEmpty(request.get("sourceRef"));
+        if (!sourceRef.isEmpty()) {
+            return sourceRef;
+        }
+        Object envelope = request.get("generationResponse");
+        if (envelope instanceof Map<?, ?> outer) {
+            Map<String, Object> generatedSourceRef = mapOrEmpty(((Map<String, Object>) outer).get("sourceRef"));
+            if (!generatedSourceRef.isEmpty()) {
+                return generatedSourceRef;
+            }
+        }
+        return new LinkedHashMap<>();
+    }
+
+    private static Map<String, Object> controlledInputRef(
+            Map<String, Object> sourceArtifactRef,
+            Map<String, Object> generatedArtifactRef,
+            Map<String, Object> oracleSpec) {
+        Map<String, Object> oracleSourceRef = mapOrEmpty(oracleSpec.get("sourceRef"));
+        if (!oracleSourceRef.isEmpty()) {
+            return oracleSourceRef;
+        }
+        if (!sourceArtifactRef.isEmpty()) {
+            return sourceArtifactRef;
+        }
+        return generatedArtifactRef;
+    }
+
+    private static Map<String, Object> canonicalBuildResult(Map<String, Object> build) {
+        return selectKeys(build,
+                "schemaVersion",
+                "buildId",
+                "runId",
+                "workflowId",
+                "buildMode",
+                "command",
+                "toolchain",
+                "status",
+                "inputArtifactRef",
+                "buildOutputRef",
+                "logRef",
+                "startedAt",
+                "completedAt",
+                "createdAt",
+                "diagnostics",
+                "summary",
+                "evidenceRefs");
+    }
+
+    private static Map<String, Object> canonicalExecutionResult(Map<String, Object> execution) {
+        return selectKeys(execution,
+                "schemaVersion",
+                "executionId",
+                "runId",
+                "workflowId",
+                "executionSurface",
+                "command",
+                "status",
+                "exitCode",
+                "timedOut",
+                "stdoutRef",
+                "stderrRef",
+                "normalizedOutputRef",
+                "outputRef",
+                "logRef",
+                "sourceArtifactRef",
+                "inputArtifactRef",
+                "generatedArtifactRef",
+                "referenceArtifactRef",
+                "startedAt",
+                "completedAt",
+                "createdAt",
+                "diagnostics",
+                "summary",
+                "evidenceRefs");
+    }
+
+    private static Map<String, Object> selectKeys(Map<String, Object> source, String... keys) {
+        Map<String, Object> selected = new LinkedHashMap<>();
+        for (String key : keys) {
+            if (source.containsKey(key)) {
+                selected.put(key, source.get(key));
+            }
+        }
+        return selected;
+    }
+
+    private static Map<String, Object> classDirectoryReference(Path classOutputDir) {
+        if (classOutputDir == null || !Files.isDirectory(classOutputDir)) {
+            return outputReference("generated-java-build-output", "");
+        }
+        try (var stream = Files.walk(classOutputDir)) {
+            StringBuilder manifest = new StringBuilder();
+            stream.filter(Files::isRegularFile)
+                    .sorted()
+                    .forEach(path -> {
+                        try {
+                            manifest.append(classOutputDir.relativize(path).toString().replace('\\', '/'))
+                                    .append(':')
+                                    .append(HashUtil.sha256(Base64.getEncoder().encodeToString(Files.readAllBytes(path))))
+                                    .append('\n');
+                        } catch (IOException e) {
+                            manifest.append(path.getFileName()).append(":io-error\n");
+                        }
+                    });
+            return outputReference("generated-java-build-output", manifest.toString());
+        } catch (IOException e) {
+            return outputReference("generated-java-build-output", "io-error:" + e.getMessage());
+        }
+    }
+
+    private static String runtimeToolchain() {
+        return System.getProperty("java.vm.name", "JVM")
+                + " "
+                + System.getProperty("java.version", "unknown");
+    }
+
+    private static List<Map<String, Object>> diagnosticsWithRawLogRef(
+            List<Map<String, Object>> diagnostics,
+            Map<String, Object> logRef) {
+        List<Map<String, Object>> out = new ArrayList<>(diagnostics.size());
+        for (Map<String, Object> diagnostic : diagnostics) {
+            Map<String, Object> copy = new LinkedHashMap<>(diagnostic);
+            if (!copy.containsKey("rawLogRef")) {
+                copy.put("rawLogRef", logRef);
+            }
+            out.add(copy);
+        }
+        return out;
+    }
+
+    @SafeVarargs
+    private static List<Map<String, Object>> evidenceRefs(Map<String, Object>... refs) {
+        List<Map<String, Object>> out = new ArrayList<>(refs.length);
+        for (Map<String, Object> ref : refs) {
+            if (ref != null && !ref.isEmpty()) {
+                out.add(new LinkedHashMap<>(ref));
+            }
+        }
+        return out;
+    }
+
+    private static String renderBuildLog(
+            List<Map<String, Object>> diagnostics,
+            boolean ok,
+            int sourceCount,
+            int fileCount) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("compileOk=").append(ok)
+                .append(" sourceCount=").append(sourceCount)
+                .append(" fileCount=").append(fileCount)
+                .append('\n');
+        for (Map<String, Object> diagnostic : diagnostics) {
+            builder.append(String.valueOf(diagnostic.getOrDefault("severity", "info"))).append(' ')
+                    .append(String.valueOf(diagnostic.getOrDefault("filePath", "generated-project"))).append(':')
+                    .append(String.valueOf(diagnostic.getOrDefault("line", 1))).append(':')
+                    .append(String.valueOf(diagnostic.getOrDefault("column", 1))).append(' ')
+                    .append(String.valueOf(diagnostic.getOrDefault("message", "")))
+                    .append('\n');
+        }
+        return builder.toString();
+    }
+
+    private static String renderExecutionLog(
+            String entryClass,
+            GeneratedProgramRunner.RunResult run,
+            String stdout,
+            String stderr) {
+        return "entryClass=" + (entryClass == null ? "<missing>" : entryClass)
+                + " ran=" + run.ran()
+                + " ok=" + run.ok()
+                + " exitCode=" + run.exitCode()
+                + " errorClass=" + (run.errorClass() == null ? "" : run.errorClass())
+                + "\nstdout:\n" + stdout
+                + "\nstderr:\n" + stderr;
+    }
+
+    private static Map<String, Object> runtimeDiagnostic(
+            String entryClass,
+            GeneratedProgramRunner.RunResult run,
+            Map<String, Object> stderrRef) {
+        String message = run.errorMessage() == null
+                ? "Generated Java execution failed."
+                : safeDiagnosticMessage(run.errorMessage());
+        Map<String, Object> diagnostic = diagnostic(
+                "error",
+                run.ran() ? "generated-java-runtime-failed" : "generated-java-run-not-started",
+                runtimeFilePath(entryClass),
+                1L,
+                1L,
+                message);
+        diagnostic.put("rawLogRef", stderrRef);
+        return diagnostic;
+    }
+
+    private static String runtimeFilePath(String entryClass) {
+        if (entryClass == null || entryClass.isBlank()) {
+            return "generated-project";
+        }
+        return "src/main/java/" + entryClass.replace('.', '/') + ".java";
+    }
+
+    private static String safeRuntimeSummary(GeneratedProgramRunner.RunResult run) {
+        if (isTimeout(run.errorClass())) {
+            return "Generated Java execution exceeded the configured wall-clock budget.";
+        }
+        if (!run.ran()) {
+            return "Generated Java execution could not start in the controlled runner.";
+        }
+        return "Generated Java execution failed in the controlled runner: "
+                + safeDiagnosticMessage(run.errorMessage());
+    }
+
+    private static String safeDiagnosticMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "No diagnostic detail was available.";
+        }
+        return message.replaceAll("(/[\\w./-]+)+", "<path>");
+    }
+
+    private static boolean isTimeout(String value) {
+        return value != null && value.toLowerCase().contains("timeout");
     }
 
     @SuppressWarnings("unchecked")
@@ -776,9 +1280,22 @@ public final class BuildTestRunnerService {
     }
 
     private static Map<String, Object> diagnostic(String severity, String code, String message) {
+        return diagnostic(severity, code, "generated-project", 1L, 1L, message);
+    }
+
+    private static Map<String, Object> diagnostic(
+            String severity,
+            String code,
+            String filePath,
+            long line,
+            long column,
+            String message) {
         Map<String, Object> diag = new LinkedHashMap<>();
         diag.put("severity", severity);
         diag.put("code", code);
+        diag.put("filePath", filePath);
+        diag.put("line", line);
+        diag.put("column", column);
         diag.put("message", message);
         return diag;
     }
