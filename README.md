@@ -75,6 +75,8 @@ today's layout without pretending that future migration targets already exist.
 For Issue #328, the same catalog is also the ownership map for service
 `openapi` files and shared root schemas declared through `schemas`; see
 [Contract and Schema Ownership](docs/governance/contract-ownership.md).
+Fixture and corpus ownership are documented separately in
+[Fixture and Golden-Master Ownership](docs/governance/fixture-ownership.md).
 Dependency and license visibility is catalog-driven: each component records its
 `packageManifest`, `dependencyManifest`, and `supplyChainParticipation`, and
 `scripts/license-sbom.sh` resolves the live paths from that metadata instead of

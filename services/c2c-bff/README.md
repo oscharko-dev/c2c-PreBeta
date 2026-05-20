@@ -111,6 +111,8 @@ npm run start
   `mode: "diagnostic-fixture"` and `productMode: "unavailable"`. The
   fixture module lives under `src/diagnostic-fixtures/` and is imported
   only by `run-store.ts` when a diagnostic-fixture run is created.
+  Shared ownership rules for these fixture sources are documented in
+  [`docs/governance/fixture-ownership.md`](../../docs/governance/fixture-ownership.md).
 
 The W0 BFF does not retrieve generated Java, build-test output, or
 evidence-pack manifests from local files when serving a product run.

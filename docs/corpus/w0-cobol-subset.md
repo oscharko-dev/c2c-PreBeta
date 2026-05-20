@@ -33,8 +33,13 @@ successful generated Java claim.
 
 Use these as executable references:
 
-- `corpus/synthetic/programs/`
-- `fixtures/semantic-ir/`
-- `fixtures/acceptance/`
+- `corpus/synthetic/programs/` for the shared synthetic COBOL source corpus
+- `fixtures/semantic-ir/` for shared semantic-IR snapshots owned by target-Java
+  generation and verification smoke coverage
+- `fixtures/acceptance/` for the W0.2 acceptance-contract registry owned by the
+  BFF and Orchestrator boundary
 - `services/cobol-parser-service/src/test/`
 - `services/target-java-generation-service/src/test/`
+
+Shared fixture ownership and future-acceptance guardrails are documented in
+[`docs/governance/fixture-ownership.md`](../governance/fixture-ownership.md).

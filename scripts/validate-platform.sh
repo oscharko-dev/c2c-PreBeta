@@ -37,6 +37,10 @@ python3 -m unittest scripts/check_w0_2_evidence_test.py
 
 echo "Validated W0.2 evidence pack validator regression tests."
 
+python3 -m unittest scripts/validate_fixture_ownership_test.py
+
+echo "Validated fixture ownership guardrails."
+
 (
   cd services/orchestrator-service
   PYTHONPATH=src python3 -m unittest tests.test_config tests.test_workflow tests.test_server_integration
