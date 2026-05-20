@@ -48,6 +48,15 @@ ADR files live under `docs/adr/` and must stay short:
 - consequences;
 - issue link.
 
+## Service Catalog Changes
+
+When a service or service-local component is added, moved, renamed, or removed:
+
+- update `config/service-catalog.json` in the same PR;
+- update any affected path references, contracts, fixtures, or docs;
+- run `python3 scripts/validate-service-catalog.py`;
+- run `make dev-check` if the change touches executable code or service wiring.
+
 ## Definition of Ready
 
 An issue is ready when it has:
