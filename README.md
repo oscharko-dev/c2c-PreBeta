@@ -72,6 +72,10 @@ language, package manager, validation-relevant contract files, ownership,
 runtime role, and release-gate participation. Each entry keeps a stable `id`
 separate from the current live `path`, which lets the repository describe
 today's layout without pretending that future migration targets already exist.
+Dependency and license visibility is catalog-driven: each component records its
+`packageManifest`, `dependencyManifest`, and `supplyChainParticipation`, and
+`scripts/license-sbom.sh` resolves the live paths from that metadata instead of
+relying on hand-maintained path lists.
 
 The catalog follows the topology policy in
 [ADR 0008](docs/adr/0008-repository-topology-and-service-taxonomy.md). Validate
@@ -273,9 +277,11 @@ Examples:
 - `w0-service-java-v0.1.0-7f3c2a1-20260514T101010Z`
 - `w0-service-python-v0.1.0-7f3c2a1-20260514T101010Z`
 
-The local convention is produced by `scripts/build-metadata.sh`. Build and run
-artifacts for product-mode runs are materialized under `var/c2c-local/` by the
-launcher and Orchestrator.
+The local convention is produced by `scripts/build-metadata.sh`. The stable
+artifact stem is the catalog component `id`, followed by the compatibility
+language tag, version, git SHA, and UTC timestamp, so names stay stable even
+when live filesystem paths change. Build and run artifacts for product-mode
+runs are materialized under `var/c2c-local/` by the launcher and Orchestrator.
 
 ## Repo layout map
 

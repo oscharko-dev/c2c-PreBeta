@@ -14,6 +14,7 @@ from typing import Any
 ALLOWED_KINDS = {"app", "service", "library"}
 ALLOWED_CLASSIFICATIONS = {"product", "reference"}
 ALLOWED_PACKAGE_MANAGERS = {"go", "maven", "npm", "pip"}
+ALLOWED_SUPPLY_CHAIN_PARTICIPATION = {"license", "sbom"}
 REQUIRED_COMPONENT_IDS = {
     "agentic-harness-core",
     "build-test-runner-service",
@@ -107,6 +108,18 @@ def _validate_string_array(value: Any, field: str, component_id: str) -> list[st
     return normalized
 
 
+def _validate_enum_array(
+    value: Any, field: str, component_id: str, allowed: set[str]
+) -> list[str]:
+    normalized = _validate_string_array(value, field, component_id)
+    invalid = [item for item in normalized if item not in allowed]
+    if invalid:
+        raise ValueError(
+            f"{component_id}: {field} values must be drawn from {sorted(allowed)}; got {invalid!r}"
+        )
+    return normalized
+
+
 def _validate_component(
     repo_root: Path, component: dict[str, Any], seen_ids: set[str], seen_paths: set[str]
 ) -> str:
@@ -152,12 +165,21 @@ def _validate_component(
     for field in ("runtimeRole", "ownerArea"):
         _require_string(component.get(field), field, component_id)
 
+    supply_chain_participation = _validate_enum_array(
+        component.get("supplyChainParticipation"),
+        "supplyChainParticipation",
+        component_id,
+        ALLOWED_SUPPLY_CHAIN_PARTICIPATION,
+    )
+
     for field in LOCAL_FILE_FIELDS:
         if field not in component:
             if field == "packageManifest":
                 raise ValueError(f"{component_id}: packageManifest is required")
-            if field == "dependencyManifest" and package_manager == "npm":
-                raise ValueError(f"{component_id}: dependencyManifest is required for npm components")
+            if field == "dependencyManifest" and supply_chain_participation:
+                raise ValueError(
+                    f"{component_id}: dependencyManifest is required for supply-chain participating components"
+                )
             continue
         file_path = _resolve_component_relative(
             repo_root, component_root, component[field], field, component_id
@@ -240,6 +262,8 @@ def _component_matches(component: dict[str, Any], args: argparse.Namespace) -> b
     if args.classification and component["classification"] != args.classification:
         return False
     if args.package_manager and component["packageManager"] != args.package_manager:
+        return False
+    if args.supply_chain and args.supply_chain not in component["supplyChainParticipation"]:
         return False
     if args.release_gate and args.release_gate not in component["releaseGateParticipation"]:
         return False
@@ -324,12 +348,28 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--list-field",
-        choices=("path", "packageManifest", "dependencyManifest", "dockerfile", "openapi", "schemas"),
+        choices=(
+            "path",
+            "packageManifest",
+            "dependencyManifest",
+            "dockerfile",
+            "openapi",
+            "schemas",
+            "supplyChainParticipation",
+        ),
         help="List a field for all matching catalog components after validation.",
     )
     parser.add_argument(
         "--print-field",
-        choices=("path", "packageManifest", "dependencyManifest", "dockerfile", "openapi", "schemas"),
+        choices=(
+            "path",
+            "packageManifest",
+            "dependencyManifest",
+            "dockerfile",
+            "openapi",
+            "schemas",
+            "supplyChainParticipation",
+        ),
         help="Print a field for one matching catalog component after validation.",
     )
     parser.add_argument("--component-id", help="Filter by component id.")
@@ -344,6 +384,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--package-manager",
         choices=sorted(ALLOWED_PACKAGE_MANAGERS),
         help="Filter by package manager.",
+    )
+    parser.add_argument(
+        "--supply-chain",
+        choices=sorted(ALLOWED_SUPPLY_CHAIN_PARTICIPATION),
+        help="Filter by supply-chain participation membership.",
     )
     parser.add_argument("--release-gate", help="Filter by release gate membership.")
     return parser.parse_args(argv)
