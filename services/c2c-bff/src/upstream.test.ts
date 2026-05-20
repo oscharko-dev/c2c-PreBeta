@@ -305,6 +305,45 @@ test("startTransformRun omits empty W0.2 oracle metadata from the inputRef", asy
   );
 });
 
+test("startRun forwards parity workflow fields on the orchestrator payload", async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({
+        run: { runId: "live-parity-1", status: "updating" },
+        status: "started",
+      });
+      res.writeHead(201, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+      });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      await orch.startRun({
+        programId: "BRNCH01",
+        cobolSourcePath: "corpus/synthetic/programs/branch-account-guard.cbl",
+        requester: "studio",
+        executionMode: "parity",
+        trustCaseId: "trust-branch-approval",
+        sourceReferenceFixtureId: "branch-account-guard-v0",
+        sourceReferenceMode: "reference-fixture",
+      });
+      const parsed = JSON.parse(captured[0]?.body ?? "{}");
+      assert.equal(parsed.requester, "studio");
+      assert.equal(parsed.executionMode, "parity");
+      assert.equal(parsed.trustCaseId, "trust-branch-approval");
+      assert.equal(parsed.sourceReferenceFixtureId, "branch-account-guard-v0");
+      assert.equal(parsed.sourceReferenceMode, "reference-fixture");
+      assert.equal(
+        parsed.cobolSourcePath,
+        "corpus/synthetic/programs/branch-account-guard.cbl",
+      );
+    },
+  );
+});
+
 test("orchestrator client encodes workflow endpoint with the run id", async () => {
   const client = createNodeHttpClient();
   await withEchoServer(

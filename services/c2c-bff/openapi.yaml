@@ -420,9 +420,14 @@ paths:
 
   /api/v0/runs:
     post:
-      summary: Legacy sample-based run start path
+      summary: Start a sample-backed standard or parity run through the Orchestrator
+      description: >
+        Starts a browser-visible run and delegates workflow authority to the
+        Orchestrator. When `executionMode=parity`, the BFF forwards the
+        curated trust-case and source/reference fields required by the
+        Orchestrator parity contract. Diagnostic-fixture fallback is never
+        used for parity runs; an unavailable Orchestrator returns 503.
       operationId: startRun
-      deprecated: true
       requestBody:
         required: true
         content:
@@ -435,7 +440,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/RunSummary" }
         "400":
-          description: validation error
+          description: validation error, unsupported execution mode, or invalid parity configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: orchestrator rejected request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable for product-mode parity runs
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -1142,9 +1157,27 @@ components:
     RunStartInput:
       type: object
       required: [programId]
+      description: >
+        Starts a standard run by default. Supplying `executionMode=parity` or
+        any source/reference field starts an Orchestrator-owned parity run.
       properties:
         programId: { type: string }
         requester: { type: string }
+        executionMode:
+          type: string
+          enum: [standard, parity]
+          default: standard
+        trustCaseId:
+          type: string
+          description: Optional curated trust-case identifier for parity runs.
+        sourceReferenceFixtureId:
+          type: string
+          description: Required for parity runs; forwarded to the Orchestrator.
+        sourceReferenceMode:
+          type: string
+          enum: [reference-fixture, native-cobol]
+          default: reference-fixture
+          description: Controlled source/reference execution mode for parity runs.
 
     TransformInput:
       type: object
@@ -1206,6 +1239,14 @@ components:
             means "v0".
         runId: { type: string }
         programId: { type: string }
+        executionMode:
+          type: string
+          enum: [standard, parity]
+        trustCaseId: { type: string }
+        sourceReferenceFixtureId: { type: string }
+        sourceReferenceMode:
+          type: string
+          enum: [reference-fixture, native-cobol, ""]
         status:
           type: string
           enum: [starting, updating, completed, failed]
@@ -1981,6 +2022,13 @@ components:
             ]
         expectedOutput: { type: string }
         actualOutput: { type: string }
+        comparison:
+          oneOf:
+            - $ref: "#/components/schemas/ParityComparisonView"
+            - type: 'null'
+        diffSummary:
+          type: string
+          maxLength: 4050
         outputRef:
           oneOf:
             - $ref: "#/components/schemas/OutputRef"
@@ -2007,6 +2055,78 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Diagnostic" }
         note: { type: string }
+
+    ParityComparisonView:
+      type: object
+      description: >
+        Browser-safe projection of the deterministic parity comparison emitted
+        by the Orchestrator/build-test path. Artifact references are hash-only
+        BFF OutputRef values; raw URIs and unbounded diff payloads are not
+        exposed.
+      properties:
+        matched: { type: boolean }
+        status:
+          type: string
+          enum: [passed, failed, blocked]
+        comparisonPolicyVersion: { type: string }
+        mismatchClassification:
+          type: string
+          enum:
+            [
+              none,
+              content,
+              formatting,
+              line_endings,
+              stderr,
+              exit_code,
+              runtime_failure,
+              unsupported_input,
+              policy,
+              unknown,
+            ]
+        diffSummary:
+          type: string
+          maxLength: 4050
+        comparisonPolicyRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        comparisonResultRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        diffRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        expectedRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        actualRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        sourceOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        javaOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        sourceNormalizedOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        javaNormalizedOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        normalizedDiffRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
 
     EvidenceView:
       type: object

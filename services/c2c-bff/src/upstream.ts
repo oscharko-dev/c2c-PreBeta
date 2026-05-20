@@ -193,6 +193,10 @@ export interface OrchestratorClient {
     programId: string;
     cobolSourcePath: string;
     requester?: string;
+    executionMode?: "standard" | "parity";
+    trustCaseId?: string;
+    sourceReferenceFixtureId?: string;
+    sourceReferenceMode?: "reference-fixture" | "native-cobol";
   }): Promise<UpstreamResponse | undefined>;
   startTransformRun(input: {
     programId: string;
@@ -327,8 +331,16 @@ export function createOrchestratorClient(
   };
   return {
     enabled: true,
-    async startRun({ programId, cobolSourcePath, requester }) {
-      const payload = {
+    async startRun({
+      programId,
+      cobolSourcePath,
+      requester,
+      executionMode,
+      trustCaseId,
+      sourceReferenceFixtureId,
+      sourceReferenceMode,
+    }) {
+      const payload: Record<string, unknown> = {
         requester: requester ?? "c2c-bff",
         inputRef: {
           uri: `urn:c2c-bff/sample/${programId}`,
@@ -338,6 +350,12 @@ export function createOrchestratorClient(
         programId,
         cobolSourcePath,
       };
+      if (executionMode) payload.executionMode = executionMode;
+      if (trustCaseId) payload.trustCaseId = trustCaseId;
+      if (sourceReferenceFixtureId) {
+        payload.sourceReferenceFixtureId = sourceReferenceFixtureId;
+      }
+      if (sourceReferenceMode) payload.sourceReferenceMode = sourceReferenceMode;
       return http.request(`${baseUrl}/v0/runs`, {
         method: "POST",
         headers: controlHeaders,
