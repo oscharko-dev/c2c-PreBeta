@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the repository service catalog for Issue #323."""
+"""Validate the repository service catalog for Issue #327."""
 
 from __future__ import annotations
 
@@ -15,6 +15,12 @@ ALLOWED_KINDS = {"app", "service", "library"}
 ALLOWED_CLASSIFICATIONS = {"product", "reference"}
 ALLOWED_PACKAGE_MANAGERS = {"go", "maven", "npm", "pip"}
 ALLOWED_SUPPLY_CHAIN_PARTICIPATION = {"license", "sbom"}
+PACKAGE_MANAGER_TO_DEPENDENCY_MANIFEST = {
+    "go": "go.mod",
+    "maven": "pom.xml",
+    "npm": "package-lock.json",
+    "pip": "requirements.txt",
+}
 REQUIRED_COMPONENT_IDS = {
     "agentic-harness-core",
     "build-test-runner-service",
@@ -171,6 +177,7 @@ def _validate_component(
         component_id,
         ALLOWED_SUPPLY_CHAIN_PARTICIPATION,
     )
+    expected_dependency_manifest = PACKAGE_MANAGER_TO_DEPENDENCY_MANIFEST[package_manager]
 
     for field in LOCAL_FILE_FIELDS:
         if field not in component:
@@ -178,9 +185,15 @@ def _validate_component(
                 raise ValueError(f"{component_id}: packageManifest is required")
             if field == "dependencyManifest" and supply_chain_participation:
                 raise ValueError(
-                    f"{component_id}: dependencyManifest is required for supply-chain participating components"
+                    f"{component_id}: dependencyManifest is required for supply-chain participating components; "
+                    f"expected {expected_dependency_manifest!r}"
                 )
             continue
+        if field == "dependencyManifest" and component[field] != expected_dependency_manifest:
+            raise ValueError(
+                f"{component_id}: dependencyManifest must be {expected_dependency_manifest!r} for "
+                f"{package_manager} components"
+            )
         file_path = _resolve_component_relative(
             repo_root, component_root, component[field], field, component_id
         )
@@ -248,7 +261,7 @@ def validate_catalog_data(catalog: dict[str, Any], repo_root: Path) -> None:
         expected_classification = "reference" if component_id in REFERENCE_COMPONENT_IDS else "product"
         if component["classification"] != expected_classification:
             raise ValueError(
-                f"{component_id}: classification must be {expected_classification!r} for Issue #323 coverage"
+                f"{component_id}: classification must be {expected_classification!r} for Issue #327 coverage"
             )
 
 
