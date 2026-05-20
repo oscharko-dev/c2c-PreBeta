@@ -1,36 +1,40 @@
-name: Studio a11y gate
+name: Studio browser quality gate
 
-# Studio-IDE-12 (#250) §Accessibility AC:
-#   "axe-core run on the Studio shell after a successful run returns
-#    zero serious or critical violations."
+# Studio-IDE-12 (#250) browser-side gates:
+#   * Accessibility: axe-core on the Studio shell has zero serious or
+#     critical violations.
+#   * CSP: Studio hydrates and Monaco mounts under the production CSP,
+#     and sanitizer payloads do not execute.
 #
-# This workflow is the CI side of that gate. It runs only the @a11y
-# Playwright spec against a production Studio build (no BFF, no
-# upstream services) so the WCAG 2.2 AA assertion is enforced on every
-# PR without paying the 10-service local-stack startup cost.
-#
-# The harness exercises the empty workbench shell at ``/`` — that
-# surface includes every workbench region the issue lists (top bar,
-# activity bar, secondary stripe, status bar, etc.) and renders
-# without a connected backend.
-#
-# Companion specs (``@perf`` / ``@memory`` / ``@visual``) run in their
-# dedicated required workflows because their CI infrastructure is now
-# deterministic enough to block regressions.
+# The two browser gates share one production Studio build. They run only
+# for Studio/BFF/browser-gate changes; the required `ci` workflow covers
+# general TypeScript build, lint, unit, and BFF tests on every PR.
 
 on:
   push:
     branches:
       - dev
       - main
+    paths:
+      - 'apps/c2c-studio/**'
+      - 'services/c2c-bff/**'
+      - '.github/workflows/studio-a11y.yml'
   pull_request:
     branches:
       - dev
       - main
+    paths:
+      - 'apps/c2c-studio/**'
+      - 'services/c2c-bff/**'
+      - '.github/workflows/studio-a11y.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  a11y:
-    name: Studio a11y (WCAG 2.2 AA)
+  browser-quality:
+    name: Studio browser quality (a11y + CSP)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -84,10 +88,16 @@ jobs:
           CI: "1"
         run: npm run test:e2e:a11y:ci
 
+      - name: Run CSP gate (@csp spec only)
+        working-directory: apps/c2c-studio
+        env:
+          CI: "1"
+        run: npm run test:e2e:csp:ci
+
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-a11y
+          name: playwright-report-browser-quality
           path: apps/c2c-studio/playwright-report/
           retention-days: 7

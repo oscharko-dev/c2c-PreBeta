@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/cluster_lifecycle_logger.py\" session-start",
+            "timeout": 5,
+            "statusMessage": "Logging session start"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/cluster_lifecycle_logger.py\" post-tool-use",
+            "timeout": 5,
+            "statusMessage": "Logging shell result"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/cluster_lifecycle_logger.py\" stop",
+            "timeout": 5,
+            "statusMessage": "Logging session stop"
+          }
+        ]
+      }
+    ]
+  }
+}

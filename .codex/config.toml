@@ -1,0 +1,230 @@
+approval_policy = "never"
+check_for_update_on_startup = true
+developer_instructions = """
+Operate in one of two modes:
+
+1. Default mode: use the smallest effective execution shape.
+2. Cluster mode: use the project agent team for GitHub issues, PR-ready
+   implementation work, refactoring sprints, audits, CI repair, release gates,
+   or any task where parallel review materially improves quality.
+3. Stay single-agent for tiny questions, narrow one-file edits, or explicit
+   user requests to avoid delegation.
+
+Execution defaults:
+- Apply state-of-the-art, best-practice, production-ready, and enterprise-grade standards.
+- Keep architecture and code as simple as possible; avoid unnecessary complexity (KEEP IT SIMPLE).
+- Full access is available by default. Use it deliberately and keep scope tight.
+- Treat `origin/dev` as the integration target and require a green `ci` check before merge.
+- For OpenAI/Codex API and product questions, prefer the `openaiDeveloperDocs` MCP server before general web search.
+- Use live web search or MCP for unstable facts, external APIs, model details,
+  framework changes, pricing, policies, and recommendations that may age.
+- Prefer official documentation and primary sources.
+- Include concrete dates or versions when freshness matters.
+- Use the repository MCP/tool surface deliberately: GitHub plugin or `gh` for
+  GitHub state, Context7 for library docs, OpenAI Developer Docs for OpenAI
+  product/API work, Playwright/browser tooling for UI verification, and Figma
+  MCP only when a design URL or design task exists.
+- Before and after substantial work, read and update role memory under
+  `.codex/agent-memory/<agent-name>/MEMORY.md`; do not store secrets,
+  customer data, logs containing tokens, or raw private source in memory.
+- Use `.codex/RUNBOOK.md` as the project operating manual for agent-team
+  delivery. Use `.codex/playbooks/feature.md`, `.codex/playbooks/audit.md`,
+  `.codex/playbooks/refactor.md`, and `.codex/playbooks/ci-repair.md` when the
+  task matches those workflows.
+
+When cluster mode is active:
+- Start with a short coordination plan that assigns ownership, file scopes,
+  dependencies, and stop conditions.
+- Prefer read-heavy fan-out first: `explorer`, `architect`, `docs-researcher`,
+  `security-reviewer`, or `performance-engineer` when relevant.
+- Use write agents only for disjoint file scopes: `implementor` or `developer`.
+- Use `test-engineer` for test coverage and regression harnesses.
+- Use `pr-shepherd` for CI/review follow-up after a PR exists.
+- Finish write waves with `verifier`, `pr-reviewer`, or `security-reviewer`
+  depending on risk.
+- Keep delegation shallow and predictable. Do not recurse unless the user
+  explicitly asks for deeper nesting.
+- Return distilled outcomes from subagents, not raw transcripts.
+- Stop rather than improvise when the issue is ambiguous, acceptance criteria
+  are missing, scope expands beyond the issue, file ownership overlaps, secrets
+  would be required, or CI has failed after three distinct repair attempts.
+"""
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+model_reasoning_summary = "auto"
+model_verbosity = "medium"
+personality = "pragmatic"
+plan_mode_reasoning_effort = "high"
+project_doc_fallback_filenames = [
+    "CODEX.md",
+    "codex.md",
+]
+project_doc_max_bytes = 65536
+review_model = "gpt-5.4"
+sandbox_mode = "danger-full-access"
+web_search = "live"
+
+[agents]
+job_max_runtime_seconds = 1800
+max_depth = 1
+max_threads = 8
+
+[apps._default]
+destructive_enabled = true
+enabled = true
+open_world_enabled = true
+
+[features]
+apps = true
+codex_hooks = true
+fast_mode = false
+multi_agent = true
+plugins = true
+prevent_idle_sleep = true
+
+[mcp_servers.chrome_devtools]
+args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+]
+command = "npx"
+enabled = true
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 45
+
+[mcp_servers.context7]
+args = [
+    "-y",
+    "@upstash/context7-mcp",
+]
+command = "/opt/homebrew/opt/node@22/bin/npx"
+cwd = "/Users/oscharko-dev"
+enabled = true
+required = true
+startup_timeout_sec = 20
+supports_parallel_tool_calls = true
+tool_timeout_sec = 45
+
+[mcp_servers.figma]
+enabled = true
+url = "https://mcp.figma.com/mcp"
+
+[mcp_servers.filesystem]
+args = [
+    "-y",
+    "@modelcontextprotocol/server-filesystem",
+    "/Users/oscharko-dev/Projects/c2c-PreBeta",
+]
+command = "/opt/homebrew/opt/node@22/bin/npx"
+cwd = "/Users/oscharko-dev/Projects/c2c-PreBeta"
+enabled = true
+required = true
+startup_timeout_sec = 20
+tool_timeout_sec = 45
+
+[mcp_servers.github]
+args = [
+    "-y",
+    "@modelcontextprotocol/server-github",
+]
+command = "npx"
+enabled = false
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 45
+
+# GitHub work should normally use the installed GitHub plugin or `gh`.
+# Enable this MCP server locally only when a real token is supplied through the
+# environment. Never commit personal access tokens into project config.
+
+[mcp_servers.linear]
+enabled = false
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 45
+url = "https://mcp.linear.app/mcp"
+
+[mcp_servers.openaiDeveloperDocs]
+enabled = true
+required = false
+startup_timeout_sec = 20
+supports_parallel_tool_calls = true
+tool_timeout_sec = 45
+url = "https://developers.openai.com/mcp"
+
+[mcp_servers.playwright]
+args = [
+    "-y",
+    "@playwright/mcp",
+]
+command = "npx"
+cwd = "/Users/oscharko-dev/Projects/c2c-PreBeta"
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 90
+
+[mcp_servers.sentry]
+enabled = false
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 45
+url = "https://mcp.sentry.dev"
+
+[profiles.deep]
+approval_policy = "never"
+model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+model_verbosity = "high"
+plan_mode_reasoning_effort = "xhigh"
+sandbox_mode = "danger-full-access"
+web_search = "live"
+
+[profiles.fast]
+approval_policy = "never"
+model = "gpt-5.3-codex-spark"
+model_reasoning_effort = "medium"
+model_verbosity = "low"
+sandbox_mode = "danger-full-access"
+web_search = "live"
+
+[profiles.max]
+approval_policy = "never"
+model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+model_verbosity = "high"
+plan_mode_reasoning_effort = "xhigh"
+review_model = "gpt-5.4"
+sandbox_mode = "danger-full-access"
+web_search = "live"
+
+[profiles.research]
+approval_policy = "never"
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+model_reasoning_summary = "concise"
+plan_mode_reasoning_effort = "high"
+review_model = "gpt-5.4"
+sandbox_mode = "read-only"
+web_search = "live"
+
+[profiles.review]
+approval_policy = "never"
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+model_reasoning_summary = "detailed"
+model_verbosity = "high"
+plan_mode_reasoning_effort = "high"
+review_model = "gpt-5.4"
+sandbox_mode = "read-only"
+web_search = "live"
+
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "85"
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1"
+
+[tools]
+view_image = true
