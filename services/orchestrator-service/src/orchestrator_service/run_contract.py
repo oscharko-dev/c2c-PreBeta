@@ -266,15 +266,20 @@ class ModelInvocationBudgetExhaustedError(WorkflowContractError):
 # Repair budget
 # ---------------------------------------------------------------------------
 
-# Hard W0.2 bounds taken from Issue #166's "iteration limit … 1 to 3"
-# constraint. The default is two attempts.
+# Enterprise default: AI-assisted paths are unbounded unless an operator
+# explicitly configures a finite ceiling. We keep a large integer sentinel in
+# the contract so existing {limit, used, remaining} payloads remain numeric.
+UNLIMITED_AI_BUDGET = 2_147_483_647
+
+# Repair attempts still accept explicit finite limits, but the default posture
+# is unrestricted.
 REPAIR_BUDGET_MIN = 1
-REPAIR_BUDGET_MAX = 3
-DEFAULT_REPAIR_BUDGET = 2
+REPAIR_BUDGET_MAX = UNLIMITED_AI_BUDGET
+DEFAULT_REPAIR_BUDGET = UNLIMITED_AI_BUDGET
 
 
 def clamp_repair_budget(value: int) -> int:
-    """Clamp a repair-budget value to the W0.2-allowed range [1, 3]."""
+    """Clamp a repair-budget value to the supported positive-integer range."""
     if value < REPAIR_BUDGET_MIN:
         return REPAIR_BUDGET_MIN
     if value > REPAIR_BUDGET_MAX:
@@ -330,18 +335,15 @@ class RepairBudget:
 # Assist budget (Issue #216 / W0.3-5)
 # ---------------------------------------------------------------------------
 
-# Productive AI assist activations are budgeted per run alongside the
-# existing repair-iteration budget. W0.3 today invokes the productive
-# Transformation Agent once per run, so the default is one activation;
-# the contract leaves headroom up to three so future waves can add
-# additional productive agent roles without contract surgery.
+# Productive AI assist activations accept explicit finite limits, but the
+# default enterprise posture is unrestricted.
 ASSIST_BUDGET_MIN = 1
-ASSIST_BUDGET_MAX = 3
-DEFAULT_ASSIST_BUDGET = 1
+ASSIST_BUDGET_MAX = UNLIMITED_AI_BUDGET
+DEFAULT_ASSIST_BUDGET = UNLIMITED_AI_BUDGET
 
 
 def clamp_assist_budget(value: int) -> int:
-    """Clamp an assist-budget value to the W0.3-allowed range [1, 3]."""
+    """Clamp an assist-budget value to the supported positive-integer range."""
     if value < ASSIST_BUDGET_MIN:
         return ASSIST_BUDGET_MIN
     if value > ASSIST_BUDGET_MAX:
@@ -404,14 +406,11 @@ class AssistBudget:
 # Model invocation budget (Issue #216 / W0.3-5)
 # ---------------------------------------------------------------------------
 
-# Counts productive Model Gateway calls across all agent roles in one
-# run. Default covers the worst case of the W0.3 product path: one
-# transformation activation + up to three repair iterations, with two
-# units of headroom for additional bounded steps a future wave may
-# introduce.
+# Counts productive Model Gateway calls across all agent roles in one run.
+# Defaults to unrestricted for the enterprise baseline.
 MODEL_INVOCATION_BUDGET_MIN = 1
-MODEL_INVOCATION_BUDGET_MAX = 20
-DEFAULT_MODEL_INVOCATION_BUDGET = 6
+MODEL_INVOCATION_BUDGET_MAX = UNLIMITED_AI_BUDGET
+DEFAULT_MODEL_INVOCATION_BUDGET = UNLIMITED_AI_BUDGET
 
 
 def clamp_model_invocation_budget(value: int) -> int:
@@ -484,20 +483,13 @@ class ModelInvocationBudget:
 # Editor-assist budget (Studio-IDE-10 / Issue #249 / ADR 0004)
 # ---------------------------------------------------------------------------
 
-# ADR 0004 defines the editor-assist channel as a parallel-governed
-# channel with its own budget, distinct from the per-run productive
-# budgets above. The default and range are intentionally tighter than
-# ``modelInvocationBudget``: productive runs are expensive and
-# intentional; editor-assist is cheap and abuse-prone. The bounds live
-# here so the W0.3 contract has a single source of truth even though
-# the budget itself is consumed by the BFF, not by the Orchestrator
-# state machine. ADR 0004 is explicit that ``editorAssistBudget`` does
-# **not** appear in the per-run contract payload returned by
-# ``GET /v0/runs/{runId}/workflow``, so ``W02RunContract`` does not
-# carry an ``editor_assist_budget`` field.
+# ADR 0004 defines the editor-assist channel as a parallel-governed channel
+# with its own budget, distinct from the per-run productive budgets above.
+# The enterprise default is unrestricted; the numeric sentinel keeps the wire
+# shape stable for existing consumers.
 EDITOR_ASSIST_BUDGET_MIN = 1
-EDITOR_ASSIST_BUDGET_MAX = 10
-DEFAULT_EDITOR_ASSIST_BUDGET = 3
+EDITOR_ASSIST_BUDGET_MAX = UNLIMITED_AI_BUDGET
+DEFAULT_EDITOR_ASSIST_BUDGET = UNLIMITED_AI_BUDGET
 
 
 class EditorAssistBudgetExhaustedError(WorkflowContractError):

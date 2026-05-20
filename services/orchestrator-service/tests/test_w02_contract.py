@@ -46,6 +46,7 @@ from orchestrator_service.run_contract import (
     ModelInvocationBudgetExhaustedError,
     RepairBudget,
     RepairBudgetExhaustedError,
+    REPAIR_BUDGET_MAX,
     SCHEMA_VERSION,
     STATE_BUILD_TEST_RUNNING,
     STATE_COBOL_PARSE_ATTEMPTED,
@@ -198,8 +199,8 @@ class WorkflowStateMachineTests(unittest.TestCase):
 
 
 class RepairBudgetTests(unittest.TestCase):
-    def test_default_budget_is_two(self):
-        self.assertEqual(DEFAULT_REPAIR_BUDGET, 2)
+    def test_default_budget_is_unlimited(self):
+        self.assertGreater(DEFAULT_REPAIR_BUDGET, 1_000_000)
 
     def test_budget_consumes_until_exhausted(self):
         budget = RepairBudget(limit=2)
@@ -217,19 +218,19 @@ class RepairBudgetTests(unittest.TestCase):
         with self.assertRaises(RepairBudgetExhaustedError):
             budget.consume()
 
-    def test_clamp_repair_budget_enforces_w02_range(self):
+    def test_clamp_repair_budget_enforces_positive_minimum(self):
         self.assertEqual(clamp_repair_budget(0), 1)
         self.assertEqual(clamp_repair_budget(-5), 1)
         self.assertEqual(clamp_repair_budget(1), 1)
         self.assertEqual(clamp_repair_budget(2), 2)
         self.assertEqual(clamp_repair_budget(3), 3)
-        self.assertEqual(clamp_repair_budget(10), 3)
+        self.assertEqual(clamp_repair_budget(10), 10)
 
     def test_budget_rejects_out_of_range_limit(self):
         with self.assertRaises(ValueError):
             RepairBudget(limit=0)
         with self.assertRaises(ValueError):
-            RepairBudget(limit=4)
+            RepairBudget(limit=REPAIR_BUDGET_MAX + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +241,8 @@ class RepairBudgetTests(unittest.TestCase):
 class AssistBudgetTests(unittest.TestCase):
     """Contract-level coverage for the W0.3-5 productive-assist budget."""
 
-    def test_default_assist_budget_is_one(self):
-        self.assertEqual(DEFAULT_ASSIST_BUDGET, 1)
+    def test_default_assist_budget_is_unlimited(self):
+        self.assertGreater(DEFAULT_ASSIST_BUDGET, 1_000_000)
 
     def test_budget_consumes_until_exhausted(self):
         budget = AssistBudget(limit=2)
@@ -259,18 +260,21 @@ class AssistBudgetTests(unittest.TestCase):
         with self.assertRaises(AssistBudgetExhaustedError):
             budget.consume()
 
-    def test_clamp_assist_budget_enforces_w03_range(self):
+    def test_clamp_assist_budget_enforces_positive_minimum(self):
         self.assertEqual(clamp_assist_budget(0), ASSIST_BUDGET_MIN)
         self.assertEqual(clamp_assist_budget(-5), ASSIST_BUDGET_MIN)
         self.assertEqual(clamp_assist_budget(1), 1)
-        self.assertEqual(clamp_assist_budget(3), ASSIST_BUDGET_MAX)
-        self.assertEqual(clamp_assist_budget(100), ASSIST_BUDGET_MAX)
+        self.assertEqual(clamp_assist_budget(3), 3)
+        self.assertEqual(clamp_assist_budget(100), 100)
+        self.assertEqual(
+            clamp_assist_budget(ASSIST_BUDGET_MAX + 1), ASSIST_BUDGET_MAX
+        )
 
     def test_budget_rejects_out_of_range_limit(self):
         with self.assertRaises(ValueError):
             AssistBudget(limit=0)
         with self.assertRaises(ValueError):
-            AssistBudget(limit=4)
+            AssistBudget(limit=ASSIST_BUDGET_MAX + 1)
 
     def test_budget_rejects_negative_used(self):
         with self.assertRaises(ValueError):
@@ -290,8 +294,8 @@ class AssistBudgetTests(unittest.TestCase):
 class ModelInvocationBudgetTests(unittest.TestCase):
     """Contract-level coverage for the W0.3-5 Model Gateway invocation budget."""
 
-    def test_default_model_invocation_budget_is_six(self):
-        self.assertEqual(DEFAULT_MODEL_INVOCATION_BUDGET, 6)
+    def test_default_model_invocation_budget_is_unlimited(self):
+        self.assertGreater(DEFAULT_MODEL_INVOCATION_BUDGET, 1_000_000)
 
     def test_budget_consumes_until_exhausted(self):
         budget = ModelInvocationBudget(limit=3)
@@ -362,7 +366,7 @@ class NewRunContractBudgetWiringTests(unittest.TestCase):
             DEFAULT_MODEL_INVOCATION_BUDGET,
         )
 
-    def test_clamps_out_of_range_assist_budget_limit(self):
+    def test_preserves_explicit_assist_budget_limit(self):
         contract = new_run_contract(
             run_id="run-clamp-assist",
             workflow_id="w0-migration-v0",
@@ -370,7 +374,7 @@ class NewRunContractBudgetWiringTests(unittest.TestCase):
             source_ref=self._source_ref(),
             assist_budget_limit=99,
         )
-        self.assertEqual(contract.assist_budget.limit, ASSIST_BUDGET_MAX)
+        self.assertEqual(contract.assist_budget.limit, 99)
 
     def test_clamps_out_of_range_model_invocation_budget_limit(self):
         contract = new_run_contract(

@@ -163,6 +163,12 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             workflow_id="w0-migration-v0",
             requester="bff",
             source_ref={"uri": "urn:source/HELLO.cob"},
+            # Keep this fixture deterministic by pinning finite budgets.
+            # Production defaults are now unlimited, but this suite verifies
+            # lineage math on a small, bounded contract surface.
+            repair_budget_limit=2,
+            assist_budget_limit=1,
+            model_invocation_budget_limit=6,
         )
 
     def _write_source_and_parse_metadata(self, context: W0RunContext) -> None:
@@ -679,6 +685,9 @@ class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):
             workflow_id="w0-migration-v0",
             requester="bff",
             source_ref={"uri": "urn:source/HELLO.cob"},
+            repair_budget_limit=2,
+            assist_budget_limit=1,
+            model_invocation_budget_limit=6,
         )
 
     @staticmethod

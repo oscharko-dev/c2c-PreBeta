@@ -32,18 +32,20 @@ import type { UpstreamResponse } from "./upstream";
 // ---------------------------------------------------------------------------
 
 export const EDITOR_ASSIST_SCHEMA_VERSION = "v0" as const;
+export const UNLIMITED_AI_BUDGET = 2_147_483_647;
 
-// Bounds per ADR 0004 "editorAssistBudget" section.
+// Enterprise default: no editor-assist throttling unless an operator
+// explicitly configures a finite limit.
 export const EDITOR_ASSIST_BUDGET_MIN = 1;
-export const EDITOR_ASSIST_BUDGET_MAX = 10;
-export const DEFAULT_EDITOR_ASSIST_BUDGET = 3;
+export const EDITOR_ASSIST_BUDGET_MAX = UNLIMITED_AI_BUDGET;
+export const DEFAULT_EDITOR_ASSIST_BUDGET = UNLIMITED_AI_BUDGET;
 
 // Per-(tenant, calendarDateUTC) ceiling defended in ADR 0004 §"Why
 // per-session plus per-tenant-per-day". Tighter than the
 // editorAssistBudget * sessions-per-day product on purpose: it is the
 // abuse boundary, not the productive ceiling. Configurable so
 // integration tests can exercise the rollover and cap behaviour.
-export const EDITOR_ASSIST_DEFAULT_TENANT_DAILY_CAP = 100;
+export const EDITOR_ASSIST_DEFAULT_TENANT_DAILY_CAP = UNLIMITED_AI_BUDGET;
 
 // Hard cap on the redacted region the client may submit. ADR 0005 §4
 // hashes over what leaves the client; the cap protects the BFF and

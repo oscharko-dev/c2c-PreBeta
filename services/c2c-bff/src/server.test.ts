@@ -32,6 +32,7 @@ import {
 } from "./upstream";
 import { loadConfig, type BffConfig } from "./config";
 import {
+  DEFAULT_EDITOR_ASSIST_BUDGET,
   createEditorAssistBudgetStore,
   type EditorAssistLedgerEntry,
   type BudgetSnapshot,
@@ -7048,7 +7049,11 @@ function minimalEditorAssistLedgerEntry(): EditorAssistLedgerEntry {
     redactedFields: [],
     ledgerRef: "urn:c2c/editor-assist/tenant-a/studio-session-1/1",
     editorAssistRef: "eai-tenant-a-studio-session-1-1",
-    budgetSnapshot: { limit: 3, used: 1, remaining: 2 },
+    budgetSnapshot: {
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
+      used: 1,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET - 1,
+    },
     startedAt: "2026-05-19T00:00:00.000Z",
     endedAt: "2026-05-19T00:00:01.000Z",
     status: "success",
@@ -7103,7 +7108,11 @@ test("POST /api/v0/editor/explain returns the success body and consumes one budg
         (body.editorAssistRef as string).startsWith("eai-tenant-a-"),
       true,
     );
-    assert.deepEqual(body.budgetSnapshot, { limit: 3, used: 1, remaining: 2 });
+    assert.deepEqual(body.budgetSnapshot, {
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
+      used: 1,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET - 1,
+    });
     const redaction = body.redactionApplied as string[];
     // Union of studio + gateway redactions, order-insensitive.
     assert.equal(redaction.includes("ssn-us"), true);
@@ -7396,9 +7405,9 @@ test("POST /api/v0/editor/explain preflights the ledger before budget and gatewa
     );
     assert.equal(budget.status, 200);
     assert.deepEqual((budget.body as Record<string, unknown>).budget, {
-      limit: 3,
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
       used: 0,
-      remaining: 3,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET,
     });
   } finally {
     await server.close();
@@ -7445,7 +7454,11 @@ test("POST /api/v0/editor/explain fails closed when ledger persistence fails", a
       "Editor-assist audit ledger unavailable. Try again shortly.",
     );
     assert.doesNotMatch(JSON.stringify(body), /c2c-secret-ledger|EACCES/);
-    assert.deepEqual(body.budgetSnapshot, { limit: 3, used: 1, remaining: 2 });
+    assert.deepEqual(body.budgetSnapshot, {
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
+      used: 1,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET - 1,
+    });
   } finally {
     await server.close();
   }
@@ -7526,9 +7539,9 @@ test("POST /api/v0/editor/explain returns 400 invalid_region on byteHash mismatc
       { headers: auth.headers },
     );
     assert.deepEqual((budget.body as { budget: BudgetSnapshot }).budget, {
-      limit: 3,
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
       used: 0,
-      remaining: 3,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET,
     });
   } finally {
     await server.close();
@@ -7563,7 +7576,11 @@ test("POST /api/v0/editor/explain maps gateway 403 to policy_denied with HTTP 40
     assert.equal(response.status, 403);
     const body = response.body as Record<string, unknown>;
     assert.equal(body.errorCode, "policy_denied");
-    assert.deepEqual(body.budgetSnapshot, { limit: 3, used: 1, remaining: 2 });
+    assert.deepEqual(body.budgetSnapshot, {
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
+      used: 1,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET - 1,
+    });
   } finally {
     await server.close();
   }
@@ -7845,7 +7862,11 @@ test("GET /api/v0/editor/budget returns the current session snapshot", async () 
     assert.equal(response.status, 200);
     const body = response.body as Record<string, unknown>;
     assert.equal(body.schemaVersion, "v0");
-    assert.deepEqual(body.budget, { limit: 3, used: 0, remaining: 3 });
+    assert.deepEqual(body.budget, {
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
+      used: 0,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET,
+    });
   } finally {
     await server.close();
   }
@@ -7878,9 +7899,9 @@ test("GET /api/v0/editor/budget treats query sessionId as correlation only", asy
     );
     assert.equal(response.status, 200);
     assert.deepEqual((response.body as Record<string, unknown>).budget, {
-      limit: 3,
+      limit: DEFAULT_EDITOR_ASSIST_BUDGET,
       used: 1,
-      remaining: 2,
+      remaining: DEFAULT_EDITOR_ASSIST_BUDGET - 1,
     });
   } finally {
     await server.close();

@@ -29,32 +29,29 @@ DEFAULT_MODEL_POLICY_VERSION = "v0"
 DEFAULT_CAPABILITY_POLICY_PROFILE = "harness-control-plane"
 DEFAULT_CAPABILITY_VERSION = "v0.1.0"
 
-# Issue #166: hard W0.2 bounds for the bounded repair loop. The default is two
-# attempts; the limit is clamped to [1, 3] so configuration cannot escape the
-# W0.2 contract.
-DEFAULT_REPAIR_BUDGET_MAX = 2
+# Enterprise default: AI-assisted paths are unrestricted unless an operator
+# explicitly configures finite ceilings.
+UNLIMITED_AI_BUDGET = 2_147_483_647
+
+DEFAULT_REPAIR_BUDGET_MAX = UNLIMITED_AI_BUDGET
 REPAIR_BUDGET_MIN = 1
-REPAIR_BUDGET_MAX = 3
+REPAIR_BUDGET_MAX = UNLIMITED_AI_BUDGET
 
-# Issue #216 (W0.3-5): per-run productive-assist activation budget. W0.3 today
-# invokes the productive Transformation Agent once per run, so the default is
-# one activation. Clamped to [1, 3] so operators cannot escape the W0.3 cap.
-DEFAULT_ASSIST_BUDGET_MAX = 1
+# Per-run productive-assist activation budget. Defaults to unrestricted.
+DEFAULT_ASSIST_BUDGET_MAX = UNLIMITED_AI_BUDGET
 ASSIST_BUDGET_MIN = 1
-ASSIST_BUDGET_MAX = 3
+ASSIST_BUDGET_MAX = UNLIMITED_AI_BUDGET
 
-# Issue #216 (W0.3-5): per-run Model Gateway invocation budget. Covers the
-# worst case of one transformation call + three repair-iteration calls plus
-# two units of headroom for future bounded steps. Clamped to [1, 20].
-DEFAULT_MODEL_INVOCATION_BUDGET_MAX = 6
+# Per-run Model Gateway invocation budget. Defaults to unrestricted.
+DEFAULT_MODEL_INVOCATION_BUDGET_MAX = UNLIMITED_AI_BUDGET
 MODEL_INVOCATION_BUDGET_MIN = 1
-MODEL_INVOCATION_BUDGET_MAX = 20
+MODEL_INVOCATION_BUDGET_MAX = UNLIMITED_AI_BUDGET
 
 # Issue #169: defaults for the productive Transformation Agent.
 DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_ID = "c2c.transformation-agent.cobol-to-java.v0"
 DEFAULT_TRANSFORMATION_AGENT_PROMPT_TEMPLATE_VERSION = "v0"
 DEFAULT_TRANSFORMATION_AGENT_DEADLINE_MS = 60000
-DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES = 1024 * 1024
+DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES = 0
 DEFAULT_TRANSFORMATION_AGENT_PACKAGE_BASE = "com.c2c.generated"
 DEFAULT_TRANSFORMATION_AGENT_JAVA_VERSION = "21"
 DEFAULT_TRANSFORMATION_AGENT_RUNTIME_LIBRARY = "c2c-target-java-runtime"
@@ -76,7 +73,7 @@ DEFAULT_TRANSFORMATION_AGENT_W0_SUBSET: tuple[str, ...] = (
 DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_ID = "c2c.verification-repair-agent.cobol-to-java.v0"
 DEFAULT_REPAIR_AGENT_PROMPT_TEMPLATE_VERSION = "v0"
 DEFAULT_REPAIR_AGENT_DEADLINE_MS = 60000
-DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES = 256 * 1024
+DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES = 0
 
 DEFAULT_PARSER_SERVICE_HOST = "127.0.0.1"
 DEFAULT_PARSER_SERVICE_PORT = 8081
@@ -359,7 +356,7 @@ def load_config() -> OrchestratorConfig:
         "ORCHESTRATOR_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES",
         DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES,
     )
-    if transformation_agent_max_output_bytes <= 0:
+    if transformation_agent_max_output_bytes < 0:
         transformation_agent_max_output_bytes = DEFAULT_TRANSFORMATION_AGENT_MAX_OUTPUT_BYTES
     transformation_agent_package_base = (
         os.environ.get(
@@ -409,7 +406,7 @@ def load_config() -> OrchestratorConfig:
         "ORCHESTRATOR_REPAIR_AGENT_MAX_OUTPUT_BYTES",
         DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES,
     )
-    if repair_agent_max_output_bytes <= 0:
+    if repair_agent_max_output_bytes < 0:
         repair_agent_max_output_bytes = DEFAULT_REPAIR_AGENT_MAX_OUTPUT_BYTES
     repair_agent_package_base = (
         os.environ.get(

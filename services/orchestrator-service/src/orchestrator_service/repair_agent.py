@@ -1204,7 +1204,6 @@ class RepairAgent:
                 "buildTestResultRef": _coerce_artifact_ref(request.build_test_result_ref),
                 "repairBudgetRemaining": int(request.repair_budget_remaining),
                 "temperature": 0,
-                "max_tokens": 8192,
             },
             "timeoutMs": int(request.deadline_ms),
         }

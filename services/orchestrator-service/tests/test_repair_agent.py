@@ -230,12 +230,14 @@ def _escalate_response(escalation_code: str, *, rationale: str = "Out of scope."
 
 
 # Helper that wires up the agent + a temp store with a single call.
-def _agent_for(response_or_exc) -> tuple[RepairAgent, RunArtifactStore, str]:
+def _agent_for(
+    response_or_exc, **config_overrides: Any
+) -> tuple[RepairAgent, RunArtifactStore, str]:
     tmp = tempfile.mkdtemp()
     store = RunArtifactStore(tmp)
     store.init_run("run-1", "w0-migration-v0")
     agent = RepairAgent(
-        config=_config(),
+        config=_config(**config_overrides),
         artifact_store=store,
         model_invoker=_StubInvoker(response_or_exc),
     )
@@ -333,7 +335,7 @@ class RepairAgentGatewayRequestTests(unittest.TestCase):
         params = call["parameters"]
         self.assertEqual(params["failureCategory"], "java_compile_failed")
         self.assertEqual(params["temperature"], 0)
-        self.assertEqual(params["max_tokens"], 8192)
+        self.assertNotIn("max_tokens", params)
         self.assertEqual(params["previousJavaCandidateRef"]["uri"], "urn:gen/manifest")
         self.assertEqual(params["buildTestResultRef"]["uri"], "urn:build/result")
         self.assertEqual(params["semanticIrRef"]["uri"], "urn:ir/HELLO")
@@ -464,14 +466,14 @@ class RepairAgentRefuseAndEscalateTests(unittest.TestCase):
     def test_refuse_without_refusal_code_is_invalid(self):
         bad = _ok_propose_response()
         bad["output"] = {"decision": DECISION_REFUSE, "rationale": "no code"}
-        agent, store, tmp = _agent_for(bad)
+        agent, store, tmp = _agent_for(bad, repair_agent_max_output_bytes=1024)
         with self.assertRaises(RepairAgentContractInvalidError):
             agent.invoke(_request())
 
     def test_escalate_without_escalation_code_is_invalid(self):
         bad = _ok_propose_response()
         bad["output"] = {"decision": DECISION_ESCALATE, "rationale": "no code"}
-        agent, store, tmp = _agent_for(bad)
+        agent, store, tmp = _agent_for(bad, repair_agent_max_output_bytes=1024)
         with self.assertRaises(RepairAgentContractInvalidError):
             agent.invoke(_request())
 
@@ -573,7 +575,7 @@ class RepairAgentGatewayFailureTests(unittest.TestCase):
     def test_invalid_decision_envelope_raises_contract_invalid(self):
         bad = _ok_propose_response()
         bad["output"] = "not a json object at all"
-        agent, store, tmp = _agent_for(bad)
+        agent, store, tmp = _agent_for(bad, repair_agent_max_output_bytes=1024)
         with self.assertRaises(RepairAgentContractInvalidError) as ctx:
             agent.invoke(_request())
         self.assertEqual(
@@ -681,7 +683,7 @@ class RepairAgentCandidateValidationTests(unittest.TestCase):
         )
         bad["output"]["entryClass"] = "Big"
         bad["output"]["entryFilePath"] = "src/main/java/com/c2c/generated/Big.java"
-        agent, store, tmp = _agent_for(bad)
+        agent, store, tmp = _agent_for(bad, repair_agent_max_output_bytes=1024)
         with self.assertRaises(RepairAgentContractInvalidError) as ctx:
             agent.invoke(_request())
         self.assertIn("size limit", str(ctx.exception))
