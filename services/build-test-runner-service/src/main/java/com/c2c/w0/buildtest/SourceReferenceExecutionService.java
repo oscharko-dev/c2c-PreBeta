@@ -505,10 +505,7 @@ final class SourceReferenceExecutionService {
     }
 
     private static String normalize(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("\r\n", "\n").trim();
+        return DeterministicComparisonPolicy.normalize(value);
     }
 
     private static boolean isTimeout(String reason) {

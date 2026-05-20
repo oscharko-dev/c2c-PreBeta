@@ -93,6 +93,7 @@ public final class BuildTestRunnerService {
             response.put("tests", emptyTests());
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -125,6 +126,7 @@ public final class BuildTestRunnerService {
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         } catch (IOException e) {
@@ -146,6 +148,7 @@ public final class BuildTestRunnerService {
             response.put("goldenMaster", Map.of());
             response.put("comparison", Map.of());
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -190,6 +193,7 @@ public final class BuildTestRunnerService {
                         "skipped", true,
                         "reason", "compile-failed"));
                 response.put("diagnostics", diagnostics);
+                attachComparisonResult(response);
                 response.put("outputRef", reference(response));
                 return response;
             }
@@ -240,6 +244,7 @@ public final class BuildTestRunnerService {
                             "skipped", true,
                             "reason", "run-not-started"));
                     response.put("diagnostics", diagnostics);
+                    attachComparisonResult(response);
                     response.put("outputRef", reference(response));
                     return response;
                 }
@@ -277,6 +282,7 @@ public final class BuildTestRunnerService {
                                 "skipped", false,
                                 "reason", "true-golden-master-reproduction-failed"));
                         response.put("diagnostics", diagnostics);
+                        attachComparisonResult(response);
                         response.put("outputRef", reference(response));
                         return response;
                     }
@@ -308,21 +314,36 @@ public final class BuildTestRunnerService {
                         "matched", false,
                         "skipped", true,
                         "reason", "missing-golden-master"));
-            } else if (run.ok()) {
-                Map<String, Object> comparison = compareToGoldenMaster(run.stdout(), golden.get().expected());
+            } else if (run != null && run.ran()) {
+                Map<String, Object> comparison = compareToGoldenMaster(
+                        string(response.get("runId"), "run-unknown"),
+                        string(response.get("workflowId"), null),
+                        run.stdout(),
+                        run.stderr(),
+                        run.ran() ? run.exitCode() : null,
+                        golden.get().expected(),
+                        "",
+                        null);
                 response.put("comparison", comparison);
+                response.put("comparisonResult", comparison.get("comparisonResult"));
+                response.put("comparisonResultRef", comparison.get("comparisonResultRef"));
                 if (Boolean.TRUE.equals(comparison.get("matched"))) {
-                    applyClassification(response, ResultClassifier.match());
+                    if (run.ok()) {
+                        applyClassification(response, ResultClassifier.match());
+                    }
                 } else {
                     boolean known = golden.get().knownDivergenceAtW0();
-                    applyClassification(response, ResultClassifier.divergence(known,
-                            known
-                                    ? "Generated stdout diverges from Golden Master; classified as a documented W0 generator coverage gap."
-                                    : "Generated program output differs from Golden Master."));
+                    if (run.ok()) {
+                        applyClassification(response, ResultClassifier.divergence(known,
+                                known
+                                        ? "Generated stdout diverges from Golden Master; classified as a documented W0 generator coverage gap."
+                                        : "Generated program output differs from Golden Master."));
+                    }
                 }
             }
 
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -369,6 +390,7 @@ public final class BuildTestRunnerService {
                     "skipped", true,
                     "reason", "options.skipExecution=true"));
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -385,6 +407,7 @@ public final class BuildTestRunnerService {
                     "skipped", true,
                     "reason", "run-failed"));
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -398,6 +421,7 @@ public final class BuildTestRunnerService {
                     "skipped", true,
                     "reason", "options.compareOutput=false"));
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -440,6 +464,7 @@ public final class BuildTestRunnerService {
                     "skipped", true,
                     "reason", "oracle-invalid-request"));
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -454,6 +479,7 @@ public final class BuildTestRunnerService {
                     "skipped", true,
                     "reason", "oracle-unavailable"));
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -468,6 +494,7 @@ public final class BuildTestRunnerService {
                     "skipped", false,
                     "reason", "oracle-cobol-compile-failed"));
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
@@ -483,20 +510,35 @@ public final class BuildTestRunnerService {
                     "skipped", false,
                     "reason", "oracle-cobol-run-failed"));
             response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
             response.put("outputRef", reference(response));
             return response;
         }
 
         // Explicit user-supplied expected output is the paste-mode oracle.
         // Otherwise, the COBOL runtime must have produced the oracle stdout.
-        String javaStdout = run == null ? "" : run.stdout();
         String expectedStdout = usingUserExpectedOutput ? expectedOutput : oracle.stdout();
         Map<String, Object> comparison = compareOutputs(
-                javaStdout,
+                string(response.get("runId"), "run-unknown"),
+                string(response.get("workflowId"), null),
                 expectedStdout,
+                "",
+                usingUserExpectedOutput ? null : oracle.exitCode(),
+                run == null ? "" : run.stdout(),
+                run == null ? "" : run.stderr(),
+                run == null ? null : run.exitCode(),
                 usingUserExpectedOutput ? "oracle.user-provided" : "oracle.cobol-runtime",
-                usingUserExpectedOutput ? "user-provided-expected-output" : "cobol-oracle-stdout");
+                usingUserExpectedOutput
+                        ? "user-provided-expected-output"
+                        : "cobol-oracle-stdout",
+                usingUserExpectedOutput
+                        ? "user-provided-expected-stderr"
+                        : "cobol-oracle-stderr",
+                "java-stdout",
+                "java-stderr");
         response.put("comparison", comparison);
+        response.put("comparisonResult", comparison.get("comparisonResult"));
+        response.put("comparisonResultRef", comparison.get("comparisonResultRef"));
         if (Boolean.TRUE.equals(comparison.get("matched"))) {
             applyClassification(response, ResultClassifier.match());
         } else {
@@ -506,6 +548,7 @@ public final class BuildTestRunnerService {
                             : "Generated Java stdout diverges from COBOL oracle stdout."));
         }
         response.put("diagnostics", diagnostics);
+        attachComparisonResult(response);
         response.put("outputRef", reference(response));
         return response;
     }
@@ -539,44 +582,120 @@ public final class BuildTestRunnerService {
     }
 
     private static Map<String, Object> compareOutputs(
+            String runId,
+            String workflowId,
+            String sourceStdout,
+            String sourceStderr,
+            Integer sourceExitCode,
             String javaStdout,
-            String expectedStdout,
-            String source,
-            String expectedKind) {
-        String left = normalise(javaStdout);
-        String right = normalise(expectedStdout);
+            String javaStderr,
+            Integer javaExitCode,
+            String sourceSurfaceLabel,
+            String sourceStdoutKind,
+            String sourceStderrKind,
+            String javaStdoutKind,
+            String javaStderrKind) {
+        Map<String, Object> sourceStdoutRef = outputReference(sourceStdoutKind, sourceStdout);
+        Map<String, Object> sourceStderrRef = outputReference(sourceStderrKind, sourceStderr);
+        Map<String, Object> javaStdoutRef = outputReference(javaStdoutKind, javaStdout);
+        Map<String, Object> javaStderrRef = outputReference(javaStderrKind, javaStderr);
+        Map<String, Object> sourceNormalizedRef =
+                outputReference(sourceStdoutKind + "-normalized", DeterministicComparisonPolicy.normalize(sourceStdout));
+        Map<String, Object> sourceNormalizedStderrRef =
+                outputReference(sourceStderrKind + "-normalized", DeterministicComparisonPolicy.normalize(sourceStderr));
+        Map<String, Object> javaNormalizedRef =
+                outputReference(javaStdoutKind + "-normalized", DeterministicComparisonPolicy.normalize(javaStdout));
+        Map<String, Object> javaNormalizedStderrRef =
+                outputReference(javaStderrKind + "-normalized", DeterministicComparisonPolicy.normalize(javaStderr));
+        Map<String, Object> comparisonResult = ParityComparison.compare(
+                runId,
+                workflowId,
+                new ParityComparison.ExecutionFact(
+                        "passed",
+                        sourceExitCode,
+                        sourceStdout,
+                        sourceStderr,
+                        sourceStdoutRef,
+                        sourceStderrRef,
+                        sourceNormalizedRef,
+                        sourceNormalizedStderrRef,
+                        sourceSurfaceLabel),
+                new ParityComparison.ExecutionFact(
+                        javaExitCode != null && javaExitCode.intValue() == 0 ? "passed"
+                                : (javaExitCode != null && javaExitCode.intValue() == 124 ? "timed_out" : "failed"),
+                        javaExitCode,
+                        javaStdout,
+                        javaStderr,
+                        javaStdoutRef,
+                        javaStderrRef,
+                        javaNormalizedRef,
+                        javaNormalizedStderrRef,
+                        "generated-java"));
         Map<String, Object> comparison = new LinkedHashMap<>();
-        comparison.put("matched", left.equals(right));
-        comparison.put("normalisation", "trim+crlf-to-lf");
-        comparison.put("source", source);
+        comparison.put("matched", Boolean.TRUE.equals(comparisonResult.get("matched")));
+        comparison.put("normalisation", DeterministicComparisonPolicy.VERSION);
+        comparison.put("source", sourceSurfaceLabel);
         comparison.put("actualSha256", HashUtil.sha256(javaStdout == null ? "" : javaStdout));
-        comparison.put("expectedSha256", HashUtil.sha256(expectedStdout == null ? "" : expectedStdout));
+        comparison.put("expectedSha256", HashUtil.sha256(sourceStdout == null ? "" : sourceStdout));
         comparison.put("actualLength", javaStdout == null ? 0 : javaStdout.length());
-        comparison.put("expectedLength", expectedStdout == null ? 0 : expectedStdout.length());
-        comparison.put("actualRef", outputReference("java-stdout", javaStdout));
-        comparison.put("expectedRef", outputReference(expectedKind, expectedStdout));
-        if (!left.equals(right)) {
-            comparison.put("diff", briefDiff(left, right));
-        }
+        comparison.put("expectedLength", sourceStdout == null ? 0 : sourceStdout.length());
+        comparison.put("actualRef", javaStdoutRef);
+        comparison.put("expectedRef", sourceStdoutRef);
+        comparison.put("actualStderrRef", javaStderrRef);
+        comparison.put("expectedStderrRef", sourceStderrRef);
+        comparison.put("actualNormalizedRef", javaNormalizedRef);
+        comparison.put("expectedNormalizedRef", sourceNormalizedRef);
+        comparison.put("actualNormalizedStderrRef", javaNormalizedStderrRef);
+        comparison.put("expectedNormalizedStderrRef", sourceNormalizedStderrRef);
+        comparison.put("sourceStdoutRef", sourceStdoutRef);
+        comparison.put("sourceStderrRef", sourceStderrRef);
+        comparison.put("javaStdoutRef", javaStdoutRef);
+        comparison.put("javaStderrRef", javaStderrRef);
+        comparison.put("sourceNormalizedOutputRef", sourceNormalizedRef);
+        comparison.put("sourceNormalizedStderrRef", sourceNormalizedStderrRef);
+        comparison.put("javaNormalizedOutputRef", javaNormalizedRef);
+        comparison.put("javaNormalizedStderrRef", javaNormalizedStderrRef);
+        comparison.put("comparisonPolicyVersion", DeterministicComparisonPolicy.VERSION);
+        comparison.put("comparisonPolicyRef", DeterministicComparisonPolicy.toRef());
+        comparison.put("comparisonResult", comparisonResult);
+        comparison.put("comparisonResultRef", comparisonResult.get("outputRef"));
+        comparison.put("diff", comparisonResult.get("diffSummary"));
+        comparison.put("diffRef", comparisonResult.get("diffRef"));
+        comparison.put("normalizedDiffRef", comparisonResult.get("diffRef"));
+        comparison.put("mismatchClassification", comparisonResult.get("mismatchClassification"));
+        comparison.put("status", comparisonResult.get("status"));
+        comparison.put("sourceExitCode", sourceExitCode);
+        comparison.put("javaExitCode", javaExitCode);
+        comparison.put("sourceOutputRef", sourceStdoutRef);
+        comparison.put("javaOutputRef", javaStdoutRef);
+        comparison.put("sourceStderrOutputRef", sourceStderrRef);
+        comparison.put("javaStderrOutputRef", javaStderrRef);
         return comparison;
     }
 
-    private static Map<String, Object> compareToGoldenMaster(String actual, String expected) {
-        String left = normalise(actual);
-        String right = normalise(expected);
-        Map<String, Object> comparison = new LinkedHashMap<>();
-        comparison.put("matched", left.equals(right));
-        comparison.put("normalisation", "trim+crlf-to-lf");
-        comparison.put("actualSha256", HashUtil.sha256(actual == null ? "" : actual));
-        comparison.put("expectedSha256", HashUtil.sha256(expected == null ? "" : expected));
-        comparison.put("actualLength", actual == null ? 0 : actual.length());
-        comparison.put("expectedLength", expected == null ? 0 : expected.length());
-        comparison.put("actualRef", outputReference("java-stdout", actual));
-        comparison.put("expectedRef", outputReference("golden-master-output", expected));
-        if (!left.equals(right)) {
-            comparison.put("diff", briefDiff(left, right));
-        }
-        return comparison;
+    private static Map<String, Object> compareToGoldenMaster(
+            String runId,
+            String workflowId,
+            String actual,
+            String actualStderr,
+            Integer actualExitCode,
+            String expected,
+            String expectedStderr,
+            Integer expectedExitCode) {
+        return compareOutputs(
+                runId,
+                workflowId,
+                expected,
+                expectedStderr,
+                expectedExitCode,
+                actual,
+                actualStderr,
+                actualExitCode,
+                "golden-master",
+                "golden-master-output",
+                "golden-master-stderr",
+                "java-stdout",
+                "java-stderr");
     }
 
     static Map<String, Object> outputReference(String kind, String content) {
@@ -592,27 +711,7 @@ public final class BuildTestRunnerService {
     }
 
     private static String normalise(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("\r\n", "\n").trim();
-    }
-
-    private static String briefDiff(String actual, String expected) {
-        if (actual.isEmpty()) {
-            return "actual is empty; expected " + expected.length() + " characters";
-        }
-        if (expected.isEmpty()) {
-            return "expected is empty; actual " + actual.length() + " characters";
-        }
-        int common = 0;
-        int max = Math.min(actual.length(), expected.length());
-        while (common < max && actual.charAt(common) == expected.charAt(common)) {
-            common++;
-        }
-        return "first divergence at character " + common
-                + "; actualLength=" + actual.length()
-                + " expectedLength=" + expected.length();
+        return DeterministicComparisonPolicy.normalize(value);
     }
 
     private static String trueGoldenMasterFailureSummary(CobolRuntimeExecutor.Reproduction reproduction) {
@@ -1085,7 +1184,7 @@ public final class BuildTestRunnerService {
     }
 
     @SafeVarargs
-    private static List<Map<String, Object>> evidenceRefs(Map<String, Object>... refs) {
+    static List<Map<String, Object>> evidenceRefs(Map<String, Object>... refs) {
         List<Map<String, Object>> out = new ArrayList<>(refs.length);
         for (Map<String, Object> ref : refs) {
             if (ref != null && !ref.isEmpty()) {
@@ -1093,6 +1192,61 @@ public final class BuildTestRunnerService {
             }
         }
         return out;
+    }
+
+    private static void attachComparisonResult(Map<String, Object> response) {
+        if (response.get("comparisonResult") instanceof Map<?, ?>) {
+            return;
+        }
+        Map<String, Object> comparison = mapOrEmpty(response.get("comparison"));
+        Map<String, Object> execution = mapOrEmpty(response.get("execution"));
+        ParityComparison.ExecutionFact target = executionFactFromExecution(execution);
+        String runId = string(response.get("runId"), "run-unknown");
+        String workflowId = string(response.get("workflowId"), null);
+        String reason = string(comparison.get("reason"), null);
+        Map<String, Object> comparisonResult;
+        if ("compile-failed".equals(reason) || "run-failed".equals(reason)
+                || "run-not-started".equals(reason)
+                || "oracle-cobol-compile-failed".equals(reason)
+                || "oracle-cobol-run-failed".equals(reason)) {
+            comparisonResult = ParityComparison.runtimeFailure(
+                    runId,
+                    workflowId,
+                    null,
+                    target,
+                    reason == null ? "Generated Java execution did not complete successfully." : reason);
+        } else if ("missing-golden-master".equals(reason) || "oracle-unavailable".equals(reason)
+                || "oracle-invalid-request".equals(reason) || "options.compareOutput=false".equals(reason)
+                || "options.skipExecution=true".equals(reason)) {
+            comparisonResult = ParityComparison.unsupported(
+                    runId,
+                    workflowId,
+                    null,
+                    target,
+                    reason == null ? "Comparison input is unavailable or explicitly disabled." : reason);
+        } else {
+            return;
+        }
+        response.put("comparisonResult", comparisonResult);
+        response.put("comparisonResultRef", comparisonResult.get("outputRef"));
+    }
+
+    private static ParityComparison.ExecutionFact executionFactFromExecution(Map<String, Object> execution) {
+        if (execution.isEmpty()) {
+            return null;
+        }
+        Integer exitCode = execution.get("exitCode") instanceof Number number ? number.intValue() : null;
+        return new ParityComparison.ExecutionFact(
+                string(execution.get("status"), "skipped"),
+                exitCode,
+                string(execution.get("stdout"), ""),
+                string(execution.get("stderr"), ""),
+                mapOrEmpty(execution.get("stdoutRef")),
+                mapOrEmpty(execution.get("stderrRef")),
+                mapOrEmpty(execution.get("normalizedOutputRef")),
+                outputReference("generated-java-stderr-normalized",
+                        DeterministicComparisonPolicy.normalize(string(execution.get("stderr"), ""))),
+                "generated-java");
     }
 
     private static String renderBuildLog(

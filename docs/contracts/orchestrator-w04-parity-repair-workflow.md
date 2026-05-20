@@ -24,6 +24,9 @@ truth. Architectural decision context lives in
 - Repair proposals require explicit developer approval before application.
 - Evidence captures the mode labels, approvals, outputs, hashes, diagnostics,
   comparisons, and provenance needed for audit.
+- The Orchestrator projects deterministic comparison lineage from the Java
+  runner output into additive contract surfaces rather than recomputing
+  parity independently.
 
 ## Canonical Workflow Objects
 
@@ -51,9 +54,17 @@ The consumer-visible parity loop is:
    input.
 5. The Build/Test Runner builds and executes the generated Java candidate.
 6. Deterministic normalization and comparison decide whether reference and
-   target outputs match.
+   target outputs match. The comparison policy must record at least the
+   line-ending, trailing-whitespace, stdout, stderr, exit-code, and
+   empty-output rules used for the decision.
 7. Evidence records the run configuration, artifacts, outputs, hashes,
    diagnostics, comparison, and provenance state.
+
+For Issue #354 consumers must treat the Java runner payload as the comparison
+source of truth. The Orchestrator may persist or relay additive projection
+objects such as workflow-contract `parityComparison` and evidence
+`artifacts.parityComparison`, but those surfaces only re-express the runner's
+comparison policy/version, execution/comparison result refs, and diff refs.
 
 ## Repair Workflow
 
@@ -153,6 +164,8 @@ The first trust workflow must preserve at least these evidence classes:
 - generated Java candidate identity and provenance;
 - build and runtime diagnostics;
 - normalized comparison result and parity status;
+- deterministic comparison policy/version plus projected execution,
+  comparison, and diff references;
 - mode labels presented to the developer;
 - repair proposal metadata, the approved patch payload hash, approval or
   rejection decision, and any applied patch provenance;
@@ -168,7 +181,7 @@ required for audit, replay, or deterministic verification:
 | --- | --- |
 | Run identity and status | trust-case identifiers and versions, run identifiers, workflow identifiers, mode labels, completeness status, final classification, and evidence-completeness warnings |
 | Deterministic artifacts | source COBOL references, input fixture references, reference artifact references, generated Java candidate references, build/test result references, runtime version references, harness event references, trajectory ledger references, and unsupported-feature references |
-| Comparison results | normalized comparison outputs, parity status, oracle comparison references, matched/mismatched outcome, and the hashes or byte sizes needed to verify the referenced artifacts |
+| Comparison results | normalized comparison outputs, parity status, oracle comparison references, workflow/evidence `parityComparison` projections, comparison policy version/reference, execution/comparison result refs, diff refs, matched/mismatched outcome, and the hashes or byte sizes needed to verify the referenced artifacts |
 | Assist lineage | `assistDecision` outcome, reason code, selected agent role, decision timestamp, budget snapshots, and affected artifact references |
 | Repair lineage | `repairAttempts` metadata, decision refs, model invocation refs, approved patch payload hash, approval or rejection decision, and applied patch provenance |
 | Manual-edit provenance | `manualEditsCarriedOver`, `manualDriftRegionCount`, and the `manualEditOverlay` reference when manual edits are present |

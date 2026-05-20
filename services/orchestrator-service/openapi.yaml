@@ -590,6 +590,10 @@ components:
             - type: object
               additionalProperties: true
             - type: 'null'
+        parityComparison:
+          oneOf:
+            - $ref: "#/components/schemas/W04ParityComparisonProjection"
+            - type: 'null'
         evidencePackRef:
           oneOf:
             - type: object
@@ -667,6 +671,49 @@ components:
         diffFromPreviousRef:
           type: object
           additionalProperties: true
+    W04ParityComparisonProjection:
+      type: object
+      required:
+        - status
+        - matched
+        - comparisonPolicyVersion
+        - executionResultRef
+        - comparisonResultRef
+        - mismatchClassification
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [passed, failed, blocked]
+        matched:
+          type: boolean
+        comparisonPolicyVersion:
+          type: string
+        comparisonPolicyRef:
+          type: object
+          additionalProperties: true
+        executionResultRef:
+          type: object
+          additionalProperties: true
+        comparisonResultRef:
+          type: object
+          additionalProperties: true
+        diffRef:
+          type: object
+          additionalProperties: true
+        mismatchClassification:
+          type: string
+          enum:
+            - none
+            - content
+            - formatting
+            - line_endings
+            - stderr
+            - exit_code
+            - runtime_failure
+            - unsupported_input
+            - policy
+            - unknown
     W02StateTransition:
       type: object
       required: [state, at]

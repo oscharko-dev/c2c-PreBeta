@@ -15,7 +15,9 @@ verification result for the c2c Evidence Pack v0.
    container-grade isolation boundary.
 4. Compare captured stdout to a documented Golden Master output (true
    `GnuCOBOL` execution where it exists, otherwise a clearly labelled
-   synthetic fixture) and classify the outcome.
+   synthetic fixture) and classify the outcome under a deterministic
+   comparison policy that normalizes line endings, trims trailing
+   whitespace, compares stderr explicitly, and records exit-code parity.
 5. Execute one approved source/reference context for Trust-3 through an
    explicit `reference-fixture` or `native-cobol` mode and return the shared
    parity execution result contract.
@@ -118,6 +120,11 @@ source for this endpoint.
   such as `ran`, `ok`, `stdout`, and `stderr`.
 - `executionResult`: exact canonical Trust-2 generated-Java execution result
   without the legacy compatibility fields.
+- `comparisonResult`: canonical deterministic parity comparison artifact with
+  `comparisonPolicyVersion`, content-addressed refs for source/reference and
+  generated Java outputs, a concise `diffSummary`, a machine-readable
+  `diffRef`, and deterministic `mismatchClassification`.
+- `comparisonResultRef`: content-addressed reference to `comparisonResult`.
 - `outputRef`: a hash-stamped reference to the canonical result JSON.
 
 The executable examples are the service tests under `src/test/`; local

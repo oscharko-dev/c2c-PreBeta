@@ -388,15 +388,37 @@ func (t AgentTrajectoryRef) Validate(path string) error {
 // run is not classifiable as success at the evidence layer regardless of
 // whether the deterministic build/test gate passed.
 type OracleComparison struct {
-	Matched            bool           `json:"matched"`
-	OracleKind         string         `json:"oracleKind,omitempty"`
-	ExpectedRef        *DataReference `json:"expectedRef,omitempty"`
-	ActualRef          *DataReference `json:"actualRef,omitempty"`
-	ExpectedSHA256     string         `json:"expectedSha256,omitempty"`
-	ActualSHA256       string         `json:"actualSha256,omitempty"`
-	BuildTestResultRef *DataReference `json:"buildTestResultRef,omitempty"`
-	Classification     string         `json:"classification,omitempty"`
-	Summary            string         `json:"summary,omitempty"`
+	Matched                   bool           `json:"matched"`
+	OracleKind                string         `json:"oracleKind,omitempty"`
+	ExpectedRef               *DataReference `json:"expectedRef,omitempty"`
+	ActualRef                 *DataReference `json:"actualRef,omitempty"`
+	ExpectedSHA256            string         `json:"expectedSha256,omitempty"`
+	ActualSHA256              string         `json:"actualSha256,omitempty"`
+	BuildTestResultRef        *DataReference `json:"buildTestResultRef,omitempty"`
+	ComparisonResultRef       *DataReference `json:"comparisonResultRef,omitempty"`
+	ComparisonPolicyRef       *DataReference `json:"comparisonPolicyRef,omitempty"`
+	DiffRef                   *DataReference `json:"diffRef,omitempty"`
+	NormalizedDiffRef         *DataReference `json:"normalizedDiffRef,omitempty"`
+	Classification            string         `json:"classification,omitempty"`
+	Status                    string         `json:"status,omitempty"`
+	ComparisonPolicyVersion   string         `json:"comparisonPolicyVersion,omitempty"`
+	MismatchClassification    string         `json:"mismatchClassification,omitempty"`
+	SourceExitCode            *int           `json:"sourceExitCode,omitempty"`
+	TargetExitCode            *int           `json:"targetExitCode,omitempty"`
+	SourceStdoutRef           *DataReference `json:"sourceStdoutRef,omitempty"`
+	SourceStderrRef           *DataReference `json:"sourceStderrRef,omitempty"`
+	TargetStdoutRef           *DataReference `json:"targetStdoutRef,omitempty"`
+	TargetStderrRef           *DataReference `json:"targetStderrRef,omitempty"`
+	SourceNormalizedRef       *DataReference `json:"sourceNormalizedRef,omitempty"`
+	SourceNormalizedStderrRef *DataReference `json:"sourceNormalizedStderrRef,omitempty"`
+	TargetNormalizedRef       *DataReference `json:"targetNormalizedRef,omitempty"`
+	TargetNormalizedStderrRef *DataReference `json:"targetNormalizedStderrRef,omitempty"`
+	SourceOutputRef           *DataReference `json:"sourceOutputRef,omitempty"`
+	SourceNormalizedOutputRef *DataReference `json:"sourceNormalizedOutputRef,omitempty"`
+	JavaOutputRef             *DataReference `json:"javaOutputRef,omitempty"`
+	JavaNormalizedOutputRef   *DataReference `json:"javaNormalizedOutputRef,omitempty"`
+	DiffSummary               string         `json:"diffSummary,omitempty"`
+	Summary                   string         `json:"summary,omitempty"`
 }
 
 func (o OracleComparison) IsZero() bool {
@@ -407,7 +429,29 @@ func (o OracleComparison) IsZero() bool {
 		o.ExpectedSHA256 == "" &&
 		o.ActualSHA256 == "" &&
 		o.BuildTestResultRef == nil &&
+		o.ComparisonResultRef == nil &&
+		o.ComparisonPolicyRef == nil &&
+		o.DiffRef == nil &&
+		o.NormalizedDiffRef == nil &&
 		o.Classification == "" &&
+		o.Status == "" &&
+		o.ComparisonPolicyVersion == "" &&
+		o.MismatchClassification == "" &&
+		o.SourceExitCode == nil &&
+		o.TargetExitCode == nil &&
+		o.SourceStdoutRef == nil &&
+		o.SourceStderrRef == nil &&
+		o.TargetStdoutRef == nil &&
+		o.TargetStderrRef == nil &&
+		o.SourceNormalizedRef == nil &&
+		o.SourceNormalizedStderrRef == nil &&
+		o.TargetNormalizedRef == nil &&
+		o.TargetNormalizedStderrRef == nil &&
+		o.SourceOutputRef == nil &&
+		o.SourceNormalizedOutputRef == nil &&
+		o.JavaOutputRef == nil &&
+		o.JavaNormalizedOutputRef == nil &&
+		o.DiffSummary == "" &&
 		o.Summary == ""
 }
 
@@ -442,6 +486,37 @@ func (o OracleComparison) Validate(path string) error {
 	if o.BuildTestResultRef != nil {
 		if err := o.BuildTestResultRef.Validate(path + ".buildTestResultRef"); err != nil {
 			return err
+		}
+	}
+	for field, ref := range map[string]*DataReference{
+		"comparisonResultRef":       o.ComparisonResultRef,
+		"comparisonPolicyRef":       o.ComparisonPolicyRef,
+		"diffRef":                   o.DiffRef,
+		"normalizedDiffRef":         o.NormalizedDiffRef,
+		"sourceStdoutRef":           o.SourceStdoutRef,
+		"sourceStderrRef":           o.SourceStderrRef,
+		"targetStdoutRef":           o.TargetStdoutRef,
+		"targetStderrRef":           o.TargetStderrRef,
+		"sourceNormalizedRef":       o.SourceNormalizedRef,
+		"sourceNormalizedStderrRef": o.SourceNormalizedStderrRef,
+		"targetNormalizedRef":       o.TargetNormalizedRef,
+		"targetNormalizedStderrRef": o.TargetNormalizedStderrRef,
+		"sourceOutputRef":           o.SourceOutputRef,
+		"sourceNormalizedOutputRef": o.SourceNormalizedOutputRef,
+		"javaOutputRef":             o.JavaOutputRef,
+		"javaNormalizedOutputRef":   o.JavaNormalizedOutputRef,
+	} {
+		if ref != nil {
+			if err := ref.Validate(path + "." + field); err != nil {
+				return err
+			}
+		}
+	}
+	if o.Status != "" {
+		switch o.Status {
+		case "passed", "failed", "blocked":
+		default:
+			return fieldError(path+".status", "status must be passed|failed|blocked")
 		}
 	}
 	return nil

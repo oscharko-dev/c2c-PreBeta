@@ -694,6 +694,10 @@ def _has_non_empty_list(mapping: Mapping[str, JsonValue] | None, key: str) -> bo
 GENERATED_PROJECT_DIR = "generated-project"
 GENERATED_PROJECT_MANIFEST_FILE = "generated-project-manifest.json"
 MANUAL_EDIT_OVERLAY_FILE = "manual-edit-overlay.json"
+PARITY_RESULT_DIR = "parity-results"
+PARITY_EXECUTION_RESULT_FILE = "execution-result.json"
+PARITY_COMPARISON_RESULT_FILE = "comparison-result.json"
+PARITY_COMPARISON_DIFF_FILE = "comparison.diff"
 
 
 def _build_generated_project_manifest(
@@ -1279,6 +1283,11 @@ class W0WorkflowRunner:
             if _contract.assist_decision is not None
             else None
         )
+        parity_comparison = (
+            dict(_contract.parity_comparison)
+            if isinstance(_contract.parity_comparison, Mapping)
+            else {}
+        )
         request = RepairAgentRequest(
             run_id=context.run_id,
             workflow_id=context.workflow_id,
@@ -1298,6 +1307,11 @@ class W0WorkflowRunner:
             repair_budget_remaining=int(repair_budget_remaining),
             source_text=source_text,
             source_cobol_ref=dict(source_cobol_ref) if source_cobol_ref else None,
+            oracle_diff_ref=(
+                dict(parity_comparison["diffRef"])
+                if isinstance(parity_comparison.get("diffRef"), Mapping)
+                else None
+            ),
             oracle_payload=dict(oracle_payload) if isinstance(oracle_payload, Mapping) and oracle_payload else None,
             semantic_ir=dict(semantic_ir) if isinstance(semantic_ir, Mapping) and semantic_ir else None,
             semantic_ir_ref=dict(semantic_ir_ref) if semantic_ir_ref else None,
@@ -1763,6 +1777,9 @@ class W0WorkflowRunner:
                 "createdBy": self.config.service_name,
                 "updatedAt": _iso_now(),
             }
+            parity_comparison = getattr(w02_contract, "parity_comparison", None)
+            if isinstance(parity_comparison, Mapping) and parity_comparison:
+                summary["parityComparison"] = dict(parity_comparison)
             _record_artifact(self.artifact_store.update_summary(context.run_id, context.workflow_id, summary))
 
         def _persist_model_policy_skipped(reason: str) -> ArtifactMetadata:
@@ -2532,6 +2549,14 @@ class W0WorkflowRunner:
                 completed_steps.append("compile-test-java")
                 _write_summary("updating", message="compile-test-java completed")
                 w02_contract.set_build_test_result_ref(_as_reference_payload(build_test_output.output_ref))
+                parity_comparison, parity_artifacts = self._project_parity_comparison(
+                    context=context,
+                    build_test_output=build_test_output,
+                    persist=True,
+                )
+                for meta in parity_artifacts:
+                    _record_artifact(meta)
+                w02_contract.set_parity_comparison(parity_comparison)
 
             # Issue #166 / Issue #170: W0.2 verification/repair loop. The
             # build-test runner is the deterministic gate; on a failed
@@ -3019,6 +3044,14 @@ class W0WorkflowRunner:
                         kind=KIND_BUILD_TEST_RESULT,
                     )
                 )
+                parity_comparison, parity_artifacts = self._project_parity_comparison(
+                    context=context,
+                    build_test_output=build_test_output,
+                    persist=True,
+                )
+                for meta in parity_artifacts:
+                    _record_artifact(meta)
+                w02_contract.set_parity_comparison(parity_comparison)
                 success, build_failure_code = build_test_outcome(build_test_output.payload)
 
             if success:
@@ -3441,6 +3474,328 @@ class W0WorkflowRunner:
         except Exception as exc:
             raise OrchestratorError(f"trajectory ledger unavailable: {exc}") from exc
 
+    @staticmethod
+    def _artifact_ref_payload(raw: Any) -> JsonObject | None:
+        if not isinstance(raw, Mapping):
+            return None
+        ref = _reference_payload_from_metadata(raw)
+        if ref is None:
+            return None
+        return dict(ref)
+
+    @staticmethod
+    def _parity_result_dir(build_test_output: WorkflowStepResult) -> str:
+        digest = build_test_output.output_ref.sha256 or sha256(
+            build_test_output.output_ref.uri.encode("utf-8")
+        ).hexdigest()
+        return f"{PARITY_RESULT_DIR}/{digest[:16]}"
+
+    def _materialise_parity_json_ref(
+        self,
+        context: W0RunContext,
+        *,
+        relative_path: str,
+        payload: Mapping[str, JsonValue],
+        kind: str,
+        persist: bool,
+    ) -> tuple[JsonObject, ArtifactMetadata | None]:
+        if not persist or isinstance(self.artifact_store, NullArtifactStore):
+            ref = dict(
+                _as_reference_payload(
+                    _build_reference(
+                        f"urn:orchestrator/{context.run_id}/{relative_path}",
+                        dict(payload),
+                    )
+                )
+            )
+            ref["mimeType"] = "application/json"
+            ref["kind"] = kind
+            return ref, None
+        meta = self.artifact_store.write_json(
+            context.run_id,
+            context.workflow_id,
+            relative_path,
+            dict(payload),
+            kind=kind,
+        )
+        ref = _reference_payload_from_metadata(
+            meta.to_dict() if meta is not None else None
+        )
+        if ref is None:
+            raise OrchestratorError(
+                f"failed to materialise parity json ref for {relative_path}"
+            )
+        return ref, meta
+
+    def _materialise_parity_text_ref(
+        self,
+        context: W0RunContext,
+        *,
+        relative_path: str,
+        content: str,
+        kind: str,
+        persist: bool,
+    ) -> tuple[JsonObject, ArtifactMetadata | None]:
+        if not persist or isinstance(self.artifact_store, NullArtifactStore):
+            ref = dict(
+                _as_reference_payload(
+                    _build_reference(
+                        f"urn:orchestrator/{context.run_id}/{relative_path}",
+                        content,
+                    )
+                )
+            )
+            ref["mimeType"] = "text/plain"
+            ref["kind"] = kind
+            return ref, None
+        meta = self.artifact_store.write_text(
+            context.run_id,
+            context.workflow_id,
+            relative_path,
+            content,
+            kind=kind,
+            mime_type="text/plain",
+        )
+        ref = _reference_payload_from_metadata(
+            meta.to_dict() if meta is not None else None
+        )
+        if ref is None:
+            raise OrchestratorError(
+                f"failed to materialise parity text ref for {relative_path}"
+            )
+        return ref, meta
+
+    @staticmethod
+    def _comparison_status_from_payload(
+        payload: Mapping[str, JsonValue],
+        *,
+        matched: bool | None,
+        explicit_status: str | None,
+    ) -> str:
+        success_statuses = frozenset({"ok", "passed", "success", "complete", "verified"})
+        status = (explicit_status or "").strip().lower()
+        if status in {"passed", "failed", "blocked"}:
+            return status
+        runner_status = str(payload.get("status") or "").strip().lower()
+        if matched is True or runner_status in success_statuses:
+            return "passed"
+        if matched is False and runner_status in {
+            "output-divergence",
+            "failed",
+            "mismatch",
+        }:
+            return "failed"
+        if matched is False and runner_status:
+            return "failed" if "divergence" in runner_status else "blocked"
+        return "blocked"
+
+    @staticmethod
+    def _comparison_mismatch_classification(
+        payload: Mapping[str, JsonValue],
+        *,
+        matched: bool | None,
+        explicit_mismatch: str | None,
+        diff_summary: str | None,
+    ) -> str:
+        mismatch = (explicit_mismatch or "").strip()
+        if mismatch:
+            return mismatch
+        if matched is True:
+            return "none"
+        classification = str(payload.get("classification") or "").strip().lower()
+        if classification in {
+            "compile-error",
+            "run-error",
+            "oracle-unavailable",
+            "oracle-invalid-request",
+            "missing-golden-master",
+            "true-golden-master-reproduction-error",
+        }:
+            return "unknown"
+        if diff_summary and "line ending" in diff_summary.lower():
+            return "line_endings"
+        return "content"
+
+    def _project_parity_comparison(
+        self,
+        *,
+        context: W0RunContext,
+        build_test_output: WorkflowStepResult | None,
+        persist: bool,
+    ) -> tuple[JsonObject | None, list[ArtifactMetadata]]:
+        if build_test_output is None:
+            return None, []
+        payload = build_test_output.payload or {}
+        comparison_result = _first_non_empty_mapping(payload.get("comparisonResult"))
+        comparison = (
+            _first_non_empty_mapping(comparison_result.get("comparison"))
+            or _first_non_empty_mapping(payload.get("comparison"))
+            or _first_non_empty_mapping(payload.get("oracleComparison"))
+        )
+        execution_payload = (
+            _first_non_empty_mapping(comparison_result.get("executionResult"))
+            or _first_non_empty_mapping(payload.get("executionResult"))
+            or _first_non_empty_mapping(payload.get("execution"))
+        )
+        explicit_execution_ref = self._artifact_ref_payload(
+            comparison_result.get("executionResultRef") or payload.get("executionResultRef")
+        )
+        matched_raw = comparison_result.get("matched")
+        if matched_raw is None:
+            matched_raw = comparison.get("matched")
+        matched = bool(matched_raw) if isinstance(matched_raw, bool) else None
+        policy_version = (
+            _text(comparison_result.get("comparisonPolicyVersion"))
+            or _text(comparison.get("comparisonPolicyVersion"))
+            or _text(payload.get("comparisonPolicyVersion"))
+            or _text(comparison.get("normalisation"))
+        )
+        diff_summary = (
+            _text(comparison_result.get("diffSummary"))
+            or _text(comparison.get("diffSummary"))
+            or _text(comparison.get("diff"))
+            or _text(payload.get("summary"))
+        )
+        mismatch = self._comparison_mismatch_classification(
+            payload,
+            matched=matched,
+            explicit_mismatch=(
+                _text(comparison_result.get("mismatchClassification"))
+                or _text(comparison.get("mismatchClassification"))
+                or _text(payload.get("mismatchClassification"))
+            ),
+            diff_summary=diff_summary,
+        )
+        comparison_status = self._comparison_status_from_payload(
+            payload,
+            matched=matched,
+            explicit_status=(
+                _text(comparison_result.get("status"))
+                or _text(payload.get("comparisonStatus"))
+            ),
+        )
+        if policy_version is None:
+            return None, []
+
+        source_normalized_ref = (
+            self._artifact_ref_payload(comparison_result.get("sourceNormalizedRef"))
+            or self._artifact_ref_payload(comparison.get("sourceNormalizedRef"))
+            or self._artifact_ref_payload(comparison.get("expectedNormalizedRef"))
+            or self._artifact_ref_payload(comparison.get("expectedRef"))
+        )
+        target_normalized_ref = (
+            self._artifact_ref_payload(comparison_result.get("targetNormalizedRef"))
+            or self._artifact_ref_payload(comparison.get("targetNormalizedRef"))
+            or self._artifact_ref_payload(comparison.get("actualNormalizedRef"))
+            or self._artifact_ref_payload(execution_payload.get("normalizedOutputRef"))
+            or self._artifact_ref_payload(comparison.get("actualRef"))
+        )
+        if source_normalized_ref is None or target_normalized_ref is None:
+            return None, []
+
+        projection_dir = self._parity_result_dir(build_test_output)
+        persisted: list[ArtifactMetadata] = []
+
+        execution_result_ref = explicit_execution_ref
+        if execution_result_ref is None and execution_payload:
+            execution_result_ref, execution_meta = self._materialise_parity_json_ref(
+                context,
+                relative_path=f"{projection_dir}/{PARITY_EXECUTION_RESULT_FILE}",
+                payload=execution_payload,
+                kind="parity-execution-result",
+                persist=persist,
+            )
+            if execution_meta is not None:
+                persisted.append(execution_meta)
+
+        comparison_policy_ref = (
+            self._artifact_ref_payload(comparison_result.get("comparisonPolicyRef"))
+            or self._artifact_ref_payload(comparison.get("comparisonPolicyRef"))
+            or self._artifact_ref_payload(payload.get("comparisonPolicyRef"))
+        )
+        diff_ref = (
+            self._artifact_ref_payload(comparison_result.get("diffRef"))
+            or self._artifact_ref_payload(comparison.get("diffRef"))
+            or self._artifact_ref_payload(payload.get("diffRef"))
+        )
+        if diff_ref is None and diff_summary and _text(comparison.get("diff")):
+            diff_ref, diff_meta = self._materialise_parity_text_ref(
+                context,
+                relative_path=f"{projection_dir}/{PARITY_COMPARISON_DIFF_FILE}",
+                content=str(comparison.get("diff") or ""),
+                kind="parity-comparison-diff",
+                persist=persist,
+            )
+            if diff_meta is not None:
+                persisted.append(diff_meta)
+
+        canonical_comparison = comparison_result or {
+            "schemaVersion": "v0",
+            "comparisonId": f"{context.run_id}-{build_test_output.output_ref.sha256[:12]}",
+            "runId": context.run_id,
+            "workflowId": context.workflow_id,
+            "status": comparison_status,
+            "comparisonPolicyVersion": policy_version,
+            "sourceNormalizedRef": source_normalized_ref,
+            "targetNormalizedRef": target_normalized_ref,
+            "diffSummary": (
+                diff_summary
+                or "Deterministic comparison completed without a diff summary."
+            ),
+            "mismatchClassification": mismatch,
+            "createdAt": _iso_now(),
+        }
+        if "status" not in canonical_comparison:
+            canonical_comparison["status"] = comparison_status
+        if "comparisonPolicyVersion" not in canonical_comparison:
+            canonical_comparison["comparisonPolicyVersion"] = policy_version
+        if "sourceNormalizedRef" not in canonical_comparison:
+            canonical_comparison["sourceNormalizedRef"] = source_normalized_ref
+        if "targetNormalizedRef" not in canonical_comparison:
+            canonical_comparison["targetNormalizedRef"] = target_normalized_ref
+        if "diffSummary" not in canonical_comparison:
+            canonical_comparison["diffSummary"] = (
+                diff_summary
+                or "Deterministic comparison completed without a diff summary."
+            )
+        if "mismatchClassification" not in canonical_comparison:
+            canonical_comparison["mismatchClassification"] = mismatch
+        if comparison_policy_ref is not None:
+            canonical_comparison["comparisonPolicyRef"] = comparison_policy_ref
+        if diff_ref is not None:
+            canonical_comparison["diffRef"] = diff_ref
+
+        comparison_result_ref = self._artifact_ref_payload(
+            comparison_result.get("comparisonResultRef") or payload.get("comparisonResultRef")
+        )
+        if comparison_result_ref is None:
+            comparison_result_ref, comparison_meta = self._materialise_parity_json_ref(
+                context,
+                relative_path=f"{projection_dir}/{PARITY_COMPARISON_RESULT_FILE}",
+                payload=canonical_comparison,
+                kind="parity-comparison-result",
+                persist=persist,
+            )
+            if comparison_meta is not None:
+                persisted.append(comparison_meta)
+
+        if execution_result_ref is None or comparison_result_ref is None:
+            return None, persisted
+
+        projection: JsonObject = {
+            "status": canonical_comparison["status"],
+            "matched": matched if matched is not None else comparison_status == "passed",
+            "comparisonPolicyVersion": policy_version,
+            "executionResultRef": execution_result_ref,
+            "comparisonResultRef": comparison_result_ref,
+            "mismatchClassification": canonical_comparison["mismatchClassification"],
+        }
+        if comparison_policy_ref is not None:
+            projection["comparisonPolicyRef"] = comparison_policy_ref
+        if diff_ref is not None:
+            projection["diffRef"] = diff_ref
+        return projection, persisted
+
     # noinspection PyTypeHints
     def _build_evidence_payload(
         self,
@@ -3567,6 +3922,20 @@ class W0WorkflowRunner:
             )
             if oracle is not None:
                 artifacts["oracleComparison"] = oracle
+            parity_comparison = (
+                dict(w02_contract.parity_comparison)
+                if w02_contract is not None
+                and isinstance(w02_contract.parity_comparison, Mapping)
+                else None
+            )
+            if parity_comparison is None:
+                parity_comparison, _ = self._project_parity_comparison(
+                    context=context,
+                    build_test_output=build_test_output,
+                    persist=False,
+                )
+            if parity_comparison is not None:
+                artifacts["parityComparison"] = parity_comparison
             artifacts["runtimeVersion"] = {
                 "id": f"{self.config.transformation_agent_runtime_library}:{self.config.transformation_agent_java_version}",
                 "ref": _as_reference_payload(
@@ -3872,11 +4241,18 @@ class W0WorkflowRunner:
         if build_test_output is None:
             return None
         payload = build_test_output.payload or {}
+        comparison_result = (
+            payload.get("comparisonResult")
+            if isinstance(payload.get("comparisonResult"), Mapping)
+            else {}
+        )
         comparison = payload.get("comparison") or {}
         oracle = payload.get("oracleComparison") or {}
         golden = payload.get("goldenMaster") or {}
 
-        matched = comparison.get("matched")
+        matched = comparison_result.get("matched")
+        if matched is None:
+            matched = comparison.get("matched")
         if matched is None:
             matched = oracle.get("matched")
         if matched is None:
@@ -3884,12 +4260,16 @@ class W0WorkflowRunner:
             matched = classification == "match"
 
         expected_sha = (
-            comparison.get("expectedSha256")
+            comparison_result.get("expectedSha256")
+            or comparison_result.get("sourceSha256")
+            or comparison.get("expectedSha256")
             or oracle.get("expectedSha256")
             or ""
         )
         actual_sha = (
-            comparison.get("actualSha256")
+            comparison_result.get("actualSha256")
+            or comparison_result.get("targetSha256")
+            or comparison.get("actualSha256")
             or oracle.get("actualSha256")
             or ""
         )
@@ -3918,23 +4298,66 @@ class W0WorkflowRunner:
             "buildTestResultRef": _as_reference_payload(build_test_output.output_ref),
             "classification": str(payload.get("classification") or ""),
         }
+        if comparison_result:
+            for key in (
+                "status",
+                "comparisonPolicyVersion",
+                "mismatchClassification",
+                "diffSummary",
+            ):
+                value = _text(comparison_result.get(key))
+                if value is not None:
+                    envelope[key] = value
+            for key in (
+                "comparisonPolicyRef",
+                "comparisonResultRef",
+                "diffRef",
+                "normalizedDiffRef",
+                "sourceStdoutRef",
+                "sourceStderrRef",
+                "targetStdoutRef",
+                "targetStderrRef",
+                "sourceNormalizedRef",
+                "sourceNormalizedStderrRef",
+                "targetNormalizedRef",
+                "targetNormalizedStderrRef",
+                "sourceOutputRef",
+                "sourceNormalizedOutputRef",
+                "javaOutputRef",
+                "javaNormalizedOutputRef",
+            ):
+                ref = _reference_payload_from_metadata(comparison_result.get(key))
+                if ref is not None:
+                    envelope[key] = ref
+            for key in ("sourceExitCode", "targetExitCode"):
+                value = comparison_result.get(key)
+                if isinstance(value, int):
+                    envelope[key] = value
         if expected_sha:
             envelope["expectedSha256"] = str(expected_sha)
         if actual_sha:
             envelope["actualSha256"] = str(actual_sha)
         expected_ref = (
-            _reference_payload_from_metadata(comparison.get("expectedRef"))
+            _reference_payload_from_metadata(comparison_result.get("sourceStdoutRef"))
+            or _reference_payload_from_metadata(comparison_result.get("sourceOutputRef"))
+            or _reference_payload_from_metadata(comparison.get("expectedRef"))
             or _reference_payload_from_metadata(oracle.get("expectedRef"))
         )
         actual_ref = (
-            _reference_payload_from_metadata(comparison.get("actualRef"))
+            _reference_payload_from_metadata(comparison_result.get("targetStdoutRef"))
+            or _reference_payload_from_metadata(comparison_result.get("javaOutputRef"))
+            or _reference_payload_from_metadata(comparison.get("actualRef"))
             or _reference_payload_from_metadata(oracle.get("actualRef"))
         )
         if expected_ref is not None:
             envelope["expectedRef"] = expected_ref
         if actual_ref is not None:
             envelope["actualRef"] = actual_ref
-        summary = str(payload.get("summary") or "")
+        summary = str(
+            comparison_result.get("diffSummary")
+            or payload.get("summary")
+            or ""
+        )
         if summary:
             envelope["summary"] = summary
         return envelope

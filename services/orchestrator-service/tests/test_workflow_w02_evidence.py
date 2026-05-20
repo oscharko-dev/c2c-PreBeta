@@ -243,6 +243,20 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
                     "actualRef": {"uri": "urn:run/java-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "java-stdout"},
                     "expectedRef": {"uri": "urn:run/oracle-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "cobol-oracle-stdout"},
                 },
+                "comparisonResult": {
+                    "status": "passed",
+                    "matched": True,
+                    "comparisonPolicyVersion": "deterministic-output-v1",
+                    "mismatchClassification": "none",
+                    "comparisonPolicyRef": {"uri": "urn:run/policy", "sha256": "1" * 64, "byteSize": 12, "kind": "parity-comparison-policy"},
+                    "comparisonResultRef": {"uri": "urn:run/comparison-result", "sha256": "2" * 64, "byteSize": 24, "kind": "parity-comparison-result"},
+                    "diffRef": {"uri": "urn:run/comparison-diff", "sha256": "3" * 64, "byteSize": 18, "kind": "parity-comparison-diff"},
+                    "sourceNormalizedRef": {"uri": "urn:run/source-normalized", "sha256": "4" * 64, "byteSize": 16, "kind": "oracle-normalized"},
+                    "targetNormalizedRef": {"uri": "urn:run/target-normalized", "sha256": "5" * 64, "byteSize": 16, "kind": "java-normalized"},
+                    "sourceStdoutRef": {"uri": "urn:run/oracle-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "cobol-oracle-stdout"},
+                    "targetStdoutRef": {"uri": "urn:run/java-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "java-stdout"},
+                    "diffSummary": "Outputs matched after deterministic normalization.",
+                },
                 "goldenMaster": {"classification": "true"},
             },
             output_uri="urn:run/build-2",
@@ -322,6 +336,129 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(oc["actualSha256"], "b" * 64)
         self.assertEqual(oc["actualRef"]["kind"], "java-stdout")
         self.assertEqual(oc["expectedRef"]["kind"], "cobol-oracle-stdout")
+        self.assertEqual(oc["status"], "passed")
+        self.assertEqual(oc["comparisonPolicyVersion"], "deterministic-output-v1")
+        self.assertEqual(oc["mismatchClassification"], "none")
+        self.assertEqual(oc["comparisonResultRef"]["kind"], "parity-comparison-result")
+        self.assertEqual(oc["diffRef"]["kind"], "parity-comparison-diff")
+
+    def test_w02_payload_projects_runner_comparison_lineage(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        self._write_source_and_parse_metadata(context)
+        contract = self._w02_contract()
+        baseline_ref = {
+            "uri": "urn:run/baseline",
+            "sha256": "1" * 64,
+            "byteSize": 12,
+            "kind": "generated-project-manifest",
+        }
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "output-divergence",
+                "classification": "divergence-unknown",
+                "executionResult": {
+                    "schemaVersion": "v0",
+                    "executionId": "exec-1",
+                    "runId": context.run_id,
+                    "workflowId": context.workflow_id,
+                    "executionSurface": "generated-java",
+                    "command": "java -jar generated.jar",
+                    "status": "passed",
+                    "exitCode": 0,
+                    "timedOut": False,
+                    "stdoutRef": {"uri": "urn:stdout", "sha256": "a" * 64, "byteSize": 12},
+                    "stderrRef": {"uri": "urn:stderr", "sha256": "b" * 64, "byteSize": 0},
+                    "normalizedOutputRef": {
+                        "uri": "urn:target-normalized",
+                        "sha256": "c" * 64,
+                        "byteSize": 14,
+                    },
+                    "diagnostics": [],
+                    "createdAt": "2026-05-20T12:00:00Z",
+                },
+                "comparison": {
+                    "matched": False,
+                    "normalisation": "trust-5-deterministic-v1",
+                    "expectedRef": {
+                        "uri": "urn:source-output",
+                        "sha256": "d" * 64,
+                        "byteSize": 14,
+                        "kind": "reference-output",
+                    },
+                    "actualRef": {
+                        "uri": "urn:java-output",
+                        "sha256": "e" * 64,
+                        "byteSize": 14,
+                        "kind": "java-stdout",
+                    },
+                    "diff": "@@ normalized-line-1 @@\n-REFERENCE\n+JAVA\n",
+                },
+                "comparisonResult": {
+                    "schemaVersion": "v0",
+                    "comparisonId": "cmp-1",
+                    "runId": context.run_id,
+                    "workflowId": context.workflow_id,
+                    "status": "failed",
+                    "comparisonPolicyVersion": "trust-5-deterministic-v1",
+                    "comparisonPolicyRef": {
+                        "uri": "urn:comparison-policy",
+                        "sha256": "f" * 64,
+                        "byteSize": 40,
+                    },
+                    "sourceNormalizedRef": {
+                        "uri": "urn:source-normalized",
+                        "sha256": "7" * 64,
+                        "byteSize": 14,
+                    },
+                    "targetNormalizedRef": {
+                        "uri": "urn:target-normalized",
+                        "sha256": "c" * 64,
+                        "byteSize": 14,
+                    },
+                    "diffSummary": "first divergence at normalized line 1",
+                    "mismatchClassification": "content",
+                    "createdAt": "2026-05-20T12:00:00Z",
+                },
+                "goldenMaster": {"classification": "true"},
+            },
+            output_uri="urn:run/build-compare",
+        )
+
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/baseline"),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            generated_artifact_ref=baseline_ref,
+            baseline_generated_artifact_ref=baseline_ref,
+            w02_contract=contract,
+            w02_blocked=False,
+            productive_model_invocations=[],
+        )
+
+        parity = payload["artifacts"]["parityComparison"]
+        self.assertEqual(parity["status"], "failed")
+        self.assertFalse(parity["matched"])
+        self.assertEqual(
+            parity["comparisonPolicyVersion"], "trust-5-deterministic-v1"
+        )
+        self.assertEqual(
+            parity["comparisonPolicyRef"]["uri"], "urn:comparison-policy"
+        )
+        self.assertEqual(
+            parity["executionResultRef"]["kind"], "parity-execution-result"
+        )
+        self.assertEqual(
+            parity["comparisonResultRef"]["kind"], "parity-comparison-result"
+        )
+        self.assertEqual(parity["diffRef"]["kind"], "parity-comparison-diff")
+        self.assertEqual(parity["mismatchClassification"], "content")
 
     def test_blocked_w02_run_signals_blocked_flag(self) -> None:
         context = self._w0_context(use_transformation_agent=True)

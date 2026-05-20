@@ -453,6 +453,15 @@ components:
                 byteSize: { type: integer }
         comparison:
           type: object
+          description: Legacy comparison block retained for compatibility.
+        comparisonResult:
+          type: object
+          description: >
+            Canonical deterministic parity comparison result. Carries the
+            comparison policy version, output references, diff summary, diff
+            reference, and mismatch classification for the run.
+        comparisonResultRef:
+          $ref: "#/components/schemas/ArtifactReference"
         outputRef:
           type: object
         diagnostics:
