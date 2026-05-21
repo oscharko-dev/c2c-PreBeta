@@ -30,7 +30,8 @@ final class CobolRuntimeExecutor {
     private static final int MAX_SOURCE_BYTES = 1_048_576;
     private static final int MAX_STDIN_BYTES = 1_048_576;
     static final int MAX_OUTPUT_BYTES = 1_048_576;
-    private static final String OUTPUT_TRUNCATED_SENTINEL = "\n[c2c: output truncated at 1048576 bytes]\n";
+    static final String OUTPUT_TRUNCATED_SENTINEL =
+            "\n[c2c: output truncated at " + MAX_OUTPUT_BYTES + " bytes]\n";
     private static final Pattern PROGRAM_ID_PATTERN =
             Pattern.compile("(?im)^\\s*PROGRAM-ID\\s*\\.\\s*([A-Za-z][A-Za-z0-9_-]{0,62})\\s*\\.");
     private static final Pattern MODULE_NAME_PATTERN =

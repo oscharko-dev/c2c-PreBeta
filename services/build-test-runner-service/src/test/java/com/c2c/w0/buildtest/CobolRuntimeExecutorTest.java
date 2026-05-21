@@ -10,8 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CobolRuntimeExecutorTest {
 
-    private static final String SENTINEL = "\n[c2c: output truncated at 1048576 bytes]\n";
-
     @Test
     void readAll_truncatesAtMaxOutputBytesAndAppendsSentinel() {
         int size = 2 * CobolRuntimeExecutor.MAX_OUTPUT_BYTES;
@@ -22,9 +20,12 @@ class CobolRuntimeExecutorTest {
 
         assertTrue(result.startsWith("A".repeat(CobolRuntimeExecutor.MAX_OUTPUT_BYTES)),
                 "result must begin with exactly MAX_OUTPUT_BYTES 'A' characters");
-        assertTrue(result.endsWith(SENTINEL),
+        assertTrue(result.endsWith(CobolRuntimeExecutor.OUTPUT_TRUNCATED_SENTINEL),
                 "result must end with the truncation sentinel");
-        assertEquals(CobolRuntimeExecutor.MAX_OUTPUT_BYTES + SENTINEL.length(), result.length(),
+        assertEquals(
+                CobolRuntimeExecutor.MAX_OUTPUT_BYTES
+                        + CobolRuntimeExecutor.OUTPUT_TRUNCATED_SENTINEL.length(),
+                result.length(),
                 "total length must be MAX_OUTPUT_BYTES plus sentinel length");
     }
 }
