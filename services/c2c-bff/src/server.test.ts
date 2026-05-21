@@ -5031,6 +5031,33 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
     );
     assert.equal(artifactTraversal.status, 400);
 
+    const malformedGeneratedPath = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/%E0%A4%A`,
+      { headers: auth.headers },
+    );
+    assert.equal(malformedGeneratedPath.status, 400);
+
+    const malformedArtifactPath = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/%E0%A4%A`,
+      { headers: auth.headers },
+    );
+    assert.equal(malformedArtifactPath.status, 400);
+
+    const malformedGeneratedRunId = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/%E0%A4%A/generated/files/src/main/java/c2c/CASE01.java`,
+      { headers: auth.headers },
+    );
+    assert.equal(malformedGeneratedRunId.status, 400);
+
+    const malformedArtifactRunId = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/%E0%A4%A/artifacts/files/logs/studio/comparison.log`,
+      { headers: auth.headers },
+    );
+    assert.equal(malformedArtifactRunId.status, 400);
+
+    assert.equal(calls.getGeneratedFile.length, 1);
+    assert.equal(calls.getArtifactFile.length, 1);
+
     // Unknown file inside the generated tree returns 404, not 200.
     const missing = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/does/not/exist.java`,

@@ -283,7 +283,7 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
         tenantId: "issue-362-fixture-tenant",
         userId: "issue-362-fixture-user",
         draftKeyWrappingSecret:
-          "e2e-tenant:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
         telemetrySalt: "issue-362-telemetry-salt",
         studioRedactionPatternAdditions: [],
       }),

@@ -101,6 +101,97 @@ describe('Run Panels', () => {
       expect(screen.getAllByText('Pass').length).toBeGreaterThan(0);
     });
 
+    it('preserves an explicit timeline stage selection as run status updates', () => {
+      const completedState = {
+        ...mockState,
+        phase: 'completed',
+        buildTest: {
+          status: 'ok',
+          classification: 'match',
+          expectedOutput: 'FOO',
+          actualOutput: 'FOO'
+        }
+      };
+      useTransformationRunMock.mockReturnValue({ state: completedState });
+      const { rerender } = render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      const transformTab = screen.getByRole('tab', { name: /Transform/ });
+      fireEvent.click(transformTab);
+      expect(transformTab.getAttribute('aria-selected')).toBe('true');
+
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...completedState,
+          buildTest: {
+            status: 'compile-failed',
+            classification: 'compile-error',
+            note: 'javac failed with type mismatch'
+          }
+        }
+      });
+      rerender(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      expect(screen.getByRole('tab', { name: /Transform/ }).getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('supports keyboard navigation for timeline stage tabs', async () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          buildTest: {
+            status: 'ok',
+            classification: 'match',
+            expectedOutput: 'FOO',
+            actualOutput: 'FOO'
+          }
+        }
+      });
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      expect(screen.getByRole('tablist', { name: /Build and test timeline stages/ }).getAttribute('aria-orientation')).toBe('vertical');
+      const transformTab = screen.getByRole('tab', { name: /Transform/ });
+      fireEvent.click(transformTab);
+      fireEvent.keyDown(transformTab, { key: 'ArrowDown' });
+
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /COBOL Reference Execution/ }).getAttribute('aria-selected')).toBe('true');
+      });
+
+      fireEvent.keyDown(screen.getByRole('tab', { name: /COBOL Reference Execution/ }), { key: 'End' });
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /Evidence Capture/ }).getAttribute('aria-selected')).toBe('true');
+      });
+    });
+
+    it('associates timeline and inspector tabs with their rendered panels', () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          buildTest: {
+            status: 'ok',
+            classification: 'match',
+            expectedOutput: 'FOO',
+            actualOutput: 'FOO'
+          }
+        }
+      });
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      const selectedStageTab = screen.getByRole('tab', { name: /Transform/ });
+      const stagePanelId = selectedStageTab.getAttribute('aria-controls');
+      expect(stagePanelId).toBe('build-test-stage-panel');
+      expect(document.getElementById(stagePanelId!)?.getAttribute('aria-labelledby')).toBe(selectedStageTab.id);
+
+      const artifactsTab = screen.getByRole('tab', { name: 'Artifacts' });
+      fireEvent.click(artifactsTab);
+      const inspectorPanelId = artifactsTab.getAttribute('aria-controls');
+      expect(inspectorPanelId).toBe('build-test-inspector-panel-artifacts');
+      expect(document.getElementById(inspectorPanelId!)?.getAttribute('role')).toBe('tabpanel');
+      expect(document.getElementById(inspectorPanelId!)?.getAttribute('aria-labelledby')).toBe(artifactsTab.id);
+    });
+
     it('renders build/test missing golden master', () => {
       useTransformationRunMock.mockReturnValue({
         state: {
