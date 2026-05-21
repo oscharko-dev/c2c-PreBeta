@@ -7,6 +7,7 @@ import type {
   BuildTestView,
   EvidenceView,
   OutputRef,
+  ParityEvidenceExportResponse,
   RunSummary,
   RunWorkflowView,
   TrustCaseSummary,
@@ -25,6 +26,8 @@ export function TrustSummaryCard({
   workflow,
   selectedTrustCase,
   manualDriftMessage,
+  parityEvidenceExport,
+  onExportParityEvidenceScaffold,
 }: {
   summary: RunSummary | null;
   buildTest: BuildTestView | null;
@@ -32,6 +35,12 @@ export function TrustSummaryCard({
   workflow: RunWorkflowView | null;
   selectedTrustCase: TrustCaseSummary | null;
   manualDriftMessage: string | null;
+  parityEvidenceExport: {
+    status: "idle" | "exporting" | "success" | "error";
+    response: ParityEvidenceExportResponse | null;
+    error: string | null;
+  };
+  onExportParityEvidenceScaffold: () => Promise<void>;
 }) {
   const trust = summary?.trustSummary ?? null;
   const comparison = describeBuildTestResult(buildTest);
@@ -238,6 +247,105 @@ export function TrustSummaryCard({
             </div>
           </SummarySection>
 
+          <SummarySection title="Parity export">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-text">
+                  Export a reviewable Java regression scaffold from the current parity evidence.
+                </p>
+                <p className="mt-1 text-xs text-text-dim">
+                  The export is run-scoped and remains reviewable until a developer promotes it into repository CI.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void onExportParityEvidenceScaffold();
+                }}
+                disabled={
+                  !evidence ||
+                  parityEvidenceExport.status === "exporting"
+                }
+                className="rounded border border-line-2 bg-bg-0 px-3 py-2 text-xs font-medium text-text transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {parityEvidenceExport.status === "exporting"
+                  ? "Exporting scaffold..."
+                  : "Export Java regression scaffold"}
+              </button>
+            </div>
+
+            {parityEvidenceExport.status === "error" &&
+            parityEvidenceExport.error ? (
+              <div className="mt-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-700">
+                Export failed: {parityEvidenceExport.error}
+              </div>
+            ) : null}
+
+            {parityEvidenceExport.response ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <SummaryField
+                  label="Export status"
+                  value={parityEvidenceExport.response.status}
+                  secondary={parityEvidenceExport.response.message ?? null}
+                />
+                <SummaryField
+                  label="Qualification"
+                  value={describeExportQualification(
+                    parityEvidenceExport.response.export.qualification,
+                  )}
+                  secondary={describeExportQualificationNote(
+                    parityEvidenceExport.response.export.qualification,
+                  )}
+                />
+                <SummaryField
+                  label="Scaffold path"
+                  value={
+                    parityEvidenceExport.response.export.scaffoldRef.path ??
+                    parityEvidenceExport.response.export.scaffoldTestPath ??
+                    "Unavailable"
+                  }
+                  secondary={shortRef(
+                    parityEvidenceExport.response.export.scaffoldRef,
+                  )}
+                />
+                <SummaryField
+                  label="Created at"
+                  value={
+                    parityEvidenceExport.response.export.createdAt ??
+                    "Unavailable"
+                  }
+                  secondary={parityEvidenceExport.response.export.exportId}
+                />
+              </div>
+            ) : null}
+
+            {parityEvidenceExport.response ? (
+              <div className="mt-4 space-y-3">
+                <ReferenceGroup
+                  title="Export refs"
+                  entries={[
+                    {
+                      label: "Scaffold",
+                      ref: parityEvidenceExport.response.export.scaffoldRef,
+                    },
+                    {
+                      label: "Project manifest",
+                      ref: parityEvidenceExport.response.export.projectManifestRef,
+                    },
+                    {
+                      label: "Export manifest",
+                      ref: parityEvidenceExport.response.export.manifestRef,
+                    },
+                    {
+                      label: "Expected output",
+                      ref: parityEvidenceExport.response.export.expectedOutputRef,
+                    },
+                  ]}
+                />
+              </div>
+            ) : null}
+          </SummarySection>
+
           <SummarySection title="Risk notes and warnings">
             {riskNotes.length > 0 ? (
               <ul className="space-y-2 text-xs text-text-dim">
@@ -342,6 +450,11 @@ function ReferencePill({ entry }: { entry: ReferenceEntry }) {
     <div className="inline-flex max-w-full items-start gap-2 rounded border border-line bg-bg-1 px-2 py-1 text-xs">
       <div className="min-w-0">
         <div className="font-semibold text-text-dim">{entry.label}</div>
+        {entry.ref.path ? (
+          <div className="mt-0.5 max-w-[22rem] break-all text-[11px] text-text-dim">
+            {entry.ref.path}
+          </div>
+        ) : null}
         <div className="mt-0.5 max-w-[22rem] break-all font-mono text-[11px] text-text">
           {entry.ref.sha256}
         </div>
@@ -438,6 +551,36 @@ function trustWarningNotes(trust: TrustSummaryView): string[] {
         return "Manual edits were carried into the verified Java artifact and should be reviewed alongside the deterministic evidence.";
     }
   });
+}
+
+function describeExportQualification(
+  qualification: ParityEvidenceExportResponse["export"]["qualification"],
+): string {
+  switch (qualification) {
+    case "clean":
+      return "Clean export";
+    case "stale_evidence":
+      return "Stale evidence export";
+    case "repair_verified":
+      return "Repair-verified export";
+    case "manual_edits_carried_over":
+      return "Manual edits carried over";
+  }
+}
+
+function describeExportQualificationNote(
+  qualification: ParityEvidenceExportResponse["export"]["qualification"],
+): string {
+  switch (qualification) {
+    case "clean":
+      return "Exported from successful parity evidence.";
+    case "stale_evidence":
+      return "The scaffold reflects stale evidence and should be reviewed before promotion.";
+    case "repair_verified":
+      return "The scaffold reflects a verified repair outcome.";
+    case "manual_edits_carried_over":
+      return "Manual edits were carried into the exported scaffold.";
+  }
 }
 
 function uniqueReferences(entries: ReferenceEntry[]): ReferenceEntry[] {

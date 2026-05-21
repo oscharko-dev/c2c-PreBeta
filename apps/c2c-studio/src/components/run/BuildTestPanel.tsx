@@ -20,7 +20,11 @@ import {
   type EvidenceArtifactCandidate,
   type TimelineStageDetail,
 } from "./runPanelUtils";
-import type { Diagnostic, GeneratedFileContent } from "../../types/api";
+import type {
+  Diagnostic,
+  GeneratedFileContent,
+  ParityEvidenceExportResponse,
+} from "../../types/api";
 
 type InspectorTab = "overview" | "artifacts" | "outputs" | "diagnostics" | "viewer";
 type ComparisonView = "outputs" | "diff";
@@ -38,10 +42,20 @@ export function BuildTestPanel({
       regionCount: 0,
       baselineRunIds: [],
     }),
+    exportParityEvidenceScaffold,
   } = useTransformationRun();
   const { statusFlags, selectedTrustCase } = useSourceWorkspace();
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview");
   const [comparisonView, setComparisonView] = useState<ComparisonView>("outputs");
+  const [parityEvidenceExport, setParityEvidenceExport] = useState<{
+    status: "idle" | "exporting" | "success" | "error";
+    response: ParityEvidenceExportResponse | null;
+    error: string | null;
+  }>({
+    status: "idle",
+    response: null,
+    error: null,
+  });
   const manualDrift = manualDriftSummary();
   const manualDriftMessage = describeManualDriftSummary(manualDrift);
 
@@ -153,6 +167,47 @@ export function BuildTestPanel({
     };
   }, [selectedArtifact, state.runId]);
 
+  useEffect(() => {
+    setParityEvidenceExport({
+      status: "idle",
+      response: null,
+      error: null,
+    });
+  }, [state.runId]);
+
+  const handleExportParityEvidenceScaffold = async () => {
+    if (!state.runId || !state.evidence) {
+      setParityEvidenceExport({
+        status: "error",
+        response: null,
+        error: "A completed run with evidence is required before export.",
+      });
+      return;
+    }
+
+    setParityEvidenceExport({
+      status: "exporting",
+      response: null,
+      error: null,
+    });
+
+    const result = await exportParityEvidenceScaffold();
+    if (!result.ok) {
+      setParityEvidenceExport({
+        status: "error",
+        response: null,
+        error: result.message,
+      });
+      return;
+    }
+
+    setParityEvidenceExport({
+      status: "success",
+      response: result.data,
+      error: null,
+    });
+  };
+
   if (isIdle) {
     return (
       <div className="p-4 space-y-2 text-sm">
@@ -220,6 +275,8 @@ export function BuildTestPanel({
             workflow={state.workflow}
             selectedTrustCase={selectedTrustCase}
             manualDriftMessage={manualDriftMessage}
+            parityEvidenceExport={parityEvidenceExport}
+            onExportParityEvidenceScaffold={handleExportParityEvidenceScaffold}
           />
         </div>
       </div>

@@ -11,6 +11,9 @@ import {
   GeneratedFilesIndex,
   BuildTestView,
   EvidenceView,
+  ParityEvidenceExportQualification,
+  ParityEvidenceExportRequest,
+  ParityEvidenceExportResponse,
   OutputRef,
   RunEventsView,
   RunProgressStep,
@@ -2089,6 +2092,64 @@ function parseEvidenceView(payload: unknown): ApiResult<EvidenceView> {
   return { ok: true, data: payload };
 }
 
+function isParityEvidenceExportQualification(
+  value: unknown,
+): value is ParityEvidenceExportQualification {
+  return (
+    value === "clean" ||
+    value === "stale_evidence" ||
+    value === "repair_verified" ||
+    value === "manual_edits_carried_over"
+  );
+}
+
+function isParityEvidenceExportResponsePayload(
+  payload: unknown,
+): payload is ParityEvidenceExportResponse {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  const exportPayload = payload.export;
+  return (
+    isString(payload.runId) &&
+    isString(payload.programId) &&
+    payload.status === "created" &&
+    (payload.message === undefined || isString(payload.message)) &&
+    isRecord(exportPayload) &&
+    isString(exportPayload.exportId) &&
+    isOutputRef(exportPayload.scaffoldRef) &&
+    isParityEvidenceExportQualification(exportPayload.qualification) &&
+    (exportPayload.projectRoot === undefined ||
+      isString(exportPayload.projectRoot)) &&
+    (exportPayload.scaffoldTestPath === undefined ||
+      isString(exportPayload.scaffoldTestPath)) &&
+    (exportPayload.projectManifestRef === undefined ||
+      exportPayload.projectManifestRef === null ||
+      isOutputRef(exportPayload.projectManifestRef)) &&
+    (exportPayload.manifestRef === undefined ||
+      exportPayload.manifestRef === null ||
+      isOutputRef(exportPayload.manifestRef)) &&
+    (exportPayload.expectedOutputRef === undefined ||
+      exportPayload.expectedOutputRef === null ||
+      isOutputRef(exportPayload.expectedOutputRef)) &&
+    (exportPayload.createdAt === undefined ||
+      isString(exportPayload.createdAt))
+  );
+}
+
+function parseParityEvidenceExportResponse(
+  payload: unknown,
+): ApiResult<ParityEvidenceExportResponse> {
+  if (!isParityEvidenceExportResponsePayload(payload)) {
+    return createFailure(
+      "Contract error: ParityEvidenceExportResponse payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return { ok: true, data: payload };
+}
+
 function parseRunEventsView(payload: unknown): ApiResult<RunEventsView> {
   if (!isRunEventsViewPayload(payload)) {
     return createFailure(
@@ -2414,6 +2475,22 @@ export const apiClient = {
     fetchJson(
       `/api/v0/runs/${encodeURIComponent(runId)}/evidence`,
       parseEvidenceView,
+    ),
+  exportParityEvidenceScaffold: (
+    runId: string,
+    request: ParityEvidenceExportRequest = {},
+  ) =>
+    fetchJson(
+      `/api/v0/runs/${encodeURIComponent(runId)}/evidence/export`,
+      parseParityEvidenceExportResponse,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
     ),
   getRunEvents: (runId: string) =>
     fetchJson(

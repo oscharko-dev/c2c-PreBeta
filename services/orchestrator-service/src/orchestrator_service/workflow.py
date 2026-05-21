@@ -31,6 +31,10 @@ from .artifacts import (
     KIND_MANUAL_EDIT_OVERLAY,
     KIND_MODEL_INVOCATION_LEDGER,
     KIND_MODEL_POLICY_SKIPPED,
+    KIND_PARITY_REGRESSION_EXPORT_MANIFEST,
+    KIND_PARITY_REGRESSION_PROJECT_FILE,
+    KIND_PARITY_REGRESSION_PROJECT_MANIFEST,
+    KIND_PARITY_REGRESSION_TEST_FILE,
     KIND_PARSE_OUTPUT,
     KIND_RUN_PROGRESS,
     KIND_SEMANTIC_IR,
@@ -786,6 +790,10 @@ def _reference_payload_from_metadata(raw: Mapping[str, JsonValue] | None) -> Jso
     kind = _text(raw.get("kind"))
     if kind:
         payload["kind"] = kind
+    for key in ("path", "name", "createdBy", "createdAt"):
+        value = _text(raw.get(key))
+        if value:
+            payload[key] = value
     return payload
 
 
@@ -836,6 +844,7 @@ def _has_non_empty_list(mapping: Mapping[str, JsonValue] | None, key: str) -> bo
 GENERATED_PROJECT_DIR = "generated-project"
 GENERATED_PROJECT_MANIFEST_FILE = "generated-project-manifest.json"
 MANUAL_EDIT_OVERLAY_FILE = "manual-edit-overlay.json"
+PARITY_EXPORT_DIR = "exports/java-regression"
 PARITY_RESULT_DIR = "parity-results"
 SOURCE_REFERENCE_EXECUTION_RESULT_FILE = "source-reference-execution-result.json"
 PARITY_EXECUTION_RESULT_FILE = "execution-result.json"
@@ -1286,6 +1295,591 @@ class W0WorkflowRunner:
                 raise OrchestratorError(f"repair project file missing for {path}")
             project_files[path] = content.decode("utf-8", errors="replace")
         return dict(manifest), project_files
+
+    def _load_project_from_manifest(
+        self,
+        run_id: str,
+        *,
+        manifest_path: str,
+        file_prefix: str,
+        missing_message: str,
+    ) -> tuple[JsonObject, dict[str, str]]:
+        manifest = self.artifact_store.read_json(run_id, manifest_path)
+        if not isinstance(manifest, Mapping):
+            raise OrchestratorError(missing_message)
+        files_meta = manifest.get("files")
+        if not isinstance(files_meta, Sequence) or isinstance(
+            files_meta, (str, bytes, bytearray)
+        ):
+            raise OrchestratorError(f"{missing_message}: manifest is invalid")
+        project_files: dict[str, str] = {}
+        for entry in files_meta:
+            if not isinstance(entry, Mapping):
+                continue
+            path = _text(entry.get("path"))
+            if not path:
+                continue
+            content = self.artifact_store.read_bytes(run_id, f"{file_prefix}/{path}")
+            if content is None:
+                raise OrchestratorError(f"{missing_message}: file missing for {path}")
+            project_files[path] = content.decode("utf-8", errors="replace")
+        return dict(manifest), project_files
+
+    @staticmethod
+    def _normalise_export_slug(value: str, fallback: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+        if not slug:
+            slug = fallback
+        return slug[:80]
+
+    def _reserve_parity_export_root(
+        self,
+        run_id: str,
+        *,
+        program_id: str,
+        export_name: str | None,
+    ) -> tuple[str, str]:
+        base_name = export_name or f"{program_id}-parity-regression"
+        program_slug = self._normalise_export_slug(program_id, "program")
+        export_slug_base = self._normalise_export_slug(base_name, "parity-regression")
+        attempt = 1
+        while True:
+            suffix = "" if attempt == 1 else f"-{attempt}"
+            export_slug = f"{export_slug_base}{suffix}"
+            root = f"{PARITY_EXPORT_DIR}/{program_slug}/{export_slug}"
+            marker = self.artifact_store.read_bytes(
+                run_id, f"{root}/c2c-parity-export-manifest.json"
+            )
+            if marker is None:
+                return root, export_slug
+            attempt += 1
+
+    @staticmethod
+    def _normalise_export_output(text: str) -> str:
+        return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    def _load_export_expected_output(
+        self,
+        run_id: str,
+        *,
+        build_payload: Mapping[str, JsonValue],
+        contract_payload: Mapping[str, JsonValue],
+    ) -> tuple[str, JsonObject | None]:
+        candidate_refs: list[Mapping[str, JsonValue]] = []
+        comparison = build_payload.get("comparison")
+        if isinstance(comparison, Mapping):
+            expected_ref = comparison.get("expectedRef")
+            if isinstance(expected_ref, Mapping):
+                candidate_refs.append(expected_ref)
+        parity = contract_payload.get("parityComparison")
+        if isinstance(parity, Mapping):
+            source_ref = parity.get("sourceNormalizedRef")
+            if isinstance(source_ref, Mapping):
+                candidate_refs.append(source_ref)
+        direct_expected_ref = build_payload.get("expectedOutputRef")
+        if isinstance(direct_expected_ref, Mapping):
+            candidate_refs.append(direct_expected_ref)
+
+        for ref in candidate_refs:
+            path = _text(ref.get("path"))
+            if not path:
+                continue
+            raw = self.artifact_store.read_bytes(run_id, path)
+            if raw is None:
+                continue
+            return self._normalise_export_output(
+                raw.decode("utf-8", errors="replace")
+            ), dict(ref)
+
+        expected_output = build_payload.get("expectedOutput")
+        if isinstance(expected_output, str) and expected_output.strip():
+            return self._normalise_export_output(expected_output), None
+        raise OrchestratorError(
+            "export blocked: normalized expected output is unavailable for this run"
+        )
+
+    @staticmethod
+    def _augment_generated_pom_for_export(
+        pom_xml: str,
+        *,
+        export_slug: str,
+    ) -> str:
+        project = pom_xml
+        if "<artifactId>" in project:
+            project = re.sub(
+                r"(<artifactId>)([^<]+)(</artifactId>)",
+                rf"\1\2-{export_slug}\3",
+                project,
+                count=1,
+            )
+        junit_dependency = (
+            "    <dependency>\n"
+            "      <groupId>org.junit.jupiter</groupId>\n"
+            "      <artifactId>junit-jupiter</artifactId>\n"
+            "      <version>5.10.2</version>\n"
+            "      <scope>test</scope>\n"
+            "    </dependency>\n"
+        )
+        if "junit-jupiter" not in project:
+            if "</dependencies>" in project:
+                project = project.replace(
+                    "</dependencies>",
+                    f"{junit_dependency}  </dependencies>",
+                    1,
+                )
+            else:
+                project = project.replace(
+                    "</project>",
+                    "  <dependencies>\n"
+                    f"{junit_dependency}"
+                    "  </dependencies>\n"
+                    "</project>\n",
+                    1,
+                )
+        surefire_plugin = (
+            "      <plugin>\n"
+            "        <artifactId>maven-surefire-plugin</artifactId>\n"
+            "        <version>3.2.5</version>\n"
+            "      </plugin>\n"
+        )
+        if "maven-surefire-plugin" not in project:
+            if "</build>" in project:
+                project = project.replace(
+                    "</build>",
+                    f"{surefire_plugin}  </build>",
+                    1,
+                )
+            else:
+                project = project.replace(
+                    "</project>",
+                    "  <build>\n"
+                    "    <plugins>\n"
+                    f"{surefire_plugin}"
+                    "    </plugins>\n"
+                    "  </build>\n"
+                    "</project>\n",
+                    1,
+                )
+        return project
+
+    @staticmethod
+    def _render_parity_export_test(
+        *,
+        package_name: str,
+        class_name: str,
+        expected_resource_path: str,
+        trust_case_id: str,
+        run_id: str,
+        generated_at: str,
+    ) -> str:
+        package_declaration = f"package {package_name};\n\n" if package_name else ""
+        return (
+            f"{package_declaration}"
+            "import static org.junit.jupiter.api.Assertions.assertEquals;\n"
+            "import static org.junit.jupiter.api.Assertions.assertNotNull;\n\n"
+            "import java.io.ByteArrayOutputStream;\n"
+            "import java.io.IOException;\n"
+            "import java.io.InputStream;\n"
+            "import java.io.PrintStream;\n"
+            "import java.nio.charset.StandardCharsets;\n\n"
+            "import org.junit.jupiter.api.Test;\n\n"
+            "/**\n"
+            f" * Exported parity-regression scaffold from run {run_id}.\n"
+            f" * Trust case: {trust_case_id or 'unavailable'}\n"
+            f" * Exported at: {generated_at}\n"
+            " */\n"
+            f"class {class_name}ParityRegressionTest {{\n"
+            "    @Test\n"
+            f"    void parityRun{run_id.replace('-', '_')}MatchesExpectedNormalizedOutput() throws Exception {{\n"
+            f"        String expected = loadResource(\"/{expected_resource_path}\");\n"
+            "        String actual = captureProgramOutput();\n"
+            "        assertEquals(normalize(expected), normalize(actual));\n"
+            "    }\n\n"
+            "    private static String captureProgramOutput() throws Exception {\n"
+            "        PrintStream original = System.out;\n"
+            "        ByteArrayOutputStream buffer = new ByteArrayOutputStream();\n"
+            "        try (PrintStream capture = new PrintStream(buffer, true, StandardCharsets.UTF_8)) {\n"
+            "            System.setOut(capture);\n"
+            f"            {class_name}.main(new String[0]);\n"
+            "        } finally {\n"
+            "            System.setOut(original);\n"
+            "        }\n"
+            "        return buffer.toString(StandardCharsets.UTF_8);\n"
+            "    }\n\n"
+            "    private static String loadResource(String path) throws IOException {\n"
+            f"        try (InputStream stream = {class_name}ParityRegressionTest.class.getResourceAsStream(path)) {{\n"
+            "            assertNotNull(stream, () -> \"Missing export resource: \" + path);\n"
+            "            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);\n"
+            "        }\n"
+            "    }\n\n"
+            "    private static String normalize(String raw) {\n"
+            "        return raw.replace(\"\\r\\n\", \"\\n\").replace(\"\\r\", \"\\n\").strip();\n"
+            "    }\n"
+            "}\n"
+        )
+
+    @staticmethod
+    def _render_parity_export_readme(
+        *,
+        run_id: str,
+        export_slug: str,
+    ) -> str:
+        return (
+            "# Java Parity Regression Export\n\n"
+            f"- Run ID: `{run_id}`\n"
+            f"- Export ID: `{export_slug}`\n\n"
+            "This artifact is a reviewable scaffold generated from successful parity evidence. "
+            "It is not executed automatically by repository CI because run-scoped exports live "
+            "outside the checked-in Maven build graph until a developer adopts them deliberately.\n"
+        )
+
+    def export_parity_regression_test(
+        self,
+        *,
+        run_id: str,
+        requester: str,
+        export_name: str | None = None,
+    ) -> JsonObject:
+        if not self.artifact_store.has_run(run_id):
+            raise OrchestratorError("run not found")
+        workflow_id = _text((self.artifact_store.read_summary(run_id) or {}).get("workflowId")) or self.config.workflow_id
+        contract_payload_raw = self.artifact_store.read_json(run_id, "w02-run-contract.json")
+        contract_payload = (
+            dict(contract_payload_raw)
+            if isinstance(contract_payload_raw, Mapping)
+            else {}
+        )
+
+        build_payload = self.artifact_store.read_json(run_id, "build-test-result.json")
+        if not isinstance(build_payload, Mapping):
+            raise OrchestratorError("export blocked: build-test result is unavailable")
+        evidence_manifest = self.artifact_store.read_json(
+            run_id, "evidence-pack-manifest.json"
+        )
+        if not isinstance(evidence_manifest, Mapping):
+            raise OrchestratorError("export blocked: evidence pack manifest is unavailable")
+        trust_summary = (
+            contract_payload.get("trustSummary")
+            if isinstance(contract_payload.get("trustSummary"), Mapping)
+            else {}
+        )
+        trust_state = _text(trust_summary.get("trustState")) or "parity_passed"
+        divergence = _text(trust_summary.get("divergenceDisposition")) or "none"
+        evidence_summary = trust_summary.get("evidence")
+        evidence_status = (
+            _text(evidence_summary.get("status"))
+            if isinstance(evidence_summary, Mapping)
+            else "current"
+        )
+        if evidence_status in {"incomplete", ""}:
+            raise OrchestratorError(
+                "export blocked: incomplete evidence cannot produce a regression scaffold"
+            )
+        if divergence == "intentional":
+            raise OrchestratorError(
+                "export blocked: intentionally diverged evidence cannot be exported as parity regression coverage"
+            )
+        if trust_state in {
+            "build_failed",
+            "runtime_failed",
+            "parity_failed",
+            "intentional_divergence",
+        }:
+            raise OrchestratorError(
+                f"export blocked: only successful parity evidence is eligible (trustState={trust_state or 'unknown'})"
+            )
+        comparison_result = build_payload.get("comparisonResult")
+        build_match = _text(build_payload.get("classification")) == "match" or _text(
+            build_payload.get("status")
+        ).lower() == "ok"
+        comparison = build_payload.get("comparison")
+        if isinstance(comparison, Mapping):
+            matched = comparison.get("matched")
+            comparison_status = _text(comparison.get("status")).lower()
+            build_match = build_match or matched is True or comparison_status in {
+                "matched",
+                "passed",
+            }
+        if isinstance(comparison_result, Mapping):
+            matched = comparison_result.get("matched")
+            comparison_status = _text(comparison_result.get("status")).lower()
+            build_match = build_match or matched is True or comparison_status in {
+                "matched",
+                "passed",
+            }
+        if not build_match:
+            raise OrchestratorError(
+                "export blocked: build-test classification is not a successful parity match"
+            )
+        effective_trust_state = trust_state
+        if (
+            effective_trust_state == "blocked"
+            and divergence in {"", "none"}
+            and evidence_status != "incomplete"
+        ):
+            effective_trust_state = "parity_passed"
+        qualification = "clean"
+        warning_codes = trust_summary.get("warningCodes")
+        if evidence_status == "stale" and trust_state != "blocked":
+            qualification = "stale_evidence"
+        elif _text(trust_summary.get("repairStatus")) == "repair_verified":
+            qualification = "repair_verified"
+        elif isinstance(warning_codes, list) and "manual_edits_carried_over" in warning_codes:
+            qualification = "manual_edits_carried_over"
+
+        generated_manifest, generated_files = self._load_project_from_manifest(
+            run_id,
+            manifest_path=GENERATED_PROJECT_MANIFEST_FILE,
+            file_prefix=GENERATED_PROJECT_DIR,
+            missing_message="export blocked: generated project manifest is unavailable",
+        )
+        entry_class = _text(generated_manifest.get("entryClass"))
+        entry_file_path = _text(generated_manifest.get("entryFilePath"))
+        if not entry_class or not entry_file_path:
+            raise OrchestratorError(
+                "export blocked: generated project manifest is missing entry metadata"
+            )
+        package_name, _, class_name = entry_class.rpartition(".")
+        if not class_name:
+            class_name = entry_class
+            package_name = ""
+        if not class_name:
+            raise OrchestratorError(
+                "export blocked: generated entry class is not a valid Java class"
+            )
+
+        expected_output, expected_output_ref = self._load_export_expected_output(
+            run_id,
+            build_payload=build_payload,
+            contract_payload=contract_payload,
+        )
+
+        generated_at = _iso_now()
+        program_id = _text(trust_summary.get("trustCase", {}).get("trustCaseId")) if isinstance(trust_summary.get("trustCase"), Mapping) else ""
+        program_key = _text((self.artifact_store.read_summary(run_id) or {}).get("programId")) or class_name
+        project_root, export_slug = self._reserve_parity_export_root(
+            run_id,
+            program_id=program_key,
+            export_name=export_name,
+        )
+
+        expected_resource_path = f"c2c/parity/{export_slug}/expected-output.txt"
+        provenance_resource_path = f"c2c/parity/{export_slug}/provenance.json"
+        test_dir = "src/test/java"
+        if package_name:
+            test_dir = f"{test_dir}/{package_name.replace('.', '/')}"
+        test_relative_path = f"{test_dir}/{class_name}ParityRegressionTest.java"
+
+        export_files = dict(generated_files)
+        pom_xml = export_files.get("pom.xml")
+        if isinstance(pom_xml, str) and pom_xml:
+            export_files["pom.xml"] = self._augment_generated_pom_for_export(
+                pom_xml,
+                export_slug=export_slug,
+            )
+        export_files[test_relative_path] = self._render_parity_export_test(
+            package_name=package_name,
+            class_name=class_name,
+            expected_resource_path=expected_resource_path,
+            trust_case_id=_text(
+                trust_summary.get("trustCase", {}).get("trustCaseId")
+            )
+            if isinstance(trust_summary.get("trustCase"), Mapping)
+            else "",
+            run_id=run_id,
+            generated_at=generated_at,
+        )
+        export_files[f"src/test/resources/{expected_resource_path}"] = (
+            expected_output + "\n"
+        )
+        provenance_payload: JsonObject = {
+            "schemaVersion": SCHEMA_VERSION,
+            "exportedAt": generated_at,
+            "runId": run_id,
+            "workflowId": workflow_id,
+            "requester": requester,
+            "trustCase": dict(trust_summary.get("trustCase"))
+            if isinstance(trust_summary.get("trustCase"), Mapping)
+            else {},
+            "trustState": effective_trust_state,
+            "divergenceDisposition": divergence,
+            "evidenceStatus": evidence_status,
+            "qualification": qualification,
+            "entryClass": entry_class,
+            "entryFilePath": entry_file_path,
+            "generatedArtifactRef": dict(contract_payload.get("generatedJavaRef"))
+            if isinstance(contract_payload.get("generatedJavaRef"), Mapping)
+            else None,
+            "buildTestResultRef": dict(contract_payload.get("buildTestResultRef"))
+            if isinstance(contract_payload.get("buildTestResultRef"), Mapping)
+            else None,
+            "evidencePackRef": dict(contract_payload.get("evidencePackRef"))
+            if isinstance(contract_payload.get("evidencePackRef"), Mapping)
+            else None,
+            "expectedOutputRef": expected_output_ref,
+            "comparisonResultRef": dict(
+                build_payload.get("comparison", {}).get("comparisonResultRef")
+            )
+            if isinstance(build_payload.get("comparison"), Mapping)
+            and isinstance(
+                build_payload.get("comparison", {}).get("comparisonResultRef"),
+                Mapping,
+            )
+            else None,
+            "note": (
+                "The scaffold is not executed automatically because run-scoped exports "
+                "remain review artifacts until a developer promotes them into the "
+                "checked-in Maven build graph."
+            ),
+        }
+        export_files[f"src/test/resources/{provenance_resource_path}"] = json.dumps(
+            provenance_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        export_files["README.md"] = self._render_parity_export_readme(
+            run_id=run_id,
+            export_slug=export_slug,
+        )
+
+        project_manifest_files: list[JsonObject] = []
+        for relpath, content in sorted(export_files.items()):
+            kind = KIND_PARITY_REGRESSION_PROJECT_FILE
+            if relpath == test_relative_path:
+                kind = KIND_PARITY_REGRESSION_TEST_FILE
+            meta = self.artifact_store.write_text(
+                run_id,
+                workflow_id,
+                f"{project_root}/{relpath}",
+                content,
+                kind=kind,
+            )
+            project_manifest_files.append(
+                {
+                    "path": relpath,
+                    "sha256": meta.sha256,
+                    "byteSize": meta.byteSize,
+                    "mimeType": meta.mimeType,
+                }
+            )
+
+        project_manifest_payload: JsonObject = {
+            "schemaVersion": SCHEMA_VERSION,
+            "exportKind": "java-parity-regression",
+            "exportId": export_slug,
+            "runId": run_id,
+            "workflowId": workflow_id,
+            "entryClass": entry_class,
+            "entryFilePath": entry_file_path,
+            "scaffoldTestPath": test_relative_path,
+            "expectedOutputResourcePath": expected_resource_path,
+            "fileCount": len(project_manifest_files),
+            "files": project_manifest_files,
+        }
+        project_manifest_meta = self.artifact_store.write_json(
+            run_id,
+            workflow_id,
+            f"{project_root}/generated-project-manifest.json",
+            project_manifest_payload,
+            kind=KIND_PARITY_REGRESSION_PROJECT_MANIFEST,
+        )
+        scaffold_meta = self.artifact_store.find_metadata(
+            run_id, f"{project_root}/{test_relative_path}"
+        )
+        if scaffold_meta is None:
+            raise OrchestratorError("export failed: scaffold test metadata is unavailable")
+        export_manifest_payload: JsonObject = {
+            "schemaVersion": SCHEMA_VERSION,
+            "exportKind": "java-parity-regression",
+            "exportId": export_slug,
+            "runId": run_id,
+            "workflowId": workflow_id,
+            "programId": program_key,
+            "createdAt": generated_at,
+            "qualification": qualification,
+            "entryClass": entry_class,
+            "entryFilePath": entry_file_path,
+            "projectRoot": project_root,
+            "scaffoldTestPath": test_relative_path,
+            "expectedOutputResourcePath": expected_resource_path,
+            "provenanceResourcePath": provenance_resource_path,
+            "projectManifestRef": _reference_payload_from_metadata(
+                project_manifest_meta.to_dict()
+            ),
+            "scaffoldRef": _reference_payload_from_metadata(scaffold_meta),
+            "provenance": provenance_payload,
+        }
+        export_manifest_meta = self.artifact_store.write_json(
+            run_id,
+            workflow_id,
+            f"{project_root}/c2c-parity-export-manifest.json",
+            export_manifest_payload,
+            kind=KIND_PARITY_REGRESSION_EXPORT_MANIFEST,
+        )
+
+        exports = evidence_manifest.get("exports")
+        export_entries = (
+            [dict(entry) for entry in exports if isinstance(entry, Mapping)]
+            if isinstance(exports, list)
+            else []
+        )
+        export_entry: JsonObject = {
+            **(_reference_payload_from_metadata(scaffold_meta) or {}),
+            "kind": KIND_PARITY_REGRESSION_TEST_FILE,
+            "format": "java-junit5",
+            "projectRoot": project_root,
+            "scaffoldTestPath": test_relative_path,
+            "projectManifestRef": _reference_payload_from_metadata(
+                project_manifest_meta.to_dict()
+            ),
+            "manifestRef": _reference_payload_from_metadata(
+                export_manifest_meta.to_dict()
+            ),
+            "createdAt": generated_at,
+        }
+        evidence_manifest_updated = dict(evidence_manifest)
+        evidence_manifest_updated["exports"] = [
+            export_entry,
+            *[
+                entry
+                for entry in export_entries
+                if _text(entry.get("path")) != _text(export_entry.get("path"))
+            ],
+        ]
+        self.artifact_store.write_json(
+            run_id,
+            workflow_id,
+            "evidence-pack-manifest.json",
+            evidence_manifest_updated,
+            kind=KIND_EVIDENCE_PACK_MANIFEST,
+        )
+
+        return {
+            "runId": run_id,
+            "programId": program_key,
+            "status": "created",
+            "message": (
+                "Java parity regression scaffold exported as a run artifact. "
+                "The scaffold is reviewable now and can be promoted into repository CI later."
+            ),
+            "export": {
+                "exportId": export_slug,
+                "projectRoot": project_root,
+                "scaffoldTestPath": test_relative_path,
+                "scaffoldRef": _reference_payload_from_metadata(scaffold_meta),
+                "projectManifestRef": _reference_payload_from_metadata(
+                    project_manifest_meta.to_dict()
+                ),
+                "manifestRef": _reference_payload_from_metadata(
+                    export_manifest_meta.to_dict()
+                ),
+                "expectedOutputRef": expected_output_ref,
+                "createdAt": generated_at,
+                "qualification": qualification,
+                "autoExecuted": False,
+            },
+        }
 
     def _persist_manual_compile_candidate(
         self,

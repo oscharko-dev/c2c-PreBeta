@@ -476,6 +476,34 @@ export interface EvidenceView {
   note?: string;
 }
 
+export type ParityEvidenceExportQualification =
+  | "clean"
+  | "stale_evidence"
+  | "repair_verified"
+  | "manual_edits_carried_over";
+
+export interface ParityEvidenceExportRequest {
+  exportName?: string;
+}
+
+export interface ParityEvidenceExportResponse {
+  runId: string;
+  programId: string;
+  status: "created";
+  message?: string;
+  export: {
+    exportId: string;
+    scaffoldRef: OutputRef;
+    qualification: ParityEvidenceExportQualification;
+    projectRoot?: string;
+    scaffoldTestPath?: string;
+    projectManifestRef?: OutputRef | null;
+    manifestRef?: OutputRef | null;
+    expectedOutputRef?: OutputRef | null;
+    createdAt?: string;
+  };
+}
+
 export interface RunEvent {
   type?: string;
   status?: string;

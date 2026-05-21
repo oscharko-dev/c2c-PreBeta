@@ -152,6 +152,7 @@ interface ArtifactStubResponses {
     accept?: UpstreamResponse;
     reject?: UpstreamResponse;
   };
+  exportParityRegression?: UpstreamResponse;
   evidence?: UpstreamResponse;
   events?: UpstreamResponse;
   artifacts?: UpstreamResponse;
@@ -202,6 +203,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       accept: Array<{ runId: string; payload: unknown }>;
       reject: Array<{ runId: string; payload: unknown }>;
     };
+    exportParityRegression: Array<{ runId: string; payload: unknown }>;
     getEvidence: number;
     getEvents: number;
     getArtifacts: number;
@@ -249,6 +251,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       accept: [] as Array<{ runId: string; payload: unknown }>,
       reject: [] as Array<{ runId: string; payload: unknown }>,
     },
+    exportParityRegression: [] as Array<{ runId: string; payload: unknown }>,
     getEvidence: 0,
     getEvents: 0,
     getArtifacts: 0,
@@ -366,6 +369,10 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     async getEvidence() {
       calls.getEvidence += 1;
       return artifactResponses.evidence;
+    },
+    async exportParityRegression(runId, payload) {
+      calls.exportParityRegression.push({ runId, payload });
+      return artifactResponses.exportParityRegression;
     },
     async getEvents() {
       calls.getEvents += 1;
@@ -2607,6 +2614,156 @@ test("live evidence exposes manifestHash, validationStatus, exportRef, and aggre
     assert.equal(body.validationStatus, "incomplete");
     assert.deepEqual(body.missingArtifacts, ["semanticIr"]);
     assert.equal(body.exportRef?.sha256, "e".repeat(64));
+  } finally {
+    await server.close();
+  }
+});
+
+test("live evidence prefers the newest exportRef when multiple exports exist", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const auth = createRouteAuth();
+  const manifest = {
+    schemaVersion: "v0",
+    capability: "evidence.pack",
+    service: "evidence-service",
+    packId: "epk-live-2",
+    runId: "live-run-2",
+    wave: "w0",
+    status: "complete",
+    createdAt: "2026-05-14T10:00:30Z",
+    artifacts: {},
+    validation: {
+      status: "valid",
+      requiredArtifacts: [],
+      missingArtifacts: [],
+      messages: [],
+    },
+    exports: [
+      {
+        format: "java-junit5",
+        uri: "file:///run/older-export.java",
+        sha256: "1".repeat(64),
+        byteSize: 1024,
+        createdAt: "2026-05-14T10:00:30Z",
+      },
+      {
+        format: "java-junit5",
+        uri: "file:///run/newer-export.java",
+        sha256: "2".repeat(64),
+        byteSize: 2048,
+        createdAt: "2026-05-14T11:00:30Z",
+      },
+    ],
+  };
+  const { client: orch } = stubOrchestrator({
+    evidence: {
+      status: 200,
+      body: {
+        runId: "live-run-2",
+        programId: "CASE01",
+        runStatus: "completed",
+        status: "complete",
+        missingArtifacts: [],
+        data: manifest,
+        artifactRef: {
+          uri: "file:///run/evidence-pack-manifest.json",
+          sha256: "f".repeat(64),
+          byteSize: 768,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const evidence = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
+    );
+    const body = evidence.body as {
+      exportRef: { sha256: string } | null;
+    };
+    assert.equal(body.exportRef?.sha256, "2".repeat(64));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs/:runId/evidence/export proxies the orchestrator export response", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const auth = createRouteAuth();
+  const { client: orch, calls } = stubOrchestrator({
+    exportParityRegression: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        programId: "CASE01",
+        status: "created",
+        export: {
+          exportId: "hello-regression",
+          qualification: "clean",
+          scaffoldRef: {
+            sha256: "a".repeat(64),
+            path: "exports/java-regression/case01/hello/src/test/java/CASE01ParityRegressionTest.java",
+          },
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const exported = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence/export`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: { exportName: "hello-regression" },
+      },
+    );
+    const body = exported.body as {
+      status: string;
+      export: { scaffoldRef: { path: string } };
+    };
+    assert.equal(body.status, "created");
+    assert.equal(
+      body.export.scaffoldRef.path,
+      "exports/java-regression/case01/hello/src/test/java/CASE01ParityRegressionTest.java",
+    );
+    assert.deepEqual(calls.exportParityRegression, [
+      {
+        runId: startedBody.runId,
+        payload: { exportName: "hello-regression" },
+      },
+    ]);
   } finally {
     await server.close();
   }

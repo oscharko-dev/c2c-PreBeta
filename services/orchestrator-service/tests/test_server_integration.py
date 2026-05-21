@@ -281,6 +281,12 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                         "runId": payload.get("runId", "run-unknown"),
                         "workflowId": payload.get("workflowId", "w0-migration-v0"),
                         "programId": "CASE01",
+                        "classification": "match",
+                        "expectedOutput": "NORMALIZED-OUTPUT",
+                        "comparisonResult": {
+                            "matched": True,
+                            "status": "matched",
+                        },
                         "outputRef": {"uri": "urn:build-output"},
                     }
                 )
@@ -2076,6 +2082,35 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 generated["artifactRef"]["sha256"],
             )
 
+            export_status, export_body = _post_json(
+                host,
+                orchestrator_port,
+                f"/v0/runs/{run_id}/evidence/export/request",
+                {"exportName": "hello-regression"},
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(export_status, 200)
+            self.assertEqual(export_body["status"], "created")
+            self.assertEqual(
+                export_body["export"]["qualification"],
+                "clean",
+            )
+            self.assertIn(
+                "CASE01ParityRegressionTest.java",
+                export_body["export"]["scaffoldRef"]["path"],
+            )
+
+            status_code, evidence_after_export = _fetch_json(
+                f"/v0/runs/{run_id}/evidence"
+            )
+            self.assertEqual(status_code, 200)
+            exports = evidence_after_export["data"].get("exports", [])
+            self.assertTrue(exports)
+            self.assertEqual(
+                exports[0]["path"],
+                export_body["export"]["scaffoldRef"]["path"],
+            )
+
             # Events endpoint returns the trajectory-ledger contents
             status_code, events = _fetch_json(f"/v0/runs/{run_id}/events")
             self.assertEqual(status_code, 200)
@@ -2119,7 +2154,9 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(status_code, 404)
 
             # On-disk hashes match recorded metadata
-            for entry in artifacts["artifacts"]:
+            status_code, refreshed_artifacts = _fetch_json(f"/v0/runs/{run_id}/artifacts")
+            self.assertEqual(status_code, 200)
+            for entry in refreshed_artifacts["artifacts"]:
                 run_dir = Path(self._artifact_root) / run_id
                 on_disk = (run_dir / entry["path"]).read_bytes()
                 from hashlib import sha256

@@ -159,6 +159,29 @@ current selection differs from the completed evidence, Studio must show that
 the prior results were produced from another trust case or catalog version
 rather than implying that they validate the current selection.
 
+## Parity Evidence Export
+
+Successful parity evidence may be exported as a run-scoped Java regression
+scaffold through the Studio and BFF path. This export is a durability aid for a
+developer who wants to promote a convincing trust run into repository-backed
+regression coverage without manually reconstructing the evidence inputs.
+
+The export contract is intentionally conservative:
+
+- Only successful parity evidence is eligible for an unqualified export.
+- Failed, incomplete, or intentionally diverged evidence must be blocked.
+- Stale evidence and repair-verified/manual-edit-qualified evidence must remain
+  explicitly labelled so the exported scaffold does not overstate its authority.
+- Generated scaffold paths must avoid overwriting developer-maintained tests
+  unless the developer later promotes the scaffold deliberately.
+
+Exported scaffolds are not executed automatically as part of the current run.
+They remain review artifacts until a developer promotes them into the checked-in
+Maven build graph. This preserves deterministic evidence semantics, prevents
+run-scoped exports from mutating repository CI implicitly, and ensures human
+review settles naming, ownership, and long-term maintenance before the scaffold
+becomes a standing quality gate.
+
 ## Component Responsibilities
 
 The trust workflow spans these stable responsibilities:
