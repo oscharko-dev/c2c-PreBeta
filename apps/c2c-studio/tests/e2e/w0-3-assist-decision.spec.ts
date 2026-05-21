@@ -22,6 +22,7 @@ const MOCK_CORS_HEADERS = {
   "access-control-allow-origin": "http://127.0.0.1:3000",
   "access-control-allow-methods": "GET,POST,OPTIONS",
   "access-control-allow-headers": "Content-Type",
+  "access-control-allow-credentials": "true",
 };
 
 interface RunFixture {
@@ -47,6 +48,43 @@ interface ScenarioFixture {
   assistDecision: AssistDecisionFixture;
 }
 
+function trustCaseSummary(programId: string) {
+  return {
+    trustCaseId: `trust-${programId.toLowerCase()}`,
+    version: "trust-case-v1",
+    catalogVersion: "catalog-v1",
+    catalogHash: "trust-case-hash-1",
+    configurationDigest: `digest-${programId.toLowerCase()}`,
+    programId,
+    title: "W0.4 deterministic baseline",
+    description:
+      "Deterministic baseline trust-case used for Studio E2E assertions.",
+    defaultForProgram: true,
+    sourceReferenceFixtureId: "fixture-w04-baseline",
+    sourceReferenceMode: "reference-routine",
+    environmentProfileId: "env-dev",
+    comparisonStrategy: "deterministic",
+    comparisonPolicyVersion: "policy-v1",
+    supportedSubset: ["basic-cobol"],
+  };
+}
+
+function trustCaseIdentity(programId: string) {
+  const trustCase = trustCaseSummary(programId);
+
+  return {
+    trustCaseId: trustCase.trustCaseId,
+    trustCaseVersion: trustCase.version,
+    trustCaseCatalogVersion: trustCase.catalogVersion,
+    trustCaseCatalogHash: trustCase.catalogHash,
+    trustCaseConfigurationDigest: trustCase.configurationDigest,
+    trustCaseEnvironmentProfileId: trustCase.environmentProfileId,
+    trustCaseComparisonPolicyVersion: trustCase.comparisonPolicyVersion,
+    sourceReferenceFixtureId: trustCase.sourceReferenceFixtureId,
+    sourceReferenceMode: trustCase.sourceReferenceMode,
+  };
+}
+
 function expectReadyWorkbench(page: Page) {
   return (async () => {
     await page.goto("/");
@@ -56,7 +94,9 @@ function expectReadyWorkbench(page: Page) {
 }
 
 function topBarStartButton(page: Page) {
-  return page.getByRole("button", { name: "Start Transformation" });
+  return page
+    .getByLabel("Workbench Top Bar")
+    .getByRole("button", { name: "Generate & Verify" });
 }
 
 function cobolEditorSurface(page: Page) {
@@ -67,12 +107,25 @@ function cobolEditorSurface(page: Page) {
     .first();
 }
 
-async function fillCobol(page: Page, source: string) {
-  await page.getByRole("button", { name: "Start Typing" }).click();
-  const editor = cobolEditorSurface(page);
-  await expect(editor).toBeVisible({ timeout: 30_000 });
-  await editor.click();
-  await page.keyboard.insertText(source);
+async function enterCobolSource(page: Page, source: string) {
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        (window as unknown as { __c2cEditorHarnessReady?: boolean })
+          .__c2cEditorHarnessReady,
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.evaluate((sourceText) => {
+    window.dispatchEvent(
+      new CustomEvent("c2c-e2e:load-cobol", {
+        detail: { sourceText, sourceName: "pasted-source.cbl" },
+      }),
+    );
+  }, source);
+  const editorSurface = cobolEditorSurface(page);
+  await expect(editorSurface).toBeVisible();
 }
 
 async function setAiAssist(page: Page, enabled: boolean) {
@@ -80,9 +133,8 @@ async function setAiAssist(page: Page, enabled: boolean) {
     name: /allow ai assist after deterministic baseline/i,
   });
   await expect(toggle).toBeVisible();
-  if ((await toggle.isChecked()) !== enabled) {
-    await toggle.click();
-  }
+  await toggle.setChecked(enabled);
+  await expect(toggle).toBeChecked({ checked: enabled });
 }
 
 function runLinks(runId: string) {
@@ -106,6 +158,7 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
   const { runId, programId } = run;
   const links = runLinks(runId);
   const isSuccess = finalClassification === "success";
+  const trustCase = trustCaseSummary(programId);
   const generatedSha = "deadbeef".repeat(8);
   const javaSource = [
     "public final class W03Demo {",
@@ -118,7 +171,28 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
   const modelGatewayAvailable =
     fixture.assistDecision.outcome === "assist_required";
 
-  await page.route("**/api/v0/model-gateway/health", async (route) => {
+  await page.route("**/api/v0/trust-cases*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: MOCK_CORS_HEADERS,
+      body: JSON.stringify({
+        schemaVersion: "v0",
+        catalogVersion: trustCase.catalogVersion,
+        catalogHash: trustCase.catalogHash,
+        programId,
+        defaultTrustCaseId: trustCase.trustCaseId,
+        savedTrustCaseId: trustCase.trustCaseId,
+        trustCases: [trustCase],
+      }),
+    });
+  });
+
+  await page.route("**/api/v0/model-gateway/health*", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: MOCK_CORS_HEADERS });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -173,26 +247,59 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
     });
   });
 
-  await page.route("**/api/v0/transform", async (route) => {
+  await page.route(
+    /\/api\/v0\/transform(?:\?.*)?$/,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") {
+        await route.fulfill({ status: 204, headers: MOCK_CORS_HEADERS });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        headers: MOCK_CORS_HEADERS,
+        body: JSON.stringify({
+          runId,
+          orchestratorRunId: runId,
+          programId,
+          ...trustCaseIdentity(programId),
+          status: "starting",
+          mode: "live",
+          productMode: "live",
+          createdAt: "2026-05-17T00:00:00Z",
+          updatedAt: "2026-05-17T00:00:00Z",
+          links,
+        }),
+      });
+    },
+  );
+
+  await page.route("**/api/v0/session/bootstrap*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: MOCK_CORS_HEADERS,
+      body: JSON.stringify({
+        tenantId: "issue-362-fixture-tenant",
+        userId: "issue-362-fixture-user",
+        draftKeyWrappingSecret:
+          "e2e-tenant:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        telemetrySalt: "issue-362-telemetry-salt",
+        studioRedactionPatternAdditions: [],
+      }),
+    });
+  });
+
+  await page.route("**/api/v0/editor/telemetry*", async (route) => {
     if (route.request().method() === "OPTIONS") {
       await route.fulfill({ status: 204, headers: MOCK_CORS_HEADERS });
       return;
     }
     await route.fulfill({
-      status: 201,
+      status: 204,
       contentType: "application/json",
       headers: MOCK_CORS_HEADERS,
-      body: JSON.stringify({
-        runId,
-        orchestratorRunId: runId,
-        programId,
-        status: "starting",
-        mode: "live",
-        productMode: "live",
-        createdAt: "2026-05-17T00:00:00Z",
-        updatedAt: "2026-05-17T00:00:00Z",
-        links,
-      }),
+      body: "",
     });
   });
 
@@ -205,6 +312,7 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
         runId,
         orchestratorRunId: runId,
         programId,
+        ...trustCaseIdentity(programId),
         status: isSuccess ? "completed" : "failed",
         mode: "live",
         productMode: "live",
@@ -528,7 +636,7 @@ test.describe("W0.3-7 causal assist-decision browser acceptance", () => {
     await mockBffScenario(page, fixture);
 
     await expectReadyWorkbench(page);
-    await fillCobol(page, fixture.run.cobolSource);
+    await enterCobolSource(page, fixture.run.cobolSource);
     await setAiAssist(page, false);
     await expect(topBarStartButton(page)).toBeEnabled();
     await topBarStartButton(page).click();
@@ -588,7 +696,7 @@ test.describe("W0.3-7 causal assist-decision browser acceptance", () => {
     await mockBffScenario(page, fixture);
 
     await expectReadyWorkbench(page);
-    await fillCobol(page, fixture.run.cobolSource);
+    await enterCobolSource(page, fixture.run.cobolSource);
     await expect(topBarStartButton(page)).toBeEnabled();
     await topBarStartButton(page).click();
 
@@ -662,7 +770,7 @@ test.describe("W0.3-7 causal assist-decision browser acceptance", () => {
     await mockBffScenario(page, fixture);
 
     await expectReadyWorkbench(page);
-    await fillCobol(page, fixture.run.cobolSource);
+    await enterCobolSource(page, fixture.run.cobolSource);
     await expect(topBarStartButton(page)).toBeEnabled();
     await topBarStartButton(page).click();
 
