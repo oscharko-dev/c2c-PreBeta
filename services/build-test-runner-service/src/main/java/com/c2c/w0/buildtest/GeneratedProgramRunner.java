@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,6 +29,10 @@ import java.util.concurrent.TimeUnit;
 final class GeneratedProgramRunner {
 
     private static final int MAX_CAPTURE_BYTES = 1_048_576;
+    private static final Pattern JVM_EXCEPTION_HEADER =
+            Pattern.compile("^Exception in thread \\\"[^\\\"]+\\\" ([\\w.$]+)(?::\\s*(.*))?$");
+    private static final Pattern JVM_CAUSED_BY_HEADER =
+            Pattern.compile("^Caused by:\\s+([\\w.$]+)(?::\\s*(.*))?$");
 
     private GeneratedProgramRunner() {
     }
@@ -193,6 +199,13 @@ final class GeneratedProgramRunner {
         }
 
         static RunResult processFailure(int exitCode, String stdout, String stderr, long durationMs) {
+            RuntimeFailureDetails runtimeFailure = runtimeFailureFrom(stderr);
+            if (runtimeFailure != null) {
+                return new RunResult(true, false, exitCode, stdout, stderr, durationMs,
+                        runtimeFailure.summary(),
+                        runtimeFailure.errorClass(),
+                        runtimeFailure.errorMessage());
+            }
             return new RunResult(true, false, exitCode, stdout, stderr, durationMs,
                     "Generated program exited with status " + exitCode + ".",
                     "process-exit-" + exitCode,
@@ -263,12 +276,48 @@ final class GeneratedProgramRunner {
                     : "Generated program failed at runtime: " + name + ": " + message;
         }
 
+        private static RuntimeFailureDetails runtimeFailureFrom(String stderr) {
+            String header = firstLine(stderr);
+            if (header.isBlank()) {
+                return null;
+            }
+            Matcher matcher = JVM_EXCEPTION_HEADER.matcher(header);
+            if (!matcher.matches()) {
+                matcher = JVM_CAUSED_BY_HEADER.matcher(header);
+                if (!matcher.matches()) {
+                    return null;
+                }
+            }
+            String className = matcher.group(1);
+            String message = matcher.groupCount() >= 2 ? matcher.group(2) : null;
+            String safeMessage = message == null ? "" : message.trim();
+            String simpleName = simpleClassName(className);
+            String summary = safeMessage.isBlank()
+                    ? "Generated program failed at runtime: " + simpleName
+                    : "Generated program failed at runtime: " + simpleName + ": " + safeMessage;
+            String errorMessage = safeMessage.isBlank() ? header : safeMessage;
+            return new RuntimeFailureDetails(className, errorMessage, summary);
+        }
+
+        private static String simpleClassName(String className) {
+            if (className == null || className.isBlank()) {
+                return "unknown";
+            }
+            int packageSeparator = className.lastIndexOf('.');
+            int nestedSeparator = className.lastIndexOf('$');
+            int separator = Math.max(packageSeparator, nestedSeparator);
+            return separator >= 0 ? className.substring(separator + 1) : className;
+        }
+
         private static String firstLine(String value) {
             if (value == null || value.isBlank()) {
                 return "";
             }
             int newline = value.indexOf('\n');
             return (newline >= 0 ? value.substring(0, newline) : value).trim();
+        }
+
+        private record RuntimeFailureDetails(String errorClass, String errorMessage, String summary) {
         }
     }
 }
