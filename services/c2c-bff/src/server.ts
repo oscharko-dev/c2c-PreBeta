@@ -221,6 +221,14 @@ function isJavaSourceFilePath(filePath: string): boolean {
   return normalizeRequestJavaFilePath(filePath).toLowerCase().endsWith(".java");
 }
 
+function decodeRequestPath(rawPath: string): string {
+  return rawPath
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => decodeURIComponent(segment))
+    .join("/");
+}
+
 export interface ServerDeps {
   config: BffConfig;
   samples?: SampleRegistry;
@@ -371,6 +379,7 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
         deps.config.experienceLearningUrl,
         httpClient,
         deps.config.upstreamTimeoutMs,
+        deps.config.experienceLearningControlToken ?? "",
       ),
     modelGateway:
       deps.modelGateway ??
@@ -2422,6 +2431,30 @@ function rejectUnauthenticatedStudioJsonRequest(args: {
   return false;
 }
 
+function rejectUnauthenticatedStudioRequest(args: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  allowedOrigins: readonly string[];
+  sessionStore: SessionStore;
+  forceSecureSessionCookies: boolean;
+}): boolean {
+  if (rejectDisallowedBrowserOrigin(args.req, args.res, args.allowedOrigins)) {
+    return true;
+  }
+  const session = resolveEditorAssistSession(
+    args.req,
+    args.res,
+    args.sessionStore,
+    args.forceSecureSessionCookies,
+  );
+  if (!session.ok) {
+    jsonResponse(args.res, 401, { error: session.message });
+    return true;
+  }
+  appendVaryHeader(args.res, "Cookie");
+  return false;
+}
+
 function explicitStringField(
   raw: unknown,
   fieldName: string,
@@ -3534,6 +3567,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       }
 
       if (pathname === "/api/v0/transform" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         let body: unknown;
         try {
           body = await readJsonBody(req, config.transformSourceMaxBytes);
@@ -3819,6 +3863,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // /api/v0/transform, but signals "Generator-only invocation; verification
       // is invoked separately via /verify". Returns 201 with a `runMode` marker.
       if (pathname === "/api/v0/generate" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         let body: unknown;
         try {
           body = await readJsonBody(req, config.transformSourceMaxBytes);
@@ -3947,7 +4002,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const genUseTransformationAgent =
           typeof genUseTransformationAgentRaw === "boolean"
             ? genUseTransformationAgentRaw
-            : true;
+            : false;
         if (genUseTransformationAgent) {
           const gatewayAvailability =
             await verifyTransformationModelGatewayAvailable(modelGateway);
@@ -4873,6 +4928,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       }
 
       if (pathname === "/api/v0/runs" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         let body: unknown;
         try {
           body = await readJsonBody(req);
@@ -5055,6 +5121,20 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
+      if (method === "GET" && /^\/api\/v0\/runs\/[^\/]+(?:\/.*)?$/.test(pathname)) {
+        if (
+          rejectUnauthenticatedStudioRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
+      }
+
       const runMatch = /^\/api\/v0\/runs\/([^\/]+)$/.exec(pathname);
       if (runMatch && method === "GET") {
         const runId = decodeURIComponent(runMatch[1] ?? "");
@@ -5228,12 +5308,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         /^\/api\/v0\/runs\/([^\/]+)\/generated\/files\/(.+)$/.exec(pathname);
       if (generatedFileContent && method === "GET") {
         const runId = decodeURIComponent(generatedFileContent[1] ?? "");
-        const rawPath = generatedFileContent[2] ?? "";
-        const decodedPath = rawPath
-          .split("/")
-          .filter((segment) => segment.length > 0)
-          .map((segment) => decodeURIComponent(segment))
-          .join("/");
+        const decodedPath = decodeRequestPath(generatedFileContent[2] ?? "");
         if (!isSafeGeneratedRelpath(decodedPath)) {
           jsonResponse(res, 400, { error: "invalid generated file path" });
           return;
@@ -5305,6 +5380,129 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           // could otherwise report ``byteSize: 1`` and still smuggle a
           // larger payload through ``content``. We compare both and take
           // the maximum so the cap cannot be bypassed.
+          const declaredByteSize = asNumber(envelope.byteSize);
+          const measuredByteSize = Buffer.byteLength(content, "utf-8");
+          const byteSize =
+            declaredByteSize === undefined
+              ? measuredByteSize
+              : Math.max(declaredByteSize, measuredByteSize);
+          if (byteSize > config.artifactContentMaxBytes) {
+            jsonResponse(res, 413, {
+              error: "artifact_too_large",
+              path: decodedPath,
+              byteSize,
+              limit: config.artifactContentMaxBytes,
+            });
+            return;
+          }
+          jsonResponse(res, 200, {
+            runId: stored.runId,
+            programId: stored.programId,
+            mode: "live",
+            productMode: "live",
+            path: asString(envelope.path) || decodedPath,
+            content,
+            sha256: asString(envelope.sha256),
+            byteSize,
+            mimeType: asString(envelope.mimeType),
+            kind: asString(envelope.kind),
+            orchestratorRunId: liveRunId,
+          });
+          return;
+        } catch (err) {
+          if (err instanceof UpstreamResponseTooLargeError) {
+            jsonResponse(res, 413, {
+              error: "artifact_too_large",
+              path: decodedPath,
+              byteSize: err.declaredByteSize,
+              limit: err.limit,
+            });
+            return;
+          }
+          jsonResponse(res, 502, {
+            error: sanitizeUpstreamMessage(
+              err instanceof Error ? err.message : "",
+              "orchestrator request failed",
+            ),
+          });
+          return;
+        }
+      }
+
+      const artifactFileContent =
+        /^\/api\/v0\/runs\/([^\/]+)\/artifacts\/files\/(.+)$/.exec(pathname);
+      if (artifactFileContent && method === "GET") {
+        const runId = decodeURIComponent(artifactFileContent[1] ?? "");
+        const decodedPath = decodeRequestPath(artifactFileContent[2] ?? "");
+        if (!isSafeGeneratedRelpath(decodedPath)) {
+          jsonResponse(res, 400, { error: "invalid artifact path" });
+          return;
+        }
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === "diagnostic-fixture") {
+          jsonResponse(res, 404, {
+            error: "artifact unavailable for diagnostic-fixture runs",
+          });
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId || !orchestrator.enabled) {
+          jsonResponse(res, 503, {
+            error: "orchestrator unavailable; artifact cannot be served",
+          });
+          return;
+        }
+        try {
+          const getArtifactFile = orchestrator.getArtifactFile;
+          if (typeof getArtifactFile !== "function") {
+            jsonResponse(res, 503, {
+              error: "orchestrator unavailable; artifact cannot be served",
+            });
+            return;
+          }
+          const upstream = await getArtifactFile(
+            liveRunId,
+            decodedPath,
+            config.artifactContentMaxBytes,
+          );
+          if (!upstream) {
+            jsonResponse(res, 502, { error: "orchestrator request failed" });
+            return;
+          }
+          if (upstream.truncated) {
+            jsonResponse(res, 413, {
+              error: "artifact_too_large",
+              path: decodedPath,
+              limit: config.artifactContentMaxBytes,
+            });
+            return;
+          }
+          if (upstream.status === 404) {
+            jsonResponse(res, 404, {
+              error: "artifact not found",
+              path: decodedPath,
+            });
+            return;
+          }
+          if (upstream.status === 400) {
+            jsonResponse(res, 400, {
+              error: "invalid artifact path",
+              path: decodedPath,
+            });
+            return;
+          }
+          if (upstream.status < 200 || upstream.status >= 300) {
+            jsonResponse(res, 502, {
+              error: `orchestrator returned status ${upstream.status}`,
+            });
+            return;
+          }
+          const envelope = asRecord(upstream.body) ?? {};
+          const content = asString(envelope.content);
           const declaredByteSize = asNumber(envelope.byteSize);
           const measuredByteSize = Buffer.byteLength(content, "utf-8");
           const byteSize =

@@ -943,6 +943,41 @@ def _is_model_policy_denial(exc: BaseException) -> bool:
     return False
 
 
+_SENSITIVE_EVENT_PAYLOAD_KEYS = frozenset(
+    {
+        "source",
+        "sourceText",
+        "source_text",
+        "code",
+        "content",
+        "rawSource",
+        "raw_source",
+    }
+)
+
+
+def _redacted_text_summary(value: str) -> JsonObject:
+    encoded = value.encode("utf-8", errors="replace")
+    return {
+        "redacted": True,
+        "sha256": sha256(encoded).hexdigest(),
+        "byteSize": len(encoded),
+    }
+
+
+def _redact_event_payload(value: Any, *, key: str | None = None) -> JsonValue:
+    if key in _SENSITIVE_EVENT_PAYLOAD_KEYS and isinstance(value, str):
+        return _redacted_text_summary(value)
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): _redact_event_payload(child_value, key=str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_redact_event_payload(child_value) for child_value in value]
+    return value
+
+
 def _build_cobol_oracle_payload(
     source_text: str | None,
     input_reference: DataReference,
@@ -951,12 +986,11 @@ def _build_cobol_oracle_payload(
     expected_output: str | None = None,
     oracle_input: str | None = None,
 ) -> JsonObject | None:
-    """Construct the executable COBOL oracle payload for build-test-runner.
+    """Construct a non-executing oracle payload for build-test-runner.
 
-    The oracle lets the runner execute the UI-provided COBOL source with
-    GnuCOBOL and compare its stdout against generated Java stdout (Issue
-    #92). Returns ``None`` when no source text is available, so the runner
-    falls back to registry Golden Master behaviour.
+    Browser-provided COBOL source is untrusted. The runner only receives a
+    user-provided expected-output oracle here; without that text this returns
+    ``None`` so registry Golden Master behaviour remains the fallback.
 
     Issue #172: when the BFF forwards an ``expectedOutput`` (golden master
     text) or an ``oracleInput`` (stdin fed to the oracle) on the inputRef,
@@ -964,17 +998,15 @@ def _build_cobol_oracle_payload(
     the verification/repair agent can use them directly instead of
     re-deriving from defaults.
     """
-    if not source_text or not source_text.strip():
+    if not isinstance(expected_output, str) or not expected_output:
         return None
     safe_timeout = timeout_ms if isinstance(timeout_ms, int) and timeout_ms > 0 else DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS
     payload: JsonObject = {
         "mode": ORACLE_MODE_COBOL_RUNTIME,
-        "sourceText": source_text,
         "sourceRef": _as_reference_payload(input_reference),
         "timeoutMs": safe_timeout,
+        "expectedOutput": expected_output,
     }
-    if isinstance(expected_output, str) and expected_output:
-        payload["expectedOutput"] = expected_output
     if isinstance(oracle_input, str) and oracle_input:
         payload["oracleInput"] = oracle_input
     return payload
@@ -6637,8 +6669,8 @@ class W0WorkflowRunner:
             "inputRef": _as_reference_payload(input_ref),
             "outputRef": _as_reference_payload(output_ref),
             "payload": {
-                "input": dict(input_payload),
-                "output": dict(output_payload),
+                "input": _redact_event_payload(dict(input_payload)),
+                "output": _redact_event_payload(dict(output_payload)),
             },
         }
         if latency_ms is not None:

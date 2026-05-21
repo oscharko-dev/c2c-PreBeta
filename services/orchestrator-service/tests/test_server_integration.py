@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from orchestrator_service.artifacts import (
     KIND_BUILD_TEST_RESULT,
     KIND_GENERATED_PROJECT_FILE,
+    KIND_TRAJECTORY_LEDGER,
 )
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.server import create_configured_server
@@ -1599,7 +1600,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             )
             MockHarnessHandler.state = state
 
-            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
@@ -1632,7 +1633,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
             MockHarnessHandler.state = state
-            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
@@ -1694,7 +1695,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             state = MockHarnessState(host=host, port=mock_port)
             state.pause_parse_seconds = 0.25
             MockHarnessHandler.state = state
-            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
@@ -1744,7 +1745,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             state.fail_run_list = True
             state.fail_run_reads = True
             MockHarnessHandler.state = state
-            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
             connection = HTTPConnection(host, orchestrator_port, timeout=3)
@@ -1852,7 +1853,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
             MockHarnessHandler.state = state
-            orchestrator_server, _ = self._create_orchestrator(host, mock_port)
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
@@ -1964,9 +1965,33 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(file_view["content"], "class CASE01 {}")
             self.assertEqual(file_view["byteSize"], len(b"class CASE01 {}"))
 
+            # Issue #364: browser-safe artifact content for non-Java run artifacts.
+            runner.artifact_store.write_text(
+                run_id,
+                "w0-migration-v0",
+                "logs/studio/comparison.log",
+                "comparison ok\n",
+                kind=KIND_TRAJECTORY_LEDGER,
+            )
+            status_code, artifact_view = _fetch_json(
+                f"/v0/runs/{run_id}/artifacts/files/logs/studio/comparison.log"
+            )
+            self.assertEqual(status_code, 200)
+            self.assertEqual(artifact_view["path"], "logs/studio/comparison.log")
+            self.assertEqual(artifact_view["content"], "comparison ok\n")
+            self.assertEqual(
+                artifact_view["byteSize"],
+                len("comparison ok\n".encode("utf-8")),
+            )
+
             # Issue #97: path traversal is rejected
             status_code, file_traversal = _fetch_json(
                 f"/v0/runs/{run_id}/generated/files/..%2F..%2Fetc%2Fpasswd"
+            )
+            self.assertEqual(status_code, 400)
+
+            status_code, artifact_traversal = _fetch_json(
+                f"/v0/runs/{run_id}/artifacts/files/..%2F..%2Fetc%2Fpasswd"
             )
             self.assertEqual(status_code, 400)
 

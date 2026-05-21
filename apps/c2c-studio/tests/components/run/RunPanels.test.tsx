@@ -83,11 +83,12 @@ describe('Run Panels', () => {
         }
       });
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
-      expect(screen.getAllByText('COBOL Oracle').length).toBeGreaterThan(0);
-      expect(screen.getByText('Java Compilation')).toBeDefined();
-      expect(screen.getByText('Java Execution')).toBeDefined();
-      expect(screen.getByText('Equivalence Check')).toBeDefined();
-      expect(screen.getByText('Equivalent')).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Transform/ })).toBeDefined();
+      expect(screen.getByRole('tab', { name: /COBOL Reference Execution/ })).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Java Build/ })).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Java Execution/ })).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Parity Comparison/ })).toBeDefined();
+      expect(screen.getAllByText('Pass').length).toBeGreaterThan(0);
     });
 
     it('renders build/test missing golden master', () => {
@@ -102,9 +103,9 @@ describe('Run Panels', () => {
         }
       });
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
-      expect(screen.getByText('COBOL Oracle')).toBeDefined();
-      expect(screen.getByText('Golden master unavailable')).toBeDefined();
-      expect(screen.getByText('Blocked before compilation started')).toBeDefined();
+      expect(screen.getByRole('tab', { name: /COBOL Reference Execution/ })).toBeDefined();
+      expect(screen.getAllByText('Waiting for backend evidence').length).toBeGreaterThan(0);
+      expect(screen.getByText(/Not executed/i)).toBeDefined();
     });
 
     it('renders live orchestrator progress steps when available', () => {
@@ -154,9 +155,8 @@ describe('Run Panels', () => {
       });
 
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
-      expect(screen.getByText('Accepted')).toBeDefined();
-      expect(screen.getByText('Generate Java')).toBeDefined();
-      expect(screen.getByText('Compile & Test Java')).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Transform/ })).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Java Build/ })).toBeDefined();
       expect(screen.getByText('build-test-runner is running')).toBeDefined();
     });
 
@@ -199,8 +199,8 @@ describe('Run Panels', () => {
       });
 
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
-      expect(screen.getByText('Model Policy Skipped')).toBeDefined();
-      expect(screen.getByText('Skipped: Step skipped by workflow policy.')).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Transform/ })).toBeDefined();
+      expect(screen.getAllByText('Skipped: Step skipped by workflow policy.').length).toBeGreaterThan(0);
     });
 
     it('marks parity results stale when the source workspace has pending re-run state', () => {
@@ -245,9 +245,10 @@ describe('Run Panels', () => {
         }
       });
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
-      expect(screen.getByText('Compilation failed')).toBeDefined();
+      expect(screen.getByRole('tab', { name: /Parity Comparison/ })).toBeDefined();
       expect(screen.getAllByText('Blocked by compilation failure').length).toBeGreaterThan(0);
-      expect(screen.getByText('javac failed with type mismatch')).toBeDefined();
+      expect(screen.getAllByText('Java compilation failed before equivalence could run.').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('javac failed with type mismatch').length).toBeGreaterThan(0);
     });
   });
 
@@ -576,10 +577,10 @@ describe('Run Panels', () => {
         }
       ];
       render(<RunArtifactsPanel artifacts={artifacts} />);
-      expect(screen.getByText('artifacts/source.cbl')).toBeDefined();
-      expect(screen.getByText('source')).toBeDefined();
-      expect(screen.getByText('1234')).toBeDefined();
-      expect(screen.getByText('hash123')).toBeDefined();
+      expect(screen.getByRole('option', { name: /artifacts\/source\.cbl/i })).toBeDefined();
+      expect(screen.getAllByText('source').length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/1234 bytes/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText('hash123').length).toBeGreaterThan(0);
     });
 
     it('renders artifact fetch errors separately from the artifact list', () => {
@@ -593,6 +594,35 @@ describe('Run Panels', () => {
       expect(screen.getByText('Missing artifact records')).toBeDefined();
       expect(screen.getByText('generatedJava')).toBeDefined();
       expect(screen.getByText('No run artifacts available.')).toBeDefined();
+    });
+
+    it('moves artifact focus with keyboard navigation', () => {
+      const artifacts = [
+        {
+          path: 'artifacts/source.cbl',
+          name: 'art1',
+          kind: 'source',
+          byteSize: 1234,
+          sha256: 'hash123',
+          createdBy: 'system',
+          createdAt: '2026-05-15T12:00:00Z',
+        },
+        {
+          path: 'artifacts/build.log',
+          name: 'art2',
+          kind: 'log',
+          byteSize: 42,
+          sha256: 'hash456',
+          createdBy: 'runner',
+          createdAt: '2026-05-15T12:01:00Z',
+        },
+      ];
+
+      render(<RunArtifactsPanel artifacts={artifacts} />);
+      const firstArtifact = screen.getByRole('option', { name: /artifacts\/source\.cbl/i });
+      fireEvent.keyDown(firstArtifact, { key: 'ArrowDown' });
+      expect(screen.getByRole('option', { name: /artifacts\/build\.log/i, selected: true })).toBeDefined();
+      expect(screen.getAllByText('hash456').length).toBeGreaterThan(0);
     });
   });
 

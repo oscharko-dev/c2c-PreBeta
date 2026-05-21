@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	defaultExperienceListenAddr      = ":8084"
+	defaultExperienceListenAddr      = "127.0.0.1:8084"
 	defaultPolicyPath                = "policies/learning-policy-v0.yaml"
 	defaultHarnessEventLogPath       = "data/experience-service-harness-events-v0.jsonl"
 	defaultTrajectoryLedgerPath      = "data/agent-trajectory-ledger-v0.jsonl"
@@ -25,6 +25,7 @@ type experienceLearningConfig struct {
 	artifactRegistryPath     string
 	editorTelemetryEventPath string
 	autoAnalyzeOnIngest      bool
+	controlToken             string
 }
 
 func resolveExperienceConfig() (experienceLearningConfig, error) {
@@ -37,6 +38,10 @@ func resolveExperienceConfig() (experienceLearningConfig, error) {
 		artifactRegistryPath:     strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_ARTIFACT_REGISTRY_PATH")),
 		editorTelemetryEventPath: strings.TrimSpace(os.Getenv("EXPERIENCE_LEARNING_EDITOR_TELEMETRY_EVENTS_PATH")),
 		autoAnalyzeOnIngest:      true,
+		controlToken: strings.TrimSpace(firstNonEmpty(
+			os.Getenv("EXPERIENCE_LEARNING_CONTROL_TOKEN"),
+			os.Getenv("C2C_INTERNAL_CONTROL_TOKEN"),
+		)),
 	}
 
 	if cfg.policyPath == "" {
@@ -94,8 +99,23 @@ func normalizeListenAddress(input string) string {
 	if value == "" {
 		return defaultExperienceListenAddr
 	}
-	if value[0] == ':' || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
 		return value
 	}
-	return ":" + value
+	if value[0] == ':' {
+		return "127.0.0.1" + value
+	}
+	if strings.Contains(value, ":") {
+		return value
+	}
+	return "127.0.0.1:" + value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

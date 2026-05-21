@@ -1,8 +1,10 @@
 import {
   BuildTestView,
   OutputRef,
+  RunArtifactMetadata,
   RunProgressStep,
   RunProgressView,
+  RunWorkflowView,
 } from '@/types/api';
 import type { ManualDriftSummary } from '@/stores/transformationRun';
 import { TransformationRunState } from '@/types/run';
@@ -44,11 +46,52 @@ export interface BuildTestMetadataItem {
   ref?: OutputRef | null;
 }
 
+export interface WorkflowMetadataItem {
+  label: string;
+  value: string;
+  copyValue?: string;
+}
+
 export interface OutputDiffLine {
   kind: "equal" | "added" | "removed";
   content: string;
   expectedLineNumber?: number;
   actualLineNumber?: number;
+}
+
+export interface EvidenceArtifactCandidate {
+  key: string;
+  label: string;
+  path: string;
+  kind: string;
+  sha256: string;
+  byteSize?: number;
+  mimeType?: string;
+  stageId: TimelineStageId;
+  fetchKind: "artifact" | "generated";
+  summary: string;
+}
+
+export type TimelineStageId =
+  | "transform"
+  | "source-reference"
+  | "java-build"
+  | "java-execution"
+  | "output-normalization"
+  | "parity-comparison"
+  | "verification-repair"
+  | "evidence-capture";
+
+export interface TimelineStageDetail {
+  id: TimelineStageId;
+  label: string;
+  status: StatusVariant;
+  detail: string;
+  actor: string;
+  durationText: string;
+  evidenceCount: number;
+  actionLabel: string | null;
+  diagnostic: string | null;
 }
 
 export function splitOutputLines(value?: string): string[] {
@@ -69,6 +112,22 @@ function humanizeToken(value: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function formatDurationMs(value?: number): string {
+  if (value === undefined || value < 0) {
+    return "Pending";
+  }
+  if (value < 1000) {
+    return `${value} ms`;
+  }
+  const seconds = value / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(seconds >= 10 ? 0 : 1)} s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainderSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${remainderSeconds}s`;
 }
 
 function describeOutputRef(ref?: OutputRef | null): string {
@@ -250,6 +309,88 @@ export function getBuildTestArtifactRefs(
 
 export function getBuildTestReferenceSummary(ref?: OutputRef | null): string {
   return describeOutputRef(ref);
+}
+
+function describeBudget(
+  label: string,
+  budget: { used: number; limit: number } | null | undefined,
+): string {
+  if (!budget) {
+    return `${label} unavailable`;
+  }
+
+  return `${budget.used}/${budget.limit} used`;
+}
+
+function describeWorkflowOutcome(workflow: RunWorkflowView | null): string {
+  if (!workflow) {
+    return 'Unavailable';
+  }
+
+  if (workflow.finalClassification) {
+    return humanizeToken(workflow.finalClassification);
+  }
+
+  if (workflow.state) {
+    return humanizeToken(workflow.state);
+  }
+
+  return 'In progress';
+}
+
+export function getWorkflowMetadataItems(
+  workflow: RunWorkflowView | null,
+): WorkflowMetadataItem[] {
+  if (!workflow) {
+    return [];
+  }
+
+  const items: WorkflowMetadataItem[] = [
+    {
+      label: 'Workflow state',
+      value: describeWorkflowOutcome(workflow),
+      copyValue: workflow.state ?? workflow.finalClassification ?? undefined,
+    },
+    {
+      label: 'Active step',
+      value: workflow.activeStep ? humanizeToken(workflow.activeStep) : 'Unavailable',
+      copyValue: workflow.activeStep ?? undefined,
+    },
+    {
+      label: 'Active agent',
+      value: workflow.activeAgent ? humanizeToken(workflow.activeAgent) : 'Unavailable',
+      copyValue: workflow.activeAgent ?? undefined,
+    },
+    {
+      label: 'Failure code',
+      value: workflow.failureCode ? humanizeToken(workflow.failureCode) : 'None',
+      copyValue: workflow.failureCode ?? undefined,
+    },
+    {
+      label: 'Failure message',
+      value: workflow.failureMessage ?? 'None',
+      copyValue: workflow.failureMessage ?? undefined,
+    },
+    {
+      label: 'Repair budget',
+      value: describeBudget('Repair budget', workflow.repairBudget),
+    },
+    {
+      label: 'Assist budget',
+      value: describeBudget('Assist budget', workflow.assistBudget),
+    },
+    {
+      label: 'Model budget',
+      value: describeBudget('Model budget', workflow.modelInvocationBudget),
+    },
+    {
+      label: 'Agent attempts',
+      value: String(workflow.agentAttemptCount),
+      copyValue: String(workflow.agentAttemptCount),
+    },
+  ];
+
+  return items;
 }
 
 const DIFF_MATRIX_LIMIT = 250_000;
@@ -552,6 +693,16 @@ function describeProgressStep(step: RunProgressStep): string {
   }
 }
 
+function artifactSummary(artifact: {
+  kind?: string;
+  sha256?: string;
+  byteSize?: number;
+}): string {
+  const shortHash = artifact.sha256 ? artifact.sha256.slice(0, 12) : "unknown";
+  const size = artifact.byteSize !== undefined ? ` · ${artifact.byteSize} bytes` : "";
+  return `${humanizeToken(artifact.kind ?? "artifact")} · ${shortHash}${size}`;
+}
+
 function getProgressPipelineStages(progress?: RunProgressView | null): PipelineStageState[] | null {
   if (!progress || progress.steps.length === 0) {
     return null;
@@ -624,6 +775,352 @@ export function getPipelineStages(
   };
 
   return [oracleStage, compilationStage, executionStage, equivalenceStage];
+}
+
+const TIMELINE_STAGE_LABELS: Record<TimelineStageId, string> = {
+  transform: "Transform",
+  "source-reference": "COBOL Reference Execution",
+  "java-build": "Java Build",
+  "java-execution": "Java Execution",
+  "output-normalization": "Output Normalization",
+  "parity-comparison": "Parity Comparison",
+  "verification-repair": "Repair Review",
+  "evidence-capture": "Evidence Capture",
+};
+
+function mapProgressStepToTimelineStage(stepName: string): TimelineStageId | null {
+  if (
+    stepName === "accepted" ||
+    stepName === "parse-cobol" ||
+    stepName === "generate-ir" ||
+    stepName === "generate-java" ||
+    stepName === "model-guidance" ||
+    stepName === "model-policy-skipped"
+  ) {
+    return "transform";
+  }
+  if (
+    stepName.includes("source-reference") ||
+    stepName.includes("golden-master") ||
+    stepName.includes("oracle")
+  ) {
+    return "source-reference";
+  }
+  if (
+    stepName === "compile-test-java" ||
+    stepName.includes("compile")
+  ) {
+    return "java-build";
+  }
+  if (stepName.includes("execution") || stepName.includes("runtime")) {
+    return "java-execution";
+  }
+  if (stepName.includes("normalized")) {
+    return "output-normalization";
+  }
+  if (stepName.includes("comparison")) {
+    return "parity-comparison";
+  }
+  if (stepName.includes("repair")) {
+    return "verification-repair";
+  }
+  if (stepName === "write-evidence" || stepName.includes("evidence")) {
+    return "evidence-capture";
+  }
+  return null;
+}
+
+function inferArtifactStage(artifact: Pick<RunArtifactMetadata, "kind" | "path">): TimelineStageId {
+  const haystack = `${artifact.kind} ${artifact.path}`.toLowerCase();
+  if (haystack.includes("repair")) return "verification-repair";
+  if (haystack.includes("evidence")) return "evidence-capture";
+  if (haystack.includes("comparison") || haystack.includes("diff")) return "parity-comparison";
+  if (haystack.includes("normalized")) return "output-normalization";
+  if (haystack.includes("runtime") || haystack.includes("stdout") || haystack.includes("stderr")) {
+    return "java-execution";
+  }
+  if (haystack.includes("build") || haystack.includes("compile") || haystack.includes("javac")) {
+    return "java-build";
+  }
+  if (haystack.includes("oracle") || haystack.includes("golden-master") || haystack.includes("source-ref")) {
+    return "source-reference";
+  }
+  return "transform";
+}
+
+export function getEvidenceArtifactCandidates(
+  state: TransformationRunState,
+): EvidenceArtifactCandidate[] {
+  const artifactRows = (state.artifacts?.artifacts ?? []).map((artifact) => ({
+    key: `artifact:${artifact.path}`,
+    label: artifact.name || artifact.path,
+    path: artifact.path,
+    kind: artifact.kind,
+    sha256: artifact.sha256,
+    byteSize: artifact.byteSize,
+    mimeType: artifact.mimeType,
+    stageId: inferArtifactStage(artifact),
+    fetchKind: "artifact" as const,
+    summary: artifactSummary(artifact),
+  }));
+  const generatedRows = (state.generatedFiles?.files ?? []).map((file) => ({
+    key: `generated:${file.path}`,
+    label: file.path,
+    path: file.path,
+    kind: "generated-project-file",
+    sha256: file.sha256 ?? "unknown",
+    byteSize: file.byteSize,
+    mimeType: file.mimeType,
+    stageId: "transform" as const,
+    fetchKind: "generated" as const,
+    summary: artifactSummary({
+      kind: "generated-project-file",
+      sha256: file.sha256,
+      byteSize: file.byteSize,
+    }),
+  }));
+  return [...artifactRows, ...generatedRows];
+}
+
+function timelineActionLabel(
+  stageId: TimelineStageId,
+  status: StatusVariant,
+): string | null {
+  if (status === "success") {
+    return "Review evidence";
+  }
+  switch (stageId) {
+    case "java-build":
+      return "Inspect compile diagnostics";
+    case "java-execution":
+      return "Inspect runtime output";
+    case "parity-comparison":
+      return "Inspect diff and normalized outputs";
+    case "verification-repair":
+      return "Review repair diagnostics";
+    case "evidence-capture":
+      return "Inspect evidence manifest";
+    default:
+      return status === "pending" ? "Wait for the stage to complete" : "Review stage details";
+  }
+}
+
+export function buildTimelineStages(
+  state: TransformationRunState,
+): TimelineStageDetail[] {
+  const artifacts = getEvidenceArtifactCandidates(state);
+  const progressSteps = [...(state.progress?.steps ?? [])].sort(
+    (left, right) => left.stepId - right.stepId,
+  );
+  const buildTest = state.buildTest;
+  const workflow = state.workflow;
+  const evidence = state.evidence;
+
+  const stageMap = new Map<TimelineStageId, TimelineStageDetail>();
+  (Object.keys(TIMELINE_STAGE_LABELS) as TimelineStageId[]).forEach((id) => {
+    stageMap.set(id, {
+      id,
+      label: TIMELINE_STAGE_LABELS[id],
+      status: "pending",
+      detail: "Waiting for backend evidence",
+      actor: "orchestrator",
+      durationText: "Pending",
+      evidenceCount: artifacts.filter((artifact) => artifact.stageId === id).length,
+      actionLabel: null,
+      diagnostic: null,
+    });
+  });
+
+  for (const step of progressSteps) {
+    const stageId = mapProgressStepToTimelineStage(step.name);
+    if (!stageId) {
+      continue;
+    }
+    const current = stageMap.get(stageId);
+    if (!current) {
+      continue;
+    }
+    const status = mapProgressStepStatus(step.status);
+    stageMap.set(stageId, {
+      ...current,
+      status,
+      detail: describeProgressStep(step),
+      actor: step.actor || step.service || step.capabilityId || current.actor,
+      durationText: formatDurationMs(step.latencyMs),
+      diagnostic: step.diagnostic ?? null,
+      actionLabel: timelineActionLabel(stageId, status),
+    });
+  }
+
+  if (buildTest) {
+    const buildStage = stageMap.get("java-build");
+    if (buildStage && buildTest.compileStatus) {
+      const status =
+        buildTest.compileStatus === "ok"
+          ? "success"
+          : buildTest.compileStatus === "failed"
+            ? "error"
+            : buildTest.compileStatus === "skipped"
+              ? "blocked"
+              : buildStage.status;
+      stageMap.set("java-build", {
+        ...buildStage,
+        status,
+        detail:
+          buildTest.compileStatus === "ok"
+            ? "The generated Java project compiled successfully."
+            : buildTest.compileStatus === "failed"
+              ? "Compilation failed before the parity verdict could be completed."
+              : buildStage.detail,
+        actor: "build-test-runner",
+        actionLabel: timelineActionLabel("java-build", status),
+      });
+    }
+    const executionStage = stageMap.get("java-execution");
+    if (executionStage && buildTest.executionStatus) {
+      const status =
+        buildTest.executionStatus === "ok"
+          ? "success"
+          : buildTest.executionStatus === "failed"
+            ? "error"
+            : buildTest.executionStatus === "skipped" || buildTest.executionStatus === "not-run"
+              ? "blocked"
+              : executionStage.status;
+      stageMap.set("java-execution", {
+        ...executionStage,
+        status,
+        detail:
+          buildTest.executionStatus === "ok"
+            ? "The generated Java finished execution."
+            : buildTest.executionStatus === "failed"
+              ? "Execution failed before the parity verdict could be completed."
+              : executionStage.detail,
+        actor: "build-test-runner",
+        actionLabel: timelineActionLabel("java-execution", status),
+      });
+    }
+    const normalizationStage = stageMap.get("output-normalization");
+    if (normalizationStage) {
+      const hasNormalizationEvidence = Boolean(
+        buildTest.comparison?.expectedRef ||
+          buildTest.comparison?.actualRef ||
+          buildTest.expectedOutputRef ||
+          buildTest.actualOutputRef,
+      );
+      const status =
+        hasNormalizationEvidence
+          ? "success"
+          : buildTest.classification === "compile-error" ||
+              buildTest.classification === "run-error"
+            ? "blocked"
+            : normalizationStage.status;
+      stageMap.set("output-normalization", {
+        ...normalizationStage,
+        status,
+        detail:
+          hasNormalizationEvidence
+            ? "Normalized oracle and Java outputs are available for inspection."
+            : normalizationStage.detail,
+        actor: "build-test-runner",
+        actionLabel: timelineActionLabel("output-normalization", status),
+      });
+    }
+    const comparisonStage = stageMap.get("parity-comparison");
+    if (comparisonStage) {
+      const status = mapBuildTestClassificationToVariant(buildTest.classification);
+      stageMap.set("parity-comparison", {
+        ...comparisonStage,
+        status:
+          buildTest.classification === "compile-error" ||
+          buildTest.classification === "run-error"
+            ? "blocked"
+            : status,
+        detail: describeBuildTestResult(buildTest).detail,
+        actor: "build-test-runner",
+        diagnostic: buildTest.note ?? null,
+        actionLabel: timelineActionLabel("parity-comparison", status),
+      });
+    }
+    const sourceReferenceStage = stageMap.get("source-reference");
+    if (sourceReferenceStage && buildTest.status !== "missing-golden-master") {
+      const status =
+        buildTest.status === "golden-master-reproduction-failed"
+          ? "error"
+          : "success";
+      stageMap.set("source-reference", {
+        ...sourceReferenceStage,
+        status,
+        detail:
+          status === "error"
+            ? "The COBOL reference execution did not complete successfully."
+            : "The COBOL reference output is available for parity comparison.",
+        actor: "build-test-runner",
+        actionLabel: timelineActionLabel("source-reference", status),
+      });
+    }
+  }
+
+  const repairStage = stageMap.get("verification-repair");
+  if (repairStage && workflow) {
+    const repairAttemptCount = workflow.repairAttempts.length;
+    const status =
+      workflow.activeAgent === "verification_repair_agent"
+        ? "pending"
+        : repairAttemptCount > 0
+          ? workflow.finalClassification === "success"
+            ? "success"
+            : "warning"
+          : workflow.finalClassification === "cancelled"
+            ? "neutral"
+            : repairStage.status;
+    stageMap.set("verification-repair", {
+      ...repairStage,
+      status,
+      detail:
+        repairAttemptCount > 0
+          ? `${repairAttemptCount} governed repair attempt${repairAttemptCount === 1 ? "" : "s"} recorded for this run.`
+          : workflow.failureCode
+            ? "No governed repair attempt was recorded for the current run."
+            : "Repair has not been invoked for this run.",
+      actor: workflow.activeAgent ?? "orchestrator",
+      diagnostic: workflow.failureMessage ?? null,
+      actionLabel: timelineActionLabel("verification-repair", status),
+    });
+  }
+
+  const evidenceStage = stageMap.get("evidence-capture");
+  if (evidenceStage && evidence) {
+    const status =
+      evidence.status === "complete"
+        ? "success"
+        : evidence.status === "invalid"
+          ? "blocked"
+          : "warning";
+    stageMap.set("evidence-capture", {
+      ...evidenceStage,
+      status,
+      detail:
+        evidence.status === "complete"
+          ? "The evidence manifest is complete and linked to the run artifacts."
+          : evidence.note ?? "The evidence bundle is partial or invalid.",
+      actor: "evidence-service",
+      actionLabel: timelineActionLabel("evidence-capture", status),
+    });
+  }
+
+  if (workflow?.finalClassification === "cancelled") {
+    for (const stage of stageMap.values()) {
+      if (stage.status === "pending") {
+        stage.status = "neutral";
+        stage.detail = "The run was cancelled before this stage completed.";
+        stage.actionLabel = "Rerun the parity workflow";
+      }
+    }
+  }
+
+  return (Object.keys(TIMELINE_STAGE_LABELS) as TimelineStageId[]).map(
+    (id) => stageMap.get(id)!,
+  );
 }
 
 export function deriveRunProblems(state: TransformationRunState): RunProblem[] {

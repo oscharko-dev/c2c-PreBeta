@@ -141,6 +141,9 @@ interface ArtifactStubResponses {
   generatedFile?:
     | UpstreamResponse
     | ((path: string) => UpstreamResponse | undefined);
+  artifactFile?:
+    | UpstreamResponse
+    | ((path: string) => UpstreamResponse | undefined);
   buildTest?: UpstreamResponse;
   manualCompileRepair?: {
     diagnose?: UpstreamResponse;
@@ -188,6 +191,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getGenerated: number;
     getGeneratedFiles: number;
     getGeneratedFile: Array<{ runId: string; path: string }>;
+    getArtifactFile: Array<{ runId: string; path: string }>;
     getBuildTest: number;
     manualCompileRepair: {
       diagnose: Array<{ runId: string; payload: unknown }>;
@@ -232,6 +236,7 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getGenerated: 0,
     getGeneratedFiles: 0,
     getGeneratedFile: [] as Array<{ runId: string; path: string }>,
+    getArtifactFile: [] as Array<{ runId: string; path: string }>,
     getBuildTest: 0,
     manualCompileRepair: {
       diagnose: [] as Array<{ runId: string; payload: unknown }>,
@@ -320,6 +325,14 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       }
       return responder;
     },
+    async getArtifactFile(runId: string, filePath: string) {
+      calls.getArtifactFile.push({ runId, path: filePath });
+      const responder = artifactResponses.artifactFile;
+      if (typeof responder === "function") {
+        return responder(filePath);
+      }
+      return responder;
+    },
     async getBuildTest() {
       calls.getBuildTest += 1;
       return artifactResponses.buildTest;
@@ -386,6 +399,9 @@ function disabledOrchestrator(): OrchestratorClient {
       return undefined;
     },
     async getGeneratedFile() {
+      return undefined;
+    },
+    async getArtifactFile() {
       return undefined;
     },
     async getBuildTest() {
@@ -497,6 +513,7 @@ const baseConfig: BffConfig = {
   orchestratorControlToken: "",
   evidenceUrl: "",
   experienceLearningUrl: "",
+  experienceLearningControlToken: "",
   modelGatewayUrl: "",
   harnessUrl: "",
   buildTestRunnerUrl: "",
@@ -1251,6 +1268,9 @@ test("starting a run surfaces orchestrator failures instead of silently falling 
     async getGeneratedFile() {
       return undefined;
     },
+    async getArtifactFile() {
+      return undefined;
+    },
     async getBuildTest() {
       return undefined;
     },
@@ -1318,6 +1338,9 @@ test("starting a run with orchestrator non-2xx response returns 502 and creates 
       return undefined;
     },
     async getGeneratedFile() {
+      return undefined;
+    },
+    async getArtifactFile() {
       return undefined;
     },
     async getBuildTest() {
@@ -2759,7 +2782,11 @@ test("transform derives program id, calls orchestrator, and returns the full tra
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      modelGatewayUrl: "http://gateway",
+    },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -2785,7 +2812,7 @@ test("transform derives program id, calls orchestrator, and returns the full tra
       targetLanguage: "java",
       expectedOutput: undefined,
       oracleInput: undefined,
-      useTransformationAgent: true,
+      useTransformationAgent: false,
     });
     assert.equal(runStore.list().length, 1);
 
@@ -2906,7 +2933,11 @@ test("transform carries trustCaseId through the parity-aware path only", async (
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      modelGatewayUrl: "http://gateway",
+    },
     samples: stubSamples([FIXED_SAMPLE]),
     trustCases: stubTrustCases([FIXED_TRUST_CASE]),
     orchestrator: orch,
@@ -2937,7 +2968,7 @@ test("transform carries trustCaseId through the parity-aware path only", async (
       targetLanguage: "java",
       expectedOutput: undefined,
       oracleInput: undefined,
-      useTransformationAgent: true,
+      useTransformationAgent: false,
       executionMode: "parity",
       trustCaseId: "HELLO01-DEFAULT",
     });
@@ -3050,6 +3081,9 @@ test("transform does not create a run when the orchestrator returns a non-2xx st
     async getGeneratedFile() {
       return undefined;
     },
+    async getArtifactFile() {
+      return undefined;
+    },
     async getBuildTest() {
       return undefined;
     },
@@ -3116,6 +3150,9 @@ test("transform does not create a run when the orchestrator throws", async () =>
       return undefined;
     },
     async getGeneratedFile() {
+      return undefined;
+    },
+    async getArtifactFile() {
       return undefined;
     },
     async getBuildTest() {
@@ -4325,6 +4362,7 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const javaContent = "package c2c;\npublic final class CASE01 {}\n";
+  const comparisonContent = "comparison ok\n";
   const filesIndex = [
     {
       path: "pom.xml",
@@ -4381,6 +4419,25 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
       return {
         status: 404,
         body: { error: "generated file not found", path: filePath },
+      };
+    },
+    artifactFile: (filePath) => {
+      if (filePath === "logs/studio/comparison.log") {
+        return {
+          status: 200,
+          body: {
+            path: filePath,
+            content: comparisonContent,
+            sha256: "d".repeat(64),
+            byteSize: comparisonContent.length,
+            mimeType: "text/plain",
+            kind: "trajectory-ledger",
+          },
+        };
+      }
+      return {
+        status: 404,
+        body: { error: "artifact not found", path: filePath },
       };
     },
   });
@@ -4446,11 +4503,40 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
       "src/main/java/c2c/CASE01.java",
     );
 
+    const artifact = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/logs/studio/comparison.log`,
+    );
+    assert.equal(artifact.status, 200);
+    const artifactBody = artifact.body as {
+      path: string;
+      content: string;
+      sha256: string;
+      byteSize: number;
+      kind: string;
+    };
+    assert.equal(artifactBody.path, "logs/studio/comparison.log");
+    assert.equal(artifactBody.content, comparisonContent);
+    assert.equal(artifactBody.kind, "trajectory-ledger");
+    assert.doesNotMatch(
+      JSON.stringify(artifact.body),
+      /storage\.internal|\/var\/lib|file:\/\//,
+    );
+    assert.equal(calls.getArtifactFile.length, 1);
+    assert.equal(
+      calls.getArtifactFile[0]?.path,
+      "logs/studio/comparison.log",
+    );
+
     // Path traversal attempts are rejected by the BFF before reaching the orchestrator.
     const traversal = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/..%2F..%2Fetc%2Fpasswd`,
     );
     assert.equal(traversal.status, 400);
+
+    const artifactTraversal = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/..%2F..%2Fetc%2Fpasswd`,
+    );
+    assert.equal(artifactTraversal.status, 400);
 
     // Unknown file inside the generated tree returns 404, not 200.
     const missing = await fetchJson(
@@ -5623,6 +5709,118 @@ test("GET /api/v0/runs/{runId}/generated/files/{path} measures content when upst
   }
 });
 
+test("GET /api/v0/runs/{runId}/artifacts/files/{path} returns 413 when artifact exceeds configured limit", async () => {
+  const runStore = createRunStore();
+  const oversizedContent = "A".repeat(2048);
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    artifactFile: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        path: "logs/studio/comparison.log",
+        content: oversizedContent,
+        sha256: "a".repeat(64),
+        byteSize: oversizedContent.length,
+        mimeType: "text/plain",
+        uri: "urn:c2c/artifact/1",
+        kind: "trajectory-ledger",
+      },
+    },
+  });
+  const handler = createApp({
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      artifactContentMaxBytes: 1024,
+    },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/logs/studio/comparison.log`,
+    );
+    assert.equal(response.status, 413);
+    const body = response.body as {
+      error: string;
+      limit: number;
+      byteSize: number;
+    };
+    assert.equal(body.error, "artifact_too_large");
+    assert.equal(body.limit, 1024);
+    assert.equal(body.byteSize, oversizedContent.length);
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /api/v0/runs/{runId}/artifacts/files/{path} measures content when upstream underreports byteSize", async () => {
+  const runStore = createRunStore();
+  const oversizedContent = "A".repeat(2048);
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch } = stubOrchestrator({
+    artifactFile: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        path: "logs/studio/comparison.log",
+        content: oversizedContent,
+        sha256: "a".repeat(64),
+        byteSize: 1,
+        mimeType: "text/plain",
+        uri: "urn:c2c/artifact/1",
+        kind: "trajectory-ledger",
+      },
+    },
+  });
+  const handler = createApp({
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      artifactContentMaxBytes: 1024,
+    },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/logs/studio/comparison.log`,
+    );
+    assert.equal(response.status, 413);
+    const body = response.body as {
+      error: string;
+      limit: number;
+      byteSize: number;
+    };
+    assert.equal(body.error, "artifact_too_large");
+    assert.equal(body.limit, 1024);
+    assert.equal(body.byteSize, oversizedContent.length);
+  } finally {
+    await server.close();
+  }
+});
+
 test("transform 502 response carries a UI-safe failureCode and never leaks orchestrator URL", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
@@ -5649,6 +5847,9 @@ test("transform 502 response carries a UI-safe failureCode and never leaks orche
       return undefined;
     },
     async getGeneratedFile() {
+      return undefined;
+    },
+    async getArtifactFile() {
       return undefined;
     },
     async getBuildTest() {
@@ -5767,6 +5968,9 @@ test("concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
       return undefined;
     },
     async getGeneratedFile() {
+      return undefined;
+    },
+    async getArtifactFile() {
       return undefined;
     },
     async getBuildTest() {
