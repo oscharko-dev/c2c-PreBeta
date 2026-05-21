@@ -38,6 +38,8 @@ CONTRACT_SCHEMA_FILES = [
     "schemas/patch-proposal-v0.json",
 ]
 
+TRAVERSAL_SAFE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
@@ -503,7 +505,7 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         self.assertEqual(schema["properties"]["files"]["items"]["$ref"], "#/$defs/fileChange")
         self.assertEqual(
             schema["$defs"]["fileChange"]["properties"]["path"]["pattern"],
-            "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+            TRAVERSAL_SAFE_PATH_PATTERN,
         )
 
     def test_validator_rejects_path_traversal_and_secret_like_text(self) -> None:
@@ -530,6 +532,55 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         payload["files"][0]["diff"] = "@@ -1,1 +1,1 @@\n-return old;\n+return tampered;"
         with self.assertRaises(ContractValidationError):
             validate_payload("patch-proposal-v0", payload)
+
+    def test_execution_diagnostic_bounds_constrain_message_and_file_path(self) -> None:
+        execution_schema = _load_json(REPO_ROOT / "schemas/parity-execution-result-v0.json")
+        diagnostic = execution_schema["$defs"]["diagnostic"]
+        self.assertEqual(diagnostic["properties"]["message"]["maxLength"], 4000)
+        self.assertEqual(diagnostic["properties"]["filePath"]["maxLength"], 500)
+        self.assertEqual(
+            diagnostic["properties"]["filePath"]["pattern"],
+            TRAVERSAL_SAFE_PATH_PATTERN,
+        )
+
+    def test_build_diagnostic_bounds_constrain_file_path(self) -> None:
+        build_schema = _load_json(REPO_ROOT / "schemas/parity-build-result-v0.json")
+        build_diagnostic = build_schema["$defs"]["buildDiagnostic"]
+        self.assertEqual(build_diagnostic["properties"]["filePath"]["maxLength"], 500)
+        self.assertEqual(
+            build_diagnostic["properties"]["filePath"]["pattern"],
+            TRAVERSAL_SAFE_PATH_PATTERN,
+        )
+        self.assertEqual(build_diagnostic["properties"]["message"]["maxLength"], 4000)
+
+    def test_validator_rejects_oversize_execution_diagnostic_message(self) -> None:
+        payload = copy.deepcopy(sample_payloads()["parity-execution-result-v0"])
+        payload["diagnostics"] = [
+            {
+                "severity": "error",
+                "message": "x" * 4001,
+            }
+        ]
+        with self.assertRaises(ContractValidationError):
+            validate_payload("parity-execution-result-v0", payload)
+
+    def test_validator_rejects_diagnostic_file_path_traversal(self) -> None:
+        payload = copy.deepcopy(sample_payloads()["parity-build-result-v0"])
+        payload["diagnostics"][0]["filePath"] = "../../etc/passwd"
+        with self.assertRaises(ContractValidationError):
+            validate_payload("parity-build-result-v0", payload)
+
+    def test_validator_rejects_absolute_diagnostic_file_path(self) -> None:
+        payload = copy.deepcopy(sample_payloads()["parity-build-result-v0"])
+        payload["diagnostics"][0]["filePath"] = "/etc/passwd"
+        with self.assertRaises(ContractValidationError):
+            validate_payload("parity-build-result-v0", payload)
+
+    def test_validator_rejects_oversize_diagnostic_file_path(self) -> None:
+        payload = copy.deepcopy(sample_payloads()["parity-build-result-v0"])
+        payload["diagnostics"][0]["filePath"] = "a/" + ("b" * 600)
+        with self.assertRaises(ContractValidationError):
+            validate_payload("parity-build-result-v0", payload)
 
     def test_validator_accepts_reference_only_diff_payloads(self) -> None:
         payload = copy.deepcopy(sample_payloads()["patch-proposal-v0"])
