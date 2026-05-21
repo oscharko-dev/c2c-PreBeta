@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -97,6 +98,11 @@ var sha256Pattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 // applies the same 4000-char ceiling via DiagnosticBounds.boundedDiffSummary,
 // so a conforming evidence pack already satisfies this bound; the Validate()
 // guard rejects packs that bypassed the Java helper.
+//
+// JSON Schema's maxLength counts Unicode characters, not bytes, so the guard
+// uses utf8.RuneCountInString rather than len() to avoid rejecting valid
+// non-ASCII inputs (each multi-byte UTF-8 rune would otherwise inflate the
+// byte count past the schema ceiling).
 const maxOracleComparisonTextLength = 4000
 
 // requiredArtifactsW0 lists the W0 minimum artifact set. The manifest is
@@ -526,11 +532,11 @@ func (o OracleComparison) Validate(path string) error {
 			return fieldError(path+".status", "status must be passed|failed|blocked")
 		}
 	}
-	if len(o.DiffSummary) > maxOracleComparisonTextLength {
+	if utf8.RuneCountInString(o.DiffSummary) > maxOracleComparisonTextLength {
 		return fieldError(path+".diffSummary",
 			fmt.Sprintf("diffSummary must not exceed %d characters", maxOracleComparisonTextLength))
 	}
-	if len(o.Summary) > maxOracleComparisonTextLength {
+	if utf8.RuneCountInString(o.Summary) > maxOracleComparisonTextLength {
 		return fieldError(path+".summary",
 			fmt.Sprintf("summary must not exceed %d characters", maxOracleComparisonTextLength))
 	}

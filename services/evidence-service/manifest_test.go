@@ -196,6 +196,30 @@ func TestOracleComparisonValidateAcceptsDiffSummaryAtCeiling(t *testing.T) {
 	}
 }
 
+// TestOracleComparisonValidateCountsCharactersNotBytes guards the rune-aware
+// length check (JSON Schema maxLength is defined in Unicode characters, not
+// bytes). The "é" rune is two UTF-8 bytes, so a 4000-rune string occupies
+// 8000 bytes; a byte-count guard would have falsely rejected this schema-
+// conformant input.
+func TestOracleComparisonValidateCountsCharactersNotBytes(t *testing.T) {
+	multiByteAtCeiling := strings.Repeat("é", maxOracleComparisonTextLength)
+	o := OracleComparison{
+		OracleKind:  OracleKindCobolRuntime,
+		Status:      "failed",
+		DiffSummary: multiByteAtCeiling,
+		Summary:     multiByteAtCeiling,
+	}
+	if err := o.Validate("oracleComparison"); err != nil {
+		t.Fatalf("expected 4000-rune non-ASCII diffSummary/summary to validate, got %v", err)
+	}
+
+	overCeiling := strings.Repeat("é", maxOracleComparisonTextLength+1)
+	o.DiffSummary = overCeiling
+	if err := o.Validate("oracleComparison"); err == nil {
+		t.Fatalf("expected rejection at 4001 runes")
+	}
+}
+
 func TestManifestRoundTripsJSON(t *testing.T) {
 	m := newCompleteManifest(t)
 	m.Artifacts.ModelInvocations[0].PolicyDecision = "policy allow"
