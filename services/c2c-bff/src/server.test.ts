@@ -39,6 +39,7 @@ import {
 } from "./editorExplain";
 import { createSessionStore, type SessionStore } from "./sessionStore";
 import { SESSION_COOKIE_NAME } from "./sessionCookie";
+import type { TrustCaseCatalog, TrustCaseSummary } from "./trust-cases";
 
 const FIXED_SAMPLE: SampleDetail = {
   programId: "BRNCH01",
@@ -96,6 +97,44 @@ function stubSamples(items: SampleDetail[]): SampleRegistry {
   };
 }
 
+const FIXED_TRUST_CASE: TrustCaseSummary = {
+  trustCaseId: "HELLO01-DEFAULT",
+  version: "2026-05-21",
+  catalogVersion: "2026-05-21",
+  catalogHash: "0".repeat(64),
+  configurationDigest: "1".repeat(64),
+  programId: "HELLO01",
+  title: "HELLO01 default parity trust case",
+  description: "Default immutable parity case for HELLO01.",
+  defaultForProgram: true,
+  sourceReferenceFixtureId: "HELLOW02",
+  sourceReferenceMode: "reference-fixture",
+  environmentProfileId: "generated-java-sandbox-v1",
+  comparisonStrategy: "deterministic-output",
+  comparisonPolicyVersion: "deterministic-output-v1",
+  supportedSubset: ["DISPLAY", "STOP-RUN"],
+};
+
+function stubTrustCases(items: TrustCaseSummary[]): TrustCaseCatalog {
+  const byId = new Map(items.map((item) => [item.trustCaseId, item]));
+  return {
+    schemaVersion: "v0",
+    catalogVersion: "2026-05-21",
+    catalogHash: "0".repeat(64),
+    list(programId?: string): TrustCaseSummary[] {
+      return items.filter((item) => !programId || item.programId === programId);
+    },
+    get(trustCaseId: string): TrustCaseSummary | undefined {
+      return byId.get(trustCaseId);
+    },
+    defaultForProgram(programId: string): TrustCaseSummary | undefined {
+      return items.find(
+        (item) => item.programId === programId && item.defaultForProgram,
+      );
+    },
+  };
+}
+
 interface ArtifactStubResponses {
   generated?: UpstreamResponse;
   generatedFiles?: UpstreamResponse;
@@ -142,6 +181,8 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       expectedOutput?: string;
       oracleInput?: string;
       useTransformationAgent?: boolean;
+      executionMode?: "standard" | "parity";
+      trustCaseId?: string;
       generateOnly?: boolean;
     }>;
     getGenerated: number;
@@ -184,6 +225,9 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       expectedOutput?: string;
       oracleInput?: string;
       useTransformationAgent?: boolean;
+      executionMode?: "standard" | "parity";
+      trustCaseId?: string;
+      generateOnly?: boolean;
     }>,
     getGenerated: 0,
     getGeneratedFiles: 0,
@@ -2766,6 +2810,158 @@ test("transform derives program id, calls orchestrator, and returns the full tra
       workflow: `/api/v0/runs/${body.runId}/workflow`,
       traceability: `/api/v0/runs/${body.runId}/traceability`,
     });
+  } finally {
+    await server.close();
+  }
+});
+
+test("trust-case catalog lists defaults and saves a session preference", async () => {
+  const sessionStore = createSessionStore({
+    randomBytes: (size) => Buffer.alloc(size, 3),
+    idleTimeoutMs: 0,
+  });
+  const session = sessionStore.create({ tenantId: "tenant-1", userId: "user-1" });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    trustCases: stubTrustCases([FIXED_TRUST_CASE]),
+    orchestrator: disabledOrchestrator(),
+    evidence: disabledEvidence(),
+    sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const listed = await fetchJson(
+      `${server.baseUrl}/api/v0/trust-cases?programId=HELLO01`,
+      {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${session.sessionId}` },
+      },
+    );
+    assert.equal(listed.status, 200);
+    assert.equal(
+      (listed.body as { defaultTrustCaseId: string }).defaultTrustCaseId,
+      "HELLO01-DEFAULT",
+    );
+    assert.equal(
+      (listed.body as { savedTrustCaseId: string | null }).savedTrustCaseId,
+      null,
+    );
+
+    const saved = await fetchJson(
+      `${server.baseUrl}/api/v0/session/trust-case-preference`,
+      {
+        method: "PUT",
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${session.sessionId}` },
+        body: { programId: "HELLO01", trustCaseId: "HELLO01-DEFAULT" },
+      },
+    );
+    assert.equal(saved.status, 200);
+    assert.equal(
+      (saved.body as { trustCaseId: string }).trustCaseId,
+      "HELLO01-DEFAULT",
+    );
+
+    const listedWithPreference = await fetchJson(
+      `${server.baseUrl}/api/v0/trust-cases?programId=HELLO01`,
+      {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${session.sessionId}` },
+      },
+    );
+    assert.equal(
+      (listedWithPreference.body as { savedTrustCaseId: string }).savedTrustCaseId,
+      "HELLO01-DEFAULT",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("transform carries trustCaseId through the parity-aware path only", async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    trustCases: stubTrustCases([FIXED_TRUST_CASE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const sourceText =
+      "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n";
+    const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: "POST",
+      body: {
+        sourceText,
+        sourceName: "hello.cbl",
+        trustCaseId: "HELLO01-DEFAULT",
+      },
+    });
+    assert.equal(started.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    assert.deepEqual(calls.startTransformRun[0], {
+      programId: "HELLO01",
+      sourceText,
+      requester: "c2c-ui",
+      sourceName: "hello.cbl",
+      options: undefined,
+      targetLanguage: "java",
+      expectedOutput: undefined,
+      oracleInput: undefined,
+      useTransformationAgent: true,
+      executionMode: "parity",
+      trustCaseId: "HELLO01-DEFAULT",
+    });
+    const stored = runStore.list()[0];
+    assert.equal(stored?.executionMode, "parity");
+    assert.equal(stored?.trustCaseId, "HELLO01-DEFAULT");
+    assert.equal(stored?.trustCaseConfigurationDigest, "1".repeat(64));
+  } finally {
+    await server.close();
+  }
+});
+
+test("transform rejects unknown trust cases and browser-authored runtime internals", async () => {
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples: stubSamples([FIXED_SAMPLE]),
+    trustCases: stubTrustCases([FIXED_TRUST_CASE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    modelGateway: availableModelGateway(),
+    runStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const sourceText =
+      "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n";
+    const unknown = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: "POST",
+      body: { sourceText, trustCaseId: "MISSING-CASE" },
+    });
+    assert.equal(unknown.status, 400);
+    assert.match((unknown.body as { error: string }).error, /unknown trustCaseId/);
+
+    const unsafe = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
+      method: "POST",
+      body: {
+        sourceText,
+        trustCaseId: "HELLO01-DEFAULT",
+        runtime: { programArgs: ["--tamper"] },
+      },
+    });
+    assert.equal(unsafe.status, 400);
+    assert.match(
+      (unsafe.body as { error: string }).error,
+      /browser-authored runtime internals/,
+    );
+    assert.equal(calls.startTransformRun.length, 0);
+    assert.equal(runStore.list().length, 0);
   } finally {
     await server.close();
   }

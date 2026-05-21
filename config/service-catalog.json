@@ -70,7 +70,8 @@
         "schemas/parity-execution-result-v0.json",
         "schemas/parity-run-v0.json",
         "schemas/patch-proposal-v0.json",
-        "schemas/repair-diagnosis-v0.json"
+        "schemas/repair-diagnosis-v0.json",
+        "schemas/trust-case-v0.json"
       ],
       "defaultPort": 8084,
       "runtimeRole": "workflow-authority",

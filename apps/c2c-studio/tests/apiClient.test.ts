@@ -112,6 +112,96 @@ describe("apiClient", () => {
     });
   });
 
+  it("fetches and saves immutable trust-case selection contracts", async () => {
+    const trustCase = {
+      trustCaseId: "HELLOW02-DEFAULT",
+      version: "2026-05-21",
+      catalogVersion: "2026-05-21",
+      catalogHash: "0".repeat(64),
+      configurationDigest: "1".repeat(64),
+      programId: "HELLOW02",
+      title: "HELLOW02 default",
+      description: "Default trust case",
+      defaultForProgram: true,
+      sourceReferenceFixtureId: "HELLOW02",
+      sourceReferenceMode: "reference-fixture",
+      environmentProfileId: "generated-java-sandbox-v1",
+      comparisonStrategy: "deterministic-output",
+      comparisonPolicyVersion: "deterministic-output-v1",
+      supportedSubset: ["DISPLAY"],
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            schemaVersion: "v0",
+            catalogVersion: "2026-05-21",
+            catalogHash: "0".repeat(64),
+            programId: "HELLOW02",
+            defaultTrustCaseId: "HELLOW02-DEFAULT",
+            savedTrustCaseId: null,
+            trustCases: [trustCase],
+          }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            programId: "HELLOW02",
+            trustCaseId: "HELLOW02-DEFAULT",
+            persisted: true,
+            selected: trustCase,
+          }),
+      } as Response);
+
+    const listed = await apiClient.getTrustCases("HELLOW02");
+    const saved = await apiClient.saveTrustCasePreference(
+      "HELLOW02",
+      "HELLOW02-DEFAULT",
+    );
+
+    expect(listed).toEqual({
+      ok: true,
+      data: {
+        schemaVersion: "v0",
+        catalogVersion: "2026-05-21",
+        catalogHash: "0".repeat(64),
+        programId: "HELLOW02",
+        defaultTrustCaseId: "HELLOW02-DEFAULT",
+        savedTrustCaseId: null,
+        trustCases: [trustCase],
+      },
+    });
+    expect(saved).toEqual({
+      ok: true,
+      data: {
+        programId: "HELLOW02",
+        trustCaseId: "HELLOW02-DEFAULT",
+        persisted: true,
+        selected: trustCase,
+      },
+    });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/v0/trust-cases?programId=HELLOW02",
+      { credentials: "include" },
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/v0/session/trust-case-preference",
+      {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          programId: "HELLOW02",
+          trustCaseId: "HELLOW02-DEFAULT",
+        }),
+      },
+    );
+  });
+
   it("rejects malformed transform payloads that miss required links", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

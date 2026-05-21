@@ -53,6 +53,12 @@ export interface StoredRun {
   programId: string;
   executionMode?: RunExecutionMode;
   trustCaseId?: string;
+  trustCaseVersion?: string;
+  trustCaseCatalogVersion?: string;
+  trustCaseCatalogHash?: string;
+  trustCaseConfigurationDigest?: string;
+  trustCaseEnvironmentProfileId?: string;
+  trustCaseComparisonPolicyVersion?: string;
   sourceReferenceFixtureId?: string;
   sourceReferenceMode?: SourceReferenceMode;
   status: RunStatus;
@@ -113,6 +119,13 @@ export function createRunStore(
         programId: sample.programId,
         executionMode: initial?.executionMode,
         trustCaseId: initial?.trustCaseId,
+        trustCaseVersion: initial?.trustCaseVersion,
+        trustCaseCatalogVersion: initial?.trustCaseCatalogVersion,
+        trustCaseCatalogHash: initial?.trustCaseCatalogHash,
+        trustCaseConfigurationDigest: initial?.trustCaseConfigurationDigest,
+        trustCaseEnvironmentProfileId: initial?.trustCaseEnvironmentProfileId,
+        trustCaseComparisonPolicyVersion:
+          initial?.trustCaseComparisonPolicyVersion,
         sourceReferenceFixtureId: initial?.sourceReferenceFixtureId,
         sourceReferenceMode: initial?.sourceReferenceMode,
         status: initial?.status ?? "starting",

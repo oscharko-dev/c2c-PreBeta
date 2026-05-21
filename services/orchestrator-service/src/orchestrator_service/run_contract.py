@@ -915,6 +915,7 @@ class W02RunContract:
     generated_java_ref: JsonObject | None = None
     build_test_result_ref: JsonObject | None = None
     parity_comparison: JsonObject | None = None
+    resolved_trust_case: JsonObject | None = None
     evidence_pack_ref: JsonObject | None = None
     final_classification: str | None = None
     failure_code: str | None = None
@@ -1087,6 +1088,12 @@ class W02RunContract:
         self.parity_comparison = dict(payload) if payload else None
         self.touch()
 
+    def set_resolved_trust_case(
+        self, payload: Mapping[str, JsonValue] | None
+    ) -> None:
+        self.resolved_trust_case = dict(payload) if payload else None
+        self.touch()
+
     def set_evidence_pack_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.evidence_pack_ref = dict(ref) if ref else None
         self.touch()
@@ -1188,6 +1195,7 @@ class W02RunContract:
             "generatedJavaRef": dict(self.generated_java_ref) if self.generated_java_ref else None,
             "buildTestResultRef": dict(self.build_test_result_ref) if self.build_test_result_ref else None,
             "parityComparison": dict(self.parity_comparison) if self.parity_comparison else None,
+            "resolvedTrustCase": dict(self.resolved_trust_case) if self.resolved_trust_case else None,
             "evidencePackRef": dict(self.evidence_pack_ref) if self.evidence_pack_ref else None,
             "finalClassification": self.final_classification,
             "failureCode": self.failure_code,

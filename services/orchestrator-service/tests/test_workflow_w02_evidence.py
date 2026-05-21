@@ -30,6 +30,7 @@ from orchestrator_service.workflow import (
     W0WorkflowRunner,
     WorkflowStepResult,
 )
+from orchestrator_service.trust_cases import load_trust_case_catalog
 
 from tests.test_workflow import StubGateway
 from tests.test_workflow import W0WorkflowRunnerTests as _W0Tests
@@ -341,6 +342,116 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(oc["mismatchClassification"], "none")
         self.assertEqual(oc["comparisonResultRef"]["kind"], "parity-comparison-result")
         self.assertEqual(oc["diffRef"]["kind"], "parity-comparison-diff")
+
+    def test_resolved_trust_case_is_persisted_on_contract_and_evidence(self) -> None:
+        trust_case = load_trust_case_catalog().resolve(
+            "HELLOW02-DEFAULT",
+            program_id="HELLOW02",
+        ).to_identity_payload()
+        context = W0RunContext(
+            run_id="run-evidence",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02-DEFAULT",
+            trust_case_resolution=trust_case,
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+            use_transformation_agent=True,
+        )
+        self._write_source_and_parse_metadata(context)
+        contract = self.runner._init_w02_contract(
+            context,
+            _ref("urn:source/HELLO.cob"),
+        )
+
+        contract_snapshot = self.runner.artifact_store.read_json(
+            context.run_id,
+            "w02-run-contract.json",
+        )
+        self.assertIsNotNone(contract_snapshot)
+        self.assertEqual(
+            contract_snapshot["resolvedTrustCase"]["trustCaseId"],
+            "HELLOW02-DEFAULT",
+        )
+        self.assertEqual(
+            contract_snapshot["resolvedTrustCase"]["catalogVersion"],
+            "2026-05-21",
+        )
+        self.assertEqual(
+            contract_snapshot["resolvedTrustCase"]["sourceReferenceFixtureId"],
+            "HELLOW02",
+        )
+        self.assertEqual(
+            contract_snapshot["resolvedTrustCase"]["runtimeProgramArgs"],
+            [],
+        )
+
+        build = _step(
+            "compile-test-java",
+            payload={
+                "status": "ok",
+                "classification": "match",
+                "comparison": {
+                    "matched": True,
+                    "actualSha256": "b" * 64,
+                    "expectedSha256": "b" * 64,
+                    "actualRef": {"uri": "urn:run/java-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "java-stdout"},
+                    "expectedRef": {"uri": "urn:run/oracle-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "cobol-oracle-stdout"},
+                },
+                "comparisonResult": {
+                    "status": "passed",
+                    "matched": True,
+                    "comparisonPolicyVersion": "deterministic-output-v1",
+                    "mismatchClassification": "none",
+                    "comparisonPolicyRef": {"uri": "urn:run/policy", "sha256": "1" * 64, "byteSize": 12, "kind": "parity-comparison-policy"},
+                    "comparisonResultRef": {"uri": "urn:run/comparison-result", "sha256": "2" * 64, "byteSize": 24, "kind": "parity-comparison-result"},
+                    "diffRef": {"uri": "urn:run/comparison-diff", "sha256": "3" * 64, "byteSize": 18, "kind": "parity-comparison-diff"},
+                    "sourceNormalizedRef": {"uri": "urn:run/source-normalized", "sha256": "4" * 64, "byteSize": 16, "kind": "oracle-normalized"},
+                    "targetNormalizedRef": {"uri": "urn:run/target-normalized", "sha256": "5" * 64, "byteSize": 16, "kind": "java-normalized"},
+                    "sourceStdoutRef": {"uri": "urn:run/oracle-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "cobol-oracle-stdout"},
+                    "targetStdoutRef": {"uri": "urn:run/java-stdout", "sha256": "b" * 64, "byteSize": 16, "kind": "java-stdout"},
+                    "diffSummary": "Outputs matched after deterministic normalization.",
+                },
+                "goldenMaster": {"classification": "true"},
+            },
+            output_uri="urn:run/build-trust-case",
+        )
+
+        payload = self.runner._build_evidence_payload(
+            context=context,
+            input_ref=_ref("urn:source/HELLO.cob"),
+            parse_output=_step("parse-cobol", output_uri="urn:run/parse"),
+            ir_output=_step("generate-ir", output_uri="urn:run/ir"),
+            generator_output=_step("generate-java", output_uri="urn:run/generator"),
+            build_test_output=build,
+            model_output=None,
+            model_policy_skipped_meta=None,
+            trajectory_payload={"schemaVersion": "v0", "runId": "run-evidence", "steps": []},
+            w02_contract=contract,
+            w02_blocked=False,
+        )
+
+        trust_case_artifact = payload["artifacts"]["trustCase"]
+        self.assertEqual(trust_case_artifact["trustCaseId"], "HELLOW02-DEFAULT")
+        self.assertEqual(trust_case_artifact["catalogVersion"], "2026-05-21")
+        self.assertTrue(trust_case_artifact["catalogHash"])
+        self.assertTrue(trust_case_artifact["configurationDigest"])
+        self.assertEqual(trust_case_artifact["sourceReferenceFixtureId"], "HELLOW02")
+        self.assertEqual(trust_case_artifact["sourceReferenceMode"], "reference-fixture")
+        self.assertEqual(trust_case_artifact["environmentProfileId"], "generated-java-sandbox-v1")
+        self.assertEqual(trust_case_artifact["comparisonPolicyVersion"], "deterministic-output-v1")
+        self.assertEqual(trust_case_artifact["runtimeProgramArgs"], [])
+        self.assertIn("artifactRef", trust_case_artifact)
+        self.assertEqual(trust_case_artifact["artifactRef"]["kind"], "trust-case")
+
+        persisted = self.runner.artifact_store.read_json(
+            context.run_id,
+            "executed-trust-case.json",
+        )
+        self.assertEqual(persisted["trustCaseId"], "HELLOW02-DEFAULT")
+        self.assertEqual(persisted["catalogVersion"], "2026-05-21")
 
     def test_w02_payload_projects_runner_comparison_lineage(self) -> None:
         context = self._w0_context(use_transformation_agent=True)

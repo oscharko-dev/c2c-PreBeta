@@ -427,6 +427,7 @@ class W02RunContractShapeTests(unittest.TestCase):
             "generatedJavaRef",
             "buildTestResultRef",
             "parityComparison",
+            "resolvedTrustCase",
             "evidencePackRef",
             "finalClassification",
             "failureCode",
@@ -461,6 +462,7 @@ class W02RunContractShapeTests(unittest.TestCase):
         self.assertIsNone(payload["finalClassification"])
         self.assertIsNone(payload["failureCode"])
         self.assertIsNone(payload["parityComparison"])
+        self.assertIsNone(payload["resolvedTrustCase"])
 
     def test_set_parity_comparison_records_runner_projection(self):
         contract = self._build()

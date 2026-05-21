@@ -16,6 +16,11 @@ import {
   type AcceptanceFixtureDetail,
 } from "./acceptance-fixtures";
 import {
+  loadTrustCaseCatalog,
+  type TrustCaseCatalog,
+  type TrustCaseSummary,
+} from "./trust-cases";
+import {
   createBuildTestRunnerClient,
   createEvidenceClient,
   createExperienceLearningClient,
@@ -189,6 +194,24 @@ const STATIC_MIME: Record<string, string> = {
 
 const FORMAT_JAVA_JSON_ENVELOPE_BYTES = 8192;
 const JAVA_EXECUTION_MAX_FILES = 512;
+const TRUST_CASE_PREFERENCE_MAX_BODY_BYTES = 2048;
+const FORBIDDEN_TRUST_CASE_TRANSFORM_FIELDS = [
+  "sourceReferenceFixtureId",
+  "sourceReferenceMode",
+  "runtime",
+  "runtimeArgs",
+  "programArgs",
+  "environment",
+  "environmentProfile",
+  "comparison",
+  "comparisonStrategy",
+  "trustCase",
+  "trustCaseDefinition",
+  "catalogVersion",
+  "catalogHash",
+  "configurationDigest",
+  "evidenceIdentity",
+] as const;
 
 function formatJavaRawBodyMaxBytes(maxContentBytes: number): number {
   return maxContentBytes * 2 + FORMAT_JAVA_JSON_ENVELOPE_BYTES;
@@ -202,6 +225,7 @@ export interface ServerDeps {
   config: BffConfig;
   samples?: SampleRegistry;
   acceptanceFixtures?: AcceptanceFixtureRegistry;
+  trustCases?: TrustCaseCatalog;
   orchestrator?: OrchestratorClient;
   evidence?: EvidenceClient;
   experienceLearning?: ExperienceLearningClient;
@@ -245,6 +269,7 @@ interface ResolvedDeps {
   config: BffConfig;
   samples: SampleRegistry;
   acceptanceFixtures: () => AcceptanceFixtureRegistry;
+  trustCases: () => TrustCaseCatalog;
   orchestrator: OrchestratorClient;
   evidence: EvidenceClient;
   experienceLearning: ExperienceLearningClient;
@@ -292,10 +317,39 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
     }
     return acceptanceFixturesResult.value;
   };
+  let trustCasesResult:
+    | { ok: true; value: TrustCaseCatalog }
+    | { ok: false; error: Error }
+    | undefined = deps.trustCases
+    ? { ok: true, value: deps.trustCases }
+    : undefined;
+  const trustCasesAccessor = (): TrustCaseCatalog => {
+    if (!trustCasesResult) {
+      try {
+        trustCasesResult = {
+          ok: true,
+          value: loadTrustCaseCatalog(
+            deps.config.repoRoot,
+            acceptanceFixturesAccessor(),
+          ),
+        };
+      } catch (err) {
+        trustCasesResult = {
+          ok: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
+    }
+    if (!trustCasesResult.ok) {
+      throw trustCasesResult.error;
+    }
+    return trustCasesResult.value;
+  };
   return {
     config: deps.config,
     samples: deps.samples ?? loadSampleRegistry(deps.config.repoRoot),
     acceptanceFixtures: acceptanceFixturesAccessor,
+    trustCases: trustCasesAccessor,
     orchestrator:
       deps.orchestrator ??
       createOrchestratorClient(
@@ -601,6 +655,44 @@ function badRequest(res: http.ServerResponse, message: string): void {
   jsonResponse(res, 400, { error: message });
 }
 
+function trustCaseCatalogResponse(
+  catalog: TrustCaseCatalog,
+  programId: string | undefined,
+  savedTrustCaseId: string | null,
+): Record<string, unknown> {
+  const trustCases = catalog.list(programId);
+  const defaultTrustCaseId = programId
+    ? catalog.defaultForProgram(programId)?.trustCaseId ?? null
+    : trustCases.find((entry) => entry.defaultForProgram)?.trustCaseId ?? null;
+  return {
+    schemaVersion: catalog.schemaVersion,
+    catalogVersion: catalog.catalogVersion,
+    catalogHash: catalog.catalogHash,
+    programId: programId ?? null,
+    defaultTrustCaseId,
+    savedTrustCaseId,
+    trustCases,
+  };
+}
+
+function sessionTrustCasePreference(
+  req: http.IncomingMessage,
+  sessionStore: SessionStore,
+  programId: string,
+): string | null {
+  const sessionId = parseSessionCookieFromRequest(req);
+  if (!sessionId) return null;
+  return sessionStore.getTrustCasePreference(sessionId, programId);
+}
+
+function forbiddenTrustCaseTransformFields(
+  body: Record<string, unknown>,
+): string[] {
+  return FORBIDDEN_TRUST_CASE_TRANSFORM_FIELDS.filter(
+    (field) => body[field] !== undefined,
+  ).map((field) => String(field));
+}
+
 function parseRequestOrigin(req: http.IncomingMessage): string | null {
   const origin = req.headers.origin;
   if (typeof origin !== "string" || origin.length === 0) return null;
@@ -677,7 +769,7 @@ function applyLocalApiCors(
   if (origin === null || !allowedOrigins.includes(origin)) return;
 
   res.setHeader("access-control-allow-origin", origin);
-  res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+  res.setHeader("access-control-allow-methods", "GET,POST,PUT,OPTIONS");
   res.setHeader("access-control-allow-headers", "Content-Type");
   // Cookie-authenticated routes require credentials, but only for exact
   // configured Studio origins. Reflecting arbitrary localhost origins would
@@ -2121,6 +2213,26 @@ function applyWorkflowSnapshotToStore(
     manualEditsCarriedOver: snapshot.manualEditsCarriedOver,
     manualDriftRegionCount: snapshot.manualDriftRegionCount,
   };
+  if (snapshot.trustCase) {
+    patch.trustCaseId = snapshot.trustCase.trustCaseId;
+    patch.trustCaseVersion = snapshot.trustCase.version;
+    patch.trustCaseCatalogVersion = snapshot.trustCase.catalogVersion;
+    patch.trustCaseCatalogHash = snapshot.trustCase.catalogHash;
+    patch.trustCaseConfigurationDigest =
+      snapshot.trustCase.configurationDigest;
+    patch.trustCaseEnvironmentProfileId =
+      snapshot.trustCase.environmentProfileId;
+    patch.trustCaseComparisonPolicyVersion =
+      snapshot.trustCase.comparisonPolicyVersion;
+    patch.sourceReferenceFixtureId =
+      snapshot.trustCase.sourceReferenceFixtureId;
+    if (
+      snapshot.trustCase.sourceReferenceMode === "reference-fixture" ||
+      snapshot.trustCase.sourceReferenceMode === "native-cobol"
+    ) {
+      patch.sourceReferenceMode = snapshot.trustCase.sourceReferenceMode;
+    }
+  }
   const updated = runStore.update(stored.runId, patch);
   return updated ?? stored;
 }
@@ -2676,6 +2788,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
     config,
     samples,
     acceptanceFixtures,
+    trustCases,
     orchestrator,
     evidence,
     experienceLearning,
@@ -2893,6 +3006,142 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         );
         res.writeHead(204);
         res.end();
+        return;
+      }
+
+      if (pathname === "/api/v0/trust-cases" && method === "GET") {
+        try {
+          const programIdRaw = requestUrl.searchParams.get("programId");
+          const programId =
+            typeof programIdRaw === "string" && programIdRaw.trim().length > 0
+              ? programIdRaw.trim()
+              : undefined;
+          const catalog = trustCases();
+          const savedTrustCaseId = programId
+            ? sessionTrustCasePreference(req, sessionStore, programId)
+            : null;
+          const savedSummary =
+            savedTrustCaseId === null ? undefined : catalog.get(savedTrustCaseId);
+          jsonResponse(
+            res,
+            200,
+            trustCaseCatalogResponse(
+              catalog,
+              programId,
+              savedSummary && (!programId || savedSummary.programId === programId)
+                ? savedSummary.trustCaseId
+                : null,
+            ),
+          );
+        } catch (err) {
+          jsonResponse(res, 500, {
+            error: "trust-case catalog unavailable",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      if (
+        pathname === "/api/v0/session/trust-case-preference" &&
+        method === "GET"
+      ) {
+        const programIdRaw = requestUrl.searchParams.get("programId");
+        if (!programIdRaw || programIdRaw.trim().length === 0) {
+          badRequest(res, "programId must be a non-empty string");
+          return;
+        }
+        const programId = programIdRaw.trim();
+        const sessionId = parseSessionCookieFromRequest(req);
+        const sessionRecord = sessionId ? sessionStore.get(sessionId) : null;
+        jsonResponse(res, 200, {
+          programId,
+          trustCaseId: sessionRecord?.trustCasePreferences[programId] ?? null,
+          persisted: Boolean(sessionRecord),
+        });
+        return;
+      }
+
+      if (
+        pathname === "/api/v0/session/trust-case-preference" &&
+        method === "PUT"
+      ) {
+        if (rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)) {
+          return;
+        }
+        if (rejectNonJsonContentType(req, res)) return;
+        const sessionId = parseSessionCookieFromRequest(req);
+        if (!sessionId) {
+          jsonResponse(res, 401, { error: "session cookie missing" });
+          return;
+        }
+        let raw: unknown;
+        try {
+          raw = await readJsonBody(req, TRUST_CASE_PREFERENCE_MAX_BODY_BYTES);
+        } catch (err) {
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        const requestBody = asRecord(raw);
+        if (!requestBody) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const programId =
+          typeof requestBody.programId === "string" &&
+          requestBody.programId.trim().length > 0
+            ? requestBody.programId.trim()
+            : undefined;
+        const trustCaseId =
+          typeof requestBody.trustCaseId === "string" &&
+          requestBody.trustCaseId.trim().length > 0
+            ? requestBody.trustCaseId.trim()
+            : undefined;
+        if (!programId) {
+          badRequest(res, "programId must be a non-empty string");
+          return;
+        }
+        if (!trustCaseId) {
+          badRequest(res, "trustCaseId must be a non-empty string");
+          return;
+        }
+        let selected: TrustCaseSummary | undefined;
+        try {
+          selected = trustCases().get(trustCaseId);
+        } catch (err) {
+          jsonResponse(res, 500, {
+            error: "trust-case catalog unavailable",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
+        if (!selected) {
+          badRequest(res, `unknown trustCaseId ${JSON.stringify(trustCaseId)}`);
+          return;
+        }
+        if (selected.programId !== programId) {
+          badRequest(
+            res,
+            `trustCaseId ${JSON.stringify(trustCaseId)} does not apply to programId ${JSON.stringify(programId)}`,
+          );
+          return;
+        }
+        const record = sessionStore.setTrustCasePreference(
+          sessionId,
+          programId,
+          trustCaseId,
+        );
+        if (!record) {
+          jsonResponse(res, 401, { error: "session not found" });
+          return;
+        }
+        appendVaryHeader(res, "Cookie");
+        jsonResponse(res, 200, {
+          programId,
+          trustCaseId,
+          persisted: true,
+          selected,
+        });
         return;
       }
 
@@ -3310,6 +3559,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const expectedOutputRaw = (body as Record<string, unknown>)
           .expectedOutput;
         const oracleInputRaw = (body as Record<string, unknown>).oracleInput;
+        const trustCaseIdRaw = (body as Record<string, unknown>).trustCaseId;
         const useTransformationAgentRaw = (body as Record<string, unknown>)
           .useTransformationAgent;
         if (
@@ -3384,6 +3634,14 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         if (
+          trustCaseIdRaw !== undefined &&
+          (typeof trustCaseIdRaw !== "string" ||
+            trustCaseIdRaw.trim().length === 0)
+        ) {
+          badRequest(res, "trustCaseId must be a non-empty string when provided");
+          return;
+        }
+        if (
           useTransformationAgentRaw !== undefined &&
           typeof useTransformationAgentRaw !== "boolean"
         ) {
@@ -3414,10 +3672,51 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           typeof expectedOutputRaw === "string" ? expectedOutputRaw : undefined;
         const oracleInput =
           typeof oracleInputRaw === "string" ? oracleInputRaw : undefined;
+        const trustCaseId =
+          typeof trustCaseIdRaw === "string" ? trustCaseIdRaw.trim() : undefined;
         const useTransformationAgent =
           typeof useTransformationAgentRaw === "boolean"
             ? useTransformationAgentRaw
             : true;
+
+        let selectedTrustCase: TrustCaseSummary | undefined;
+        if (trustCaseId) {
+          const forbiddenFields = forbiddenTrustCaseTransformFields(
+            body as Record<string, unknown>,
+          );
+          if (optionsRaw !== undefined) forbiddenFields.push("options");
+          if (expectedOutputRaw !== undefined) {
+            forbiddenFields.push("expectedOutput");
+          }
+          if (oracleInputRaw !== undefined) forbiddenFields.push("oracleInput");
+          if (forbiddenFields.length > 0) {
+            badRequest(
+              res,
+              `trustCaseId submissions may not include browser-authored runtime internals: ${forbiddenFields.join(", ")}`,
+            );
+            return;
+          }
+          try {
+            selectedTrustCase = trustCases().get(trustCaseId);
+          } catch (err) {
+            jsonResponse(res, 500, {
+              error: "trust-case catalog unavailable",
+              message: err instanceof Error ? err.message : String(err),
+            });
+            return;
+          }
+          if (!selectedTrustCase) {
+            badRequest(res, `unknown trustCaseId ${JSON.stringify(trustCaseId)}`);
+            return;
+          }
+          if (selectedTrustCase.programId !== programId) {
+            badRequest(
+              res,
+              `trustCaseId ${JSON.stringify(trustCaseId)} does not apply to programId ${JSON.stringify(programId)}`,
+            );
+            return;
+          }
+        }
 
         const referenceMatch = samples.get(programId);
         if (referenceMatch && !referenceMatch.supportedInProductMode) {
@@ -3446,11 +3745,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             sourceText,
             requester: "c2c-ui",
             sourceName,
-            options: optionsRaw,
+            options: selectedTrustCase ? undefined : optionsRaw,
             targetLanguage,
-            expectedOutput,
-            oracleInput,
+            expectedOutput: selectedTrustCase ? undefined : expectedOutput,
+            oracleInput: selectedTrustCase ? undefined : oracleInput,
             useTransformationAgent,
+            ...(selectedTrustCase
+              ? {
+                  executionMode: "parity" as const,
+                  trustCaseId: selectedTrustCase.trustCaseId,
+                }
+              : {}),
           };
           const upstream = await startTransformRun(transformInput);
           if (upstream && upstream.status >= 200 && upstream.status < 300) {
@@ -3460,6 +3765,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               "live",
               liveRunId,
               {
+                executionMode: selectedTrustCase ? "parity" : undefined,
+                trustCaseId: selectedTrustCase?.trustCaseId,
+                trustCaseVersion: selectedTrustCase?.version,
+                trustCaseCatalogVersion: selectedTrustCase?.catalogVersion,
+                trustCaseCatalogHash: selectedTrustCase?.catalogHash,
+                trustCaseConfigurationDigest:
+                  selectedTrustCase?.configurationDigest,
+                trustCaseEnvironmentProfileId:
+                  selectedTrustCase?.environmentProfileId,
+                trustCaseComparisonPolicyVersion:
+                  selectedTrustCase?.comparisonPolicyVersion,
                 status: "starting",
                 message: "run accepted by orchestrator",
               },

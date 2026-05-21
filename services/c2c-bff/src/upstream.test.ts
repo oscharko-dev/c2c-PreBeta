@@ -275,6 +275,37 @@ test("startTransformRun forwards transformation-agent opt-in on the run payload"
   );
 });
 
+test("startTransformRun forwards parity trust-case selection", async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({
+        run: { runId: "live-1", status: "updating" },
+        status: "started",
+      });
+      res.writeHead(201, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+      });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      await orch.startTransformRun({
+        programId: "HELLO01",
+        sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
+        executionMode: "parity",
+        trustCaseId: "HELLO01-DEFAULT",
+      });
+      const parsed = JSON.parse(captured[0]?.body ?? "{}");
+      assert.equal(parsed.executionMode, "parity");
+      assert.equal(parsed.trustCaseId, "HELLO01-DEFAULT");
+      assert.equal(parsed.sourceReferenceFixtureId, undefined);
+      assert.equal(parsed.runtime, undefined);
+    },
+  );
+});
+
 test("startTransformRun omits empty W0.2 oracle metadata from the inputRef", async () => {
   const client = createNodeHttpClient();
   await withEchoServer(

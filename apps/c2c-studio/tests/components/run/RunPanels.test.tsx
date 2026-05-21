@@ -64,6 +64,7 @@ describe('Run Panels', () => {
         clean: true,
         pendingReRun: false,
       },
+      selectedTrustCase: null,
     });
   });
 
@@ -208,6 +209,7 @@ describe('Run Panels', () => {
           clean: false,
           pendingReRun: true,
         },
+        selectedTrustCase: null,
       });
       useTransformationRunMock.mockReturnValue({
         state: {
@@ -380,6 +382,7 @@ describe('Run Panels', () => {
           clean: false,
           pendingReRun: true,
         },
+        selectedTrustCase: null,
       });
       useTransformationRunMock.mockReturnValue({
         state: {
@@ -430,6 +433,52 @@ describe('Run Panels', () => {
           'Current Java diverges from run run-123. 2 files and 3 regions carry manual edit provenance, so build/test and evidence are stale until you rerun.',
         ).length,
       ).toBeGreaterThan(0);
+    });
+
+    it('marks evidence produced by another trust case or catalog version', () => {
+      useSourceWorkspaceMock.mockReturnValue({
+        statusFlags: {
+          clean: true,
+          pendingReRun: false,
+        },
+        selectedTrustCase: {
+          trustCaseId: 'CURRENT-CASE',
+          configurationDigest: 'current-digest',
+        },
+      });
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          summary: {
+            trustCaseId: 'OLD-CASE',
+            trustCaseConfigurationDigest: 'old-digest',
+          },
+          generated: {
+            artifactRef: {
+              sha256: 'abc123',
+            },
+          },
+          buildTest: {
+            generatedArtifactRef: {
+              sha256: 'abc123',
+            },
+          },
+          evidence: {
+            status: 'complete',
+            packId: 'pack-trust-case',
+            manifestHash: 'manifest-trust-case',
+            generatedArtifactRef: {
+              sha256: 'abc123',
+            },
+          },
+        },
+      });
+
+      render(<EvidencePackPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+      expect(
+        screen.getByText(/Existing evidence was produced from\s+OLD-CASE or a different catalog version\. Rerun to use\s+CURRENT-CASE\./),
+      ).toBeDefined();
     });
 
     it('keeps previous evidence accessible when the latest rerun fails', () => {

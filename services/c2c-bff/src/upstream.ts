@@ -208,6 +208,8 @@ export interface OrchestratorClient {
     expectedOutput?: string;
     oracleInput?: string;
     useTransformationAgent?: boolean;
+    executionMode?: "standard" | "parity";
+    trustCaseId?: string;
     // Studio-IDE-13 (#255): when ``true`` the orchestrator stops after
     // the generate-java step and finalises the run with the
     // ``generate_only_complete`` failure code. The BFF /api/v0/generate
@@ -396,6 +398,8 @@ export function createOrchestratorClient(
       expectedOutput,
       oracleInput,
       useTransformationAgent,
+      executionMode,
+      trustCaseId,
       generateOnly,
     }) {
       const sha256 = createHash("sha256")
@@ -432,6 +436,8 @@ export function createOrchestratorClient(
       if (typeof useTransformationAgent === "boolean") {
         payload.useTransformationAgent = useTransformationAgent;
       }
+      if (executionMode) payload.executionMode = executionMode;
+      if (trustCaseId) payload.trustCaseId = trustCaseId;
       if (typeof generateOnly === "boolean") {
         payload.generateOnly = generateOnly;
       }

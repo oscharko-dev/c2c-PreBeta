@@ -105,7 +105,56 @@ export interface W02RunContractFields {
   manualDriftRegionCount?: number;
 }
 
-export interface TransformResponse extends W02RunContractFields {
+export interface TrustCaseIdentityFields {
+  trustCaseId?: string;
+  trustCaseVersion?: string;
+  trustCaseCatalogVersion?: string;
+  trustCaseCatalogHash?: string;
+  trustCaseConfigurationDigest?: string;
+  trustCaseEnvironmentProfileId?: string;
+  trustCaseComparisonPolicyVersion?: string;
+  sourceReferenceFixtureId?: string;
+  sourceReferenceMode?: string;
+}
+
+export interface TrustCaseSummary {
+  trustCaseId: string;
+  version: string;
+  catalogVersion: string;
+  catalogHash: string;
+  configurationDigest: string;
+  programId: string;
+  title: string;
+  description: string;
+  defaultForProgram: boolean;
+  sourceReferenceFixtureId: string;
+  sourceReferenceMode: string;
+  environmentProfileId: string;
+  comparisonStrategy: string;
+  comparisonPolicyVersion: string;
+  supportedSubset: string[];
+}
+
+export interface TrustCasesResponse {
+  schemaVersion: "v0";
+  catalogVersion: string;
+  catalogHash: string;
+  programId: string | null;
+  defaultTrustCaseId: string | null;
+  savedTrustCaseId: string | null;
+  trustCases: TrustCaseSummary[];
+}
+
+export interface TrustCasePreferenceResponse {
+  programId: string;
+  trustCaseId: string | null;
+  persisted: boolean;
+  selected?: TrustCaseSummary;
+}
+
+export interface TransformResponse
+  extends W02RunContractFields,
+    TrustCaseIdentityFields {
   runId: string;
   orchestratorRunId: string;
   programId: string;
@@ -129,14 +178,11 @@ export interface TransformResponse extends W02RunContractFields {
 // ``javaRegionClassification`` null-fallback per ADR 0006 Decision 4:
 // when absent, the generated-Java buffer renders without trust-pillar
 // decoration. Studio MUST NOT infer regions from filename or content.
-export interface RunSummary extends W02RunContractFields {
+export interface RunSummary extends W02RunContractFields, TrustCaseIdentityFields {
   schemaVersion?: string;
   runId: string;
   programId: string;
   executionMode?: string;
-  trustCaseId?: string;
-  sourceReferenceFixtureId?: string;
-  sourceReferenceMode?: string;
   status: "starting" | "updating" | "completed" | "failed";
   mode: "live" | "diagnostic-fixture";
   productMode: "live" | "unavailable";
@@ -511,6 +557,7 @@ export interface RunWorkflowView {
   state: string | null;
   activeStep: string | null;
   activeAgent: W02ActiveAgent | null;
+  trustCase: TrustCaseIdentityFields | null;
   agentAttemptCount: number;
   repairBudget: RepairBudget | null;
   // Issue #216 (W0.3-5): per-run assist + Model Gateway budgets surfaced

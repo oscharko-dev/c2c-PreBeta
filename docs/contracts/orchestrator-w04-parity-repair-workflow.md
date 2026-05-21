@@ -34,7 +34,7 @@ The first trust workflow is described in terms of these stable objects:
 
 | Object | Meaning |
 | --- | --- |
-| Trust case | A curated parity run configuration that binds one supported COBOL source, one controlled input fixture, one reference artifact, and the policies that govern the run. |
+| Trust case | An immutable, repository-owned catalog entry that binds one supported COBOL source, one controlled input fixture, one reference artifact, and the policies that govern the run. |
 | Parity run | One end-to-end execution of transformation, reference resolution, target build/run, comparison, and evidence capture for a trust case. |
 | Repair run | A bounded follow-on workflow for a failed parity run that collects deterministic failure context, obtains an optional repair proposal through the Model Gateway, and re-enters deterministic verification after explicit approval. |
 | Reference artifact | The controlled source/reference result used as the source-side authority for the first trust slice. |
@@ -60,13 +60,25 @@ The consumer-visible parity loop is:
 7. Evidence records the run configuration, artifacts, outputs, hashes,
    diagnostics, comparison, and provenance state.
 
-The current additive orchestrator entrypoint accepts parity runs through the
-existing run-start API by setting `executionMode=parity` and supplying the
-curated `sourceReferenceFixtureId`, `sourceReferenceMode`, and optional
-`trustCaseId`. The orchestrator remains the workflow authority: it drives
-transform, source/reference execution, generated-Java build, generated-Java
-execution, comparison, evidence capture, and completion as recorded progress
-phases for polling consumers.
+The primary interactive Studio entrypoint for parity is
+`POST /api/v0/transform` through the BFF with a selected `trustCaseId`.
+Studio sends the selected trust-case identifier with the normal transformation
+request; it does not send runtime arguments, environment variables, fixture
+paths, comparison rules, secrets, filesystem paths, or other runtime internals.
+The BFF lists catalog summaries and stores only the selected session
+preference. It may validate that the identifier exists for the submitted
+program before dispatch, but it must not resolve execution semantics
+independently.
+
+The Orchestrator remains the workflow authority. It resolves `trustCaseId`
+against the repository-owned catalog, derives the controlled source/reference
+fixture, runtime profile, environment metadata, comparison policy, and evidence
+identity from that catalog entry, and then drives transform, source/reference
+execution, generated-Java build, generated-Java execution, comparison, evidence
+capture, and completion as recorded progress phases for polling consumers.
+`/api/v0/runs` remains a run resource, status, evidence, and Orchestrator
+control/read path; it must not become a browser-authored runtime configuration
+surface for the Studio parity launcher.
 
 For Issue #354 consumers must treat the Java runner payload as the comparison
 source of truth. The Orchestrator may persist or relay additive projection
@@ -128,14 +140,33 @@ expressed as a supported final classification such as `blocked`, `failed`, or
 failure code rather than a new `unsupported` final-classification value. It
 must not surface as a successful parity claim.
 
+## Immutable Trust-Case Catalog
+
+The repository-owned catalog is the only source of trust-case internals. Each
+catalog entry must carry an explicit trust-case identifier, trust-case version,
+catalog version or catalog hash, supported program shape, controlled input
+identity, runtime argument profile, environment profile metadata, comparison
+strategy, comparison policy version, and evidence identity. Runtime parameters
+are allowlisted, typed, and checked in with the repository. Studio may display
+summary fields and save the selected `trustCaseId` as a user, workspace, or
+session preference, but it must not edit catalog entries or author arbitrary
+runtime configuration.
+
+Completed run evidence is immutable. Consumers must compare the current Studio
+selection with the run's recorded trust-case identity, catalog version/hash, and
+configuration digest before presenting rerun or evidence state. When the
+current selection differs from the completed evidence, Studio must show that
+the prior results were produced from another trust case or catalog version
+rather than implying that they validate the current selection.
+
 ## Component Responsibilities
 
 The trust workflow spans these stable responsibilities:
 
 | Component | Responsibility |
 | --- | --- |
-| Studio | Presents run configuration, mode labels, diagnostics, diffs, stale-state cues, evidence state, and repair review surfaces. |
-| BFF | Owns browser-facing APIs and session-safe request brokering only. |
+| Studio | Presents immutable trust-case selection, saved-preference controls, mode labels, diagnostics, diffs, stale-state cues, evidence state, and repair review surfaces. |
+| BFF | Owns browser-facing APIs, catalog summaries, saved trust-case preference, and session-safe request brokering only. |
 | Orchestrator | Owns workflow sequencing, parity orchestration, repair decisions, and final classification. |
 | Harness | Provides controlled execution, policy, and ledger infrastructure without deciding parity outcomes. |
 | Build/Test Runner | Compiles and executes generated Java and returns build/runtime diagnostics. |
@@ -166,7 +197,10 @@ through deterministic evidence and final classification.
 
 The first trust workflow must preserve at least these evidence classes:
 
-- trust-case identity and version;
+- selected and resolved trust-case identity, version, catalog version/hash, and
+  configuration digest;
+- runtime profile, comparison policy, and trust-case evidence artifact
+  references resolved from the catalog;
 - input fixture identity and version;
 - reference artifact identity and provenance;
 - generated Java candidate identity and provenance;

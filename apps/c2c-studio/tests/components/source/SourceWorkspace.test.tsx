@@ -18,6 +18,8 @@ import {
   TransformResponse,
   RunSummary,
   RunProgressView,
+  TrustCaseSummary,
+  TrustCasesResponse,
 } from "@/types/api";
 import {
   RunExperienceView,
@@ -33,6 +35,9 @@ function okResult<T>(data: T): ApiResult<T> {
 vi.mock("@/lib/apiClient", () => ({
   apiClient: {
     transform: vi.fn(),
+    generate: vi.fn(),
+    getTrustCases: vi.fn(),
+    saveTrustCasePreference: vi.fn(),
     getRun: vi.fn(),
     getGenerated: vi.fn(),
     getGeneratedFiles: vi.fn(),
@@ -159,6 +164,40 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function trustCaseFor(programId: string): TrustCaseSummary {
+  return {
+    trustCaseId: `${programId}-DEFAULT`,
+    version: "2026-05-21",
+    catalogVersion: "2026-05-21",
+    catalogHash: "0".repeat(64),
+    configurationDigest: `${programId}-digest`,
+    programId,
+    title: `${programId} default trust case`,
+    description: "Default immutable parity trust case.",
+    defaultForProgram: true,
+    sourceReferenceFixtureId: "HELLOW02",
+    sourceReferenceMode: "reference-fixture",
+    environmentProfileId: "generated-java-sandbox-v1",
+    comparisonStrategy: "deterministic-output",
+    comparisonPolicyVersion: "deterministic-output-v1",
+    supportedSubset: ["DISPLAY"],
+  };
+}
+
+async function clickEnabledStartTransformation() {
+  const button = await screen.findByRole("button", {
+    name: /start transformation/i,
+  });
+  await waitFor(() => expect(button).not.toBeDisabled());
+  fireEvent.click(button);
+}
+
+async function clickEnabledGenerateAndVerify() {
+  const button = await screen.findByTestId("topbar-generate-and-verify-button");
+  await waitFor(() => expect(button).not.toBeDisabled());
+  fireEvent.click(button);
 }
 
 function FileOpenRaceHarness() {
@@ -350,6 +389,30 @@ describe("COBOL source input", () => {
       encryptedSize: 1,
       ttlExpiresAt: "2026-06-01T00:00:00.000Z",
     });
+    vi.mocked(apiClient.getTrustCases).mockImplementation((programId) => {
+      const effectiveProgramId = programId ?? "HELLOW02";
+      const trustCase = trustCaseFor(effectiveProgramId);
+      return Promise.resolve(
+        okResult<TrustCasesResponse>({
+          schemaVersion: "v0",
+          catalogVersion: "2026-05-21",
+          catalogHash: "0".repeat(64),
+          programId: effectiveProgramId,
+          defaultTrustCaseId: trustCase.trustCaseId,
+          savedTrustCaseId: null,
+          trustCases: [trustCase],
+        }),
+      );
+    });
+    vi.mocked(apiClient.saveTrustCasePreference).mockImplementation(
+      async (programId, trustCaseId) =>
+        okResult({
+          programId,
+          trustCaseId,
+          persisted: true,
+          selected: trustCaseFor(programId),
+        }),
+    );
     vi.mocked(apiClient.getRun).mockResolvedValue(
       okResult<RunSummary>({
         runId: "run-1",
@@ -542,7 +605,7 @@ describe("COBOL source input", () => {
         value: "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN01.\n",
       },
     });
-    fireEvent.click(screen.getByText("Start Transformation"));
+    await clickEnabledStartTransformation();
 
     await waitFor(() => {
       expect(apiClient.transform).toHaveBeenCalledWith({
@@ -551,8 +614,7 @@ describe("COBOL source input", () => {
         programId: undefined,
         sourceName: "pasted-source.cbl",
         targetLanguage: "java",
-        expectedOutput: undefined,
-        oracleInput: undefined,
+        trustCaseId: "OWN01-DEFAULT",
         useTransformationAgent: true,
       });
     });
@@ -605,7 +667,7 @@ describe("COBOL source input", () => {
         value: "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN01.\n",
       },
     });
-    fireEvent.click(screen.getByText("Start Transformation"));
+    await clickEnabledStartTransformation();
 
     await waitFor(() => {
       expect(emitTelemetryMock).toHaveBeenCalledWith({
@@ -731,7 +793,7 @@ describe("COBOL source input", () => {
     expect(screen.getByTestId("conflict-local")).toHaveTextContent("");
   });
 
-  it("submits optional expected output and oracle input when provided", async () => {
+  it("keeps optional oracle fields out of immutable trust-case submissions", async () => {
     vi.mocked(apiClient.transform).mockResolvedValue({
       ok: true,
       data: {
@@ -764,9 +826,7 @@ describe("COBOL source input", () => {
         target: { value: "stdin line\n" },
       },
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: /start transformation/i }),
-    );
+    await clickEnabledStartTransformation();
 
     await waitFor(() => {
       expect(apiClient.transform).toHaveBeenCalledWith({
@@ -775,8 +835,7 @@ describe("COBOL source input", () => {
         programId: undefined,
         sourceName: "pasted-source.cbl",
         targetLanguage: "java",
-        expectedOutput: "DONE\n",
-        oracleInput: "stdin line\n",
+        trustCaseId: "OWN02-DEFAULT",
         useTransformationAgent: true,
       });
     });
@@ -808,9 +867,7 @@ describe("COBOL source input", () => {
       },
     );
     fireEvent.click(assistToggle);
-    fireEvent.click(
-      screen.getByRole("button", { name: /start transformation/i }),
-    );
+    await clickEnabledStartTransformation();
 
     await waitFor(() => {
       expect(apiClient.transform).toHaveBeenCalledWith({
@@ -819,8 +876,7 @@ describe("COBOL source input", () => {
         programId: undefined,
         sourceName: "pasted-source.cbl",
         targetLanguage: "java",
-        expectedOutput: undefined,
-        oracleInput: undefined,
+        trustCaseId: "OWN05-DEFAULT",
         useTransformationAgent: false,
       });
     });
@@ -885,14 +941,131 @@ describe("COBOL source input", () => {
         },
       },
     );
-    fireEvent.click(
-      screen.getAllByRole("button", { name: /start transformation/i })[0],
-    );
+    await clickEnabledGenerateAndVerify();
 
     await waitFor(() => {
       expect(apiClient.transform).toHaveBeenCalledWith({
         sourceText:
           "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN03.\n",
+        programId: undefined,
+        sourceName: "pasted-source.cbl",
+        targetLanguage: "java",
+        trustCaseId: "OWN03-DEFAULT",
+        useTransformationAgent: true,
+      });
+    });
+  });
+
+  it("top bar lists the current trust case and saves the Studio preference", async () => {
+    renderSourceWorkbench(
+      <>
+        <AppTopBar
+          apiState={{
+            health: { status: "ok" },
+            mode: { orchestrator: "live", evidence: "live" },
+            error: null,
+            errorKind: null,
+            loading: false,
+          }}
+        />
+        <CobolEditorPane />
+      </>,
+    );
+
+    fireEvent.click(screen.getByText("Start Typing"));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: /COBOL source editor/i }),
+      {
+        target: {
+          value: "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN07.\n",
+        },
+      },
+    );
+
+    const selector = await screen.findByTestId("topbar-trust-case-select");
+    await waitFor(() => expect(selector).toHaveValue("OWN07-DEFAULT"));
+    fireEvent.click(screen.getByTestId("topbar-save-trust-case-preference"));
+
+    await waitFor(() => {
+      expect(apiClient.saveTrustCasePreference).toHaveBeenCalledWith(
+        "OWN07",
+        "OWN07-DEFAULT",
+      );
+    });
+  });
+
+  it("keeps generator-only actions available when parity trust cases are unavailable", async () => {
+    vi.mocked(apiClient.getTrustCases).mockResolvedValue(
+      okResult<TrustCasesResponse>({
+        schemaVersion: "v0",
+        catalogVersion: "2026-05-21",
+        catalogHash: "0".repeat(64),
+        programId: "NOCAT",
+        defaultTrustCaseId: null,
+        savedTrustCaseId: null,
+        trustCases: [],
+      }),
+    );
+    vi.mocked(apiClient.generate).mockResolvedValue({
+      ok: true,
+      data: {
+        runMode: "generate",
+        runId: "gen-1",
+        orchestratorRunId: "orch-gen-1",
+        programId: "NOCAT",
+        status: "starting",
+        mode: "live",
+        productMode: "live",
+        createdAt: "2026-05-21T00:00:00.000Z",
+        updatedAt: "2026-05-21T00:00:00.000Z",
+        links: {
+          self: "/api/v0/runs/gen-1",
+          generated: "/api/v0/runs/gen-1/generated",
+          generatedFiles: "/api/v0/runs/gen-1/generated/files",
+          buildTest: "/api/v0/runs/gen-1/build-test",
+          evidence: "/api/v0/runs/gen-1/evidence",
+          events: "/api/v0/runs/gen-1/events",
+          artifacts: "/api/v0/runs/gen-1/artifacts",
+        },
+      },
+    });
+
+    renderSourceWorkbench(
+      <>
+        <AppTopBar
+          apiState={{
+            health: { status: "ok" },
+            mode: { orchestrator: "live", evidence: "live" },
+            error: null,
+            errorKind: null,
+            loading: false,
+          }}
+        />
+        <CobolEditorPane />
+      </>,
+    );
+
+    fireEvent.click(screen.getByText("Start Typing"));
+    const sourceText =
+      "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. NOCAT.\n";
+    fireEvent.change(screen.getByRole("textbox", { name: /COBOL source editor/i }), {
+      target: { value: sourceText },
+    });
+
+    const generateAndVerify = await screen.findByTestId(
+      "topbar-generate-and-verify-button",
+    );
+    const generate = await screen.findByTestId("topbar-generate-button");
+    await waitFor(() => {
+      expect(generateAndVerify).toBeDisabled();
+      expect(generate).not.toBeDisabled();
+    });
+
+    fireEvent.click(generate);
+
+    await waitFor(() => {
+      expect(apiClient.generate).toHaveBeenCalledWith({
+        sourceText,
         programId: undefined,
         sourceName: "pasted-source.cbl",
         targetLanguage: "java",
@@ -945,9 +1118,11 @@ describe("COBOL source input", () => {
         name: /allow ai assist after deterministic baseline/i,
       }),
     );
-    expect(
-      screen.getByRole("button", { name: /start transformation/i }),
-    ).not.toBeDisabled();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /start transformation/i }),
+      ).not.toBeDisabled(),
+    );
   });
 
   it("keeps a large source buffer addressable through the Monaco-backed editor surface", async () => {
@@ -999,9 +1174,7 @@ describe("COBOL source input", () => {
         },
       },
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: /start transformation/i }),
-    );
+    await clickEnabledStartTransformation();
 
     expect(
       await screen.findByText("Backend unavailable. Try again shortly."),
