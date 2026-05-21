@@ -33,6 +33,7 @@ vi.mock("@/lib/apiClient", () => ({
   apiClient: {
     transform: vi.fn(),
     exportParityEvidenceScaffold: vi.fn(),
+    upsertIntentionalDivergenceDecision: vi.fn(),
     getRun: vi.fn(),
     getGenerated: vi.fn(),
     getGeneratedFiles: vi.fn(),
@@ -268,8 +269,15 @@ function makeExperienceResult(
 }
 
 function RunHarness() {
-  const { state, startTransform, exportParityEvidenceScaffold } =
-    useTransformationRun();
+  const {
+    state,
+    startTransform,
+    exportParityEvidenceScaffold,
+    submitIntentionalDivergenceDecision,
+    intentionalDivergenceDecision,
+    intentionalDivergenceDecisionStatus,
+    intentionalDivergenceDecisionError,
+  } = useTransformationRun();
 
   return (
     <div>
@@ -302,6 +310,18 @@ function RunHarness() {
       </div>
       <div data-testid="evidence-export-sha">
         {state.evidence?.exportRef?.sha256 ?? "none"}
+      </div>
+      <div data-testid="trust-summary-state">
+        {state.summary?.trustSummary?.trustState ?? "none"}
+      </div>
+      <div data-testid="intentional-decision-status">
+        {intentionalDivergenceDecisionStatus}
+      </div>
+      <div data-testid="intentional-decision-error">
+        {intentionalDivergenceDecisionError ?? "none"}
+      </div>
+      <div data-testid="intentional-decision-ref">
+        {intentionalDivergenceDecision?.decision.decisionRef.sha256 ?? "none"}
       </div>
       <div data-testid="events-count">{state.events?.events.length ?? 0}</div>
       <div data-testid="previous-run-id">
@@ -347,6 +367,23 @@ function RunHarness() {
       </button>
       <button onClick={() => void exportParityEvidenceScaffold()}>
         export
+      </button>
+      <button
+        onClick={() =>
+          void submitIntentionalDivergenceDecision({
+            decisionId: null,
+            rationale:
+              "The Java intentionally diverges for a governed business-rule exception.",
+            reviewer: "reviewer-1",
+            linkedEvidenceRefs: ["pack-123"],
+            affectedOutputs: ["src/main/java/com/demo/LoanProcessor.java"],
+            supersedesPreviousDecision: true,
+            invalidationNote: "Supersedes prior review.",
+            expiresAt: "2026-05-21T13:00:00.000Z",
+          })
+        }
+      >
+        mark-divergent
       </button>
     </div>
   );
@@ -553,6 +590,140 @@ describe("transformation run state machine", () => {
     );
     expect(screen.getByTestId("evidence-export-sha")).toHaveTextContent(
       "9".repeat(64),
+    );
+  });
+
+  it("submits an intentional divergence decision and updates the live trust summary", async () => {
+    const runId = "run-divergence-decision";
+    const fixtures = makeArtifactFixtures(runId, "P-A", "d".repeat(64));
+
+    vi.mocked(apiClient.transform).mockResolvedValueOnce(
+      makeTerminalResponse(runId, "P-A", "completed"),
+    );
+    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated);
+    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(
+      fixtures.generatedFiles,
+    );
+    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(
+      okResult<BuildTestView>({
+        ...fixtures.buildTest.data,
+        classification: "divergence-unknown",
+        status: "output-divergence",
+      }),
+    );
+    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence);
+    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events);
+    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(
+      fixtures.artifacts,
+    );
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(
+      makeExperienceResult(runId, "P-A"),
+    );
+    vi.mocked(apiClient.getRunExperience).mockImplementation((currentRunId: string) =>
+      Promise.resolve(makeExperienceResult(currentRunId, "P-A")),
+    );
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() =>
+      Promise.resolve(okResult<ModelGatewayHealth>({ status: "ok" })),
+    );
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() =>
+      Promise.resolve(okResult<HarnessReady>({ status: "ok" })),
+    );
+    vi.mocked(apiClient.upsertIntentionalDivergenceDecision).mockResolvedValueOnce(
+      okResult({
+        runId,
+        programId: "P-A",
+        status: "created" as const,
+        decision: {
+          decisionId: "decision-1",
+          decisionRef: {
+            sha256: "f".repeat(64),
+            byteSize: 11,
+            kind: "intentional-divergence-decision",
+          },
+          runId,
+          programId: "P-A",
+          reviewer: "reviewer-1",
+          rationale:
+            "The Java intentionally diverges for a governed business-rule exception.",
+          linkedEvidenceRefs: ["pack-123"],
+          affectedOutputs: ["src/main/java/com/demo/LoanProcessor.java"],
+          supersedesPreviousDecision: true,
+          invalidationNote: "Supersedes prior review.",
+          expiresAt: "2026-05-21T13:00:00.000Z",
+          invalidatedAt: null,
+          createdAt: "2026-05-21T12:00:00.000Z",
+          updatedAt: "2026-05-21T12:10:00.000Z",
+        },
+        trustSummary: {
+          schemaVersion: "v0",
+          trustState: "intentional_divergence",
+          repairStatus: "repair_verified",
+          coverageStatus: "full",
+          divergenceDisposition: "intentional",
+          intentionalDivergenceDecisionRef: {
+            sha256: "f".repeat(64),
+            byteSize: 11,
+            kind: "intentional-divergence-decision",
+          },
+          warningCodes: [],
+          trustCase: {
+            trustCaseId: "TC-A",
+            version: "v1",
+            catalogVersion: "2026.05",
+            catalogHash: "c".repeat(64),
+            configurationDigest: "cfg",
+          },
+          cobolResult: { status: "completed" },
+          javaResult: { status: "completed" },
+          comparisonResult: {
+            status: "mismatched",
+            mismatchClassification: "intentional-divergence",
+            decisionRecordRef: null,
+          },
+          repair: { status: "repair_verified" },
+          evidence: { status: "current" },
+          summaryDerivedAt: "2026-05-21T12:10:00.000Z",
+        },
+      }),
+    );
+
+    render(
+      <TransformationRunProvider>
+        <RunHarness />
+      </TransformationRunProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("start-a"));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("phase")).toHaveTextContent("completed"),
+    );
+    expect(screen.getByTestId("trust-summary-state")).toHaveTextContent(
+      "none",
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("mark-divergent"));
+    });
+
+    await waitFor(() =>
+      expect(
+        apiClient.upsertIntentionalDivergenceDecision,
+      ).toHaveBeenCalledWith(
+        runId,
+        expect.objectContaining({
+          reviewer: "reviewer-1",
+          supersedesPreviousDecision: true,
+        }),
+      ),
+    );
+    expect(screen.getByTestId("intentional-decision-ref")).toHaveTextContent(
+      "f".repeat(64),
+    );
+    expect(screen.getByTestId("trust-summary-state")).toHaveTextContent(
+      "intentional_divergence",
     );
   });
 

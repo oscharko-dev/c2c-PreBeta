@@ -31,6 +31,7 @@ from orchestrator_service.run_contract import (
     CLASSIFICATION_INCOMPLETE,
     CLASSIFICATION_SUCCESS,
     AssistDecision,
+    IntentionalDivergenceDecision,
     FAILURE_EVIDENCE_INCOMPLETE,
     FAILURE_JAVA_COMPILE_FAILED,
     FAILURE_JAVA_RUNTIME_FAILED,
@@ -1127,22 +1128,54 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
     def test_trust_summary_projects_intentional_divergence_with_stale_evidence(self) -> None:
         context = self._w0_context(use_transformation_agent=True)
         contract = self._w02_contract()
+        comparison_result_ref = {
+            "uri": "urn:run/comparison-result",
+            "sha256": "2" * 64,
+            "byteSize": 24,
+        }
         contract.set_parity_comparison(
             {
                 "matched": False,
-                "mismatchClassification": "intentional",
+                "mismatchClassification": "content",
                 "completedAt": "9999-12-31T23:59:59Z",
-                "comparisonResultRef": {
-                    "uri": "urn:run/comparison-result",
-                    "sha256": "2" * 64,
-                    "byteSize": 24,
-                },
-                "decisionRecordRef": {
-                    "uri": "urn:run/decision-record",
-                    "sha256": "3" * 64,
-                    "byteSize": 10,
-                },
+                "comparisonResultRef": comparison_result_ref,
             }
+        )
+        contract.record_intentional_divergence_decision(
+            IntentionalDivergenceDecision(
+                decision_id="decision-1",
+                run_id="run-evidence",
+                workflow_id="w0-migration-v0",
+                comparison_result_ref=comparison_result_ref,
+                reviewer={
+                    "reviewerId": "reviewer-1",
+                    "displayName": "Reviewer One",
+                    "role": "approver",
+                },
+                rationale={
+                    "summary": "Business policy requires the mismatch.",
+                    "technicalBasis": "The target output intentionally diverges.",
+                    "businessImpact": "The changed output is expected.",
+                },
+                linked_evidence_refs=(
+                    {
+                        "uri": "urn:run/evidence",
+                        "sha256": "4" * 64,
+                        "byteSize": 8,
+                    },
+                ),
+                affected_outputs=("java_output", "normalized_output"),
+                invalidation_triggers=(
+                    "comparison_result_changed",
+                    "expires_at_reached",
+                ),
+                decided_at="2025-05-21T12:00:00Z",
+            ),
+            {
+                "uri": "urn:run/decision-record",
+                "sha256": "3" * 64,
+                "byteSize": 10,
+            },
         )
 
         summary = self._trust_summary(
@@ -1156,6 +1189,11 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
 
         self.assertEqual(summary["trustState"], "intentional_divergence")
         self.assertEqual(summary["divergenceDisposition"], "intentional")
+        self.assertEqual(summary["comparisonResult"]["decisionStatus"], "active")
+        self.assertEqual(
+            summary["intentionalDivergenceDecision"]["decisionRef"]["uri"],
+            "urn:run/decision-record",
+        )
         self.assertEqual(summary["evidence"]["status"], "stale")
         self.assertEqual(
             summary["comparisonResult"]["decisionRecordRef"]["uri"],

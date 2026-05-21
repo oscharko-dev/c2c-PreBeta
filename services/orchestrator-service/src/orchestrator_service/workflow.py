@@ -36,6 +36,7 @@ from .artifacts import (
     KIND_PARITY_REGRESSION_PROJECT_MANIFEST,
     KIND_PARITY_REGRESSION_TEST_FILE,
     KIND_PARSE_OUTPUT,
+    KIND_RUN_SUMMARY,
     KIND_RUN_PROGRESS,
     KIND_SEMANTIC_IR,
     KIND_SEMANTIC_IR_OUTPUT,
@@ -120,6 +121,8 @@ from .run_contract import (
     ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY,
     ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE,
     AssistDecision,
+    IntentionalDivergenceDecision,
+    INTENTIONAL_DIVERGENCE_STATUS_ACTIVE,
     SCHEMA_VERSION,
     STATE_BASELINE_GENERATION_ATTEMPTED,
     STATE_BUILD_TEST_RUNNING,
@@ -475,6 +478,27 @@ MANUAL_COMPILE_REPAIR_PROJECT_FILE_KIND = "manual-compile-repair-project-file"
 MANUAL_COMPILE_REPAIR_SANDBOX_PROJECT_MANIFEST_KIND = "manual-compile-repair-sandbox-project-manifest"
 MANUAL_COMPILE_REPAIR_SANDBOX_PROJECT_FILE_KIND = "manual-compile-repair-sandbox-project-file"
 MANUAL_COMPILE_REPAIR_SANDBOX_BUILD_TEST_KIND = "manual-compile-repair-sandbox-build-test"
+INTENTIONAL_DIVERGENCE_DIR = "intentional-divergence"
+INTENTIONAL_DIVERGENCE_DECISION_KIND = "intentional-divergence-decision"
+INTENTIONAL_DIVERGENCE_REASON_CODES: tuple[str, ...] = (
+    "business_rule_alignment",
+    "legacy_defect_correction",
+    "target_platform_constraint",
+    "accepted_functional_change",
+)
+INTENTIONAL_DIVERGENCE_AFFECTED_OUTPUTS: tuple[str, ...] = (
+    "java_output",
+    "normalized_output",
+    "stderr",
+    "exit_code",
+    "evidence_summary",
+)
+INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGERS: tuple[str, ...] = (
+    "comparison_result_changed",
+    "affected_outputs_changed",
+    "linked_evidence_changed",
+    "expires_at_reached",
+)
 
 _ALLOWED_REPAIR_JAVA_ROOT = "src/main/java/"
 _FORBIDDEN_REPAIR_PREFIXES: tuple[str, ...] = (
@@ -2852,6 +2876,407 @@ class W0WorkflowRunner:
             "proposal": updated_proposal,
         }
 
+    def document_intentional_divergence(
+        self,
+        *,
+        run_id: str,
+        requester: str,
+        decision: Mapping[str, JsonValue],
+    ) -> JsonObject:
+        if not self.artifact_store.has_run(run_id):
+            raise OrchestratorError("run not found")
+
+        live_contract = self.workflow_contract(run_id)
+        cached_contract = self.artifact_store.read_json(run_id, "w02-run-contract.json")
+        contract_payload = (
+            live_contract.to_dict()
+            if live_contract is not None
+            else dict(cached_contract)
+            if isinstance(cached_contract, Mapping)
+            else None
+        )
+        if contract_payload is None:
+            raise OrchestratorError("workflow contract is unavailable")
+
+        trust_summary = _first_non_empty_mapping(contract_payload.get("trustSummary"))
+        comparison_result = _first_non_empty_mapping(
+            trust_summary.get("comparisonResult") if trust_summary else None
+        )
+        if not trust_summary or not comparison_result:
+            raise OrchestratorError("trust summary is unavailable for this run")
+        if _text(comparison_result.get("status")) != "mismatched":
+            raise OrchestratorError(
+                "intentional divergence can only be documented for a parity mismatch"
+            )
+        trust_state = _text(trust_summary.get("trustState"))
+        if trust_state not in {"parity_failed", "intentional_divergence"}:
+            raise OrchestratorError(
+                "intentional divergence can only be documented for a failed parity result"
+            )
+
+        reason_code = _text(decision.get("reasonCode"))
+        if reason_code not in INTENTIONAL_DIVERGENCE_REASON_CODES:
+            raise ValueError(
+                "reasonCode must be one of the supported intentional-divergence reason codes"
+            )
+        reviewer_payload = decision.get("reviewer")
+        if isinstance(reviewer_payload, Mapping):
+            reviewer_id = _text(reviewer_payload.get("reviewerId")) or _text(reviewer_payload.get("id"))
+            reviewer_name = _text(reviewer_payload.get("displayName")) or reviewer_id
+            reviewer_role = _text(reviewer_payload.get("role")) or "reviewer"
+            if not reviewer_id or not reviewer_name:
+                raise ValueError("reviewer must include reviewerId and displayName")
+        else:
+            reviewer_id = _text(reviewer_payload)
+            reviewer_name = reviewer_id
+            reviewer_role = "reviewer"
+            if not reviewer_id:
+                raise ValueError("reviewer must be a non-empty string")
+        rationale_payload = decision.get("rationale")
+        if isinstance(rationale_payload, Mapping):
+            rationale_summary = _text(rationale_payload.get("summary"))
+            behavior_change = _text(rationale_payload.get("technicalBasis"))
+            business_impact = _text(rationale_payload.get("businessImpact"))
+            follow_up = _text(rationale_payload.get("followUp")) or None
+        else:
+            rationale_summary = _text(decision.get("rationaleSummary"))
+            behavior_change = _text(decision.get("behaviorChange"))
+            business_impact = _text(decision.get("businessImpact")) or rationale_summary
+            follow_up = _text(decision.get("followUp")) or None
+        if not rationale_summary:
+            raise ValueError("rationale.summary must be a non-empty string")
+        if not behavior_change:
+            raise ValueError("rationale.technicalBasis must be a non-empty string")
+        if not business_impact:
+            raise ValueError("rationale.businessImpact must be a non-empty string")
+
+        artifact_index = self.artifact_store.read_index(run_id) or {}
+        artifacts = artifact_index.get("artifacts")
+        artifact_by_uri: dict[str, JsonObject] = {}
+        if isinstance(artifacts, list):
+            for artifact in artifacts:
+                if isinstance(artifact, Mapping):
+                    uri = _text(artifact.get("uri"))
+                    if uri:
+                        artifact_by_uri[uri] = dict(artifact)
+
+        linked_evidence_raw = decision.get("linkedEvidenceRefs") or decision.get("evidenceRefs")
+        if not isinstance(linked_evidence_raw, Sequence) or isinstance(
+            linked_evidence_raw, (str, bytes)
+        ):
+            raise ValueError("linkedEvidenceRefs must be a non-empty array")
+        resolved_linked_evidence_refs: list[JsonObject] = []
+        for entry in linked_evidence_raw:
+            if isinstance(entry, Mapping):
+                ref = self._artifact_ref_payload(entry)
+                if ref is not None:
+                    resolved_linked_evidence_refs.append(ref)
+                    continue
+            uri = _text(entry)
+            if not uri:
+                raise ValueError("linkedEvidenceRefs entries must be artifact URIs or refs")
+            artifact = artifact_by_uri.get(uri)
+            if artifact is None:
+                raise ValueError(f"linkedEvidenceRef is not a known run artifact: {uri}")
+            resolved_linked_evidence_refs.append(self._artifact_ref_payload(artifact) or dict(artifact))
+        if not resolved_linked_evidence_refs:
+            raise ValueError("linkedEvidenceRefs must reference at least one run artifact")
+
+        affected_outputs_raw = decision.get("affectedOutputs")
+        if not isinstance(affected_outputs_raw, Sequence) or isinstance(
+            affected_outputs_raw, (str, bytes)
+        ):
+            raise ValueError("affectedOutputs must be a non-empty array")
+        affected_outputs = [
+            _text(entry) for entry in affected_outputs_raw if _text(entry)
+        ]
+        if (
+            not affected_outputs
+            or any(entry not in INTENTIONAL_DIVERGENCE_AFFECTED_OUTPUTS for entry in affected_outputs)
+        ):
+            raise ValueError(
+                "affectedOutputs must contain only supported intentional-divergence outputs"
+            )
+
+        invalidation_raw = decision.get("invalidationTriggers")
+        if not isinstance(invalidation_raw, Sequence) or isinstance(
+            invalidation_raw, (str, bytes)
+        ):
+            raise ValueError("invalidationTriggers must be a non-empty array")
+        invalidation_triggers = [
+            _text(entry) for entry in invalidation_raw if _text(entry)
+        ]
+        if (
+            not invalidation_triggers
+            or any(
+                entry not in INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGERS
+                for entry in invalidation_triggers
+            )
+        ):
+            raise ValueError(
+                "invalidationTriggers must contain only supported invalidation triggers"
+            )
+
+        expires_at = _text(decision.get("expiresAt")) or None
+        if expires_at:
+            try:
+                expires_at_dt = datetime.datetime.fromisoformat(
+                    expires_at.replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                raise ValueError("expiresAt must be an ISO-8601 timestamp") from exc
+            if expires_at_dt <= datetime.datetime.now(datetime.timezone.utc):
+                raise ValueError("expiresAt must be in the future")
+
+        resolved_evidence_refs = resolved_linked_evidence_refs
+
+        resolved_trust_case = _first_non_empty_mapping(contract_payload.get("resolvedTrustCase"))
+        parity_comparison = _first_non_empty_mapping(contract_payload.get("parityComparison"))
+        decision_record_ref = self._artifact_ref_payload(comparison_result.get("decisionRecordRef"))
+        workflow_id = _text(contract_payload.get("workflowId")) or self.config.workflow_id
+        decision_id = sha256(
+            json.dumps(
+                {
+                    "runId": run_id,
+                    "reviewer": {
+                        "reviewerId": reviewer_id,
+                        "displayName": reviewer_name,
+                        "role": reviewer_role,
+                    },
+                    "reasonCode": reason_code,
+                    "rationaleSummary": rationale_summary,
+                    "recordedAt": _iso_now(),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+
+        bindings: JsonObject = {
+            "trustCase": {
+                "trustCaseId": _text(trust_summary.get("trustCase", {}).get("trustCaseId"))
+                if isinstance(trust_summary.get("trustCase"), Mapping)
+                else _text(resolved_trust_case.get("trustCaseId")),
+                "version": _text(trust_summary.get("trustCase", {}).get("version"))
+                if isinstance(trust_summary.get("trustCase"), Mapping)
+                else _text(resolved_trust_case.get("version")),
+                "catalogVersion": _text(trust_summary.get("trustCase", {}).get("catalogVersion"))
+                if isinstance(trust_summary.get("trustCase"), Mapping)
+                else _text(resolved_trust_case.get("catalogVersion")),
+                "catalogHash": _text(trust_summary.get("trustCase", {}).get("catalogHash"))
+                if isinstance(trust_summary.get("trustCase"), Mapping)
+                else _text(resolved_trust_case.get("catalogHash")),
+                "configurationDigest": _text(trust_summary.get("trustCase", {}).get("configurationDigest"))
+                if isinstance(trust_summary.get("trustCase"), Mapping)
+                else _text(resolved_trust_case.get("configurationDigest")),
+            },
+            "source": {
+                "sourceRef": _first_non_empty_mapping(contract_payload.get("sourceRef")),
+                "sourceReferenceFixtureId": _text(resolved_trust_case.get("sourceReferenceFixtureId")),
+                "sourceReferenceMode": _text(resolved_trust_case.get("sourceReferenceMode")),
+                "normalizedOutputRef": _first_non_empty_mapping(
+                    trust_summary.get("cobolResult", {}).get("normalizedOutputRef")
+                )
+                if isinstance(trust_summary.get("cobolResult"), Mapping)
+                else None,
+            },
+            "target": {
+                "generatedJavaRef": _first_non_empty_mapping(contract_payload.get("generatedJavaRef")),
+                "executionResultRef": _first_non_empty_mapping(
+                    trust_summary.get("javaResult", {}).get("executionResultRef")
+                )
+                if isinstance(trust_summary.get("javaResult"), Mapping)
+                else None,
+                "normalizedOutputRef": _first_non_empty_mapping(
+                    trust_summary.get("javaResult", {}).get("normalizedOutputRef")
+                )
+                if isinstance(trust_summary.get("javaResult"), Mapping)
+                else None,
+            },
+            "comparison": {
+                "status": _text(comparison_result.get("status")),
+                "mismatchClassification": _text(comparison_result.get("mismatchClassification")),
+                "comparisonPolicyRef": _first_non_empty_mapping(
+                    comparison_result.get("comparisonPolicyRef")
+                ),
+                "comparisonResultRef": _first_non_empty_mapping(
+                    comparison_result.get("comparisonResultRef")
+                ),
+                "diffRef": _first_non_empty_mapping(comparison_result.get("diffRef")),
+                "comparisonPolicyVersion": _text(
+                    parity_comparison.get("comparisonPolicyVersion")
+                ),
+            },
+            "evidence": {
+                "packRef": _first_non_empty_mapping(
+                    trust_summary.get("evidence", {}).get("packRef")
+                )
+                if isinstance(trust_summary.get("evidence"), Mapping)
+                else None,
+                "refs": resolved_evidence_refs,
+            },
+        }
+        binding_digest = sha256(
+            json.dumps(bindings, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+        recorded_at = _iso_now()
+        decision_payload: JsonObject = {
+            "schemaVersion": "v0",
+            "decisionId": decision_id,
+            "runId": run_id,
+            "workflowId": workflow_id,
+            "decisionType": "intentional_divergence",
+            "decisionKind": "intentional_target_behavior_divergence",
+            "status": "recorded",
+            "recordedBy": requester or self.config.service_name,
+            "reviewer": {
+                "reviewerId": reviewer_id,
+                "displayName": reviewer_name,
+                "role": reviewer_role,
+            },
+            "recordedAt": recorded_at,
+            "decidedAt": recorded_at,
+            "reasonCode": reason_code,
+            "rationale": {
+                "summary": rationale_summary,
+                "technicalBasis": behavior_change,
+                "businessImpact": business_impact,
+            },
+            "linkedEvidenceRefs": resolved_evidence_refs,
+            "affectedOutputs": affected_outputs,
+            "invalidationTriggers": invalidation_triggers,
+            "expiresAt": expires_at,
+            "bindingDigest": binding_digest,
+            "bindings": bindings,
+        }
+        if follow_up:
+            decision_payload["rationale"]["followUp"] = follow_up
+        decision_payload["comparisonResultRef"] = _first_non_empty_mapping(
+            comparison_result.get("comparisonResultRef")
+        )
+        if decision_record_ref is not None:
+            decision_payload["supersedesDecisionRef"] = decision_record_ref
+
+        decision_meta = self.artifact_store.write_json(
+            run_id,
+            workflow_id,
+            f"{INTENTIONAL_DIVERGENCE_DIR}/decision-{decision_id}.json",
+            decision_payload,
+            kind=INTENTIONAL_DIVERGENCE_DECISION_KIND,
+        )
+        decision_ref = self._artifact_ref_payload(decision_meta.to_dict())
+        if decision_ref is None:
+            raise OrchestratorError("failed to persist intentional divergence decision")
+
+        decision_contract = IntentionalDivergenceDecision.from_mapping(decision_payload)
+        decision_status = decision_contract.status_for(
+            parity_comparison,
+        )
+        if decision_status != INTENTIONAL_DIVERGENCE_STATUS_ACTIVE:
+            raise ValueError(
+                "intentional divergence decisions require the current parity mismatch and matching comparison refs"
+            )
+
+        updated_parity_comparison = dict(parity_comparison) if parity_comparison else {}
+        updated_parity_comparison["decisionRecordRef"] = decision_ref
+        updated_parity_comparison["documentedDecisionRef"] = decision_ref
+
+        updated_comparison_result = dict(comparison_result)
+        updated_comparison_result["decisionRecordRef"] = decision_ref
+        updated_comparison_result["decisionStatus"] = "active"
+
+        updated_trust_summary = dict(trust_summary)
+        updated_trust_summary["trustState"] = "intentional_divergence"
+        updated_trust_summary["divergenceDisposition"] = "intentional"
+        updated_trust_summary["comparisonResult"] = updated_comparison_result
+        updated_trust_summary["intentionalDivergenceDecision"] = {
+            "status": "active",
+            "decisionId": decision_id,
+            "decisionRef": decision_ref,
+            "comparisonResultRef": _first_non_empty_mapping(
+                decision_payload.get("comparisonResultRef")
+            ),
+            "reviewer": decision_payload["reviewer"],
+            "rationale": decision_payload["rationale"],
+            "linkedEvidenceRefs": resolved_evidence_refs,
+            "affectedOutputs": affected_outputs,
+            "invalidationTriggers": invalidation_triggers,
+            "decidedAt": recorded_at,
+            "expiresAt": expires_at,
+        }
+        updated_trust_summary["summaryDerivedAt"] = recorded_at
+
+        if live_contract is not None:
+            live_contract.set_parity_comparison(updated_parity_comparison)
+            live_contract.record_intentional_divergence_decision(
+                decision_contract,
+                decision_ref,
+            )
+            live_contract.replace_trust_summary(updated_trust_summary)
+            context = W0RunContext(
+                run_id=run_id,
+                workflow_id=workflow_id,
+                requester=requester or self.config.service_name,
+                evidence_refs=[],
+            )
+            self._persist_w02_contract(context, live_contract)
+        else:
+            updated_contract_payload = dict(contract_payload)
+            updated_contract_payload["parityComparison"] = updated_parity_comparison
+            updated_contract_payload["intentionalDivergenceDecision"] = decision_contract.to_dict()
+            updated_contract_payload["intentionalDivergenceDecisionRef"] = decision_ref
+            updated_contract_payload["trustSummary"] = updated_trust_summary
+            self.artifact_store.write_json(
+                run_id,
+                workflow_id,
+                "w02-run-contract.json",
+                updated_contract_payload,
+                kind=KIND_W02_RUN_CONTRACT,
+            )
+
+        run_summary = self.artifact_store.read_json(run_id, "run-summary.json")
+        if isinstance(run_summary, Mapping):
+            updated_run_summary = dict(run_summary)
+            updated_run_summary["parityComparison"] = updated_parity_comparison
+            updated_run_summary["trustSummary"] = updated_trust_summary
+            updated_run_summary["updatedAt"] = recorded_at
+            self.artifact_store.write_json(
+                run_id,
+                workflow_id,
+                "run-summary.json",
+                updated_run_summary,
+                kind=KIND_RUN_SUMMARY,
+            )
+
+        self._post_event(
+            run_id,
+            event_type="orchestrator.intentional_divergence.recorded",
+            capability=self.config.service_name,
+            actor=self.config.service_name,
+            data_class=DATA_CLASS_CONTROL,
+            status="completed",
+            state_transition=STATE_TRANSITION_FLOW,
+            input_payload={"runId": run_id, "decisionId": decision_id},
+            output_payload={"trustState": "intentional_divergence"},
+            input_ref=_build_reference(
+                f"urn:orchestrator/{run_id}/intentional-divergence/decision-request/{decision_id}",
+                decision_payload,
+            ),
+            output_ref=_build_reference(
+                f"urn:orchestrator/{run_id}/intentional-divergence/decision/{decision_id}",
+                updated_trust_summary,
+            ),
+            policy_decision=POLICY_ALLOW,
+        )
+        return {
+            "schemaVersion": "v0",
+            "runId": run_id,
+            "decision": decision_payload,
+            "decisionRef": decision_ref,
+            "trustSummary": updated_trust_summary,
+        }
+
     def _build_manual_diagnosis_refs(
         self,
         build_payload: Mapping[str, JsonValue],
@@ -4000,6 +4425,21 @@ class W0WorkflowRunner:
             parity_comparison = getattr(w02_contract, "parity_comparison", None)
             if isinstance(parity_comparison, Mapping) and parity_comparison:
                 summary["parityComparison"] = dict(parity_comparison)
+            trust_summary = getattr(w02_contract, "trust_summary", None)
+            if isinstance(trust_summary, Mapping) and trust_summary:
+                summary["trustSummary"] = dict(trust_summary)
+            divergence_decision = getattr(
+                w02_contract, "intentional_divergence_decision", None
+            )
+            if divergence_decision is not None:
+                summary["intentionalDivergenceDecision"] = divergence_decision.to_dict()
+            divergence_decision_ref = getattr(
+                w02_contract, "intentional_divergence_decision_ref", None
+            )
+            if isinstance(divergence_decision_ref, Mapping) and divergence_decision_ref:
+                summary["intentionalDivergenceDecisionRef"] = dict(
+                    divergence_decision_ref
+                )
             if parity_run:
                 summary["executionMode"] = context.execution_mode
                 if context.source_reference_fixture_id:
@@ -7036,12 +7476,85 @@ class W0WorkflowRunner:
             if isinstance(parity_comparison.get("diffRef"), Mapping)
             else None
         )
-        decision_record_ref = artifact_ref(
+        legacy_decision_record_ref = artifact_ref(
             parity_comparison.get("decisionRecordRef")
             if isinstance(parity_comparison.get("decisionRecordRef"), Mapping)
             else None
         )
         evidence_pack_ref = artifact_ref(contract.evidence_pack_ref)
+        evidence_status = "current"
+        if evidence_incomplete or evidence_pack_ref is None:
+            evidence_status = "incomplete"
+        elif (
+            evidence_recorded_at
+            and comparison_completed_at
+            and evidence_recorded_at < comparison_completed_at
+        ):
+            evidence_status = "stale"
+        intentional_decision = getattr(contract, "intentional_divergence_decision", None)
+        intentional_decision_ref = artifact_ref(
+            getattr(contract, "intentional_divergence_decision_ref", None)
+            if isinstance(getattr(contract, "intentional_divergence_decision_ref", None), Mapping)
+            else None
+        )
+        intentional_decision_status = None
+        intentional_divergence_summary: JsonObject | None = None
+        if intentional_decision is not None:
+            current_trust_summary: JsonObject = {
+                "comparisonResult": {
+                    "status": (
+                        "mismatched"
+                        if parity_passed is False
+                        else "matched"
+                        if parity_passed is True
+                        else "not_available"
+                    ),
+                    "comparisonResultRef": comparison_result_ref,
+                    "diffRef": diff_ref,
+                },
+                "cobolResult": {
+                    "normalizedOutputRef": source_normalized_ref,
+                },
+                "javaResult": {
+                    "executionResultRef": execution_result_ref,
+                    "normalizedOutputRef": target_normalized_ref,
+                },
+                "evidence": {
+                    "status": evidence_status,
+                    "packRef": evidence_pack_ref,
+                },
+            }
+            intentional_decision_status = intentional_decision.status_for(
+                parity_comparison,
+                trust_summary=current_trust_summary,
+            )
+            intentional_divergence_summary = {
+                "status": intentional_decision_status,
+                "decisionId": intentional_decision.decision_id,
+                "decisionRef": intentional_decision_ref,
+                "comparisonResultRef": artifact_ref(
+                    intentional_decision.comparison_result_ref
+                ),
+                "reviewer": dict(intentional_decision.reviewer),
+                "rationale": dict(intentional_decision.rationale),
+                "linkedEvidenceRefs": [
+                    artifact_ref(ref) for ref in intentional_decision.linked_evidence_refs
+                ],
+                "affectedOutputs": list(intentional_decision.affected_outputs),
+                "invalidationTriggers": list(
+                    intentional_decision.invalidation_triggers
+                ),
+                "decidedAt": intentional_decision.decided_at,
+            }
+            if intentional_decision.expires_at is not None:
+                intentional_divergence_summary["expiresAt"] = intentional_decision.expires_at
+            if intentional_decision.updated_at is not None:
+                intentional_divergence_summary["updatedAt"] = intentional_decision.updated_at
+        decision_record_ref = (
+            intentional_decision_ref
+            if intentional_decision_status == INTENTIONAL_DIVERGENCE_STATUS_ACTIVE
+            else legacy_decision_record_ref
+        )
 
         propose_candidate_attempts = [
             entry
@@ -7099,16 +7612,6 @@ class W0WorkflowRunner:
             else None
         )
 
-        evidence_status = "current"
-        if evidence_incomplete or evidence_pack_ref is None:
-            evidence_status = "incomplete"
-        elif (
-            evidence_recorded_at
-            and comparison_completed_at
-            and evidence_recorded_at < comparison_completed_at
-        ):
-            evidence_status = "stale"
-
         divergence_disposition = "none"
         coverage_gap_detected = (
             mismatch_classification == "known_coverage_gap"
@@ -7118,14 +7621,18 @@ class W0WorkflowRunner:
 
         if coverage_gap_detected:
             divergence_disposition = "known_coverage_gap"
-        elif mismatch_classification == "intentional" and decision_record_ref is not None:
+        elif intentional_decision_status == INTENTIONAL_DIVERGENCE_STATUS_ACTIVE:
             divergence_disposition = "intentional"
+        elif intentional_divergence_summary is not None and mismatch_classification not in {"", "none"} and parity_passed is False:
+            divergence_disposition = "unknown"
         elif mismatch_classification not in {"", "none"} and parity_passed is False:
             divergence_disposition = "unknown"
 
         warning_codes: list[str] = []
         if coverage_gap_detected:
             warning_codes.extend(["known_coverage_gap", "limited_coverage"])
+        if intentional_divergence_summary is not None and intentional_decision_status != INTENTIONAL_DIVERGENCE_STATUS_ACTIVE:
+            warning_codes.append(f"intentional_divergence_decision_{intentional_decision_status}")
         if contract.manual_edits_carried_over:
             warning_codes.append("manual_edits_carried_over")
 
@@ -7189,7 +7696,17 @@ class W0WorkflowRunner:
                 "comparisonResultRef": comparison_result_ref,
                 "diffRef": diff_ref,
                 "decisionRecordRef": decision_record_ref,
+                "decisionStatus": (
+                    intentional_decision_status
+                    if intentional_decision_status is not None
+                    else (
+                        "legacy"
+                        if legacy_decision_record_ref is not None
+                        else "none"
+                    )
+                ),
             },
+            "intentionalDivergenceDecision": intentional_divergence_summary,
             "repair": {
                 "status": repair_status,
                 "repairDecisionRef": repair_decision_ref,

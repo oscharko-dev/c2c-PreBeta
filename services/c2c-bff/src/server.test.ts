@@ -5756,6 +5756,197 @@ test("GET /api/v0/runs/{runId} preserves normalized trustSummary across repeated
   }
 });
 
+test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator trustSummary for repeated reads", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
+  const studioHeaders = auth.post({}, {}).headers;
+  const trustSummary = {
+    trustCaseId: "HELLO01-DEFAULT",
+    trustState: "intentional_divergence",
+    divergenceDisposition: "intentional",
+    evidenceRefs: ["urn:evidence/one"],
+    decisionRecordRef: {
+      sha256: "3".repeat(64),
+      byteSize: 10,
+      kind: "decision-record",
+    },
+    createdAt: "2026-05-21T10:00:00Z",
+    updatedAt: "2026-05-21T10:05:00Z",
+  };
+  const { client: baseOrch, calls } = stubOrchestrator();
+  const decisionRequests: Array<{
+    runId: string;
+    payload: {
+      reasonCode: string;
+      rationaleSummary: string;
+      behaviorChange: string;
+      reviewer: string;
+      evidenceRefs: string[];
+      affectedOutputs: string[];
+      invalidationTriggers: string[];
+      expiresAt?: string;
+      requester?: string;
+    };
+  }> = [];
+  const orch: OrchestratorClient = {
+    ...baseOrch,
+    async upsertIntentionalDivergenceDecision(
+      runId: string,
+      payload: {
+        reasonCode: string;
+        rationaleSummary: string;
+        behaviorChange: string;
+        reviewer: string;
+        evidenceRefs: string[];
+        affectedOutputs: string[];
+        invalidationTriggers: string[];
+        expiresAt?: string;
+        requester?: string;
+      },
+    ) {
+      decisionRequests.push({ runId, payload });
+      return {
+        status: 200,
+        body: {
+          runId,
+          decisionRef: {
+            sha256: "3".repeat(64),
+            byteSize: 10,
+            kind: "decision-record",
+          },
+          decision: {
+            decisionId: "decision-1",
+            reviewer: {
+              reviewerId: payload.reviewer,
+              displayName: payload.reviewer,
+              role: "reviewer",
+            },
+            rationale: {
+              summary: payload.rationaleSummary,
+              behaviorChange: payload.behaviorChange,
+            },
+            linkedEvidenceRefs: payload.evidenceRefs.map((ref) => ({
+              uri: ref,
+              sha256: "4".repeat(64),
+              byteSize: 20,
+              kind: "evidence-record",
+            })),
+            affectedOutputs: payload.affectedOutputs,
+            invalidationTriggers: payload.invalidationTriggers,
+            ...(payload.expiresAt ? { expiresAt: payload.expiresAt } : {}),
+            decisionRecordRef: {
+              sha256: "3".repeat(64),
+              byteSize: 10,
+              kind: "decision-record",
+            },
+          },
+          trustSummary,
+        },
+      };
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+      headers: studioHeaders,
+    });
+    const startedBody = started.body as { runId: string };
+
+    const decision = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/intentional-divergence-decision`,
+      {
+        method: "PUT",
+        headers: studioHeaders,
+        body: {
+          decisionId: null,
+          rationale: "The divergence is approved by the product owner.",
+          reviewer: "studio reviewer",
+          linkedEvidenceRefs: ["urn:evidence/one"],
+          affectedOutputs: ["urn:output/one"],
+          supersedesPreviousDecision: true,
+          invalidationNote:
+            "The product intentionally diverges from the baseline.",
+        },
+      },
+    );
+    assert.equal(decision.status, 200);
+    const decisionBody = decision.body as {
+      decisionRecordRef: { sha256: string; byteSize: number; kind: string };
+      trustSummary: typeof trustSummary;
+    };
+    assert.deepEqual(decisionBody.decisionRecordRef, {
+      sha256: "3".repeat(64),
+      byteSize: 10,
+      kind: "decision-record",
+    });
+    assert.deepEqual(decisionBody.trustSummary, trustSummary);
+    assert.equal(decisionRequests.length, 1);
+    assert.equal(decisionRequests[0]?.runId, startedBody.runId);
+    assert.equal(
+      decisionRequests[0]?.payload.reasonCode,
+      "accepted_functional_change",
+    );
+    assert.equal(
+      decisionRequests[0]?.payload.behaviorChange,
+      "The product intentionally diverges from the baseline.",
+    );
+    assert.deepEqual(decisionRequests[0]?.payload.evidenceRefs, [
+      "urn:evidence/one",
+    ]);
+    assert.deepEqual(decisionRequests[0]?.payload.affectedOutputs, [
+      "java_output",
+    ]);
+    assert.deepEqual(decisionRequests[0]?.payload.invalidationTriggers, [
+      "comparison_result_changed",
+      "affected_outputs_changed",
+      "linked_evidence_changed",
+    ]);
+    assert.equal(
+      decisionRequests[0]?.payload.requester,
+      "studio:tenant-a:user-a",
+    );
+
+    const first = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: studioHeaders },
+    );
+    const second = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: studioHeaders },
+    );
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: studioHeaders },
+    );
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(workflow.status, 200);
+    const firstBody = first.body as { trustSummary: typeof trustSummary };
+    const secondBody = second.body as { trustSummary: typeof trustSummary };
+    const workflowBody = workflow.body as { trustSummary: typeof trustSummary };
+    assert.deepEqual(firstBody.trustSummary, trustSummary);
+    assert.deepEqual(secondBody.trustSummary, trustSummary);
+    assert.deepEqual(workflowBody.trustSummary, trustSummary);
+    assert.deepEqual(firstBody.trustSummary, secondBody.trustSummary);
+    assert.equal(calls.getRun, 2);
+    assert.equal(calls.getWorkflow, 3);
+  } finally {
+    await server.close();
+  }
+});
+
 test("GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);

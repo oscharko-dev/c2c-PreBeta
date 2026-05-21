@@ -226,6 +226,48 @@ describe("Product State Derivation", () => {
     expect(result.state).toBe("equivalence-mismatch");
   });
 
+  it("marks intentional divergence distinctly from ordinary mismatch", () => {
+    const state = makeState({
+      phase: "completed",
+      summary: makeSummary({
+        trustSummary: {
+          trustState: "intentional_divergence",
+          repairStatus: "repair_verified",
+          coverageStatus: "full",
+          divergenceDisposition: "intentional",
+          warningCodes: [],
+          trustCase: {
+            trustCaseId: "TC-1",
+            version: "v1",
+            catalogVersion: "2026.05",
+            catalogHash: "c".repeat(64),
+            configurationDigest: "cfg",
+          },
+          cobolResult: { status: "completed" },
+          javaResult: { status: "completed" },
+          comparisonResult: {
+            status: "mismatched",
+            mismatchClassification: "intentional-divergence",
+          },
+          repair: { status: "repair_verified" },
+          evidence: { status: "current" },
+          summaryDerivedAt: "2026-05-21T12:00:00Z",
+        },
+      }),
+      buildTest: makeBuildTest({
+        status: "output-divergence",
+        classification: "divergence-unknown",
+      }),
+    });
+
+    const result = deriveProductState(state);
+    expect(result.state).toBe("equivalence-mismatch");
+    expect(result.intentionalDivergence).toBe(true);
+    expect(result.message).toBe(
+      "This run was intentionally documented as not equivalent.",
+    );
+  });
+
   it("Evidence incomplete with missing artifacts", () => {
     const state = makeState({
       phase: "completed",

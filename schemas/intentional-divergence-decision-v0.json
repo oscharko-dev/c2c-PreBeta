@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oscharko.dev/c2c/schemas/intentional-divergence-decision-v0.json",
+  "title": "Intentional Divergence Decision v0",
+  "description": "Governed reviewer approval for a parity mismatch that the Orchestrator may project as intentional divergence. The record is run-scoped, stored as an artifact, and only becomes effective when it matches the current parity comparison result and comparison refs for that run.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "decisionType",
+    "decisionId",
+    "runId",
+    "workflowId",
+    "comparisonResultRef",
+    "reviewer",
+    "rationale",
+    "linkedEvidenceRefs",
+    "affectedOutputs",
+    "invalidationTriggers",
+    "decidedAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "v0"
+    },
+    "decisionType": {
+      "type": "string",
+      "const": "intentional_divergence"
+    },
+    "decisionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "comparisonResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "reviewer": {
+      "type": "object",
+      "required": ["reviewerId", "displayName", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "reviewerId": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      }
+    },
+    "rationale": {
+      "type": "object",
+      "required": ["summary", "technicalBasis", "businessImpact"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "technicalBasis": { "type": "string", "minLength": 1 },
+        "businessImpact": { "type": "string", "minLength": 1 },
+        "followUp": { "type": "string", "minLength": 1 }
+      }
+    },
+    "linkedEvidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/artifactReference" }
+    },
+    "affectedOutputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "java_output",
+          "normalized_output",
+          "stderr",
+          "exit_code",
+          "evidence_summary"
+        ]
+      }
+    },
+    "invalidationTriggers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "comparison_result_changed",
+          "affected_outputs_changed",
+          "linked_evidence_changed",
+          "expires_at_reached"
+        ]
+      }
+    },
+    "decidedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["uri", "sha256", "byteSize"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "createdBy": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

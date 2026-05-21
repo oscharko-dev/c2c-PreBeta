@@ -66,6 +66,7 @@ export interface StoredRun {
   message: string;
   policyDecision: string;
   evidenceRefs: string[];
+  trustSummary?: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
   sample: SampleDetail;
@@ -137,6 +138,7 @@ export function createRunStore(
             : "run accepted by orchestrator"),
         policyDecision: initial?.policyDecision ?? "",
         evidenceRefs: initial?.evidenceRefs ?? [],
+        trustSummary: initial?.trustSummary,
         createdAt,
         updatedAt: createdAt,
         sample,

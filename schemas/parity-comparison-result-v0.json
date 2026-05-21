@@ -71,8 +71,12 @@
         "runtime_failure",
         "unsupported_input",
         "policy",
+        "intentional",
         "unknown"
       ]
+    },
+    "decisionRecordRef": {
+      "$ref": "#/$defs/artifactReference"
     },
     "sourceStdoutRef": {
       "$ref": "#/$defs/artifactReference"

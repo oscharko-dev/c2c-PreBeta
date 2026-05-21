@@ -107,6 +107,24 @@ The repair loop begins only after deterministic failure detection:
 
 Model output can explain or propose, but it does not determine run success.
 
+## Intentional Divergence
+
+When deterministic comparison reports a parity mismatch, the Orchestrator may
+accept a governed intentional-divergence decision for that specific run. The
+decision is run-scoped and must include:
+
+- a reviewer identity and role;
+- a structured rationale with summary, technical basis, and business impact;
+- linked evidence artifact references;
+- the affected output surfaces;
+- invalidation triggers, including expiration when appropriate.
+
+The decision only becomes effective when it matches the current parity
+comparison result for that run. Active decisions project the trust summary to
+`intentional_divergence`; ordinary mismatches remain `parity_failed` unless an
+approved decision exists. Expired or stale decisions are historical records and
+must not silently carry over to a new run.
+
 ## Execution Modes and Canonical Studio Labels
 
 Consumers must expose the first trust workflow with explicit mode labels:

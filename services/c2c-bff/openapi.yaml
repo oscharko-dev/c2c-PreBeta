@@ -585,6 +585,54 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/runs/{runId}/intentional-divergence-decision:
+    put:
+      summary: Record or update an intentional-divergence decision for a run
+      description: >
+        Issue #368. Creates or updates the governed intentional-divergence
+        decision for an existing run by forwarding the reviewed request to the
+        Orchestrator. The BFF does not accept browser-authored runtime
+        configuration here; the body is limited to the intentional-divergence
+        decision fields and the response returns the Orchestrator-owned
+        decision record plus the trust-summary projection.
+      operationId: upsertIntentionalDivergenceDecision
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntentionalDivergenceDecisionRequest" }
+      responses:
+        "200":
+          description: decision recorded or updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntentionalDivergenceDecisionResponse" }
+        "400":
+          description: validation error or unsupported field
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: session cookie missing or expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: unknown run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable or not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/runs/{runId}/generated:
     get:
       summary: Return generated Java for side-by-side display
@@ -1748,6 +1796,10 @@ components:
           oneOf:
             - type: string
             - type: 'null'
+        trustSummary:
+          oneOf:
+            - $ref: "#/components/schemas/TrustSummary"
+            - type: 'null'
         javaRegionClassification:
           description: >
             Optional per-file trust-pillar region map used by
@@ -2137,6 +2189,10 @@ components:
           oneOf:
             - type: string
             - type: 'null'
+        trustSummary:
+          oneOf:
+            - $ref: "#/components/schemas/TrustSummary"
+            - type: 'null'
         generatedJavaRef:
           oneOf:
             - $ref: "#/components/schemas/WorkflowArtifactRef"
@@ -2217,6 +2273,87 @@ components:
           oneOf:
             - type: string
             - type: 'null'
+
+    TrustSummary:
+      type: object
+      description: >
+        BFF-safe projection of the orchestrator trust-summary object. The
+        shape is intentionally open-ended so governed trust metadata can be
+        added without breaking older clients; the BFF strips non-JSON-safe
+        values and normalises nested evidence references and timestamps before
+        exposing the object to the browser.
+      properties:
+        evidenceRefs:
+          type: array
+          items: { type: string }
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      additionalProperties: true
+
+    IntentionalDivergenceDecisionRequest:
+      type: object
+      required:
+        [
+          reasonCode,
+          rationaleSummary,
+          behaviorChange,
+          reviewer,
+          evidenceRefs,
+          affectedOutputs,
+          invalidationTriggers,
+        ]
+      description: >
+        Product-level intentional-divergence decision for an existing run. The
+        BFF only accepts the governed decision fields here; runtime
+        configuration is intentionally out of scope.
+      properties:
+        reasonCode:
+          type: string
+        rationaleSummary:
+          type: string
+          minLength: 1
+        behaviorChange:
+          type: string
+          minLength: 1
+        reviewer:
+          type: string
+          minLength: 1
+        evidenceRefs:
+          type: array
+          items: { type: string }
+        affectedOutputs:
+          type: array
+          items: { type: string }
+        invalidationTriggers:
+          type: array
+          items: { type: string }
+        expiresAt:
+          type: string
+      additionalProperties: false
+
+    IntentionalDivergenceDecisionResponse:
+      type: object
+      required: [runId]
+      properties:
+        runId: { type: string }
+        decisionRecordRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        decision:
+          type: object
+          description: >
+            Orchestrator-owned decision metadata for the intentional-divergence
+            action. The object is open-ended because the Orchestrator owns its
+            internal decision record shape.
+          additionalProperties: true
+        trustSummary:
+          oneOf:
+            - $ref: "#/components/schemas/TrustSummary"
+            - type: 'null'
+      additionalProperties: true
 
     ArtifactTooLargeError:
       type: object

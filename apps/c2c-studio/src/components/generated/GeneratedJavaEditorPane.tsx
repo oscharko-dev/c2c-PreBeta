@@ -1705,8 +1705,11 @@ export function GeneratedJavaEditorPane() {
         ? productState.message ||
           "Evidence is incomplete. Generated Java remains visible, but verification is blocked."
         : productState.state === "equivalence-mismatch"
-          ? productState.message ||
-            "Java output diverges from the COBOL oracle."
+          ? productState.intentionalDivergence
+            ? productState.message ||
+              "This run was intentionally documented as not equivalent."
+            : productState.message ||
+              "Java output diverges from the COBOL oracle."
           : productState.state === "build-failed"
             ? productState.message || "Build or test execution failed."
             : productState.state === "failed"
@@ -1890,8 +1893,13 @@ export function GeneratedJavaEditorPane() {
             </Badge>
           )}
           {productState.state === "equivalence-mismatch" && (
-            <Badge variant="error" icon={true}>
-              Equivalence Mismatch
+            <Badge
+              variant={productState.intentionalDivergence ? "warning" : "error"}
+              icon={true}
+            >
+              {productState.intentionalDivergence
+                ? "Intentional Divergence"
+                : "Equivalence Mismatch"}
             </Badge>
           )}
           {productState.state === "evidence-incomplete" && (
@@ -1940,9 +1948,15 @@ export function GeneratedJavaEditorPane() {
         >
           {showingHistoricalArtifacts
             ? state.phase === "failed"
-              ? "Latest rerun failed. Showing the previous generated Java as stale so the last completed result remains accessible."
-              : "Showing the previous generated Java while the latest rerun is in progress. This content is stale until the rerun completes."
-            : "COBOL source changed after the last completed parity run. Generated Java is stale until you rerun."}
+              ? productState.intentionalDivergence
+                ? "Latest rerun failed. Showing the previous intentionally diverged generated Java as stale so the last completed decision remains accessible."
+                : "Latest rerun failed. Showing the previous generated Java as stale so the last completed result remains accessible."
+              : productState.intentionalDivergence
+                ? "Showing the previous intentionally diverged generated Java while the latest rerun is in progress. This content is stale until the rerun completes."
+                : "Showing the previous generated Java while the latest rerun is in progress. This content is stale until the rerun completes."
+            : productState.intentionalDivergence
+              ? "COBOL source changed after the last intentionally diverged run. Generated Java is stale until you rerun."
+              : "COBOL source changed after the last completed parity run. Generated Java is stale until you rerun."}
         </div>
       ) : null}
 

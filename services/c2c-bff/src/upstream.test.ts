@@ -398,6 +398,64 @@ test("orchestrator client encodes workflow endpoint with the run id", async () =
   );
 });
 
+test("orchestrator client POSTs intentional divergence decisions on the run id", async () => {
+  const client = createNodeHttpClient();
+  await withEchoServer(
+    (_req, res) => {
+      const body = JSON.stringify({
+        runId: "run-1",
+        decisionRecordRef: {
+          uri: "urn:run/decision-record",
+          sha256: "3".repeat(64),
+          byteSize: 10,
+        },
+      });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+      });
+      res.end(body);
+    },
+    async (baseUrl, captured) => {
+      const orch = createOrchestratorClient(baseUrl, client, 1_000);
+      const response = await orch.upsertIntentionalDivergenceDecision!(
+        "run a/b",
+        {
+          reasonCode: "accepted_functional_change",
+          rationaleSummary: "The divergence is a governed product decision.",
+          behaviorChange: "The product keeps the intentional divergence.",
+          reviewer: "studio reviewer",
+          evidenceRefs: ["urn:evidence/1"],
+          affectedOutputs: ["java_output"],
+          invalidationTriggers: ["comparison_result_changed"],
+          requester: "studio:tenant-a:user-a",
+        },
+      );
+      assert.equal(response?.status, 200);
+      assert.equal(captured[0]?.method, "POST");
+      assert.equal(
+        captured[0]?.path,
+        "/v0/runs/run%20a%2Fb/intentional-divergence/decision/request",
+      );
+      const parsed = JSON.parse(captured[0]?.body ?? "{}");
+      assert.equal(parsed.reasonCode, "accepted_functional_change");
+      assert.equal(
+        parsed.rationaleSummary,
+        "The divergence is a governed product decision.",
+      );
+      assert.equal(
+        parsed.behaviorChange,
+        "The product keeps the intentional divergence.",
+      );
+      assert.equal(parsed.reviewer, "studio reviewer");
+      assert.deepEqual(parsed.evidenceRefs, ["urn:evidence/1"]);
+      assert.deepEqual(parsed.affectedOutputs, ["java_output"]);
+      assert.deepEqual(parsed.invalidationTriggers, ["comparison_result_changed"]);
+      assert.equal(parsed.requester, "studio:tenant-a:user-a");
+    },
+  );
+});
+
 test("orchestrator client encodes run id and routes artifact endpoints", async () => {
   const client = createNodeHttpClient();
   await withEchoServer(

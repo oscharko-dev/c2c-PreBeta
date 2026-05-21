@@ -761,6 +761,35 @@ ASSIST_AGENT_ROLES: tuple[str, ...] = (
 )
 
 
+INTENTIONAL_DIVERGENCE_DECISION_TYPE = "intentional_divergence"
+INTENTIONAL_DIVERGENCE_STATUS_ACTIVE = "active"
+INTENTIONAL_DIVERGENCE_STATUS_EXPIRED = "expired"
+INTENTIONAL_DIVERGENCE_STATUS_STALE = "stale"
+INTENTIONAL_DIVERGENCE_STATUS_INVALID = "invalid"
+
+INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_COMPARISON_CHANGED = (
+    "comparison_result_changed"
+)
+INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_OUTPUTS_CHANGED = "affected_outputs_changed"
+INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_EVIDENCE_CHANGED = "linked_evidence_changed"
+INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_EXPIRED = "expires_at_reached"
+
+INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGERS: tuple[str, ...] = (
+    INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_COMPARISON_CHANGED,
+    INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_OUTPUTS_CHANGED,
+    INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_EVIDENCE_CHANGED,
+    INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_EXPIRED,
+)
+
+INTENTIONAL_DIVERGENCE_AFFECTED_OUTPUTS: tuple[str, ...] = (
+    "java_output",
+    "normalized_output",
+    "stderr",
+    "exit_code",
+    "evidence_summary",
+)
+
+
 # noinspection PyClassHasNoInitInspection
 @dataclass(frozen=True)
 class AssistDecision:
@@ -842,6 +871,304 @@ class AssistDecision:
         return payload
 
 
+def _non_empty_text(value: object, field: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field} is required")
+    return text
+
+
+def _artifact_reference_payload(value: object, field: str) -> JsonObject:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field} must be an object")
+    uri = _non_empty_text(value.get("uri"), f"{field}.uri")
+    sha256 = _non_empty_text(value.get("sha256"), f"{field}.sha256")
+    if len(sha256) != 64 or any(char not in "0123456789abcdefABCDEF" for char in sha256):
+        raise ValueError(f"{field}.sha256 must be a SHA-256 hex digest")
+    try:
+        byte_size = int(value.get("byteSize"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field}.byteSize must be an integer") from exc
+    if byte_size < 0:
+        raise ValueError(f"{field}.byteSize must be non-negative")
+    payload: JsonObject = {
+        "uri": uri,
+        "sha256": sha256,
+        "byteSize": byte_size,
+    }
+    for key in ("mimeType", "kind", "path", "name", "createdBy", "createdAt"):
+        optional = value.get(key)
+        if isinstance(optional, str) and optional.strip():
+            payload[key] = optional.strip()
+    return payload
+
+
+def _artifact_ref_signature(ref: Mapping[str, JsonValue]) -> tuple[str, str, int]:
+    return (
+        _non_empty_text(ref.get("uri"), "ref.uri"),
+        _non_empty_text(ref.get("sha256"), "ref.sha256"),
+        int(ref.get("byteSize") or 0),
+    )
+
+
+def _refs_match(left: Mapping[str, JsonValue], right: Mapping[str, JsonValue]) -> bool:
+    try:
+        return _artifact_ref_signature(left) == _artifact_ref_signature(right)
+    except ValueError:
+        return False
+
+
+@dataclass(frozen=True)
+class IntentionalDivergenceDecision:
+    """Documented reviewer approval for an intentional parity mismatch."""
+
+    decision_id: str
+    run_id: str
+    workflow_id: str
+    comparison_result_ref: JsonObject
+    reviewer: JsonObject
+    rationale: JsonObject
+    linked_evidence_refs: tuple[JsonObject, ...]
+    affected_outputs: tuple[str, ...]
+    invalidation_triggers: tuple[str, ...]
+    decided_at: str
+    expires_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.decision_id:
+            raise ValueError("decision_id is required")
+        if not self.run_id:
+            raise ValueError("run_id is required")
+        if not self.workflow_id:
+            raise ValueError("workflow_id is required")
+        if not isinstance(self.comparison_result_ref, Mapping):
+            raise ValueError("comparison_result_ref must be an object")
+        if not self.linked_evidence_refs:
+            raise ValueError("linked_evidence_refs must not be empty")
+        if not self.affected_outputs:
+            raise ValueError("affected_outputs must not be empty")
+        if not self.invalidation_triggers:
+            raise ValueError("invalidation_triggers must not be empty")
+        _non_empty_text(self.decided_at, "decided_at")
+        if self.expires_at is not None:
+            _non_empty_text(self.expires_at, "expires_at")
+        _artifact_reference_payload(
+            self.comparison_result_ref, "comparison_result_ref"
+        )
+        self._validate_reviewer(self.reviewer)
+        self._validate_rationale(self.rationale)
+        for ref in self.linked_evidence_refs:
+            _artifact_reference_payload(ref, "divergence decision artifact ref")
+        for output in self.affected_outputs:
+            if output not in INTENTIONAL_DIVERGENCE_AFFECTED_OUTPUTS:
+                raise ValueError(
+                    "unknown affected output: "
+                    f"{output!r}; allowed: {sorted(INTENTIONAL_DIVERGENCE_AFFECTED_OUTPUTS)}"
+                )
+        for trigger in self.invalidation_triggers:
+            if trigger not in INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGERS:
+                raise ValueError(
+                    "unknown invalidation trigger: "
+                    f"{trigger!r}; allowed: {sorted(INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGERS)}"
+                )
+
+    @staticmethod
+    def _validate_reviewer(value: object) -> JsonObject:
+        if not isinstance(value, Mapping):
+            raise ValueError("reviewer must be an object")
+        return {
+            "reviewerId": _non_empty_text(value.get("reviewerId"), "reviewer.reviewerId"),
+            "displayName": _non_empty_text(value.get("displayName"), "reviewer.displayName"),
+            "role": _non_empty_text(value.get("role"), "reviewer.role"),
+        }
+
+    @staticmethod
+    def _validate_rationale(value: object) -> JsonObject:
+        if not isinstance(value, Mapping):
+            raise ValueError("rationale must be an object")
+        payload: JsonObject = {
+            "summary": _non_empty_text(value.get("summary"), "rationale.summary"),
+            "technicalBasis": _non_empty_text(
+                value.get("technicalBasis"), "rationale.technicalBasis"
+            ),
+            "businessImpact": _non_empty_text(
+                value.get("businessImpact"), "rationale.businessImpact"
+            ),
+        }
+        follow_up = value.get("followUp")
+        if isinstance(follow_up, str) and follow_up.strip():
+            payload["followUp"] = follow_up.strip()
+        return payload
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, JsonValue]) -> "IntentionalDivergenceDecision":
+        linked_evidence_refs_raw = payload.get("linkedEvidenceRefs")
+        affected_outputs_raw = payload.get("affectedOutputs")
+        invalidation_triggers_raw = payload.get("invalidationTriggers")
+        if not isinstance(linked_evidence_refs_raw, Sequence) or isinstance(
+            linked_evidence_refs_raw, (str, bytes, bytearray)
+        ):
+            raise ValueError("linkedEvidenceRefs must be an array")
+        if not isinstance(affected_outputs_raw, Sequence) or isinstance(
+            affected_outputs_raw, (str, bytes, bytearray)
+        ):
+            raise ValueError("affectedOutputs must be an array")
+        if not isinstance(invalidation_triggers_raw, Sequence) or isinstance(
+            invalidation_triggers_raw, (str, bytes, bytearray)
+        ):
+            raise ValueError("invalidationTriggers must be an array")
+        return cls(
+            decision_id=_non_empty_text(payload.get("decisionId"), "decisionId"),
+            run_id=_non_empty_text(payload.get("runId"), "runId"),
+            workflow_id=_non_empty_text(payload.get("workflowId"), "workflowId"),
+            comparison_result_ref=_artifact_reference_payload(
+                payload.get("comparisonResultRef"), "comparisonResultRef"
+            ),
+            reviewer=cls._validate_reviewer(payload.get("reviewer")),
+            rationale=cls._validate_rationale(payload.get("rationale")),
+            linked_evidence_refs=tuple(
+                _artifact_reference_payload(ref, "linkedEvidenceRefs[]")
+                for ref in linked_evidence_refs_raw
+            ),
+            affected_outputs=tuple(
+                _non_empty_text(output, "affectedOutputs[]")
+                for output in affected_outputs_raw
+            ),
+            invalidation_triggers=tuple(
+                _non_empty_text(trigger, "invalidationTriggers[]")
+                for trigger in invalidation_triggers_raw
+            ),
+            decided_at=_non_empty_text(payload.get("decidedAt"), "decidedAt"),
+            expires_at=(
+                _non_empty_text(payload.get("expiresAt"), "expiresAt")
+                if payload.get("expiresAt") is not None
+                else None
+            ),
+            updated_at=(
+                _non_empty_text(payload.get("updatedAt"), "updatedAt")
+                if payload.get("updatedAt") is not None
+                else None
+            ),
+        )
+
+    def to_dict(self) -> JsonObject:
+        payload: JsonObject = {
+            "schemaVersion": SCHEMA_VERSION,
+            "decisionType": INTENTIONAL_DIVERGENCE_DECISION_TYPE,
+            "decisionId": self.decision_id,
+            "runId": self.run_id,
+            "workflowId": self.workflow_id,
+            "comparisonResultRef": dict(self.comparison_result_ref),
+            "reviewer": dict(self.reviewer),
+            "rationale": dict(self.rationale),
+            "linkedEvidenceRefs": [dict(ref) for ref in self.linked_evidence_refs],
+            "affectedOutputs": list(self.affected_outputs),
+            "invalidationTriggers": list(self.invalidation_triggers),
+            "decidedAt": self.decided_at,
+        }
+        if self.expires_at is not None:
+            payload["expiresAt"] = self.expires_at
+        if self.updated_at is not None:
+            payload["updatedAt"] = self.updated_at
+        return payload
+
+    def status_for(
+        self,
+        parity_comparison: Mapping[str, JsonValue] | None,
+        *,
+        trust_summary: Mapping[str, JsonValue] | None = None,
+        now: str | None = None,
+    ) -> str:
+        def _output_is_available(output: str) -> bool:
+            if not isinstance(trust_summary, Mapping):
+                return True
+            comparison_result = (
+                trust_summary.get("comparisonResult")
+                if isinstance(trust_summary.get("comparisonResult"), Mapping)
+                else {}
+            )
+            cobol_result = (
+                trust_summary.get("cobolResult")
+                if isinstance(trust_summary.get("cobolResult"), Mapping)
+                else {}
+            )
+            java_result = (
+                trust_summary.get("javaResult")
+                if isinstance(trust_summary.get("javaResult"), Mapping)
+                else {}
+            )
+            evidence = (
+                trust_summary.get("evidence")
+                if isinstance(trust_summary.get("evidence"), Mapping)
+                else {}
+            )
+            if output == "java_output":
+                return bool(
+                    java_result.get("executionResultRef")
+                    or java_result.get("normalizedOutputRef")
+                )
+            if output == "normalized_output":
+                return bool(
+                    cobol_result.get("normalizedOutputRef")
+                    and java_result.get("normalizedOutputRef")
+                )
+            if output == "stderr":
+                return bool(comparison_result.get("diffRef"))
+            if output == "exit_code":
+                return bool(
+                    java_result.get("executionResultRef")
+                    or comparison_result.get("comparisonResultRef")
+                )
+            if output == "evidence_summary":
+                return bool(evidence.get("packRef"))
+            return True
+
+        if self.expires_at is not None:
+            current_time = now or _iso_now()
+            try:
+                expires = datetime.datetime.fromisoformat(
+                    self.expires_at.replace("Z", "+00:00")
+                )
+                current = datetime.datetime.fromisoformat(
+                    current_time.replace("Z", "+00:00")
+                )
+            except ValueError:
+                return INTENTIONAL_DIVERGENCE_STATUS_INVALID
+            if current >= expires:
+                return INTENTIONAL_DIVERGENCE_STATUS_EXPIRED
+        if not isinstance(parity_comparison, Mapping) or not parity_comparison:
+            return INTENTIONAL_DIVERGENCE_STATUS_INVALID
+        if parity_comparison.get("matched") is True:
+            return INTENTIONAL_DIVERGENCE_STATUS_INVALID
+        current_result_ref = parity_comparison.get("comparisonResultRef")
+        if not isinstance(current_result_ref, Mapping) or not _refs_match(
+            current_result_ref, self.comparison_result_ref
+        ):
+            return INTENTIONAL_DIVERGENCE_STATUS_STALE
+        if isinstance(trust_summary, Mapping):
+            evidence = trust_summary.get("evidence")
+            evidence_status = (
+                str(evidence.get("status")).strip()
+                if isinstance(evidence, Mapping) and evidence.get("status") is not None
+                else ""
+            )
+            if (
+                INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_EVIDENCE_CHANGED
+                in self.invalidation_triggers
+                and isinstance(evidence, Mapping)
+                and evidence_status != "current"
+            ):
+                return INTENTIONAL_DIVERGENCE_STATUS_STALE
+            if (
+                INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_OUTPUTS_CHANGED
+                in self.invalidation_triggers
+                and any(not _output_is_available(output) for output in self.affected_outputs)
+            ):
+                return INTENTIONAL_DIVERGENCE_STATUS_STALE
+        return INTENTIONAL_DIVERGENCE_STATUS_ACTIVE
+
+
 # ---------------------------------------------------------------------------
 # Manual-edit provenance taxonomy (ADR 0007 / Issue #257)
 # ---------------------------------------------------------------------------
@@ -919,6 +1246,8 @@ class W02RunContract:
     resolved_trust_case: JsonObject | None = None
     evidence_pack_ref: JsonObject | None = None
     trust_summary: JsonObject | None = None
+    intentional_divergence_decision: IntentionalDivergenceDecision | None = None
+    intentional_divergence_decision_ref: JsonObject | None = None
     final_classification: str | None = None
     failure_code: str | None = None
     failure_message: str | None = None
@@ -964,6 +1293,16 @@ class W02RunContract:
             )
         if self.trust_summary is not None and not isinstance(self.trust_summary, Mapping):
             raise ValueError("trust_summary must be an object")
+        if self.intentional_divergence_decision is not None and not isinstance(
+            self.intentional_divergence_decision, IntentionalDivergenceDecision
+        ):
+            raise ValueError(
+                "intentional_divergence_decision must be an IntentionalDivergenceDecision instance"
+            )
+        if self.intentional_divergence_decision_ref is not None and not isinstance(
+            self.intentional_divergence_decision_ref, Mapping
+        ):
+            raise ValueError("intentional_divergence_decision_ref must be an object")
 
     def touch(self, now: str | None = None) -> None:
         self.updated_at = now or _iso_now()
@@ -1078,6 +1417,25 @@ class W02RunContract:
         self.touch()
         return decision
 
+    def record_intentional_divergence_decision(
+        self,
+        decision: IntentionalDivergenceDecision,
+        decision_ref: Mapping[str, JsonValue] | None = None,
+    ) -> IntentionalDivergenceDecision:
+        """Record a governed intentional-divergence approval on the run contract."""
+        if not isinstance(decision, IntentionalDivergenceDecision):
+            raise TypeError(
+                "record_intentional_divergence_decision requires an IntentionalDivergenceDecision instance"
+            )
+        if decision.status_for(self.parity_comparison) != INTENTIONAL_DIVERGENCE_STATUS_ACTIVE:
+            raise ValueError(
+                "intentional divergence decisions require the current parity mismatch and matching comparison refs"
+            )
+        self.intentional_divergence_decision = decision
+        self.intentional_divergence_decision_ref = dict(decision_ref) if decision_ref else None
+        self.touch()
+        return decision
+
     def set_generated_java_ref(self, ref: Mapping[str, JsonValue] | None) -> None:
         self.generated_java_ref = dict(ref) if ref else None
         self.touch()
@@ -1103,15 +1461,20 @@ class W02RunContract:
         self.touch()
 
     def set_trust_summary(self, payload: Mapping[str, JsonValue] | None) -> None:
-        """Record the immutable trust summary derived by the orchestrator."""
+        """Record the current orchestrator-projected trust summary for the run."""
         if payload is None:
             self.trust_summary = None
             self.touch()
             return
         normalised = deepcopy(dict(payload))
-        if self.trust_summary is not None and self.trust_summary != normalised:
-            raise ValueError("trust_summary is immutable once set")
         self.trust_summary = normalised
+        self.touch()
+
+    def replace_trust_summary(self, payload: Mapping[str, JsonValue]) -> None:
+        """Replace the projected trust summary for the same immutable run facts."""
+        if not isinstance(payload, Mapping):
+            raise ValueError("trust_summary must be an object")
+        self.trust_summary = deepcopy(dict(payload))
         self.touch()
 
     def set_java_region_classification(
@@ -1219,6 +1582,16 @@ class W02RunContract:
             "failureMessage": self.failure_message,
             "repairAttempts": [dict(entry) for entry in self.repair_attempts],
             "assistDecision": self.assist_decision.to_dict() if self.assist_decision else None,
+            "intentionalDivergenceDecision": (
+                self.intentional_divergence_decision.to_dict()
+                if self.intentional_divergence_decision
+                else None
+            ),
+            "intentionalDivergenceDecisionRef": (
+                dict(self.intentional_divergence_decision_ref)
+                if self.intentional_divergence_decision_ref
+                else None
+            ),
             "manualEditsCarriedOver": self.manual_edits_carried_over,
             "manualDriftRegionCount": self.manual_drift_region_count,
             # Studio-IDE-6 (#248): per-file trust-pillar overlay. Always

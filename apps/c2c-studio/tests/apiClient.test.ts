@@ -202,6 +202,102 @@ describe("apiClient", () => {
     );
   });
 
+  it("upserts an intentional divergence decision and preserves trust-summary refs", async () => {
+    const request = {
+      decisionId: null,
+      rationale:
+        "The generated Java intentionally diverges to preserve a governed edge case.",
+      reviewer: "banking-reviewer",
+      linkedEvidenceRefs: ["pack-123", "artifact://evidence"],
+      affectedOutputs: ["src/main/java/com/demo/LoanProcessor.java"],
+      supersedesPreviousDecision: true,
+      invalidationNote: "Supersedes the prior comparison review for this run.",
+      expiresAt: "2026-06-01T12:00:00.000Z",
+    };
+    const payload = {
+      runId: "run-42",
+      programId: "PROG-42",
+      status: "updated",
+      decision: {
+        decisionId: "decision-42",
+        decisionRef: {
+          sha256: "d".repeat(64),
+          byteSize: 9,
+          kind: "intentional-divergence-decision",
+        },
+        runId: "run-42",
+        programId: "PROG-42",
+        reviewer: request.reviewer,
+        rationale: request.rationale,
+        linkedEvidenceRefs: request.linkedEvidenceRefs,
+        affectedOutputs: request.affectedOutputs,
+        supersedesPreviousDecision: true,
+        invalidationNote: request.invalidationNote,
+        expiresAt: request.expiresAt,
+        invalidatedAt: null,
+        createdAt: "2026-05-21T12:00:00.000Z",
+        updatedAt: "2026-05-21T12:05:00.000Z",
+      },
+      trustSummary: {
+        trustState: "intentional_divergence",
+        repairStatus: "repair_verified",
+        coverageStatus: "full",
+        divergenceDisposition: "intentional",
+        intentionalDivergenceDecisionRef: {
+          sha256: "d".repeat(64),
+          byteSize: 9,
+          kind: "intentional-divergence-decision",
+        },
+        warningCodes: [],
+        trustCase: {
+          trustCaseId: "TC-42",
+          version: "v1",
+          catalogVersion: "2026.05",
+          catalogHash: "c".repeat(64),
+          configurationDigest: "cfg-42",
+        },
+        cobolResult: { status: "completed" },
+        javaResult: { status: "completed" },
+        comparisonResult: {
+          status: "mismatched",
+          mismatchClassification: "intentional-divergence",
+          decisionRecordRef: null,
+        },
+        repair: { status: "repair_verified" },
+        evidence: { status: "current" },
+        summaryDerivedAt: "2026-05-21T12:05:00.000Z",
+      },
+    };
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(payload),
+    } as Response);
+
+    const result = await apiClient.upsertIntentionalDivergenceDecision(
+      "run-42",
+      request,
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v0/runs/run-42/intentional-divergence-decision",
+      expect.objectContaining({
+        method: "PUT",
+        credentials: "include",
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe("updated");
+      expect(result.data.trustSummary?.trustState).toBe(
+        "intentional_divergence",
+      );
+      expect(
+        result.data.trustSummary?.intentionalDivergenceDecisionRef?.sha256,
+      ).toBe("d".repeat(64));
+    }
+  });
+
   it("rejects malformed transform payloads that miss required links", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

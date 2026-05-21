@@ -71,6 +71,10 @@ describe('Run Panels', () => {
     useTransformationRunMock.mockReturnValue({
       state: mockState,
       exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+      intentionalDivergenceDecision: null,
+      intentionalDivergenceDecisionStatus: 'idle',
+      intentionalDivergenceDecisionError: null,
+      submitIntentionalDivergenceDecision: vi.fn(),
     });
   });
 
@@ -437,6 +441,123 @@ describe('Run Panels', () => {
       expect(screen.getAllByText('Repair guardrail escalated to manual review.').length).toBeGreaterThan(0);
       expect(screen.getByText('pack-123')).toBeDefined();
       expect(screen.getByText('rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr')).toBeDefined();
+    });
+
+    it('renders an intentional divergence decision form and validates required capture fields', () => {
+      const submitDecisionMock = vi.fn();
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          summary: {
+            ...mockState.summary,
+            runId: 'run-divergent',
+            programId: 'PROG-1',
+            trustSummary: {
+              trustState: 'intentional_divergence',
+              repairStatus: 'repair_verified',
+              coverageStatus: 'full',
+              divergenceDisposition: 'intentional',
+              intentionalDivergenceDecisionRef: {
+                sha256: 'z'.repeat(64),
+                byteSize: 9,
+                kind: 'intentional-divergence-decision',
+              },
+              warningCodes: [],
+              trustCase: {
+                trustCaseId: 'TC-ALPHA',
+                version: 'v7',
+                catalogVersion: '2026.05',
+                catalogHash: 'catalog-hash',
+                configurationDigest: 'config-hash',
+              },
+              cobolResult: { status: 'completed' },
+              javaResult: { status: 'completed' },
+              comparisonResult: {
+                status: 'mismatched',
+                mismatchClassification: 'intentional-divergence',
+                decisionRecordRef: null,
+              },
+              repair: { status: 'repair_verified' },
+              evidence: { status: 'current' },
+              summaryDerivedAt: '2026-05-21T12:34:56.000Z',
+            },
+          },
+          buildTest: {
+            runId: 'run-divergent',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'output-divergence',
+            classification: 'divergence-unknown',
+            note: 'Intentionally accepted deviation.',
+          },
+          evidence: {
+            runId: 'run-divergent',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'complete',
+            generatedArtifactRef: { sha256: 'z'.repeat(64) },
+          },
+          workflow: {
+            runId: 'run-divergent',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            source: 'live',
+            state: 'verifying',
+            activeStep: null,
+            activeAgent: null,
+            trustCase: null,
+            agentAttemptCount: 0,
+            repairBudget: null,
+            assistBudget: null,
+            modelInvocationBudget: null,
+            repairAttempts: [],
+            assistDecision: null,
+            trustSummary: null,
+            finalClassification: 'failed',
+            failureCode: 'oracle_mismatch',
+            failureMessage: 'Intentionally accepted deviation.',
+            generatedJavaRef: null,
+            buildTestResultRef: null,
+            evidencePackRef: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+        intentionalDivergenceDecision: null,
+        intentionalDivergenceDecisionStatus: 'idle',
+        intentionalDivergenceDecisionError: null,
+        submitIntentionalDivergenceDecision: submitDecisionMock,
+      });
+
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      expect(screen.getAllByText('Intentionally diverged').length).toBeGreaterThan(0);
+      expect(
+        screen.getByRole('heading', { name: 'Intentional divergence decision' }),
+      ).toBeDefined();
+
+      fireEvent.click(screen.getByRole('button', { name: /Record decision/i }));
+
+      expect(submitDecisionMock).not.toHaveBeenCalled();
+      expect(
+        screen.getByText('Rationale must be at least 12 characters long.'),
+      ).toBeDefined();
+      expect(
+        screen.getByText('Reviewer is required.'),
+      ).toBeDefined();
+      expect(
+        screen.getByText(
+          'At least one linked evidence ref is required.',
+        ),
+      ).toBeDefined();
+      expect(
+        screen.getByText(
+          'At least one affected output is required.',
+        ),
+      ).toBeDefined();
     });
 
     it('exports a parity scaffold and surfaces the export status in the trust summary', async () => {

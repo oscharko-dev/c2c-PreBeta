@@ -36,6 +36,7 @@ export interface StateContext {
   missingArtifacts?: string[];
   unsupportedFeatures?: string[];
   mismatchedHashes?: { expected: string; actual: string; context: string }[];
+  intentionalDivergence?: boolean;
   // Issue #173: W0.2 failure code surfaced to the UI when the BFF/orchestrator
   // classifies the run failure. Present on blocked/failed verdict states only.
   failureCode?: W02UiErrorCode;
@@ -119,6 +120,17 @@ function failureCodeToState(code: W02UiErrorCode): ProductState {
   }
 }
 
+function isIntentionalDivergence(runState: TransformationRunState): boolean {
+  const trustSummary =
+    runState.summary?.trustSummary ?? runState.workflow?.trustSummary ?? null;
+  return (
+    trustSummary?.trustState === "intentional_divergence" ||
+    trustSummary?.divergenceDisposition === "intentional" ||
+    trustSummary?.comparisonResult?.mismatchClassification ===
+      "intentional-divergence"
+  );
+}
+
 // Issue #173: map BFF active agent identifier to the in-progress product
 // state the UI shows during that step.
 function activeAgentToState(
@@ -140,6 +152,8 @@ function activeAgentToState(
 export function deriveProductState(
   runState: TransformationRunState,
 ): StateContext {
+  const intentionalDivergence = isIntentionalDivergence(runState);
+
   if (
     runState.error === "Backend unavailable. Try again shortly." ||
     runState.error?.includes("503")
@@ -241,6 +255,14 @@ export function deriveProductState(
     return { state: runState.phase === "starting" ? "submitting" : "running" };
   }
 
+  if (runState.phase === "completed" && intentionalDivergence) {
+    return {
+      state: "equivalence-mismatch",
+      message: "This run was intentionally documented as not equivalent.",
+      intentionalDivergence: true,
+    };
+  }
+
   const generated = runState.generated;
   if (generated) {
     if (generated.status === "unsupported") {
@@ -294,7 +316,13 @@ export function deriveProductState(
       return { state: "build-failed", message: buildTest.note };
     }
     if (buildTest.classification?.startsWith("divergence")) {
-      return { state: "equivalence-mismatch", message: buildTest.note };
+      return {
+        state: "equivalence-mismatch",
+        message: intentionalDivergence
+          ? "This run was intentionally documented as not equivalent."
+          : buildTest.note,
+        intentionalDivergence,
+      };
     }
     if (buildTest.status === "incomplete") {
       return {

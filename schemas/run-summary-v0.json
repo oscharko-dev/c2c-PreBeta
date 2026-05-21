@@ -43,6 +43,11 @@
     "policyDecision": { "type": "string" },
     "createdAt": { "type": "string" },
     "updatedAt": { "type": "string" },
+    "trustSummary": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Orchestrator trust-state projection for the run. When present it reflects the current deterministic comparison outcome plus any governed intentional-divergence decision projection."
+    },
     "manualEditsCarriedOver": {
       "type": "boolean",
       "default": false,

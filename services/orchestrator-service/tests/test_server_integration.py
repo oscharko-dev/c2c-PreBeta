@@ -60,6 +60,11 @@ class MockHarnessState:
                 "owner": "build-service",
                 "endpoint": f"http://{host}:{port}/caps/build-test",
             },
+            "source-reference.execute": {
+                "id": "source-reference.execute",
+                "owner": "build-service",
+                "endpoint": f"http://{host}:{port}/caps/source-reference",
+            },
             "evidence.writer": {
                 "id": "evidence.writer",
                 "owner": "evidence-service",
@@ -293,6 +298,24 @@ class MockHarnessHandler(BaseHTTPRequestHandler):
                 self._write_json(
                     200,
                     response,
+                )
+            elif capability == "source-reference":
+                self._write_json(
+                    200,
+                    {
+                        "schemaVersion": "v0",
+                        "status": "passed",
+                        "runId": payload.get("runId", "run-unknown"),
+                        "workflowId": payload.get("workflowId", "w0-migration-v0"),
+                        "fixtureId": payload.get("fixtureId", "HELLOW02"),
+                        "referenceMode": payload.get("referenceMode", "reference-fixture"),
+                        "executionResultRef": {"uri": "urn:source-reference/execution"},
+                        "normalizedOutputRef": {
+                            "uri": "urn:source-reference/normalized-output",
+                        },
+                        "outputRef": {"uri": "urn:source-reference/execution"},
+                        "summary": "source/reference execution completed",
+                    },
                 )
             elif capability == "evidence":
                 self._write_json(
@@ -529,6 +552,113 @@ class OrchestratorIntegrationTests(unittest.TestCase):
         return server, runner
 
     @staticmethod
+    def _parity_mismatch_build_response(run_id: str = "run-ignored") -> dict:
+        return {
+            "schemaVersion": "v0",
+            "status": "failed",
+            "reason": "oracle_mismatch",
+            "runId": run_id,
+            "workflowId": "w0-migration-v0",
+            "summary": "parity mismatch",
+            "comparisonResultRef": {
+                "uri": "urn:build/parity-comparison",
+                "sha256": "4" * 64,
+                "byteSize": 36,
+            },
+            "executionResultRef": {
+                "uri": "urn:build/parity-execution",
+                "sha256": "5" * 64,
+                "byteSize": 28,
+            },
+            "parityComparison": {
+                "status": "failed",
+                "matched": False,
+                "comparisonPolicyVersion": "deterministic-output-v1",
+                "comparisonResultRef": {
+                    "uri": "urn:build/parity-comparison",
+                    "sha256": "4" * 64,
+                    "byteSize": 36,
+                },
+                "executionResultRef": {
+                    "uri": "urn:build/parity-execution",
+                    "sha256": "5" * 64,
+                    "byteSize": 28,
+                },
+                "sourceNormalizedRef": {
+                    "uri": "urn:build/reference-output",
+                    "sha256": "a" * 64,
+                    "byteSize": 18,
+                },
+                "targetNormalizedRef": {
+                    "uri": "urn:build/java-output",
+                    "sha256": "b" * 64,
+                    "byteSize": 18,
+                },
+                "diffRef": {
+                    "uri": "urn:build/oracle-diff",
+                    "sha256": "8" * 64,
+                    "byteSize": 32,
+                },
+                "mismatchClassification": "content",
+            },
+            "oracleDiffRef": {
+                "uri": "urn:build/oracle-diff",
+                "sha256": "8" * 64,
+                "byteSize": 32,
+            },
+        }
+
+    def _seed_intentional_divergence_contract(
+        self,
+        runner,
+        run_id: str,
+    ) -> tuple[dict, dict]:
+        live_contract = runner.workflow_contract(run_id)
+        self.assertIsNotNone(live_contract)
+        parity_response = self._parity_mismatch_build_response(run_id)
+        contract_payload = live_contract.to_dict()
+        contract_payload["parityComparison"] = parity_response["parityComparison"]
+        contract_payload["intentionalDivergenceDecision"] = None
+        contract_payload["intentionalDivergenceDecisionRef"] = None
+        trust_summary = dict(live_contract.trust_summary or {})
+        trust_summary["trustState"] = "parity_failed"
+        trust_summary["divergenceDisposition"] = "unknown"
+        trust_summary["comparisonResult"] = {
+            **dict(trust_summary.get("comparisonResult") or {}),
+            "status": "mismatched",
+            "mismatchClassification": "content",
+            "comparisonResultRef": parity_response["parityComparison"]["comparisonResultRef"],
+            "diffRef": parity_response["parityComparison"]["diffRef"],
+            "decisionRecordRef": None,
+            "decisionStatus": "none",
+        }
+        live_contract.set_parity_comparison(parity_response["parityComparison"])
+        live_contract.replace_trust_summary(trust_summary)
+        contract_payload["trustSummary"] = trust_summary
+        runner.artifact_store.write_json(
+            run_id,
+            contract_payload["workflowId"],
+            "w02-run-contract.json",
+            contract_payload,
+            kind=orchestrator_workflow.KIND_W02_RUN_CONTRACT,
+        )
+        summary = runner.artifact_store.read_json(run_id, "run-summary.json")
+        if isinstance(summary, dict):
+            updated_summary = dict(summary)
+            updated_summary["parityComparison"] = parity_response["parityComparison"]
+            updated_summary["trustSummary"] = trust_summary
+            runner.artifact_store.write_json(
+                run_id,
+                contract_payload["workflowId"],
+                "run-summary.json",
+                updated_summary,
+                kind=orchestrator_workflow.KIND_RUN_SUMMARY,
+            )
+        with runner._contract_lock:
+            runner._contracts_by_run.pop(run_id, None)
+        return parity_response, trust_summary
+
+    @staticmethod
     def _create_orchestrator_with_root(host: str, mock_port: int, artifact_root: str):
         config = OrchestratorConfig(
             listen_addr=f"{host}:0",
@@ -568,7 +698,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             state = MockHarnessState(host=host, port=mock_port)
             MockHarnessHandler.state = state
 
-            orchestrator_server, _runner = self._create_orchestrator(host, mock_port)
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             orchestrator_thread = threading.Thread(target=orchestrator_server.serve_forever, daemon=True)
             orchestrator_thread.start()
@@ -1532,7 +1662,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             state = MockHarnessState(host=host, port=mock_port)
             MockHarnessHandler.state = state
 
-            orchestrator_server, _runner = self._create_orchestrator(host, mock_port)
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
             orchestrator_port = orchestrator_server.server_port
             orchestrator_thread = threading.Thread(target=orchestrator_server.serve_forever, daemon=True)
             orchestrator_thread.start()
@@ -1862,6 +1992,368 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(contract["finalClassification"], "success")
             self.assertIn("repairAttempts", contract)
             self.assertEqual(contract["repairAttempts"], [])
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_intentional_divergence_endpoint_creates_updates_and_exports_projection(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.build_test_responses = [self._parity_mismatch_build_response()]
+            MockHarnessHandler.state = state
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps(
+                        {
+                            "requester": "integration",
+                            "inputRef": {
+                                "uri": "urn:integration/main.cob",
+                                "source": "IDENTIFICATION DIVISION.",
+                            },
+                        }
+                    ),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 201)
+                run_id = json.loads(response.read().decode("utf-8"))["run"]["runId"]
+            finally:
+                connection.close()
+
+            status = ""
+            for _ in range(60):
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request("GET", f"/v0/runs/{run_id}", headers=self.AUTH_HEADERS)
+                    resp = connection.getresponse()
+                    body = json.loads(resp.read().decode("utf-8"))
+                    status = body.get("status", "")
+                finally:
+                    connection.close()
+                if status in {"completed", "failed"}:
+                    break
+                time.sleep(0.05)
+            self.assertIn(status, {"completed", "failed"})
+
+            self._seed_intentional_divergence_contract(runner, run_id)
+
+            build_meta = runner.artifact_store.find_metadata(run_id, "build-test-result.json")
+            self.assertIsNotNone(build_meta)
+            build_ref = {
+                "uri": build_meta["uri"],
+                "sha256": build_meta["sha256"],
+                "byteSize": build_meta["byteSize"],
+            }
+
+            decision_request = {
+                "requester": "studio",
+                "reasonCode": "business_rule_alignment",
+                "reviewer": {
+                    "reviewerId": "reviewer-1",
+                    "displayName": "Reviewer One",
+                    "role": "approver",
+                },
+                "rationale": {
+                    "summary": "Customer policy allows the expected divergence.",
+                    "technicalBasis": "The target output intentionally differs from the reference.",
+                    "businessImpact": "The behavioral difference is approved and documented.",
+                },
+                "linkedEvidenceRefs": [build_ref],
+                "affectedOutputs": ["java_output", "normalized_output"],
+                "invalidationTriggers": ["comparison_result_changed", "linked_evidence_changed"],
+            }
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    f"/v0/runs/{run_id}/intentional-divergence/decision/request",
+                    body=json.dumps(decision_request),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                decision_response = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            self.assertEqual(
+                decision_response["trustSummary"]["trustState"],
+                "intentional_divergence",
+            )
+            self.assertEqual(
+                decision_response["trustSummary"]["comparisonResult"]["decisionStatus"],
+                "active",
+            )
+            self.assertEqual(
+                decision_response["decision"]["reviewer"]["reviewerId"],
+                "reviewer-1",
+            )
+
+            decision_request["rationale"]["summary"] = "The same divergence remains approved."
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    f"/v0/runs/{run_id}/intentional-divergence/decision/request",
+                    body=json.dumps(decision_request),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                updated_response = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            self.assertEqual(
+                updated_response["trustSummary"]["intentionalDivergenceDecision"]["rationale"]["summary"],
+                "The same divergence remains approved.",
+            )
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request("GET", f"/v0/runs/{run_id}/workflow", headers=self.AUTH_HEADERS)
+                response = connection.getresponse()
+                workflow = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            contract = workflow["contract"]
+            self.assertEqual(contract["intentionalDivergenceDecision"]["rationale"]["summary"], "The same divergence remains approved.")
+            self.assertEqual(contract["intentionalDivergenceDecisionRef"]["uri"], updated_response["decisionRef"]["uri"])
+            summary = json.loads((Path(self._artifact_root) / run_id / "run-summary.json").read_text("utf-8"))
+            self.assertEqual(summary["trustSummary"]["trustState"], "intentional_divergence")
+            self.assertEqual(
+                summary["trustSummary"]["intentionalDivergenceDecision"]["rationale"]["summary"],
+                "The same divergence remains approved.",
+            )
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_intentional_divergence_does_not_carry_over_to_new_run(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.build_test_responses = [self._parity_mismatch_build_response()]
+            MockHarnessHandler.state = state
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            def _start_parity_run() -> str:
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request(
+                        "POST",
+                        "/v0/runs",
+                        body=json.dumps(
+                            {
+                                "requester": "integration",
+                                "inputRef": {
+                                    "uri": "urn:integration/main.cob",
+                                    "source": "IDENTIFICATION DIVISION.",
+                                },
+                            }
+                        ),
+                        headers=self.JSON_AUTH_HEADERS,
+                    )
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 201)
+                    return json.loads(response.read().decode("utf-8"))["run"]["runId"]
+                finally:
+                    connection.close()
+
+            first_run_id = _start_parity_run()
+            for _ in range(60):
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request("GET", f"/v0/runs/{first_run_id}", headers=self.AUTH_HEADERS)
+                    resp = connection.getresponse()
+                    body = json.loads(resp.read().decode("utf-8"))
+                    if body.get("status") in {"completed", "failed"}:
+                        break
+                finally:
+                    connection.close()
+                time.sleep(0.05)
+
+            self._seed_intentional_divergence_contract(runner, first_run_id)
+
+            build_meta = runner.artifact_store.find_metadata(first_run_id, "build-test-result.json")
+            self.assertIsNotNone(build_meta)
+            build_ref = {
+                "uri": build_meta["uri"],
+                "sha256": build_meta["sha256"],
+                "byteSize": build_meta["byteSize"],
+            }
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    f"/v0/runs/{first_run_id}/intentional-divergence/decision/request",
+                    body=json.dumps(
+                        {
+                            "requester": "studio",
+                            "reasonCode": "business_rule_alignment",
+                            "reviewer": {
+                                "reviewerId": "reviewer-1",
+                                "displayName": "Reviewer One",
+                                "role": "approver",
+                            },
+                            "rationale": {
+                                "summary": "Approved for the first run only.",
+                                "technicalBasis": "The difference is intentional.",
+                                "businessImpact": "The run is documented.",
+                            },
+                            "linkedEvidenceRefs": [build_ref],
+                            "affectedOutputs": ["java_output"],
+                            "invalidationTriggers": ["comparison_result_changed"],
+                        }
+                    ),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+            finally:
+                connection.close()
+
+            state.build_test_responses = [self._parity_mismatch_build_response()]
+            second_run_id = _start_parity_run()
+            for _ in range(60):
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request("GET", f"/v0/runs/{second_run_id}", headers=self.AUTH_HEADERS)
+                    resp = connection.getresponse()
+                    body = json.loads(resp.read().decode("utf-8"))
+                    if body.get("status") in {"completed", "failed"}:
+                        break
+                finally:
+                    connection.close()
+                time.sleep(0.05)
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request("GET", f"/v0/runs/{second_run_id}/workflow", headers=self.AUTH_HEADERS)
+                response = connection.getresponse()
+                workflow = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
+
+            contract = workflow["contract"]
+            self.assertIsNone(contract.get("intentionalDivergenceDecision"))
+            self.assertNotEqual(contract["trustSummary"]["trustState"], "intentional_divergence")
+            self.assertEqual(contract["trustSummary"]["comparisonResult"]["decisionStatus"], "none")
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_intentional_divergence_endpoint_rejects_expired_decision(self):
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            state.build_test_responses = [self._parity_mismatch_build_response()]
+            MockHarnessHandler.state = state
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    "/v0/runs",
+                    body=json.dumps(
+                        {
+                            "requester": "integration",
+                            "inputRef": {
+                                "uri": "urn:integration/main.cob",
+                                "source": "IDENTIFICATION DIVISION.",
+                            },
+                        }
+                    ),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                run_id = json.loads(response.read().decode("utf-8"))["run"]["runId"]
+            finally:
+                connection.close()
+
+            for _ in range(60):
+                connection = HTTPConnection(host, orchestrator_port, timeout=3)
+                try:
+                    connection.request("GET", f"/v0/runs/{run_id}", headers=self.AUTH_HEADERS)
+                    resp = connection.getresponse()
+                    body = json.loads(resp.read().decode("utf-8"))
+                    if body.get("status") in {"completed", "failed"}:
+                        break
+                finally:
+                    connection.close()
+                time.sleep(0.05)
+
+            self._seed_intentional_divergence_contract(runner, run_id)
+
+            build_meta = runner.artifact_store.find_metadata(run_id, "build-test-result.json")
+            self.assertIsNotNone(build_meta)
+            build_ref = {
+                "uri": build_meta["uri"],
+                "sha256": build_meta["sha256"],
+                "byteSize": build_meta["byteSize"],
+            }
+
+            connection = HTTPConnection(host, orchestrator_port, timeout=3)
+            try:
+                connection.request(
+                    "POST",
+                    f"/v0/runs/{run_id}/intentional-divergence/decision/request",
+                    body=json.dumps(
+                        {
+                            "requester": "studio",
+                            "reasonCode": "business_rule_alignment",
+                            "reviewer": {
+                                "reviewerId": "reviewer-1",
+                                "displayName": "Reviewer One",
+                                "role": "approver",
+                            },
+                            "rationale": {
+                                "summary": "This approval is expired.",
+                                "technicalBasis": "It should fail validation.",
+                                "businessImpact": "None.",
+                            },
+                            "linkedEvidenceRefs": [build_ref],
+                            "affectedOutputs": ["java_output"],
+                            "invalidationTriggers": ["comparison_result_changed"],
+                            "expiresAt": "2000-01-01T00:00:00Z",
+                        }
+                    ),
+                    headers=self.JSON_AUTH_HEADERS,
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 400)
+            finally:
+                connection.close()
         finally:
             mock_server.shutdown()
             mock_server.server_close()
