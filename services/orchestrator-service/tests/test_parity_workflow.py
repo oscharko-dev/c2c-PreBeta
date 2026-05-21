@@ -25,7 +25,13 @@ from orchestrator_service.run_contract import (
     FAILURE_SOURCE_REFERENCE_FAILED,
     FAILURE_ORACLE_MISMATCH,
 )
-from orchestrator_service.workflow import W0RunContext, W0WorkflowRunner
+from orchestrator_service.workflow import (
+    W0RunContext,
+    W0WorkflowRunner,
+    _bounded_diagnostic_message,
+    _DIAGNOSTIC_MESSAGE_MAX_LENGTH,
+    _DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL,
+)
 
 from tests.test_workflow import StubGateway, W0WorkflowRunnerTests
 
@@ -450,6 +456,179 @@ class ParityWorkflowRegressionTests(unittest.TestCase):
                     evidence_payload["artifacts"]["parityComparison"]["mismatchClassification"],
                     expected_mismatch,
                 )
+
+    def test_oversize_source_reference_summary_is_bounded_at_producer(self) -> None:
+        """The orchestrator must apply the 4000-char ceiling to upstream
+        ``summary`` text before it lands in the step diagnostic, the W0.2
+        state-history transition message, and the run-summary message.
+
+        Symmetric with PR #397/#401's producer-side bounds on the Java side
+        (#351/#354): a runaway upstream string would otherwise pass through
+        the orchestrator unchecked and fail evidence-ledger schema validation
+        at ingest.
+        """
+        oversize = "x" * (_DIAGNOSTIC_MESSAGE_MAX_LENGTH + 500)
+        source_reference_failure = {
+            "schemaVersion": "v0",
+            "status": "failed",
+            "runId": RUN_ID,
+            "workflowId": "w0-migration-v0",
+            "summary": oversize,
+            "diagnostics": [],
+            "outputRef": {"uri": f"urn:{RUN_ID}/source-reference"},
+        }
+        runner, _, _, _ = self._run_case(
+            _parity_build_response(),
+            repair_budget_max=0,
+            source_reference_response=source_reference_failure,
+        )
+
+        by_name = {entry["name"]: entry for entry in runner.progress_payload(RUN_ID)}
+        diagnostic = by_name["source-reference-execution"].get("diagnostic")
+        self.assertIsNotNone(diagnostic)
+        self.assertLessEqual(len(diagnostic), _DIAGNOSTIC_MESSAGE_MAX_LENGTH)
+        self.assertTrue(
+            diagnostic.endswith(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL),
+            "orchestrator must apply the truncation sentinel when the upstream "
+            "summary exceeds the diagnostic ceiling",
+        )
+
+        contract = runner.artifact_store.read_json(RUN_ID, "w02-run-contract.json")
+        for entry in contract["stateHistory"]:
+            message = entry.get("message", "")
+            self.assertLessEqual(len(message), _DIAGNOSTIC_MESSAGE_MAX_LENGTH)
+
+        summary = runner.artifact_store.read_json(RUN_ID, "run-summary.json")
+        message = summary.get("message", "")
+        self.assertLessEqual(len(message), _DIAGNOSTIC_MESSAGE_MAX_LENGTH)
+        self.assertTrue(message.endswith(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL))
+
+    @staticmethod
+    def _comparison_only_failure_response(diff_summary: str) -> dict:
+        """Build a parity build-test response where compile and execution
+        succeed but the comparison fails.
+
+        The orchestrator infers per-step status from a payload mapping per
+        step: ``buildResult``, ``executionResult``, and ``comparisonResult``.
+        When ``buildResult`` is omitted the orchestrator falls back to the
+        top-level ``status``, which in :func:`_parity_build_response` is
+        wired to mirror the overall classification. Setting an explicit
+        passed ``buildResult`` is necessary for the parity-comparison step
+        to actually exercise the comparison-result diagnostic path rather
+        than the build-failed marker path.
+        """
+        response = _parity_build_response(
+            status="failed",
+            classification="run-error",
+            reason="oracle_mismatch",
+            comparison_status="failed",
+            matched=False,
+            mismatch_classification="content",
+            execution_status="passed",
+            diff_summary=diff_summary,
+        )
+        response["buildResult"] = {
+            "schemaVersion": "v0",
+            "status": "passed",
+            "summary": "Generated Java compiled cleanly.",
+            "outputRef": {
+                "uri": f"urn:{RUN_ID}/build-output",
+                "sha256": "7" * 64,
+                "byteSize": 12,
+                "kind": "parity-build-result",
+            },
+        }
+        return response
+
+    def test_oversize_parity_comparison_diff_summary_is_bounded_at_producer(
+        self,
+    ) -> None:
+        """The parity-comparison step diagnostic reflects the upstream
+        ``diffSummary`` from the comparison result. The orchestrator must
+        apply the same 4000-char ceiling so a runaway producer-side
+        ``diffSummary`` cannot pass through into the evidence-eligible
+        ``diagnostic`` field.
+        """
+        oversize = "y" * (_DIAGNOSTIC_MESSAGE_MAX_LENGTH + 2_500)
+        runner, _, _, _ = self._run_case(
+            self._comparison_only_failure_response(oversize),
+            repair_budget_max=0,
+        )
+
+        by_name = {entry["name"]: entry for entry in runner.progress_payload(RUN_ID)}
+        comparison_diagnostic = by_name["parity-comparison"].get("diagnostic")
+        self.assertIsNotNone(comparison_diagnostic)
+        self.assertLessEqual(
+            len(comparison_diagnostic), _DIAGNOSTIC_MESSAGE_MAX_LENGTH
+        )
+        self.assertTrue(
+            comparison_diagnostic.endswith(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL),
+            "parity-comparison step diagnostic must be truncated with the "
+            "sentinel when the upstream diffSummary exceeds the ceiling",
+        )
+
+    def test_in_bound_diff_summary_is_preserved_unchanged(self) -> None:
+        """Bounded inputs must pass through verbatim — the producer-side cap
+        must not corrupt or alter ``diffSummary`` values that already satisfy
+        the schema ceiling.
+        """
+        diff_summary = "Outputs diverged on line 12: expected 42, got 41."
+        runner, _, _, _ = self._run_case(
+            self._comparison_only_failure_response(diff_summary),
+            repair_budget_max=0,
+        )
+
+        by_name = {entry["name"]: entry for entry in runner.progress_payload(RUN_ID)}
+        comparison_diagnostic = by_name["parity-comparison"].get("diagnostic")
+        self.assertEqual(comparison_diagnostic, diff_summary)
+        self.assertFalse(
+            comparison_diagnostic.endswith(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL)
+        )
+
+
+class BoundedDiagnosticMessageHelperTests(unittest.TestCase):
+    """Unit coverage for :func:`_bounded_diagnostic_message`.
+
+    Each Trust-* issue has had a producer-side bound paired with a regression
+    suite that exercises the boundary explicitly (#397 for diagnostic.message,
+    #399 for generated-Java diagnostic, #401 for parity-comparison
+    diffSummary). The orchestrator-side bound (#355 follow-up) follows the
+    same pattern — these tests pin the helper at the four-thousand-char
+    boundary so a mutation that drops or shifts the cap is caught.
+    """
+
+    def test_returns_none_for_none(self) -> None:
+        self.assertIsNone(_bounded_diagnostic_message(None))
+
+    def test_returns_empty_for_empty(self) -> None:
+        self.assertEqual(_bounded_diagnostic_message(""), "")
+
+    def test_returns_value_unchanged_when_under_limit(self) -> None:
+        value = "Source/reference execution failed."
+        self.assertEqual(_bounded_diagnostic_message(value), value)
+
+    def test_returns_value_unchanged_at_limit(self) -> None:
+        value = "a" * _DIAGNOSTIC_MESSAGE_MAX_LENGTH
+        result = _bounded_diagnostic_message(value)
+        self.assertEqual(result, value)
+        self.assertEqual(len(result), _DIAGNOSTIC_MESSAGE_MAX_LENGTH)
+        self.assertFalse(result.endswith(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL))
+
+    def test_truncates_with_sentinel_one_char_over_limit(self) -> None:
+        value = "a" * (_DIAGNOSTIC_MESSAGE_MAX_LENGTH + 1)
+        result = _bounded_diagnostic_message(value)
+        self.assertEqual(len(result), _DIAGNOSTIC_MESSAGE_MAX_LENGTH)
+        self.assertTrue(result.endswith(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL))
+
+    def test_truncates_with_sentinel_for_long_value(self) -> None:
+        value = "x" * 50_000
+        result = _bounded_diagnostic_message(value)
+        self.assertEqual(len(result), _DIAGNOSTIC_MESSAGE_MAX_LENGTH)
+        self.assertTrue(result.endswith(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL))
+        kept = _DIAGNOSTIC_MESSAGE_MAX_LENGTH - len(
+            _DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL
+        )
+        self.assertEqual(result[:kept], "x" * kept)
 
 
 if __name__ == "__main__":
