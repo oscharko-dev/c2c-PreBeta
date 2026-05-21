@@ -10,6 +10,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -1301,13 +1302,13 @@ public final class BuildTestRunnerService {
                 .append('\n');
         for (Map<String, Object> diagnostic : diagnostics) {
             String filePath = DiagnosticBounds.boundedFilePath(
-                    String.valueOf(diagnostic.getOrDefault("filePath", "generated-project")));
+                    Objects.toString(diagnostic.get("filePath"), "generated-project"));
             String message = DiagnosticBounds.boundedMessage(
-                    String.valueOf(diagnostic.getOrDefault("message", "")));
-            builder.append(String.valueOf(diagnostic.getOrDefault("severity", "info"))).append(' ')
+                    Objects.toString(diagnostic.get("message"), ""));
+            builder.append(Objects.toString(diagnostic.get("severity"), "info")).append(' ')
                     .append(filePath).append(':')
-                    .append(String.valueOf(diagnostic.getOrDefault("line", 1))).append(':')
-                    .append(String.valueOf(diagnostic.getOrDefault("column", 1))).append(' ')
+                    .append(Objects.toString(diagnostic.get("line"), "1")).append(':')
+                    .append(Objects.toString(diagnostic.get("column"), "1")).append(' ')
                     .append(message)
                     .append('\n');
         }

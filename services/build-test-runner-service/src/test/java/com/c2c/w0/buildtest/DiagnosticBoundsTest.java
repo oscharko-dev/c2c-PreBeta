@@ -99,6 +99,45 @@ class DiagnosticBoundsTest {
     }
 
     @Test
+    void longTrailingSegmentStartingWithDotsIsNotTruncatedToDoubleDot() {
+        // Segment ".." is filtered, but "..foo" passes the filter. Truncating
+        // mid-segment could leave just ".." and re-trigger the schema's
+        // traversal rejection. Segment-based truncation must keep the result
+        // schema-conformant.
+        String head = "a".repeat(DiagnosticBounds.MAX_FILEPATH_LENGTH - 5);
+        String trailing = "..foo" + "x".repeat(20);
+        String input = head + "/" + trailing;
+        String bounded = DiagnosticBounds.boundedFilePath(input);
+        assertTrue(SCHEMA_FILEPATH_PATTERN.matcher(bounded).matches(),
+                () -> "expected schema-conformant path, got: " + bounded);
+        assertTrue(!bounded.endsWith(".."),
+                () -> "expected no '..' tail after truncation, got: " + bounded);
+    }
+
+    @Test
+    void veryLargeUntrustedInputDoesNotExplodeAllocation() {
+        // Producer-side defence: per-character sanitization must not loop over
+        // an unbounded input. A 256 KiB input is bounded to MAX_FILEPATH_LENGTH
+        // characters in the result.
+        String huge = "a".repeat(256 * 1024);
+        String bounded = DiagnosticBounds.boundedFilePath(huge);
+        assertTrue(bounded.length() <= DiagnosticBounds.MAX_FILEPATH_LENGTH,
+                () -> "expected <= " + DiagnosticBounds.MAX_FILEPATH_LENGTH
+                        + " chars, got " + bounded.length());
+        assertTrue(SCHEMA_FILEPATH_PATTERN.matcher(bounded).matches(),
+                () -> "expected schema-conformant path, got: " + bounded);
+    }
+
+    @Test
+    void singleOversizeSegmentFallsBackInsteadOfMidSegmentTruncation() {
+        // A single segment longer than the cap cannot be appended in full and
+        // must not be cut mid-string. Falls back to the safe placeholder.
+        String oversizeSingleSegment = "a".repeat(DiagnosticBounds.MAX_FILEPATH_LENGTH + 50);
+        String bounded = DiagnosticBounds.boundedFilePath(oversizeSingleSegment);
+        assertEquals("generated-project", bounded);
+    }
+
+    @Test
     void blankFilePathFallsBackToGeneratedProject() {
         assertEquals("generated-project", DiagnosticBounds.boundedFilePath(""));
         assertEquals("generated-project", DiagnosticBounds.boundedFilePath(null));
