@@ -278,7 +278,6 @@ function RunHarness() {
     intentionalDivergenceDecisionStatus,
     intentionalDivergenceDecisionError,
   } = useTransformationRun();
-    useTransformationRun();
 
   return (
     <div>

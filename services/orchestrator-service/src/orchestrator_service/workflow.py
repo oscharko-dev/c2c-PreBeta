@@ -2916,7 +2916,7 @@ class W0WorkflowRunner:
 
         reason_code = _text(decision.get("reasonCode"))
         if reason_code not in INTENTIONAL_DIVERGENCE_REASON_CODES:
-            raise OrchestratorError(
+            raise ValueError(
                 "reasonCode must be one of the supported intentional-divergence reason codes"
             )
         reviewer_payload = decision.get("reviewer")
@@ -2925,13 +2925,13 @@ class W0WorkflowRunner:
             reviewer_name = _text(reviewer_payload.get("displayName")) or reviewer_id
             reviewer_role = _text(reviewer_payload.get("role")) or "reviewer"
             if not reviewer_id or not reviewer_name:
-                raise OrchestratorError("reviewer must include reviewerId and displayName")
+                raise ValueError("reviewer must include reviewerId and displayName")
         else:
             reviewer_id = _text(reviewer_payload)
             reviewer_name = reviewer_id
             reviewer_role = "reviewer"
             if not reviewer_id:
-                raise OrchestratorError("reviewer must be a non-empty string")
+                raise ValueError("reviewer must be a non-empty string")
         rationale_payload = decision.get("rationale")
         if isinstance(rationale_payload, Mapping):
             rationale_summary = _text(rationale_payload.get("summary"))
@@ -2944,11 +2944,11 @@ class W0WorkflowRunner:
             business_impact = _text(decision.get("businessImpact")) or rationale_summary
             follow_up = _text(decision.get("followUp")) or None
         if not rationale_summary:
-            raise OrchestratorError("rationale.summary must be a non-empty string")
+            raise ValueError("rationale.summary must be a non-empty string")
         if not behavior_change:
-            raise OrchestratorError("rationale.technicalBasis must be a non-empty string")
+            raise ValueError("rationale.technicalBasis must be a non-empty string")
         if not business_impact:
-            raise OrchestratorError("rationale.businessImpact must be a non-empty string")
+            raise ValueError("rationale.businessImpact must be a non-empty string")
 
         artifact_index = self.artifact_store.read_index(run_id) or {}
         artifacts = artifact_index.get("artifacts")
@@ -2964,7 +2964,7 @@ class W0WorkflowRunner:
         if not isinstance(linked_evidence_raw, Sequence) or isinstance(
             linked_evidence_raw, (str, bytes)
         ):
-            raise OrchestratorError("linkedEvidenceRefs must be a non-empty array")
+            raise ValueError("linkedEvidenceRefs must be a non-empty array")
         resolved_linked_evidence_refs: list[JsonObject] = []
         for entry in linked_evidence_raw:
             if isinstance(entry, Mapping):
@@ -2974,19 +2974,19 @@ class W0WorkflowRunner:
                     continue
             uri = _text(entry)
             if not uri:
-                raise OrchestratorError("linkedEvidenceRefs entries must be artifact URIs or refs")
+                raise ValueError("linkedEvidenceRefs entries must be artifact URIs or refs")
             artifact = artifact_by_uri.get(uri)
             if artifact is None:
-                raise OrchestratorError(f"linkedEvidenceRef is not a known run artifact: {uri}")
+                raise ValueError(f"linkedEvidenceRef is not a known run artifact: {uri}")
             resolved_linked_evidence_refs.append(self._artifact_ref_payload(artifact) or dict(artifact))
         if not resolved_linked_evidence_refs:
-            raise OrchestratorError("linkedEvidenceRefs must reference at least one run artifact")
+            raise ValueError("linkedEvidenceRefs must reference at least one run artifact")
 
         affected_outputs_raw = decision.get("affectedOutputs")
         if not isinstance(affected_outputs_raw, Sequence) or isinstance(
             affected_outputs_raw, (str, bytes)
         ):
-            raise OrchestratorError("affectedOutputs must be a non-empty array")
+            raise ValueError("affectedOutputs must be a non-empty array")
         affected_outputs = [
             _text(entry) for entry in affected_outputs_raw if _text(entry)
         ]
@@ -2994,7 +2994,7 @@ class W0WorkflowRunner:
             not affected_outputs
             or any(entry not in INTENTIONAL_DIVERGENCE_AFFECTED_OUTPUTS for entry in affected_outputs)
         ):
-            raise OrchestratorError(
+            raise ValueError(
                 "affectedOutputs must contain only supported intentional-divergence outputs"
             )
 
@@ -3002,7 +3002,7 @@ class W0WorkflowRunner:
         if not isinstance(invalidation_raw, Sequence) or isinstance(
             invalidation_raw, (str, bytes)
         ):
-            raise OrchestratorError("invalidationTriggers must be a non-empty array")
+            raise ValueError("invalidationTriggers must be a non-empty array")
         invalidation_triggers = [
             _text(entry) for entry in invalidation_raw if _text(entry)
         ]
@@ -3013,7 +3013,7 @@ class W0WorkflowRunner:
                 for entry in invalidation_triggers
             )
         ):
-            raise OrchestratorError(
+            raise ValueError(
                 "invalidationTriggers must contain only supported invalidation triggers"
             )
 
@@ -3024,7 +3024,7 @@ class W0WorkflowRunner:
                     expires_at.replace("Z", "+00:00")
                 )
             except ValueError as exc:
-                raise OrchestratorError("expiresAt must be an ISO-8601 timestamp") from exc
+                raise ValueError("expiresAt must be an ISO-8601 timestamp") from exc
             if expires_at_dt <= datetime.datetime.now(datetime.timezone.utc):
                 raise ValueError("expiresAt must be in the future")
 
@@ -3170,7 +3170,9 @@ class W0WorkflowRunner:
             raise OrchestratorError("failed to persist intentional divergence decision")
 
         decision_contract = IntentionalDivergenceDecision.from_mapping(decision_payload)
-        decision_status = decision_contract.status_for(parity_comparison)
+        decision_status = decision_contract.status_for(
+            parity_comparison,
+        )
         if decision_status != INTENTIONAL_DIVERGENCE_STATUS_ACTIVE:
             raise ValueError(
                 "intentional divergence decisions require the current parity mismatch and matching comparison refs"
@@ -7479,6 +7481,16 @@ class W0WorkflowRunner:
             if isinstance(parity_comparison.get("decisionRecordRef"), Mapping)
             else None
         )
+        evidence_pack_ref = artifact_ref(contract.evidence_pack_ref)
+        evidence_status = "current"
+        if evidence_incomplete or evidence_pack_ref is None:
+            evidence_status = "incomplete"
+        elif (
+            evidence_recorded_at
+            and comparison_completed_at
+            and evidence_recorded_at < comparison_completed_at
+        ):
+            evidence_status = "stale"
         intentional_decision = getattr(contract, "intentional_divergence_decision", None)
         intentional_decision_ref = artifact_ref(
             getattr(contract, "intentional_divergence_decision_ref", None)
@@ -7488,7 +7500,34 @@ class W0WorkflowRunner:
         intentional_decision_status = None
         intentional_divergence_summary: JsonObject | None = None
         if intentional_decision is not None:
-            intentional_decision_status = intentional_decision.status_for(parity_comparison)
+            current_trust_summary: JsonObject = {
+                "comparisonResult": {
+                    "status": (
+                        "mismatched"
+                        if parity_passed is False
+                        else "matched"
+                        if parity_passed is True
+                        else "not_available"
+                    ),
+                    "comparisonResultRef": comparison_result_ref,
+                    "diffRef": diff_ref,
+                },
+                "cobolResult": {
+                    "normalizedOutputRef": source_normalized_ref,
+                },
+                "javaResult": {
+                    "executionResultRef": execution_result_ref,
+                    "normalizedOutputRef": target_normalized_ref,
+                },
+                "evidence": {
+                    "status": evidence_status,
+                    "packRef": evidence_pack_ref,
+                },
+            }
+            intentional_decision_status = intentional_decision.status_for(
+                parity_comparison,
+                trust_summary=current_trust_summary,
+            )
             intentional_divergence_summary = {
                 "status": intentional_decision_status,
                 "decisionId": intentional_decision.decision_id,
@@ -7516,7 +7555,6 @@ class W0WorkflowRunner:
             if intentional_decision_status == INTENTIONAL_DIVERGENCE_STATUS_ACTIVE
             else legacy_decision_record_ref
         )
-        evidence_pack_ref = artifact_ref(contract.evidence_pack_ref)
 
         propose_candidate_attempts = [
             entry
@@ -7573,16 +7611,6 @@ class W0WorkflowRunner:
             if isinstance(winning_attempt, Mapping)
             else None
         )
-
-        evidence_status = "current"
-        if evidence_incomplete or evidence_pack_ref is None:
-            evidence_status = "incomplete"
-        elif (
-            evidence_recorded_at
-            and comparison_completed_at
-            and evidence_recorded_at < comparison_completed_at
-        ):
-            evidence_status = "stale"
 
         divergence_disposition = "none"
         coverage_gap_detected = (

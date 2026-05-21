@@ -550,7 +550,12 @@ describe('Run Panels', () => {
       ).toBeDefined();
       expect(
         screen.getByText(
-          'At least one linked evidence ref or affected output is required.',
+          'At least one linked evidence ref is required.',
+        ),
+      ).toBeDefined();
+      expect(
+        screen.getByText(
+          'At least one affected output is required.',
         ),
       ).toBeDefined();
     });

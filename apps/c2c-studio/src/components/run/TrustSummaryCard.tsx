@@ -861,8 +861,11 @@ function validateDecisionDraft(draft: DecisionDraft): string[] {
   }
   const linkedEvidenceRefs = parseListField(draft.linkedEvidenceRefs);
   const affectedOutputs = parseListField(draft.affectedOutputs);
-  if (linkedEvidenceRefs.length === 0 && affectedOutputs.length === 0) {
-    errors.push("At least one linked evidence ref or affected output is required.");
+  if (linkedEvidenceRefs.length === 0) {
+    errors.push("At least one linked evidence ref is required.");
+  }
+  if (affectedOutputs.length === 0) {
+    errors.push("At least one affected output is required.");
   }
   if (
     draft.supersedesPreviousDecision &&

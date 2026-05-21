@@ -5911,7 +5911,6 @@ test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator tr
       "comparison_result_changed",
       "affected_outputs_changed",
       "linked_evidence_changed",
-      "expires_at_reached",
     ]);
     assert.equal(
       decisionRequests[0]?.payload.requester,

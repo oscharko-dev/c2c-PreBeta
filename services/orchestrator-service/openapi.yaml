@@ -513,7 +513,7 @@ components:
           type: array
           items:
             type: string
-      additionalProperties: true
+      additionalProperties: false
     RunStartResponse:
       type: object
       required: [run, status, message]

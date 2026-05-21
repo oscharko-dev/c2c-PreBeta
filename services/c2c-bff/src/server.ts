@@ -1313,6 +1313,8 @@ function sanitizeIntentionalDivergenceResponseBody(
     asString(decision?.rationaleSummary) ??
     "";
   const invalidationNote =
+    asString(asRecord(summaryDecision?.rationale)?.technicalBasis) ??
+    asString(asRecord(decision?.rationale)?.technicalBasis) ??
     asString(asRecord(summaryDecision?.rationale)?.behaviorChange) ??
     asString(asRecord(decision?.rationale)?.behaviorChange) ??
     asString(summaryDecision?.behaviorChange) ??
@@ -5782,12 +5784,12 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         if (
           !record.rationale ||
           !record.reviewer ||
-          (record.linkedEvidenceRefs.length === 0 &&
-            record.affectedOutputs.length === 0)
+          record.linkedEvidenceRefs.length === 0 ||
+          record.affectedOutputs.length === 0
         ) {
           badRequest(
             res,
-            "rationale, reviewer, and at least one linkedEvidenceRef or affectedOutput are required",
+            "rationale, reviewer, linkedEvidenceRefs, and affectedOutputs are required",
           );
           return;
         }
@@ -5796,7 +5798,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         );
         const invalidationTriggers = [
           ...INTENTIONAL_DIVERGENCE_DEFAULT_INVALIDATION_TRIGGERS,
-          ...(record.supersedesPreviousDecision ? ["expires_at_reached"] : []),
+          ...(record.expiresAt ? ["expires_at_reached"] : []),
         ];
         const upstream = await upsertIntentionalDivergenceDecision(runId, {
           reasonCode: INTENTIONAL_DIVERGENCE_REASON_CODE,

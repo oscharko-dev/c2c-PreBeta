@@ -126,7 +126,7 @@ function isIntentionalDivergence(runState: TransformationRunState): boolean {
   return (
     trustSummary?.trustState === "intentional_divergence" ||
     trustSummary?.divergenceDisposition === "intentional" ||
-    trustSummary?.comparisonResult.mismatchClassification ===
+    trustSummary?.comparisonResult?.mismatchClassification ===
       "intentional-divergence"
   );
 }

@@ -398,7 +398,7 @@ test("orchestrator client encodes workflow endpoint with the run id", async () =
   );
 });
 
-test("orchestrator client PUTs intentional divergence decisions on the run id", async () => {
+test("orchestrator client POSTs intentional divergence decisions on the run id", async () => {
   const client = createNodeHttpClient();
   await withEchoServer(
     (_req, res) => {
@@ -421,13 +421,13 @@ test("orchestrator client PUTs intentional divergence decisions on the run id", 
       const response = await orch.upsertIntentionalDivergenceDecision!(
         "run a/b",
         {
-          reasonCode: "product_divergence_governed",
+          reasonCode: "accepted_functional_change",
           rationaleSummary: "The divergence is a governed product decision.",
           behaviorChange: "The product keeps the intentional divergence.",
           reviewer: "studio reviewer",
           evidenceRefs: ["urn:evidence/1"],
-          affectedOutputs: ["urn:output/1"],
-          invalidationTriggers: ["review-approval"],
+          affectedOutputs: ["java_output"],
+          invalidationTriggers: ["comparison_result_changed"],
           requester: "studio:tenant-a:user-a",
         },
       );
@@ -438,7 +438,7 @@ test("orchestrator client PUTs intentional divergence decisions on the run id", 
         "/v0/runs/run%20a%2Fb/intentional-divergence/decision/request",
       );
       const parsed = JSON.parse(captured[0]?.body ?? "{}");
-      assert.equal(parsed.reasonCode, "product_divergence_governed");
+      assert.equal(parsed.reasonCode, "accepted_functional_change");
       assert.equal(
         parsed.rationaleSummary,
         "The divergence is a governed product decision.",
@@ -449,8 +449,8 @@ test("orchestrator client PUTs intentional divergence decisions on the run id", 
       );
       assert.equal(parsed.reviewer, "studio reviewer");
       assert.deepEqual(parsed.evidenceRefs, ["urn:evidence/1"]);
-      assert.deepEqual(parsed.affectedOutputs, ["urn:output/1"]);
-      assert.deepEqual(parsed.invalidationTriggers, ["review-approval"]);
+      assert.deepEqual(parsed.affectedOutputs, ["java_output"]);
+      assert.deepEqual(parsed.invalidationTriggers, ["comparison_result_changed"]);
       assert.equal(parsed.requester, "studio:tenant-a:user-a");
     },
   );

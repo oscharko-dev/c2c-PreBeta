@@ -1077,8 +1077,53 @@ class IntentionalDivergenceDecision:
         self,
         parity_comparison: Mapping[str, JsonValue] | None,
         *,
+        trust_summary: Mapping[str, JsonValue] | None = None,
         now: str | None = None,
     ) -> str:
+        def _output_is_available(output: str) -> bool:
+            if not isinstance(trust_summary, Mapping):
+                return True
+            comparison_result = (
+                trust_summary.get("comparisonResult")
+                if isinstance(trust_summary.get("comparisonResult"), Mapping)
+                else {}
+            )
+            cobol_result = (
+                trust_summary.get("cobolResult")
+                if isinstance(trust_summary.get("cobolResult"), Mapping)
+                else {}
+            )
+            java_result = (
+                trust_summary.get("javaResult")
+                if isinstance(trust_summary.get("javaResult"), Mapping)
+                else {}
+            )
+            evidence = (
+                trust_summary.get("evidence")
+                if isinstance(trust_summary.get("evidence"), Mapping)
+                else {}
+            )
+            if output == "java_output":
+                return bool(
+                    java_result.get("executionResultRef")
+                    or java_result.get("normalizedOutputRef")
+                )
+            if output == "normalized_output":
+                return bool(
+                    cobol_result.get("normalizedOutputRef")
+                    and java_result.get("normalizedOutputRef")
+                )
+            if output == "stderr":
+                return bool(comparison_result.get("diffRef"))
+            if output == "exit_code":
+                return bool(
+                    java_result.get("executionResultRef")
+                    or comparison_result.get("comparisonResultRef")
+                )
+            if output == "evidence_summary":
+                return bool(evidence.get("packRef"))
+            return True
+
         if self.expires_at is not None:
             current_time = now or _iso_now()
             try:
@@ -1101,6 +1146,26 @@ class IntentionalDivergenceDecision:
             current_result_ref, self.comparison_result_ref
         ):
             return INTENTIONAL_DIVERGENCE_STATUS_STALE
+        if isinstance(trust_summary, Mapping):
+            evidence = trust_summary.get("evidence")
+            evidence_status = (
+                str(evidence.get("status")).strip()
+                if isinstance(evidence, Mapping) and evidence.get("status") is not None
+                else ""
+            )
+            if (
+                INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_EVIDENCE_CHANGED
+                in self.invalidation_triggers
+                and isinstance(evidence, Mapping)
+                and evidence_status != "current"
+            ):
+                return INTENTIONAL_DIVERGENCE_STATUS_STALE
+            if (
+                INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_OUTPUTS_CHANGED
+                in self.invalidation_triggers
+                and any(not _output_is_available(output) for output in self.affected_outputs)
+            ):
+                return INTENTIONAL_DIVERGENCE_STATUS_STALE
         return INTENTIONAL_DIVERGENCE_STATUS_ACTIVE
 
 
@@ -1396,7 +1461,7 @@ class W02RunContract:
         self.touch()
 
     def set_trust_summary(self, payload: Mapping[str, JsonValue] | None) -> None:
-        """Record the immutable trust summary derived by the orchestrator."""
+        """Record the current orchestrator-projected trust summary for the run."""
         if payload is None:
             self.trust_summary = None
             self.touch()
