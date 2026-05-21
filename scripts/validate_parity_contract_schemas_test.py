@@ -38,6 +38,8 @@ CONTRACT_SCHEMA_FILES = [
     "schemas/patch-proposal-v0.json",
 ]
 
+TRAVERSAL_SAFE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
@@ -503,7 +505,7 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         self.assertEqual(schema["properties"]["files"]["items"]["$ref"], "#/$defs/fileChange")
         self.assertEqual(
             schema["$defs"]["fileChange"]["properties"]["path"]["pattern"],
-            "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+            TRAVERSAL_SAFE_PATH_PATTERN,
         )
 
     def test_validator_rejects_path_traversal_and_secret_like_text(self) -> None:
@@ -538,7 +540,7 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         self.assertEqual(diagnostic["properties"]["filePath"]["maxLength"], 500)
         self.assertEqual(
             diagnostic["properties"]["filePath"]["pattern"],
-            "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+            TRAVERSAL_SAFE_PATH_PATTERN,
         )
 
     def test_build_diagnostic_bounds_constrain_file_path(self) -> None:
@@ -547,7 +549,7 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
         self.assertEqual(build_diagnostic["properties"]["filePath"]["maxLength"], 500)
         self.assertEqual(
             build_diagnostic["properties"]["filePath"]["pattern"],
-            "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+            TRAVERSAL_SAFE_PATH_PATTERN,
         )
         self.assertEqual(build_diagnostic["properties"]["message"]["maxLength"], 4000)
 
