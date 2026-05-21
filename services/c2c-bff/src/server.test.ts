@@ -523,7 +523,10 @@ function availableModelGateway(): ModelGatewayClient {
 }
 
 function outputChangeOrchestrator(): OrchestratorClient {
-  const outputRef = (sha: string, kind = "artifact"): Record<string, unknown> => ({
+  const outputRef = (
+    sha: string,
+    kind = "artifact",
+  ): Record<string, unknown> => ({
     sha256: sha,
     byteSize: 12,
     kind,
@@ -676,7 +679,9 @@ function outputChangeOrchestrator(): OrchestratorClient {
   };
 }
 
-const baseRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "c2c-bff-test-root-"));
+const baseRepoRoot = fs.mkdtempSync(
+  path.join(os.tmpdir(), "c2c-bff-test-root-"),
+);
 
 const baseConfig: BffConfig = {
   serviceName: "c2c-bff",
@@ -794,8 +799,7 @@ test("loadConfig surfaces exact Studio CORS origins", () => {
   const explicit = loadConfig(
     {
       C2C_REPO_ROOT: "/tmp/c2c-test-root",
-      C2C_STUDIO_CORS_ORIGINS:
-        "http://localhost:5173/, http://127.0.0.1:5174",
+      C2C_STUDIO_CORS_ORIGINS: "http://localhost:5173/, http://127.0.0.1:5174",
     } as NodeJS.ProcessEnv,
     __dirname,
   );
@@ -1037,10 +1041,7 @@ test("API endpoints allow local split-server CORS requests from Studio", async (
     });
     assert.equal(blocked.status, 204);
     assert.equal(blocked.headers.get("access-control-allow-origin"), null);
-    assert.equal(
-      blocked.headers.get("access-control-allow-credentials"),
-      null,
-    );
+    assert.equal(blocked.headers.get("access-control-allow-credentials"), null);
   } finally {
     await server.close();
   }
@@ -3282,7 +3283,10 @@ test("trust-case catalog lists defaults and saves a session preference", async (
     randomBytes: (size) => Buffer.alloc(size, 3),
     idleTimeoutMs: 0,
   });
-  const session = sessionStore.create({ tenantId: "tenant-1", userId: "user-1" });
+  const session = sessionStore.create({
+    tenantId: "tenant-1",
+    userId: "user-1",
+  });
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -3348,7 +3352,8 @@ test("trust-case catalog lists defaults and saves a session preference", async (
       /(?:^|,\s*)Cookie(?:,|$)/i,
     );
     assert.equal(
-      (listedWithPreference.body as { savedTrustCaseId: string }).savedTrustCaseId,
+      (listedWithPreference.body as { savedTrustCaseId: string })
+        .savedTrustCaseId,
       "HELLO01-DEFAULT",
     );
   } finally {
@@ -3435,7 +3440,10 @@ test("transform rejects unknown trust cases and browser-authored runtime interna
       body: { sourceText, trustCaseId: "MISSING-CASE" },
     });
     assert.equal(unknown.status, 400);
-    assert.match((unknown.body as { error: string }).error, /unknown trustCaseId/);
+    assert.match(
+      (unknown.body as { error: string }).error,
+      /unknown trustCaseId/,
+    );
 
     const unsafe = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
@@ -5013,10 +5021,7 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
       /storage\.internal|\/var\/lib|file:\/\//,
     );
     assert.equal(calls.getArtifactFile.length, 1);
-    assert.equal(
-      calls.getArtifactFile[0]?.path,
-      "logs/studio/comparison.log",
-    );
+    assert.equal(calls.getArtifactFile[0]?.path, "logs/studio/comparison.log");
 
     // Path traversal attempts are rejected by the BFF before reaching the orchestrator.
     const traversal = await fetchJson(
@@ -7760,7 +7765,11 @@ test("Java editor execution routes reject unauthenticated or cross-origin reques
         upstreamCalls += 1;
         return {
           status: 200,
-          body: { status: "success", classification: "success", diagnostics: [] },
+          body: {
+            status: "success",
+            classification: "success",
+            diagnostics: [],
+          },
         };
       },
     },
@@ -8243,10 +8252,12 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       failureClass: "runtime_failure",
       scopeClass: "generated_code",
       likelyRootCause: "runtime output diverges from the reference execution",
-      summary: "Parity comparison failed after the generated Java execution completed.",
+      summary:
+        "Parity comparison failed after the generated Java execution completed.",
       confidence: {
         level: "high",
-        basis: "The orchestrator observed both runtime output and parity mismatch artifacts.",
+        basis:
+          "The orchestrator observed both runtime output and parity mismatch artifacts.",
       },
       recommendedNextAction: "repair_generated_code",
       evidenceRefs: [
@@ -8369,7 +8380,8 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     const previewCall = calls.manualCompileRepair.preview[0];
     assert.equal(previewCall?.runId, "run-1");
     assert.deepEqual(
-      (previewCall?.payload as { manualOverlay: unknown; requester: string }).manualOverlay,
+      (previewCall?.payload as { manualOverlay: unknown; requester: string })
+        .manualOverlay,
       {
         schemaVersion: "v0",
         regions: [
@@ -8432,10 +8444,7 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       previewId: "preview-1",
       requester: "studio:tenant-a:user-a",
     });
-    assert.equal(
-      diagnoseBody.proposal.proposalId,
-      "proposal-1",
-    );
+    assert.equal(diagnoseBody.proposal.proposalId, "proposal-1");
     assert.equal(diagnoseBody.diagnosis.failureClass, "runtime_failure");
     assert.equal(diagnoseBody.diagnosis.scopeClass, "generated_code");
     assert.equal(
@@ -8446,7 +8455,10 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       diagnoseBody.diagnosis.comparisonResultRef?.sha256,
       "3".repeat(64),
     );
-    assert.equal(diagnoseBody.diagnosis.recommendedNextAction, "repair_generated_code");
+    assert.equal(
+      diagnoseBody.diagnosis.recommendedNextAction,
+      "repair_generated_code",
+    );
 
     const reject = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/reject`,
@@ -8463,7 +8475,8 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       requester: "studio:tenant-a:user-a",
     });
     assert.equal(
-      (calls.manualCompileRepair.reject[0]?.payload as { requester: string }).requester,
+      (calls.manualCompileRepair.reject[0]?.payload as { requester: string })
+        .requester,
       "studio:tenant-a:user-a",
     );
 
@@ -8486,7 +8499,8 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       requester: "studio:tenant-a:user-a",
     });
     assert.equal(
-      (calls.manualCompileRepair.apply[0]?.payload as { requester: string }).requester,
+      (calls.manualCompileRepair.apply[0]?.payload as { requester: string })
+        .requester,
       "studio:tenant-a:user-a",
     );
 
@@ -9232,14 +9246,11 @@ test("editor-assist routes reject credentialed requests from unlisted browser or
     Origin: "http://localhost:5173",
   };
   try {
-    const explain = await fetchJson(
-      `${server.baseUrl}/api/v0/editor/explain`,
-      {
-        method: "POST",
-        headers: maliciousHeaders,
-        body: explainRequestBody({ sessionId: "origin-denied-session" }),
-      },
-    );
+    const explain = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
+      method: "POST",
+      headers: maliciousHeaders,
+      body: explainRequestBody({ sessionId: "origin-denied-session" }),
+    });
     assert.equal(explain.status, 403);
     assert.equal(
       (explain.body as Record<string, unknown>).error,
@@ -9664,11 +9675,14 @@ test("POST /api/v0/editor/explain maps transport timeouts to HTTP 504", async ()
   const originalWarn = console.warn;
   console.warn = () => {};
   try {
-    const response = await fetchJson(`${server.baseUrl}/api/v0/editor/explain`, {
-      method: "POST",
-      headers: auth.headers,
-      body: explainRequestBody(),
-    });
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/editor/explain`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: explainRequestBody(),
+      },
+    );
     assert.equal(response.status, 504);
     const body = response.body as Record<string, unknown>;
     assert.equal(body.errorCode, "timeout");
@@ -10134,7 +10148,10 @@ test("POST /api/v0/editor/explain drops unsafe gateway metadata before respondin
       (entry.redactedFields as string[]).sort(),
       ["field-name-class:email", "ssn-us"].sort(),
     );
-    assert.equal(JSON.stringify(entry).includes("alice@example.invalid"), false);
+    assert.equal(
+      JSON.stringify(entry).includes("alice@example.invalid"),
+      false,
+    );
     assert.equal(JSON.stringify(entry).includes("internal.example"), false);
   } finally {
     await server.close();
@@ -11004,6 +11021,229 @@ test("POST /api/v0/runs/:runId/output-change-explanation can attach an AI-assist
     const aiSummary = body.aiSummary as Record<string, unknown>;
     assert.equal(aiSummary.status, "available");
     assert.match(String(aiSummary.explanation), /repaired Java candidate/i);
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Issue #356 — bound parity request input and trust-case projection fields.
+// ---------------------------------------------------------------------------
+
+test("POST /api/v0/runs rejects trustCaseId exceeding 128 characters with 400", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: {
+        programId: "BRNCH01",
+        executionMode: "parity",
+        trustCaseId: "t".repeat(129),
+        sourceReferenceFixtureId: "fixture-v0",
+      },
+    });
+    assert.equal(response.status, 400);
+    assert.match(
+      (response.body as { error: string }).error,
+      /trustCaseId exceeds maximum length/,
+    );
+    assert.equal(calls.startRun, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs rejects sourceReferenceFixtureId exceeding 128 characters with 400", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: {
+        programId: "BRNCH01",
+        executionMode: "parity",
+        sourceReferenceFixtureId: "f".repeat(129),
+      },
+    });
+    assert.equal(response.status, 400);
+    assert.match(
+      (response.body as { error: string }).error,
+      /sourceReferenceFixtureId exceeds maximum length/,
+    );
+    assert.equal(calls.startRun, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("build-test projection truncates oversize comparisonPolicyVersion to 128 characters", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const auth = createRouteAuth();
+  const oversizePolicy = "p".repeat(200);
+  const { client: orch } = stubOrchestrator({
+    buildTest: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        runStatus: "completed",
+        status: "complete",
+        missingArtifacts: [],
+        kind: "build-test-result",
+        data: {
+          status: "ok",
+          classification: "match",
+          build: { compileOk: true, sourceCount: 1, diagnostics: [] },
+          execution: {
+            ran: true,
+            ok: true,
+            exitCode: 0,
+            stdout: "APPROVED-COUNT=2\n",
+            stderr: "",
+            durationMs: 5,
+          },
+          comparison: {
+            matched: true,
+            status: "passed",
+            comparisonPolicyVersion: oversizePolicy,
+          },
+          diagnostics: [],
+          programId: "BRNCH01",
+        },
+        artifactRef: {
+          uri: "file:///run/result.json",
+          sha256: "c".repeat(64),
+          byteSize: 128,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
+    );
+    assert.equal(buildTest.status, 200);
+    const body = buildTest.body as {
+      comparison: { comparisonPolicyVersion: string } | null;
+    };
+    assert.ok(body.comparison !== null);
+    assert.equal(body.comparison?.comparisonPolicyVersion.length, 128);
+    assert.equal(
+      body.comparison?.comparisonPolicyVersion,
+      oversizePolicy.slice(0, 128),
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("workflow contract with oversize trust-case fields is truncated in the run summary", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
+  const oversizeCatalogHash = "h".repeat(300);
+  const oversizeTrustCaseId = "i".repeat(200);
+  const { client: orch } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: "complete",
+        contract: {
+          currentState: "final_classification",
+          activeStep: "write-evidence",
+          agentAttemptCount: 1,
+          repairBudget: { limit: 2, used: 0, remaining: 2 },
+          repairAttempts: [],
+          finalClassification: "success",
+          failureCode: null,
+          failureMessage: null,
+          trustCase: {
+            trustCaseId: oversizeTrustCaseId,
+            version: "v1",
+            catalogVersion: "2026-05-21",
+            catalogHash: oversizeCatalogHash,
+            configurationDigest: "d".repeat(300),
+            sourceReferenceFixtureId: "fixture-v0",
+            sourceReferenceMode: "reference-fixture",
+            environmentProfileId: "sandbox-v1",
+            comparisonPolicyVersion: "deterministic-v1",
+          },
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const run = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
+    );
+    assert.equal(run.status, 200);
+    const body = run.body as {
+      trustCaseId: string;
+      trustCaseCatalogHash: string;
+      trustCaseConfigurationDigest: string;
+    };
+    assert.equal(body.trustCaseId.length, 128);
+    assert.equal(body.trustCaseId, oversizeTrustCaseId.slice(0, 128));
+    assert.equal(body.trustCaseCatalogHash.length, 256);
+    assert.equal(body.trustCaseCatalogHash, oversizeCatalogHash.slice(0, 256));
+    assert.equal(body.trustCaseConfigurationDigest.length, 256);
   } finally {
     await server.close();
   }
