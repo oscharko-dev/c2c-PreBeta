@@ -30,12 +30,17 @@ import {
   GenerateResponse,
   VerifyRequest,
   VerifyResponse,
+  ManualCompileRepairAcceptRequest,
+  ManualCompileRepairAcceptResponse,
   ManualCompileRepairApplyRequest,
   ManualCompileRepairApplyResponse,
   ManualCompileRepairCandidateProject,
   ManualCompileRepairDiagnoseRequest,
   ManualCompileRepairDiagnoseResponse,
   ManualCompileRepairDiagnosis,
+  ManualCompileRepairPreview,
+  ManualCompileRepairPreviewRequest,
+  ManualCompileRepairPreviewResponse,
   ManualCompileRepairProposal,
   ManualCompileRepairRejectResponse,
 } from "../types/api";
@@ -120,8 +125,19 @@ export interface ManualDriftSummary {
 }
 
 export interface ManualCompileRepairSession {
-  status: "idle" | "loading" | "ready" | "applying" | "rejecting" | "error";
+  status:
+    | "idle"
+    | "previewing"
+    | "preview_ready"
+    | "loading"
+    | "ready"
+    | "applying"
+    | "sandbox_ready"
+    | "accepting"
+    | "rejecting"
+    | "error";
   runId: string | null;
+  preview: ManualCompileRepairPreview | null;
   entryFilePath: string | null;
   entryClass: string | null;
   diagnosis: ManualCompileRepairDiagnosis | null;
@@ -235,10 +251,14 @@ export interface TransformationRunContextValue {
   latestVerifyResult: VerifyResponse | null;
   // Manual compile repair session state for the generated Java pane.
   manualCompileRepair: ManualCompileRepairSession | null;
+  startManualCompileRepairPreview: (
+    request: ManualCompileRepairPreviewRequest,
+  ) => Promise<ApiResult<ManualCompileRepairPreviewResponse>>;
   startManualCompileRepairDiagnose: (
     request: ManualCompileRepairDiagnoseRequest,
   ) => Promise<ApiResult<ManualCompileRepairDiagnoseResponse>>;
   applyManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairApplyResponse>>;
+  acceptManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairAcceptResponse>>;
   rejectManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairRejectResponse>>;
   clearManualCompileRepair: () => void;
   // ----- Studio-IDE-7 (#252) synchronized-diff history ------------------
@@ -768,14 +788,15 @@ export function TransformationRunProvider({
     setManualCompileRepair(null);
   }, []);
 
-  const startManualCompileRepairDiagnose = useCallback(
+  const startManualCompileRepairPreview = useCallback(
     async (
-      request: ManualCompileRepairDiagnoseRequest,
-    ): Promise<ApiResult<ManualCompileRepairDiagnoseResponse>> => {
+      request: ManualCompileRepairPreviewRequest,
+    ): Promise<ApiResult<ManualCompileRepairPreviewResponse>> => {
       const requestId = ++activeManualCompileRepairRequestRef.current;
       setManualCompileRepair({
-        status: "loading",
+        status: "previewing",
         runId: request.runId,
+        preview: null,
         entryFilePath: request.entryFilePath,
         entryClass: request.entryClass ?? null,
         diagnosis: null,
@@ -784,7 +805,7 @@ export function TransformationRunProvider({
         buildTest: null,
         error: null,
       });
-      const result = await apiClient.manualCompileRepairDiagnose(request);
+      const result = await apiClient.manualCompileRepairPreview(request);
       if (requestId !== activeManualCompileRepairRequestRef.current) {
         return result;
       }
@@ -801,16 +822,76 @@ export function TransformationRunProvider({
         return result;
       }
       setManualCompileRepair({
-        status: "ready",
+        status: "preview_ready",
         runId: result.data.runId,
+        preview: result.data.preview,
         entryFilePath: request.entryFilePath,
         entryClass: request.entryClass ?? null,
+        diagnosis: null,
+        proposal: null,
+        candidateProject: null,
+        buildTest: null,
+        error: null,
+      });
+      return result;
+    },
+    [],
+  );
+
+  const startManualCompileRepairDiagnose = useCallback(
+    async (
+      request: ManualCompileRepairDiagnoseRequest,
+    ): Promise<ApiResult<ManualCompileRepairDiagnoseResponse>> => {
+      const requestId = ++activeManualCompileRepairRequestRef.current;
+      setManualCompileRepair((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "loading",
+              error: null,
+            }
+          : {
+              status: "loading",
+              runId: request.runId,
+              preview: null,
+              entryFilePath: null,
+              entryClass: null,
+              diagnosis: null,
+              proposal: null,
+              candidateProject: null,
+              buildTest: null,
+              error: null,
+            },
+      );
+      const result = await apiClient.manualCompileRepairDiagnose(request);
+      if (requestId !== activeManualCompileRepairRequestRef.current) {
+        return result;
+      }
+      if (!result.ok) {
+        setManualCompileRepair((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "error",
+                error: result.message,
+              }
+            : prev,
+        );
+        return result;
+      }
+      setManualCompileRepair((prev) => ({
+        status: "ready",
+        runId: result.data.runId,
+        preview: prev?.preview ?? null,
+        entryFilePath:
+          prev?.entryFilePath ?? result.data.candidateProject.entryFilePath,
+        entryClass: prev?.entryClass ?? result.data.candidateProject.entryClass,
         diagnosis: result.data.diagnosis,
         proposal: result.data.proposal,
         candidateProject: result.data.candidateProject,
         buildTest: result.data.buildTest,
         error: null,
-      });
+      }));
       return result;
     },
     [],
@@ -824,20 +905,10 @@ export function TransformationRunProvider({
       !session ||
       session.status !== "ready" ||
       !session.proposal ||
-      !session.candidateProject ||
       !session.runId ||
-      !session.entryFilePath
+      !session.preview
     ) {
       return { ok: false, message: "Manual compile repair is not ready." };
-    }
-    const currentJavaFiles = Object.entries(javaBuffers)
-      .map(([path, entry]) => ({ path, content: entry.content }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-    if (currentJavaFiles.length === 0) {
-      return {
-        ok: false,
-        message: "No Java buffers are available for manual compile repair.",
-      };
     }
     setManualCompileRepair((prev) =>
       prev
@@ -850,13 +921,66 @@ export function TransformationRunProvider({
     );
     const request: ManualCompileRepairApplyRequest = {
       runId: session.runId,
-      entryFilePath: session.entryFilePath,
-      entryClass: session.entryClass ?? undefined,
-      javaFiles: currentJavaFiles,
-      proposal: session.proposal,
-      candidateProject: session.candidateProject,
+      previewId: session.preview.previewId,
+      proposalId: session.proposal.proposalId,
+      patchSha256: session.proposal.patchSha256 ?? "",
     };
     const result = await apiClient.manualCompileRepairApply(request);
+    if (!result.ok) {
+      setManualCompileRepair((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "error",
+              error: result.message,
+            }
+          : prev,
+      );
+      return result;
+    }
+    setManualCompileRepair((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "sandbox_ready",
+            proposal: result.data.proposal,
+            candidateProject: result.data.candidateProject,
+            buildTest: result.data.buildTest,
+            error: null,
+          }
+        : prev,
+    );
+    return result;
+  }, [manualCompileRepair]);
+
+  const acceptManualCompileRepair = useCallback(async (): Promise<
+    ApiResult<ManualCompileRepairAcceptResponse>
+  > => {
+    const session = manualCompileRepair;
+    if (
+      !session ||
+      session.status !== "sandbox_ready" ||
+      !session.proposal ||
+      !session.candidateProject ||
+      !session.runId
+    ) {
+      return { ok: false, message: "Sandboxed repair is not ready for acceptance." };
+    }
+    setManualCompileRepair((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "accepting",
+            error: null,
+          }
+        : prev,
+    );
+    const request: ManualCompileRepairAcceptRequest = {
+      runId: session.runId,
+      proposalId: session.proposal.proposalId,
+      patchSha256: session.proposal.patchSha256 ?? "",
+    };
+    const result = await apiClient.manualCompileRepairAccept(request);
     if (!result.ok) {
       setManualCompileRepair((prev) =>
         prev
@@ -873,36 +997,10 @@ export function TransformationRunProvider({
       result.data.candidateProject,
       result.data.runId,
     );
-    setState((prev) => {
-      const nextBuildTest = result.data.buildTest;
-      if (prev.runId === result.data.runId) {
-        return {
-          ...prev,
-          buildTest: nextBuildTest,
-          previousRun:
-            prev.previousRun?.runId === result.data.runId
-              ? {
-                  ...prev.previousRun,
-                  buildTest: nextBuildTest,
-                }
-              : prev.previousRun,
-        };
-      }
-      if (prev.previousRun?.runId === result.data.runId) {
-        return {
-          ...prev,
-          previousRun: {
-            ...prev.previousRun,
-            buildTest: nextBuildTest,
-          },
-        };
-      }
-      return prev;
-    });
     setLatestVerifyResult(null);
     setManualCompileRepair(null);
     return result;
-  }, [javaBuffers, manualCompileRepair, setState, upsertJavaBuffersFromCandidateProject]);
+  }, [manualCompileRepair, upsertJavaBuffersFromCandidateProject]);
 
   const rejectManualCompileRepair = useCallback(async (): Promise<
     ApiResult<ManualCompileRepairRejectResponse>
@@ -922,7 +1020,7 @@ export function TransformationRunProvider({
     );
     const result = await apiClient.manualCompileRepairReject({
       runId: session.runId,
-      proposal: session.proposal,
+      proposalId: session.proposal.proposalId,
     });
     if (!result.ok) {
       setManualCompileRepair((prev) =>
@@ -1553,8 +1651,10 @@ export function TransformationRunProvider({
         recordCobolDiffSnapshot,
         latestVerifyResult,
         manualCompileRepair,
+        startManualCompileRepairPreview,
         startManualCompileRepairDiagnose,
         applyManualCompileRepair,
+        acceptManualCompileRepair,
         rejectManualCompileRepair,
         clearManualCompileRepair,
       }}

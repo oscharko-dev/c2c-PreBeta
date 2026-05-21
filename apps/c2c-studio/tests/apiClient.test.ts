@@ -478,6 +478,157 @@ describe("apiClient", () => {
     });
   });
 
+  it("parses manual compile repair preview contracts", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          schemaVersion: "v0",
+          runId: "run-1",
+          preview: {
+            schemaVersion: "v0",
+            previewId: "preview-1",
+            runId: "run-1",
+            workflowId: "w0-migration-v0",
+            failureCategory: "oracle_mismatch",
+            sourceRevisionRef: {
+              sha256: "a".repeat(64),
+              byteSize: 128,
+            },
+            currentHeadRef: {
+              sha256: "b".repeat(64),
+              byteSize: 128,
+            },
+            buildTestResultRef: {
+              sha256: "c".repeat(64),
+              byteSize: 128,
+            },
+            includedFiles: [
+              {
+                path: "src/main/java/P1.java",
+                sha256: "d".repeat(64),
+                byteSize: 64,
+                role: "entry-file",
+              },
+            ],
+            diagnostics: [
+              {
+                severity: "error",
+                code: "cannot-find-symbol",
+                message: "cannot find symbol",
+                filePath: "src/main/java/P1.java",
+                line: 7,
+              },
+            ],
+            manualRegions: [
+              {
+                filePath: "src/main/java/P1.java",
+                originClass: "manual_edit",
+                startLine: 6,
+                endLine: 7,
+              },
+            ],
+            constraints: {
+              reviewRequiredBeforeAgentStart: true,
+            },
+            exclusionSummary: {
+              excludedJavaFileCount: 0,
+              excludedDiagnosticCount: 0,
+              redactionsApplied: true,
+            },
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.manualCompileRepairPreview({
+      runId: "run-1",
+      entryFilePath: "src/main/java/P1.java",
+      javaFiles: [
+        {
+          path: "src/main/java/P1.java",
+          content: "public class P1 {}",
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        schemaVersion: "v0",
+        runId: "run-1",
+        preview: {
+          previewId: "preview-1",
+          failureCategory: "oracle_mismatch",
+        },
+      },
+    });
+  });
+
+  it("parses manual compile repair accept contracts", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          schemaVersion: "v0",
+          runId: "run-1",
+          proposal: {
+            proposalId: "proposal-1",
+            runId: "run-1",
+            patchSha256: "e".repeat(64),
+            applicationState: "applied",
+            approvalState: "approved",
+            files: [
+              {
+                path: "src/main/java/P1.java",
+                changeType: "modify",
+                afterSha256: "f".repeat(64),
+              },
+            ],
+          },
+          candidateProject: {
+            entryClass: "P1",
+            entryFilePath: "src/main/java/P1.java",
+            files: {
+              "src/main/java/P1.java": "public class P1 {}",
+            },
+          },
+          buildTest: {
+            runId: "run-1",
+            programId: "P1",
+            mode: "live",
+            productMode: "live",
+            status: "ok",
+            classification: "match",
+            generatedArtifactRef: null,
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.manualCompileRepairAccept({
+      runId: "run-1",
+      proposalId: "proposal-1",
+      patchSha256: "e".repeat(64),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        runId: "run-1",
+        proposal: {
+          proposalId: "proposal-1",
+          approvalState: "approved",
+        },
+        candidateProject: {
+          entryClass: "P1",
+        },
+        buildTest: {
+          status: "ok",
+          classification: "match",
+        },
+      },
+    });
+  });
+
   it("fetches generated view and generated file index contract payloads", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({

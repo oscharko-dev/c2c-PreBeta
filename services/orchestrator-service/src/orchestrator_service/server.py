@@ -305,11 +305,17 @@ class OrchestratorService:
                     ):
                         run_id = parts[2]
                         payload = self._read_json()
+                        if parts[4] == "preview" and parts[5] == "request":
+                            self._write_json(200, service._manual_compile_repair_preview(run_id, payload))
+                            return
                         if parts[4] == "diagnose" and parts[5] == "request":
                             self._write_json(200, service._manual_compile_repair_diagnose(run_id, payload))
                             return
                         if parts[4] == "apply" and parts[5] == "request":
                             self._write_json(200, service._manual_compile_repair_apply(run_id, payload))
+                            return
+                        if parts[4] == "accept" and parts[5] == "request":
+                            self._write_json(200, service._manual_compile_repair_accept(run_id, payload))
                             return
                         if parts[4] == "reject" and parts[5] == "request":
                             self._write_json(200, service._manual_compile_repair_reject(run_id, payload))
@@ -421,6 +427,21 @@ class OrchestratorService:
         run_id: str,
         payload: Mapping[str, Any],
     ) -> JsonObject:
+        preview_id = str(payload.get("previewId") or "").strip()
+        if not preview_id:
+            raise ValueError("previewId must be a non-empty string")
+        requester = str(payload.get("requester") or self.config.service_name).strip()
+        return self.runner.manual_compile_repair_diagnose(
+            run_id=run_id,
+            requester=requester,
+            preview_id=preview_id,
+        )
+
+    def _manual_compile_repair_preview(
+        self,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
         java_files = self._request_java_files(payload)
         entry_file_path = str(payload.get("entryFilePath") or "").strip()
         if not entry_file_path:
@@ -430,15 +451,13 @@ class OrchestratorService:
         entry_class = str(payload.get("entryClass") or "").strip()
         manual_overlay_regions = _extract_manual_overlay_regions(payload.get("manualOverlay"))
         requester = str(payload.get("requester") or self.config.service_name).strip()
-        build_test_context = payload.get("buildTestContext")
-        return self.runner.manual_compile_repair_diagnose(
+        return self.runner.manual_compile_repair_preview(
             run_id=run_id,
             requester=requester,
             java_files=java_files,
             entry_class=entry_class,
             entry_file_path=entry_file_path,
             manual_overlay_regions=manual_overlay_regions,
-            build_test_context=build_test_context if isinstance(build_test_context, Mapping) else None,
         )
 
     def _manual_compile_repair_apply(
@@ -446,32 +465,41 @@ class OrchestratorService:
         run_id: str,
         payload: Mapping[str, Any],
     ) -> JsonObject:
-        java_files = self._request_java_files(payload)
-        entry_file_path = str(payload.get("entryFilePath") or "").strip()
-        if not entry_file_path:
-            entry_file_path = next(iter(sorted(java_files)))
-        if entry_file_path not in java_files:
-            raise ValueError("entryFilePath must reference one of the provided javaFiles")
-        entry_class = str(payload.get("entryClass") or "").strip()
-        proposal = payload.get("proposal")
-        candidate_project = payload.get("candidateProject")
-        if not isinstance(proposal, Mapping):
-            raise ValueError("proposal must be an object")
-        if not isinstance(candidate_project, Mapping):
-            raise ValueError("candidateProject must be an object")
+        preview_id = str(payload.get("previewId") or "").strip()
+        proposal_id = str(payload.get("proposalId") or "").strip()
+        patch_sha256 = str(payload.get("patchSha256") or "").strip()
+        if not preview_id:
+            raise ValueError("previewId must be a non-empty string")
+        if not proposal_id:
+            raise ValueError("proposalId must be a non-empty string")
+        if not patch_sha256:
+            raise ValueError("patchSha256 must be a non-empty string")
         requester = str(payload.get("requester") or self.config.service_name).strip()
-        expected_output = payload.get("expectedOutput")
-        oracle_input = payload.get("oracleInput")
         return self.runner.manual_compile_repair_apply(
             run_id=run_id,
             requester=requester,
-            current_java_files=java_files,
-            entry_class=entry_class,
-            entry_file_path=entry_file_path,
-            proposal=proposal,
-            candidate_project=candidate_project,
-            expected_output=str(expected_output) if isinstance(expected_output, str) else None,
-            oracle_input=str(oracle_input) if isinstance(oracle_input, str) else None,
+            preview_id=preview_id,
+            proposal_id=proposal_id,
+            patch_sha256=patch_sha256,
+        )
+
+    def _manual_compile_repair_accept(
+        self,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        proposal_id = str(payload.get("proposalId") or "").strip()
+        patch_sha256 = str(payload.get("patchSha256") or "").strip()
+        if not proposal_id:
+            raise ValueError("proposalId must be a non-empty string")
+        if not patch_sha256:
+            raise ValueError("patchSha256 must be a non-empty string")
+        requester = str(payload.get("requester") or self.config.service_name).strip()
+        return self.runner.manual_compile_repair_accept(
+            run_id=run_id,
+            requester=requester,
+            proposal_id=proposal_id,
+            patch_sha256=patch_sha256,
         )
 
     def _manual_compile_repair_reject(
@@ -479,14 +507,14 @@ class OrchestratorService:
         run_id: str,
         payload: Mapping[str, Any],
     ) -> JsonObject:
-        proposal = payload.get("proposal")
-        if not isinstance(proposal, Mapping):
-            raise ValueError("proposal must be an object")
+        proposal_id = str(payload.get("proposalId") or "").strip()
+        if not proposal_id:
+            raise ValueError("proposalId must be a non-empty string")
         requester = str(payload.get("requester") or self.config.service_name).strip()
         return self.runner.manual_compile_repair_reject(
             run_id=run_id,
             requester=requester,
-            proposal=proposal,
+            proposal={"proposalId": proposal_id},
         )
 
     def _artifact_payload(

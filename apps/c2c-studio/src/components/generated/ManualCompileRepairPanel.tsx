@@ -6,10 +6,7 @@ import { Loader2, X } from "lucide-react";
 import { CodeSurface } from "@/components/ui/CodeSurface";
 import { Badge } from "@/components/ui/Badge";
 import { useTransformationRun } from "@/stores/transformationRun";
-import type {
-  JavaOriginOverlay,
-  ManualCompileRepairJavaFile,
-} from "@/types/api";
+import type { ManualCompileRepairPreviewDiagnostic } from "@/types/api";
 
 interface ManualCompileRepairPanelProps {
   open: boolean;
@@ -21,29 +18,25 @@ function splitLines(content: string): { content: string }[] {
   return lines.map((line) => ({ content: line }));
 }
 
-function buildJavaFiles(entries: Record<string, string>): ManualCompileRepairJavaFile[] {
-  return Object.entries(entries)
-    .map(([path, content]) => ({ path, content }))
-    .sort((a, b) => a.path.localeCompare(b.path));
-}
-
 export function ManualCompileRepairPanel({
   open,
   onClose,
 }: ManualCompileRepairPanelProps) {
   const {
-    state,
     manualCompileRepair,
     javaBuffers,
     startManualCompileRepairDiagnose,
     applyManualCompileRepair,
+    acceptManualCompileRepair,
     rejectManualCompileRepair,
   } = useTransformationRun();
 
   const session = manualCompileRepair;
   const busy =
+    session?.status === "previewing" ||
     session?.status === "loading" ||
     session?.status === "applying" ||
+    session?.status === "accepting" ||
     session?.status === "rejecting";
 
   const changedFiles = useMemo(() => {
@@ -82,49 +75,27 @@ export function ManualCompileRepairPanel({
     );
   }, [javaBuffers, session]);
 
-  const retryDiagnose = useCallback(() => {
-    if (!session?.runId || !session.entryFilePath) {
+  const startRepairAgent = useCallback(() => {
+    if (!session?.runId || !session.preview) {
       return;
     }
-    const javaFiles = buildJavaFiles(
-      Object.fromEntries(
-        Object.entries(javaBuffers).map(([path, entry]) => [path, entry.content]),
-      ),
-    );
     void startManualCompileRepairDiagnose({
       runId: session.runId,
-      entryFilePath: session.entryFilePath,
-      entryClass: session.entryClass ?? undefined,
-      javaFiles,
-      ...(state.buildTest
-        ? {
-            buildTestContext: {
-              status: state.buildTest.status,
-              classification: state.buildTest.classification,
-              compileStatus: state.buildTest.compileStatus,
-              executionStatus: state.buildTest.executionStatus,
-              comparisonPolicy: state.buildTest.comparisonPolicy,
-              expectedOutput: state.buildTest.expectedOutput,
-              outputRef: state.buildTest.outputRef,
-              expectedOutputRef: state.buildTest.expectedOutputRef,
-              actualOutputRef: state.buildTest.actualOutputRef,
-              comparison: state.buildTest.comparison ?? undefined,
-            },
-          }
-        : {}),
-      manualEditOverlays: Object.values(javaBuffers)
-        .map((entry) => entry.manualEditOverlay)
-        .filter((overlay): overlay is JavaOriginOverlay => overlay !== null),
+      previewId: session.preview.previewId,
     });
-  }, [javaBuffers, session, startManualCompileRepairDiagnose, state.buildTest]);
+  }, [session, startManualCompileRepairDiagnose]);
 
   const handleApply = useCallback(() => {
-    void applyManualCompileRepair().then((result) => {
+    void applyManualCompileRepair();
+  }, [applyManualCompileRepair]);
+
+  const handleAccept = useCallback(() => {
+    void acceptManualCompileRepair().then((result) => {
       if (result.ok) {
         onClose();
       }
     });
-  }, [applyManualCompileRepair, onClose]);
+  }, [acceptManualCompileRepair, onClose]);
 
   const handleReject = useCallback(() => {
     void rejectManualCompileRepair().then((result) => {
@@ -156,7 +127,8 @@ export function ManualCompileRepairPanel({
           <p className="truncate text-xs text-text-dim">
             Ask Coding Agent for a reviewable repair proposal after compile
             failures, runtime exceptions, or parity mismatches, then review
-            the candidate before applying it.
+            the preview, validate the sandbox rerun, and accept only the
+            reviewed patch.
           </p>
         </div>
         <button
@@ -170,10 +142,14 @@ export function ManualCompileRepairPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
-        {session?.status === "loading" ? (
+        {session?.status === "previewing" || session?.status === "loading" ? (
           <div className="flex h-full items-center justify-center gap-3 text-text-dim">
             <Loader2 className="animate-spin text-accent" size={18} />
-            <span>Diagnosing governed repair context...</span>
+            <span>
+              {session.status === "previewing"
+                ? "Preparing governed repair context preview..."
+                : "Diagnosing governed repair context..."}
+            </span>
           </div>
         ) : session?.status === "error" ? (
           <div className="rounded border border-error/20 bg-error/10 p-4 text-sm text-text">
@@ -182,7 +158,8 @@ export function ManualCompileRepairPanel({
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={retryDiagnose}
+                onClick={startRepairAgent}
+                disabled={!session.preview}
                 className="rounded border border-line px-3 py-1.5 text-xs font-medium text-text-dim hover:bg-bg-2"
               >
                 Retry diagnosis
@@ -196,13 +173,107 @@ export function ManualCompileRepairPanel({
               </button>
             </div>
           </div>
+        ) : session?.status === "preview_ready" && session.preview ? (
+          <div className="space-y-4">
+            <section className="rounded border border-line bg-bg-1 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="incomplete" icon={true}>
+                  Preview ready
+                </Badge>
+                <Badge variant="warning" icon={true}>
+                  Server-derived context only
+                </Badge>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <MetaRow label="Run ID" value={session.preview.runId} />
+                <MetaRow
+                  label="Failure category"
+                  value={session.preview.failureCategory}
+                />
+                <MetaRow
+                  label="Included files"
+                  value={String(session.preview.includedFiles.length)}
+                />
+                <MetaRow
+                  label="Diagnostics"
+                  value={String(session.preview.diagnostics.length)}
+                />
+              </div>
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-text-dim">
+                  Constraints
+                </p>
+                <ul className="space-y-1 text-sm text-text">
+                  <li>Only files in the reviewed preview can be proposed.</li>
+                  <li>Secrets, unrelated artifacts, and out-of-scope paths stay excluded.</li>
+                  <li>Any accepted patch must first pass the sandbox rerun.</li>
+                </ul>
+              </div>
+            </section>
+
+            <section className="rounded border border-line bg-bg-1 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-text-dim">
+                  Included files
+                </p>
+                <span className="text-xs text-text-dim">
+                  {session.preview.includedFiles.length} file
+                  {session.preview.includedFiles.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {session.preview.includedFiles.map((file) => (
+                  <div
+                    key={file.path}
+                    className="rounded border border-line bg-bg-0 px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="break-all text-xs font-medium text-text">
+                        {file.path}
+                      </p>
+                      <span className="rounded border border-line px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-dim">
+                        {file.role}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-text-dim">
+                      sha {file.sha256.slice(0, 12)} · {file.byteSize} bytes
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded border border-line bg-bg-1 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-text-dim">
+                Diagnostics
+              </p>
+              <div className="mt-3 space-y-2">
+                {session.preview.diagnostics.length > 0 ? (
+                  session.preview.diagnostics.map((diagnostic, index) => (
+                    <DiagnosticCard
+                      key={`${diagnostic.code}-${diagnostic.filePath ?? "global"}-${index}`}
+                      diagnostic={diagnostic}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded border border-dashed border-line bg-bg-0 p-3 text-sm text-text-dim">
+                    No diagnostics were included in the reviewed context.
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
         ) : session?.diagnosis && session?.candidateProject ? (
           <div className="space-y-4">
             <section className="rounded border border-line bg-bg-1 p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="incomplete" icon={true}>
                   {session.status === "applying"
-                    ? "Applying"
+                    ? "Applying to sandbox"
+                    : session.status === "sandbox_ready"
+                      ? "Sandbox rerun ready"
+                      : session.status === "accepting"
+                        ? "Accepting"
                     : session.status === "rejecting"
                       ? "Rejecting"
                       : "Diagnosis ready"}
@@ -237,7 +308,7 @@ export function ManualCompileRepairPanel({
                   label="Recommended next step"
                   value={
                     session.diagnosis.recommendedNextAction ??
-                    "Review the proposal"
+                    "Review the proposal and validate the sandbox rerun."
                   }
                 />
               </div>
@@ -348,7 +419,7 @@ export function ManualCompileRepairPanel({
 
             <section className="rounded border border-line bg-bg-1 p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-text-dim">
-                Run evidence
+                Sandbox rerun evidence
               </p>
               {session.buildTest ? (
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -383,8 +454,11 @@ export function ManualCompileRepairPanel({
       <div className="shrink-0 border-t border-line bg-bg-1 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-xs text-text-dim">
-            Review the candidate before applying it. Reject leaves the current
-            buffer unchanged.
+            {session?.status === "preview_ready"
+              ? "Inspect the reviewed context before starting the repair agent."
+              : session?.status === "sandbox_ready"
+                ? "Accept only after the sandbox rerun looks correct. Reject leaves the current buffer unchanged."
+                : "Review the candidate before applying it to the sandbox. Reject leaves the current buffer unchanged."}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -395,17 +469,64 @@ export function ManualCompileRepairPanel({
             >
               {session?.status === "rejecting" ? "Rejecting..." : "Reject"}
             </button>
-            <button
-              type="button"
-              onClick={handleApply}
-              disabled={busy || !session?.proposal || !session?.candidateProject}
-              className="rounded border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {session?.status === "applying" ? "Applying..." : "Apply repair"}
-            </button>
+            {session?.status === "preview_ready" ? (
+              <button
+                type="button"
+                onClick={startRepairAgent}
+                disabled={busy || !session.preview}
+                className="rounded border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Start repair agent
+              </button>
+            ) : session?.status === "sandbox_ready" ||
+              session?.status === "accepting" ? (
+              <button
+                type="button"
+                onClick={handleAccept}
+                disabled={busy || !session?.proposal || !session?.candidateProject}
+                className="rounded border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {session?.status === "accepting" ? "Accepting..." : "Accept patch"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleApply}
+                disabled={busy || !session?.proposal || !session?.candidateProject}
+                className="rounded border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {session?.status === "applying"
+                  ? "Applying..."
+                  : "Apply to sandbox"}
+              </button>
+            )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DiagnosticCard({
+  diagnostic,
+}: {
+  diagnostic: ManualCompileRepairPreviewDiagnostic;
+}) {
+  return (
+    <div className="rounded border border-line bg-bg-0 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded border border-line px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-dim">
+          {diagnostic.severity}
+        </span>
+        <span className="font-mono text-[11px] text-text-dim">{diagnostic.code}</span>
+      </div>
+      <p className="mt-2 text-sm text-text">{diagnostic.message}</p>
+      {diagnostic.filePath ? (
+        <p className="mt-1 break-all text-[11px] text-text-dim">
+          {diagnostic.filePath}
+          {diagnostic.line ? `:${diagnostic.line}` : ""}
+        </p>
+      ) : null}
     </div>
   );
 }

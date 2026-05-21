@@ -299,7 +299,9 @@ const saveJavaDraftSpy = vi.fn();
 const setJavaManualOverlaySpy = vi.fn();
 const recordJavaDiffSnapshotSpy = vi.fn();
 const requestJavaMergeReviewSpy = vi.fn();
+const startManualCompileRepairPreviewSpy = vi.fn();
 const startManualCompileRepairDiagnoseSpy = vi.fn();
+const acceptManualCompileRepairSpy = vi.fn();
 const clearManualCompileRepairSpy = vi.fn();
 const javaStatusFlagsSpy = vi.fn().mockReturnValue({
   clean: false,
@@ -345,8 +347,10 @@ vi.mock("@/stores/transformationRun", async (importOriginal) => {
         applyJavaMergeSelections: vi.fn(),
         cancelJavaMergeReview: vi.fn(),
         manualCompileRepair: null,
+        startManualCompileRepairPreview: startManualCompileRepairPreviewSpy,
         startManualCompileRepairDiagnose: startManualCompileRepairDiagnoseSpy,
         applyManualCompileRepair: vi.fn(),
+        acceptManualCompileRepair: acceptManualCompileRepairSpy,
         rejectManualCompileRepair: vi.fn(),
         clearManualCompileRepair: clearManualCompileRepairSpy,
         javaDiffHistory: javaDiffHistorySpy(),
@@ -541,7 +545,38 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     setJavaManualOverlaySpy.mockClear();
     recordJavaDiffSnapshotSpy.mockClear();
     requestJavaMergeReviewSpy.mockClear();
+    startManualCompileRepairPreviewSpy.mockReset();
+    startManualCompileRepairPreviewSpy.mockResolvedValue({
+      ok: true,
+      data: {
+        schemaVersion: "v0",
+        runId: "run-123",
+        preview: {
+          schemaVersion: "v0",
+          previewId: "preview-123",
+          runId: "run-123",
+          workflowId: "workflow-123",
+          failureCategory: "runtime_failure",
+          sourceRevisionRef: null,
+          currentHeadRef: null,
+          buildTestResultRef: null,
+          includedFiles: [
+            {
+              path: "src/App.java",
+              sha256: "d".repeat(64),
+              byteSize: 32,
+              role: "entrypoint",
+            },
+          ],
+          diagnostics: [],
+          manualRegions: [],
+          constraints: {},
+          exclusionSummary: {},
+        },
+      },
+    });
     startManualCompileRepairDiagnoseSpy.mockClear();
+    acceptManualCompileRepairSpy.mockClear();
     clearManualCompileRepairSpy.mockClear();
     manualDriftSummarySpy.mockReset();
     manualDriftSummarySpy.mockReturnValue({
@@ -1053,6 +1088,38 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
   ])(
     "shows Ask Coding Agent for $label after manual Java edits",
     async ({ failureCode, failureMessage }) => {
+      startManualCompileRepairPreviewSpy.mockResolvedValue({
+        ok: true,
+        data: {
+          schemaVersion: "v0",
+          runId: "run-123",
+          preview: {
+            schemaVersion: "v0",
+            previewId: "preview-123",
+            runId: "run-123",
+            workflowId: "workflow-123",
+            failureCategory:
+              failureCode === "oracle_mismatch"
+                ? "parity_mismatch"
+                : "runtime_failure",
+            sourceRevisionRef: null,
+            currentHeadRef: null,
+            buildTestResultRef: null,
+            includedFiles: [
+              {
+                path: "src/App.java",
+                sha256: "d".repeat(64),
+                byteSize: 32,
+                role: "entrypoint",
+              },
+            ],
+            diagnostics: [],
+            manualRegions: [],
+            constraints: {},
+            exclusionSummary: {},
+          },
+        },
+      });
       startManualCompileRepairDiagnoseSpy.mockResolvedValue({
         ok: true,
         data: {
@@ -1224,18 +1291,23 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       ).toBeDefined();
       fireEvent.click(button);
       await waitFor(() => {
-        expect(startManualCompileRepairDiagnoseSpy).toHaveBeenCalledWith(
+        expect(startManualCompileRepairPreviewSpy).toHaveBeenCalledWith(
           expect.objectContaining({
             runId: "run-123",
             entryFilePath: "src/App.java",
-            buildTestContext: expect.objectContaining({
-              status:
-                failureCode === "oracle_mismatch"
-                  ? "output-divergence"
-                  : "run-failed",
-              expectedOutput: "EXPECTED",
-            }),
+            javaFiles: [
+              {
+                path: "src/App.java",
+                content: "public class App {}",
+              },
+            ],
           }),
+        );
+        expect(startManualCompileRepairDiagnoseSpy).toHaveBeenCalledWith(
+          {
+            runId: "run-123",
+            previewId: "preview-123",
+          },
         );
       });
     },

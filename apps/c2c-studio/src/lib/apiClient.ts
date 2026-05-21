@@ -38,13 +38,20 @@ import {
   GenerateResponse,
   VerifyRequest,
   VerifyResponse,
+  ManualCompileRepairAcceptRequest,
+  ManualCompileRepairAcceptResponse,
   ManualCompileRepairApplyRequest,
   ManualCompileRepairApplyResponse,
   ManualCompileRepairCandidateProject,
   ManualCompileRepairDiagnoseRequest,
   ManualCompileRepairDiagnoseResponse,
   ManualCompileRepairDiagnosis,
+  ManualCompileRepairPreview,
+  ManualCompileRepairPreviewRequest,
+  ManualCompileRepairPreviewResponse,
   ManualCompileRepairProposal,
+  ManualCompileRepairPreviewDiagnostic,
+  ManualCompileRepairPreviewFile,
   ManualCompileRepairProposalFile,
   ManualCompileRepairRejectRequest,
   ManualCompileRepairRejectResponse,
@@ -1686,6 +1693,68 @@ function isManualCompileRepairProposal(
   );
 }
 
+function isManualCompileRepairPreviewFile(
+  value: unknown,
+): value is ManualCompileRepairPreviewFile {
+  return (
+    isRecord(value) &&
+    isString(value.path) &&
+    isString(value.sha256) &&
+    isNonNegativeInteger(value.byteSize) &&
+    isString(value.role)
+  );
+}
+
+function isManualCompileRepairPreviewDiagnostic(
+  value: unknown,
+): value is ManualCompileRepairPreviewDiagnostic {
+  return (
+    isRecord(value) &&
+    isString(value.severity) &&
+    isString(value.code) &&
+    isString(value.message) &&
+    (value.filePath === undefined || isString(value.filePath)) &&
+    (value.line === undefined || isPositiveInteger(value.line))
+  );
+}
+
+function isManualCompileRepairPreview(
+  value: unknown,
+): value is ManualCompileRepairPreview {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === "v0" &&
+    isString(value.previewId) &&
+    isString(value.runId) &&
+    (value.workflowId === undefined || isString(value.workflowId)) &&
+    isString(value.failureCategory) &&
+    (value.sourceRevisionRef === undefined ||
+      value.sourceRevisionRef === null ||
+      isOutputRef(value.sourceRevisionRef)) &&
+    (value.currentHeadRef === undefined ||
+      value.currentHeadRef === null ||
+      isOutputRef(value.currentHeadRef)) &&
+    (value.buildTestResultRef === undefined ||
+      value.buildTestResultRef === null ||
+      isOutputRef(value.buildTestResultRef)) &&
+    Array.isArray(value.includedFiles) &&
+    value.includedFiles.every(isManualCompileRepairPreviewFile) &&
+    Array.isArray(value.diagnostics) &&
+    value.diagnostics.every(isManualCompileRepairPreviewDiagnostic) &&
+    Array.isArray(value.manualRegions) &&
+    value.manualRegions.every(
+      (entry) =>
+        isRecord(entry) &&
+        isString(entry.filePath) &&
+        isString(entry.originClass) &&
+        isPositiveInteger(entry.startLine) &&
+        isPositiveInteger(entry.endLine),
+    ) &&
+    isRecord(value.constraints) &&
+    isRecord(value.exclusionSummary)
+  );
+}
+
 function isManualCompileRepairDiagnosis(
   value: unknown,
 ): value is ManualCompileRepairDiagnosis {
@@ -1765,6 +1834,30 @@ function parseManualCompileRepairDiagnoseResponse(
   };
 }
 
+function parseManualCompileRepairPreviewResponse(
+  payload: unknown,
+): ApiResult<ManualCompileRepairPreviewResponse> {
+  if (
+    !isRecord(payload) ||
+    payload.schemaVersion !== "v0" ||
+    !isString(payload.runId) ||
+    !isManualCompileRepairPreview(payload.preview)
+  ) {
+    return createFailure(
+      "Contract error: manual compile repair preview payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return {
+    ok: true,
+    data: {
+      schemaVersion: "v0",
+      runId: payload.runId,
+      preview: payload.preview,
+    },
+  };
+}
+
 function parseManualCompileRepairApplyResponse(
   payload: unknown,
 ): ApiResult<ManualCompileRepairApplyResponse> {
@@ -1821,6 +1914,42 @@ function parseManualCompileRepairRejectResponse(
       schemaVersion: "v0",
       runId: payload.runId,
       proposal: payload.proposal,
+    },
+  };
+}
+
+function parseManualCompileRepairAcceptResponse(
+  payload: unknown,
+): ApiResult<ManualCompileRepairAcceptResponse> {
+  if (
+    !isRecord(payload) ||
+    (payload.schemaVersion !== undefined && payload.schemaVersion !== "v0") ||
+    !isString(payload.runId) ||
+    !isManualCompileRepairProposal(payload.proposal) ||
+    !isManualCompileRepairCandidateProject(payload.candidateProject)
+  ) {
+    return createFailure(
+      "Contract error: manual compile repair accept payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  const buildTestResult = isBuildTestViewPayload(payload.buildTest)
+    ? (payload.buildTest as BuildTestView)
+    : null;
+  if (!buildTestResult) {
+    return createFailure(
+      "Contract error: manual compile repair accept payload has an invalid buildTest field.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return {
+    ok: true,
+    data: {
+      schemaVersion: "v0",
+      runId: payload.runId,
+      proposal: payload.proposal,
+      candidateProject: payload.candidateProject,
+      buildTest: buildTestResult,
     },
   };
 }
@@ -2179,6 +2308,19 @@ export const apiClient = {
       },
       body: JSON.stringify(request),
     }),
+  manualCompileRepairPreview: (request: ManualCompileRepairPreviewRequest) =>
+    fetchJson(
+      "/api/v0/manual-compile-repair/preview",
+      parseManualCompileRepairPreviewResponse,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
+    ),
   manualCompileRepairDiagnose: (request: ManualCompileRepairDiagnoseRequest) =>
     fetchJson(
       "/api/v0/manual-compile-repair/diagnose",
@@ -2205,6 +2347,19 @@ export const apiClient = {
         body: JSON.stringify(request),
       },
     ),
+  manualCompileRepairAccept: (request: ManualCompileRepairAcceptRequest) =>
+    fetchJson(
+      "/api/v0/manual-compile-repair/accept",
+      parseManualCompileRepairAcceptResponse,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
+    ),
   manualCompileRepairReject: (request: ManualCompileRepairRejectRequest) =>
     fetchJson(
       "/api/v0/manual-compile-repair/reject",
@@ -2218,10 +2373,14 @@ export const apiClient = {
         body: JSON.stringify(request),
       },
     ),
+  previewManualCompileRepair: (request: ManualCompileRepairPreviewRequest) =>
+    apiClient.manualCompileRepairPreview(request),
   diagnoseManualCompileRepair: (request: ManualCompileRepairDiagnoseRequest) =>
     apiClient.manualCompileRepairDiagnose(request),
   applyManualCompileRepair: (request: ManualCompileRepairApplyRequest) =>
     apiClient.manualCompileRepairApply(request),
+  acceptManualCompileRepair: (request: ManualCompileRepairAcceptRequest) =>
+    apiClient.manualCompileRepairAccept(request),
   rejectManualCompileRepair: (request: ManualCompileRepairRejectRequest) =>
     apiClient.manualCompileRepairReject(request),
   getRun: (runId: string) =>
