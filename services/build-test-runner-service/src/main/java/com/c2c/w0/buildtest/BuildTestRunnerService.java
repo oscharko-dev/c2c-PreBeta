@@ -1300,11 +1300,15 @@ public final class BuildTestRunnerService {
                 .append(" fileCount=").append(fileCount)
                 .append('\n');
         for (Map<String, Object> diagnostic : diagnostics) {
+            String filePath = DiagnosticBounds.boundedFilePath(
+                    String.valueOf(diagnostic.getOrDefault("filePath", "generated-project")));
+            String message = DiagnosticBounds.boundedMessage(
+                    String.valueOf(diagnostic.getOrDefault("message", "")));
             builder.append(String.valueOf(diagnostic.getOrDefault("severity", "info"))).append(' ')
-                    .append(String.valueOf(diagnostic.getOrDefault("filePath", "generated-project"))).append(':')
+                    .append(filePath).append(':')
                     .append(String.valueOf(diagnostic.getOrDefault("line", 1))).append(':')
                     .append(String.valueOf(diagnostic.getOrDefault("column", 1))).append(' ')
-                    .append(String.valueOf(diagnostic.getOrDefault("message", "")))
+                    .append(message)
                     .append('\n');
         }
         return builder.toString();
@@ -1522,10 +1526,10 @@ public final class BuildTestRunnerService {
         Map<String, Object> diag = new LinkedHashMap<>();
         diag.put("severity", severity);
         diag.put("code", code);
-        diag.put("filePath", filePath);
+        diag.put("filePath", DiagnosticBounds.boundedFilePath(filePath));
         diag.put("line", line);
         diag.put("column", column);
-        diag.put("message", message);
+        diag.put("message", DiagnosticBounds.boundedMessage(message));
         return diag;
     }
 }
