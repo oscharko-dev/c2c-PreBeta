@@ -102,7 +102,7 @@ const TRUST_CASE_ID_PATTERN = /^[A-Z][A-Z0-9-]{1,63}$/u;
 const SAFE_VERSION_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/u;
 const SAFE_PROFILE_VARIABLE_KEY = /^[A-Z][A-Z0-9_]{0,63}$/u;
 const SAFE_PROFILE_VARIABLE_VALUE = /^[A-Za-z0-9._:/=+\-]{0,256}$/u;
-const SAFE_RUNTIME_VALUE = /^[A-Za-z0-9._:=+/@\-]{0,128}$/u;
+const SAFE_RUNTIME_VALUE = /^[A-Za-z0-9._:=@/+,-]{0,80}$/u;
 const SAFE_ARTIFACT_NAME = /^[A-Za-z0-9._-]{1,96}$/u;
 const SAFE_DATASET_ID = /^[A-Z][A-Z0-9_-]{1,63}$/u;
 const ENVIRONMENT_PROFILE_IDS = new Set<TrustCaseEnvironmentProfileId>([

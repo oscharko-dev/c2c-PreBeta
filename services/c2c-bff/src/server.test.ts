@@ -657,7 +657,11 @@ async function startTestServer(
 async function fetchJson(
   url: string,
   init?: { method?: string; body?: unknown; headers?: Record<string, string> },
-): Promise<{ status: number; body: unknown }> {
+): Promise<{
+  status: number;
+  body: unknown;
+  headers: http.IncomingHttpHeaders;
+}> {
   const target = new URL(url);
   const bodyBytes =
     init?.body === undefined
@@ -694,7 +698,11 @@ async function fetchJson(
               parsed = raw;
             }
           }
-          resolve({ status: res.statusCode ?? 0, body: parsed });
+          resolve({
+            status: res.statusCode ?? 0,
+            body: parsed,
+            headers: res.headers,
+          });
         });
         res.on("error", reject);
       },
@@ -2838,6 +2846,7 @@ test("trust-case catalog lists defaults and saves a session preference", async (
       },
     );
     assert.equal(listed.status, 200);
+    assert.match(String(listed.headers.vary), /(?:^|,\s*)Cookie(?:,|$)/i);
     assert.equal(
       (listed.body as { defaultTrustCaseId: string }).defaultTrustCaseId,
       "HELLO01-DEFAULT",
@@ -2861,11 +2870,28 @@ test("trust-case catalog lists defaults and saves a session preference", async (
       "HELLO01-DEFAULT",
     );
 
+    const preference = await fetchJson(
+      `${server.baseUrl}/api/v0/session/trust-case-preference?programId=HELLO01`,
+      {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${session.sessionId}` },
+      },
+    );
+    assert.equal(preference.status, 200);
+    assert.match(String(preference.headers.vary), /(?:^|,\s*)Cookie(?:,|$)/i);
+    assert.equal(
+      (preference.body as { trustCaseId: string }).trustCaseId,
+      "HELLO01-DEFAULT",
+    );
+
     const listedWithPreference = await fetchJson(
       `${server.baseUrl}/api/v0/trust-cases?programId=HELLO01`,
       {
         headers: { cookie: `${SESSION_COOKIE_NAME}=${session.sessionId}` },
       },
+    );
+    assert.match(
+      String(listedWithPreference.headers.vary),
+      /(?:^|,\s*)Cookie(?:,|$)/i,
     );
     assert.equal(
       (listedWithPreference.body as { savedTrustCaseId: string }).savedTrustCaseId,

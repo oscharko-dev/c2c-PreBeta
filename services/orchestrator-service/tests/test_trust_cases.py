@@ -18,7 +18,62 @@ from orchestrator_service.workflow import W0WorkflowRunner
 from tests.test_workflow import StubGateway, W0WorkflowRunnerTests
 
 
+def _valid_catalog_payload() -> dict[str, object]:
+    return {
+        "schemaVersion": "v0",
+        "catalogVersion": "2026-05-21",
+        "trustCases": [
+            {
+                "trustCaseId": "HELLOW02-DEFAULT",
+                "version": "2026-05-21",
+                "programId": "HELLOW02",
+                "title": "HELLOW02 default",
+                "description": "Default immutable parity trust case.",
+                "defaultForProgram": True,
+                "sourceReference": {
+                    "fixtureId": "HELLOW02",
+                    "mode": "reference-fixture",
+                },
+                "controlledInput": {
+                    "stdin": None,
+                    "dataSetIds": [],
+                    "expectedOutputFixtureId": "HELLOW02",
+                },
+                "runtime": {"programArgs": []},
+                "environmentProfile": {
+                    "profileId": "generated-java-sandbox-v1",
+                    "description": "Controlled generated Java sandbox.",
+                    "variables": {},
+                },
+                "comparison": {
+                    "strategy": "deterministic-output",
+                    "policyVersion": "deterministic-output-v1",
+                },
+                "supportedProgramShape": {
+                    "language": "cobol",
+                    "programId": "HELLOW02",
+                    "supportedSubset": ["DISPLAY", "STOP-RUN"],
+                },
+                "evidenceIdentity": {
+                    "kind": "trust-case",
+                    "artifactName": "executed-trust-case.json",
+                },
+            }
+        ],
+    }
+
+
 class TrustCaseCatalogTests(unittest.TestCase):
+    def _write_catalog(self, payload: dict[str, object]) -> Path:
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        catalog_path = Path(tmp_dir.name) / "index.json"
+        catalog_path.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return catalog_path
+
     def test_default_catalog_resolution_exposes_authoritative_identity(self) -> None:
         catalog = load_trust_case_catalog()
         resolved = catalog.resolve(
@@ -106,6 +161,31 @@ class TrustCaseCatalogTests(unittest.TestCase):
 
         with self.assertRaises(TrustCaseCatalogError):
             load_trust_case_catalog(catalog_path=catalog_path)
+
+    def test_loader_requires_schema_required_nullable_and_empty_fields(self) -> None:
+        cases = [
+            ("controlledInput", "stdin", "controlledInput.stdin is required"),
+            ("controlledInput", "dataSetIds", "controlledInput.dataSetIds is required"),
+            (
+                "environmentProfile",
+                "variables",
+                "environmentProfile.variables is required",
+            ),
+        ]
+        for section, key, message in cases:
+            with self.subTest(field=f"{section}.{key}"):
+                payload = _valid_catalog_payload()
+                trust_cases = payload["trustCases"]
+                self.assertIsInstance(trust_cases, list)
+                trust_case = trust_cases[0]
+                self.assertIsInstance(trust_case, dict)
+                section_payload = trust_case[section]
+                self.assertIsInstance(section_payload, dict)
+                del section_payload[key]
+                catalog_path = self._write_catalog(payload)
+
+                with self.assertRaisesRegex(TrustCaseCatalogError, message):
+                    load_trust_case_catalog(catalog_path=catalog_path)
 
 
 class TrustCaseIngressTests(unittest.TestCase):

@@ -160,6 +160,8 @@ class TrustCaseCatalogEntry:
             raise TrustCaseCatalogError("sourceReference.mode must be reference-fixture or native-cobol")
 
         controlled_input = _required_mapping(payload.get("controlledInput"), "controlledInput")
+        if "stdin" not in controlled_input:
+            raise TrustCaseCatalogError("controlledInput.stdin is required")
         controlled_input_stdin_raw = controlled_input.get("stdin")
         if controlled_input_stdin_raw is None:
             controlled_input_stdin = None
@@ -169,7 +171,9 @@ class TrustCaseCatalogEntry:
             if len(controlled_input_stdin_raw) > 8192:
                 raise TrustCaseCatalogError("controlledInput.stdin must be at most 8192 characters")
             controlled_input_stdin = controlled_input_stdin_raw
-        controlled_input_dataset_ids_raw = controlled_input.get("dataSetIds", [])
+        if "dataSetIds" not in controlled_input:
+            raise TrustCaseCatalogError("controlledInput.dataSetIds is required")
+        controlled_input_dataset_ids_raw = controlled_input.get("dataSetIds")
         controlled_input_dataset_ids_sequence = _required_sequence(
             controlled_input_dataset_ids_raw,
             "controlledInput.dataSetIds",
@@ -212,8 +216,10 @@ class TrustCaseCatalogEntry:
             environment_profile.get("description"),
             "environmentProfile.description",
         )
+        if "variables" not in environment_profile:
+            raise TrustCaseCatalogError("environmentProfile.variables is required")
         variables = _required_mapping(
-            environment_profile.get("variables", {}),
+            environment_profile.get("variables"),
             "environmentProfile.variables",
         )
         environment_profile_variables: JsonObject = {}

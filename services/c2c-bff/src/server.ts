@@ -3022,6 +3022,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             : null;
           const savedSummary =
             savedTrustCaseId === null ? undefined : catalog.get(savedTrustCaseId);
+          appendVaryHeader(res, "Cookie");
           jsonResponse(
             res,
             200,
@@ -3054,6 +3055,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const programId = programIdRaw.trim();
         const sessionId = parseSessionCookieFromRequest(req);
         const sessionRecord = sessionId ? sessionStore.get(sessionId) : null;
+        appendVaryHeader(res, "Cookie");
         jsonResponse(res, 200, {
           programId,
           trustCaseId: sessionRecord?.trustCasePreferences[programId] ?? null,

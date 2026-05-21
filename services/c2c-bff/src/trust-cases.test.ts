@@ -119,6 +119,20 @@ test("trust-case catalog rejects unsafe runtime values", () => {
   );
 });
 
+test("trust-case catalog accepts schema-aligned runtime argument values", () => {
+  const payload = baseCatalog();
+  const trustCase = (payload.trustCases as Array<Record<string, unknown>>)[0]!;
+  trustCase.runtime = { programArgs: ["ACCOUNT,2026", "MODE=A/B+1"] };
+  const repoRoot = withTempCatalog(payload);
+
+  const catalog = loadTrustCaseCatalog(repoRoot, acceptanceFixtures);
+
+  assert.equal(
+    catalog.defaultForProgram("HELLOW02")?.trustCaseId,
+    "HELLOW02-DEFAULT",
+  );
+});
+
 test("trust-case catalog requires exactly one default per program", () => {
   const payload = baseCatalog();
   const trustCase = {
