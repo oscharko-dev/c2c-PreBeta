@@ -989,25 +989,22 @@ def _build_cobol_oracle_payload(
 ) -> JsonObject | None:
     """Construct a non-executing oracle payload for build-test-runner.
 
-    Browser-provided COBOL source is untrusted. The runner only receives a
-    user-provided expected-output oracle here; without that text this returns
-    ``None`` so registry Golden Master behaviour remains the fallback.
-
-    Issue #172: when the BFF forwards an ``expectedOutput`` (golden master
-    text) or an ``oracleInput`` (stdin fed to the oracle) on the inputRef,
-    they are attached to the oracle payload so the build/test runner and
-    the verification/repair agent can use them directly instead of
-    re-deriving from defaults.
+    Issue #92 requires the build-test runner to receive a deterministic
+    COBOL runtime oracle whenever the requester supplied COBOL source text.
+    Issue #172 extends that payload with optional user-provided
+    ``expectedOutput`` and ``oracleInput`` metadata from the BFF.
     """
-    if not isinstance(expected_output, str) or not expected_output:
+    if not isinstance(source_text, str) or not source_text:
         return None
     safe_timeout = timeout_ms if isinstance(timeout_ms, int) and timeout_ms > 0 else DEFAULT_BUILD_TEST_ORACLE_TIMEOUT_MS
     payload: JsonObject = {
         "mode": ORACLE_MODE_COBOL_RUNTIME,
+        "sourceText": source_text,
         "sourceRef": _as_reference_payload(input_reference),
         "timeoutMs": safe_timeout,
-        "expectedOutput": expected_output,
     }
+    if isinstance(expected_output, str) and expected_output:
+        payload["expectedOutput"] = expected_output
     if isinstance(oracle_input, str) and oracle_input:
         payload["oracleInput"] = oracle_input
     return payload
