@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { apiClient } from "../../lib/apiClient";
 import { useTransformationRun } from "../../stores/transformationRun";
@@ -100,15 +100,21 @@ export function BuildTestPanel({
       ?.id ??
     timelineStages.find((stage) => stage.status === "pending")?.id ??
     "parity-comparison";
+  const timelineStageIds = timelineStages.map((stage) => stage.id).join("|");
   const [selectedStageId, setSelectedStageId] = useState(defaultStageId);
 
   useEffect(() => {
-    setSelectedStageId(defaultStageId);
-  }, [defaultStageId]);
+    setSelectedStageId((current) =>
+      timelineStageIds.split("|").includes(current) ? current : defaultStageId,
+    );
+  }, [defaultStageId, timelineStageIds]);
 
   const selectedStage =
     timelineStages.find((stage) => stage.id === selectedStageId) ??
     timelineStages[0];
+  const selectedStageTabId = `build-test-stage-tab-${selectedStage.id}`;
+  const stagePanelId = "build-test-stage-panel";
+  const inspectorPanelId = `build-test-inspector-panel-${inspectorTab}`;
   const stageArtifacts = artifactCandidates.filter(
     (artifact) => artifact.stageId === selectedStage.id,
   );
@@ -226,6 +232,44 @@ export function BuildTestPanel({
 
   const result = describeBuildTestResult(bt, intentionalDivergence);
   const diagnostics = collectDiagnostics(state);
+  const selectedStageIndex = Math.max(
+    0,
+    timelineStages.findIndex((stage) => stage.id === selectedStage.id),
+  );
+
+  const selectTimelineStageAt = (index: number) => {
+    if (timelineStages.length === 0) {
+      return;
+    }
+    const normalizedIndex =
+      (index + timelineStages.length) % timelineStages.length;
+    const nextStage = timelineStages[normalizedIndex];
+    setSelectedStageId(nextStage.id);
+    queueMicrotask(() => {
+      document.getElementById(`build-test-stage-tab-${nextStage.id}`)?.focus();
+    });
+  };
+
+  const handleTimelineStageKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+  ) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      event.preventDefault();
+      selectTimelineStageAt(selectedStageIndex + 1);
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      selectTimelineStageAt(selectedStageIndex - 1);
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      selectTimelineStageAt(0);
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      selectTimelineStageAt(timelineStages.length - 1);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col bg-bg-0 text-sm">
@@ -315,15 +359,23 @@ export function BuildTestPanel({
             </p>
           </div>
           <div className="overflow-y-auto p-3">
-            <div className="space-y-2" role="tablist" aria-label="Build and test timeline stages">
+            <div
+              className="space-y-2"
+              role="tablist"
+              aria-label="Build and test timeline stages"
+              aria-orientation="vertical"
+            >
               {timelineStages.map((stage) => (
                 <button
                   key={stage.id}
                   type="button"
+                  id={`build-test-stage-tab-${stage.id}`}
                   onClick={() => setSelectedStageId(stage.id)}
+                  onKeyDown={handleTimelineStageKeyDown}
                   role="tab"
                   aria-selected={selectedStage.id === stage.id}
-                  aria-controls={`build-test-inspector-panel-${stage.id}`}
+                  aria-controls={stagePanelId}
+                  tabIndex={selectedStage.id === stage.id ? 0 : -1}
                   className={cn(
                     "w-full rounded border px-3 py-3 text-left transition",
                     selectedStage.id === stage.id
@@ -385,80 +437,87 @@ export function BuildTestPanel({
               className="mt-4 w-auto"
             />
           </div>
-          <div
-            id={`build-test-inspector-panel-${selectedStage.id}`}
+          <section
+            id={stagePanelId}
             role="tabpanel"
+            aria-labelledby={selectedStageTabId}
             className="min-h-0 flex-1 overflow-y-auto p-4"
           >
-            {inspectorTab === "overview" ? (
-              <OverviewPanel
-                selectedStage={selectedStage}
-                stageArtifacts={stageArtifacts}
-                workflowFailureMessage={state.workflow?.failureMessage ?? null}
-                buildTestNote={bt?.note ?? null}
-              />
-            ) : null}
-            {inspectorTab === "artifacts" ? (
-              <ArtifactsPanel
-                artifacts={stageArtifacts.length > 0 ? stageArtifacts : artifactCandidates}
-                selectedArtifactKey={selectedArtifact?.key ?? null}
-                onSelectArtifact={(artifact) => {
-                  setSelectedArtifactKey(artifact.key);
-                  setInspectorTab("viewer");
-                }}
-              />
-            ) : null}
-            {inspectorTab === "outputs" ? (
-              <div>
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-medium text-text">Parity Outputs</p>
-                    <p className="mt-1 text-xs text-text-dim">
-                      Review raw outputs and the parity diff without leaving the workbench.
-                    </p>
+            <div
+              id={inspectorPanelId}
+              role="tabpanel"
+              aria-labelledby={`build-test-inspector-tab-${inspectorTab}`}
+            >
+              {inspectorTab === "overview" ? (
+                <OverviewPanel
+                  selectedStage={selectedStage}
+                  stageArtifacts={stageArtifacts}
+                  workflowFailureMessage={state.workflow?.failureMessage ?? null}
+                  buildTestNote={bt?.note ?? null}
+                />
+              ) : null}
+              {inspectorTab === "artifacts" ? (
+                <ArtifactsPanel
+                  artifacts={stageArtifacts.length > 0 ? stageArtifacts : artifactCandidates}
+                  selectedArtifactKey={selectedArtifact?.key ?? null}
+                  onSelectArtifact={(artifact) => {
+                    setSelectedArtifactKey(artifact.key);
+                    setInspectorTab("viewer");
+                  }}
+                />
+              ) : null}
+              {inspectorTab === "outputs" ? (
+                <div>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-text">Parity Outputs</p>
+                      <p className="mt-1 text-xs text-text-dim">
+                        Review raw outputs and the parity diff without leaving the workbench.
+                      </p>
+                    </div>
+                    <Tabs
+                      value={comparisonView}
+                      onValueChange={(value) =>
+                        setComparisonView(value as ComparisonView)
+                      }
+                      tabs={[
+                        { value: "outputs", label: "Outputs" },
+                        { value: "diff", label: "Diff" },
+                      ]}
+                      idBase="build-test-view"
+                      className="w-auto"
+                    />
                   </div>
-                  <Tabs
-                    value={comparisonView}
-                    onValueChange={(value) =>
-                      setComparisonView(value as ComparisonView)
-                    }
-                    tabs={[
-                      { value: "outputs", label: "Outputs" },
-                      { value: "diff", label: "Diff" },
-                    ]}
-                    idBase="build-test-view"
-                    className="w-auto"
-                  />
+                  <div
+                    id={`build-test-view-panel-${comparisonView}`}
+                    role="tabpanel"
+                    aria-labelledby={`build-test-view-tab-${comparisonView}`}
+                  >
+                    <EquivalencePanel
+                      buildTest={bt}
+                      isPending={isPending}
+                      view={comparisonView}
+                      intentionalDivergence={intentionalDivergence}
+                    />
+                  </div>
                 </div>
-                <div
-                  id={`build-test-view-panel-${comparisonView}`}
-                  role="tabpanel"
-                  aria-labelledby={`build-test-view-tab-${comparisonView}`}
-                >
-                  <EquivalencePanel
-                    buildTest={bt}
-                    isPending={isPending}
-                    view={comparisonView}
-                    intentionalDivergence={intentionalDivergence}
-                  />
-                </div>
-              </div>
-            ) : null}
-            {inspectorTab === "diagnostics" ? (
-              <DiagnosticsPanel
-                diagnostics={diagnostics}
-                workflow={state.workflow}
-              />
-            ) : null}
-            {inspectorTab === "viewer" ? (
-              <ArtifactViewerPanel
-                artifact={selectedArtifact}
-                loading={artifactState.loading}
-                error={artifactState.error}
-                data={artifactState.data}
-              />
-            ) : null}
-          </div>
+              ) : null}
+              {inspectorTab === "diagnostics" ? (
+                <DiagnosticsPanel
+                  diagnostics={diagnostics}
+                  workflow={state.workflow}
+                />
+              ) : null}
+              {inspectorTab === "viewer" ? (
+                <ArtifactViewerPanel
+                  artifact={selectedArtifact}
+                  loading={artifactState.loading}
+                  error={artifactState.error}
+                  data={artifactState.data}
+                />
+              ) : null}
+            </div>
+          </section>
         </section>
       </div>
     </div>

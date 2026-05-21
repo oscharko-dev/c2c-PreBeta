@@ -229,12 +229,28 @@ function isJavaSourceFilePath(filePath: string): boolean {
   return normalizeRequestJavaFilePath(filePath).toLowerCase().endsWith(".java");
 }
 
-function decodeRequestPath(rawPath: string): string {
-  return rawPath
+function decodeRequestComponent(rawValue: string): string | null {
+  try {
+    return decodeURIComponent(rawValue);
+  } catch (err) {
+    if (err instanceof URIError) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+function decodeRequestPath(rawPath: string): string | null {
+  const decodedSegments = rawPath
     .split("/")
     .filter((segment) => segment.length > 0)
-    .map((segment) => decodeURIComponent(segment))
-    .join("/");
+    .map((segment) => decodeRequestComponent(segment));
+
+  if (decodedSegments.some((segment) => segment === null)) {
+    return null;
+  }
+
+  return decodedSegments.join("/");
 }
 
 export interface ServerDeps {
@@ -6106,9 +6122,13 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       const generatedFileContent =
         /^\/api\/v0\/runs\/([^\/]+)\/generated\/files\/(.+)$/.exec(pathname);
       if (generatedFileContent && method === "GET") {
-        const runId = decodeURIComponent(generatedFileContent[1] ?? "");
+        const runId = decodeRequestComponent(generatedFileContent[1] ?? "");
+        if (!runId) {
+          jsonResponse(res, 400, { error: "invalid run id" });
+          return;
+        }
         const decodedPath = decodeRequestPath(generatedFileContent[2] ?? "");
-        if (!isSafeGeneratedRelpath(decodedPath)) {
+        if (!decodedPath || !isSafeGeneratedRelpath(decodedPath)) {
           jsonResponse(res, 400, { error: "invalid generated file path" });
           return;
         }
@@ -6231,9 +6251,13 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       const artifactFileContent =
         /^\/api\/v0\/runs\/([^\/]+)\/artifacts\/files\/(.+)$/.exec(pathname);
       if (artifactFileContent && method === "GET") {
-        const runId = decodeURIComponent(artifactFileContent[1] ?? "");
+        const runId = decodeRequestComponent(artifactFileContent[1] ?? "");
+        if (!runId) {
+          jsonResponse(res, 400, { error: "invalid run id" });
+          return;
+        }
         const decodedPath = decodeRequestPath(artifactFileContent[2] ?? "");
-        if (!isSafeGeneratedRelpath(decodedPath)) {
+        if (!decodedPath || !isSafeGeneratedRelpath(decodedPath)) {
           jsonResponse(res, 400, { error: "invalid artifact path" });
           return;
         }
