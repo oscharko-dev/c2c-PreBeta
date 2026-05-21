@@ -176,6 +176,7 @@ export function GeneratedJavaEditorPane() {
     cobolDiffHistory,
     recordJavaDiffSnapshot,
     manualCompileRepair: manualCompileRepairSession,
+    startManualCompileRepairPreview,
     startManualCompileRepairDiagnose,
     clearManualCompileRepair,
   } = useTransformationRun();
@@ -1272,8 +1273,10 @@ export function GeneratedJavaEditorPane() {
       (hasManualEditContext && hasRuntimeOrParityFailure));
 
   const manualCompileRepairPending =
+    manualCompileRepairSession?.status === "previewing" ||
     manualCompileRepairSession?.status === "loading" ||
     manualCompileRepairSession?.status === "applying" ||
+    manualCompileRepairSession?.status === "accepting" ||
     manualCompileRepairSession?.status === "rejecting";
 
   const diagnoseManualCompileRepair = useCallback(async (): Promise<void> => {
@@ -1288,21 +1291,7 @@ export function GeneratedJavaEditorPane() {
     const manualEditOverlays = entries.flatMap(([, entry]) =>
       entry.manualEditOverlay ? [entry.manualEditOverlay] : [],
     );
-    const buildTestContext = state.buildTest
-      ? {
-          status: state.buildTest.status,
-          classification: state.buildTest.classification,
-          compileStatus: state.buildTest.compileStatus,
-          executionStatus: state.buildTest.executionStatus,
-          comparisonPolicy: state.buildTest.comparisonPolicy,
-          expectedOutput: state.buildTest.expectedOutput,
-          outputRef: state.buildTest.outputRef,
-          expectedOutputRef: state.buildTest.expectedOutputRef,
-          actualOutputRef: state.buildTest.actualOutputRef,
-          comparison: state.buildTest.comparison ?? undefined,
-        }
-      : undefined;
-    const result = await startManualCompileRepairDiagnose({
+    const preview = await startManualCompileRepairPreview({
       runId: state.runId,
       javaFiles,
       ...(state.generated?.entryClass
@@ -1313,7 +1302,17 @@ export function GeneratedJavaEditorPane() {
         ? { manualEditOverlay: manualEditOverlays[0] }
         : {}),
       ...(manualEditOverlays.length > 1 ? { manualEditOverlays } : {}),
-      ...(buildTestContext ? { buildTestContext } : {}),
+    });
+    if (!preview.ok) {
+      setFormatNotice({
+        tone: "error",
+        message: `Coding Agent preview unavailable - ${preview.message}`,
+      });
+      return;
+    }
+    const result = await startManualCompileRepairDiagnose({
+      runId: state.runId,
+      previewId: preview.data.preview.previewId,
     });
     if (!result.ok) {
       setFormatNotice({
@@ -1324,6 +1323,7 @@ export function GeneratedJavaEditorPane() {
   }, [
     currentJavaFiles,
     selectedFilePath,
+    startManualCompileRepairPreview,
     startManualCompileRepairDiagnose,
     state.generated,
     state.runId,

@@ -401,25 +401,6 @@ def _seed_manual_compile_repair_run(
 
 
 def _stub_manual_compile_repair_artifact_refs(runner, *, run_id: str) -> None:
-    snapshot_ref = {
-        "uri": f"urn:c2c/manual-compile-repair/{run_id}/snapshot",
-        "sha256": "b" * 64,
-        "byteSize": 1,
-    }
-    candidate_ref = {
-        "uri": f"urn:c2c/manual-compile-repair/{run_id}/candidate",
-        "sha256": "c" * 64,
-        "byteSize": 1,
-    }
-
-    def _snapshot(*_args, **_kwargs) -> dict:
-        return dict(snapshot_ref)
-
-    def _candidate(*_args, **_kwargs) -> dict:
-        return dict(candidate_ref)
-
-    runner._persist_manual_compile_snapshot = _snapshot
-    runner._persist_manual_compile_candidate = _candidate
     runner._persist_manual_compile_baseline_diff = lambda *_args, **_kwargs: None
 
 
@@ -459,6 +440,70 @@ def _post_json(host: str, port: int, path: str, payload: dict, headers: dict) ->
         return response.status, json.loads(response.read().decode("utf-8"))
     finally:
         connection.close()
+
+
+def _post_manual_compile_repair_request(
+    host: str,
+    port: int,
+    run_id: str,
+    action: str,
+    payload: dict,
+    headers: dict,
+) -> tuple[int, dict]:
+    return _post_json(
+        host,
+        port,
+        f"/v0/runs/{run_id}/manual-compile-repair/{action}/request",
+        payload,
+        headers,
+    )
+
+
+def _manual_compile_preview_request(
+    *,
+    run_id: str,
+    entry_file_path: str,
+    java_source: str,
+    entry_class: str = "CASE01",
+) -> dict:
+    return {
+        "runId": run_id,
+        "entryClass": entry_class,
+        "entryFilePath": entry_file_path,
+        "javaFiles": [
+            {
+                "path": entry_file_path,
+                "content": java_source,
+            }
+        ],
+    }
+
+
+def _request_manual_compile_preview(
+    host: str,
+    port: int,
+    *,
+    run_id: str,
+    entry_file_path: str,
+    java_source: str,
+    headers: dict,
+    entry_class: str = "CASE01",
+) -> dict:
+    status, body = _post_json(
+        host,
+        port,
+        f"/v0/runs/{run_id}/manual-compile-repair/preview/request",
+        _manual_compile_preview_request(
+            run_id=run_id,
+            entry_class=entry_class,
+            entry_file_path=entry_file_path,
+            java_source=java_source,
+        ),
+        headers,
+    )
+    if status != 200:
+        raise AssertionError(f"manual compile preview failed: {status} {body}")
+    return body
 
 
 class OrchestratorIntegrationTests(unittest.TestCase):
@@ -613,30 +658,29 @@ class OrchestratorIntegrationTests(unittest.TestCase):
         try:
             host = "127.0.0.1"
             state = MockHarnessState(host=host, port=mock_port)
-            state.build_test_responses = [
-                {
-                    "schemaVersion": "v0",
-                    "status": "failed",
-                    "reason": "compile_failed",
-                    "runId": "manual-run-1",
-                    "workflowId": "w0-migration-v0",
-                    "summary": "compile failed",
-                    "diagnostics": [
-                        {
-                            "filePath": "src/main/java/com/c2c/generated/CASE01.java",
-                            "message": "cannot find symbol",
-                        }
-                    ],
-                },
-                {
-                    "schemaVersion": "v0",
-                    "status": "ok",
-                    "runId": "manual-run-1",
-                    "workflowId": "w0-migration-v0",
-                    "programId": "CASE01",
-                    "outputRef": {"uri": "urn:build-output/manual-run-1"},
-                },
-            ]
+            prior_failure = {
+                "schemaVersion": "v0",
+                "status": "failed",
+                "reason": "compile_failed",
+                "runId": "manual-run-1",
+                "workflowId": "w0-migration-v0",
+                "summary": "compile failed",
+                "diagnostics": [
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "message": "cannot find symbol",
+                    }
+                ],
+            }
+            sandbox_success = {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": "manual-run-1",
+                "workflowId": "w0-migration-v0",
+                "programId": "CASE01",
+                "outputRef": {"uri": "urn:build-output/manual-run-1"},
+            }
+            state.build_test_responses = [sandbox_success]
             state.model_gateway_responses = [
                 {
                     "invocationId": "mg-manual-1",
@@ -672,24 +716,67 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                         "unsupportedConstructs": [],
                         "confidence": 0.92,
                     },
-                }
+                },
+                {
+                    "invocationId": "mg-manual-1b",
+                    "runId": "manual-run-1",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-1b",
+                        "sha256": "e" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fixed the missing semicolon.",
+                        "files": {
+                            "src/main/java/com/c2c/generated/CASE01.java": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"repaired\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "explanation": "Added the missing semicolon.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.92,
+                    },
+                },
             ]
             MockHarnessHandler.state = state
 
             orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {\n"
+                "        System.out.println(\"broken\")\n"
+                "    }\n"
+                "}\n"
+            )
             _seed_manual_compile_repair_run(
                 runner,
                 run_id="manual-run-1",
                 program_id="CASE01",
                 java_path="src/main/java/com/c2c/generated/CASE01.java",
-                java_source=(
-                    "package com.c2c.generated;\n"
-                    "public class CASE01 {\n"
-                    "    public static void main(String[] args) {\n"
-                    "        System.out.println(\"broken\")\n"
-                    "    }\n"
-                    "}\n"
-                ),
+                java_source=current_java_source,
+            )
+            runner.artifact_store.write_json(
+                "manual-run-1",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(prior_failure),
+                kind=KIND_BUILD_TEST_RESULT,
             )
             _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-1")
             _stub_manual_compile_repair_failure_code()
@@ -697,37 +784,25 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
-            diagnose_payload = {
-                "runId": "manual-run-1",
-                "entryClass": "CASE01",
-                "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                "javaFiles": [
-                    {
-                        "path": "src/main/java/com/c2c/generated/CASE01.java",
-                        "content": (
-                            "package com.c2c.generated;\n"
-                            "public class CASE01 {\n"
-                            "    public static void main(String[] args) {\n"
-                            "        System.out.println(\"broken\")\n"
-                            "    }\n"
-                            "}\n"
-                        ),
-                    }
-                ],
-            }
-            connection = HTTPConnection(host, orchestrator_port, timeout=3)
-            try:
-                connection.request(
-                    "POST",
-                    "/v0/runs/manual-run-1/manual-compile-repair/diagnose/request",
-                    body=json.dumps(diagnose_payload),
-                    headers=self.JSON_AUTH_HEADERS,
-                )
-                diagnose_response = connection.getresponse()
-                self.assertEqual(diagnose_response.status, 200)
-                diagnose_body = json.loads(diagnose_response.read().decode("utf-8"))
-            finally:
-                connection.close()
+            preview_body = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-1",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+            diagnose_status, diagnose_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-1/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-1",
+                    "previewId": preview_body["previewId"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(diagnose_status, 200)
 
             proposal = diagnose_body["proposal"]
             self.assertIsNotNone(proposal)
@@ -748,83 +823,91 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 "model-gateway",
             )
 
-            connection = HTTPConnection(host, orchestrator_port, timeout=3)
-            try:
-                connection.request(
-                    "POST",
-                    "/v0/runs/manual-run-1/manual-compile-repair/apply/request",
-                    body=json.dumps(
-                        {
-                            "runId": "manual-run-1",
-                            "entryClass": "CASE01",
-                            "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                            "javaFiles": diagnose_payload["javaFiles"],
-                            "proposal": proposal,
-                            "candidateProject": {
-                                **diagnose_body["candidateProject"],
-                                "files": {
-                                    **diagnose_body["candidateProject"]["files"],
-                                    "src/main/java/com/c2c/generated/Injected.java": (
-                                        "package com.c2c.generated;\npublic class Injected {}\n"
-                                    ),
-                                },
-                            },
-                        }
-                    ),
-                    headers=self.JSON_AUTH_HEADERS,
-                )
-                tampered_apply_response = connection.getresponse()
-                self.assertEqual(tampered_apply_response.status, 409)
-                tampered_apply_body = json.loads(
-                    tampered_apply_response.read().decode("utf-8")
-                )
-            finally:
-                connection.close()
-            self.assertIn("unreviewed file changes", tampered_apply_body["error"])
-
-            connection = HTTPConnection(host, orchestrator_port, timeout=3)
-            try:
-                connection.request(
-                    "POST",
-                    "/v0/runs/manual-run-1/manual-compile-repair/reject/request",
-                    body=json.dumps({"runId": "manual-run-1", "proposal": proposal}),
-                    headers=self.JSON_AUTH_HEADERS,
-                )
-                reject_response = connection.getresponse()
-                self.assertEqual(reject_response.status, 200)
-                reject_body = json.loads(reject_response.read().decode("utf-8"))
-            finally:
-                connection.close()
+            reject_status, reject_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-1/manual-compile-repair/reject/request",
+                {
+                    "runId": "manual-run-1",
+                    "proposalId": proposal["proposalId"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(reject_status, 200)
             self.assertEqual(reject_body["proposal"]["approvalState"], "rejected")
             self.assertEqual(reject_body["proposal"]["applicationState"], "rejected")
 
-            connection = HTTPConnection(host, orchestrator_port, timeout=3)
-            try:
-                connection.request(
-                    "POST",
-                    "/v0/runs/manual-run-1/manual-compile-repair/apply/request",
-                    body=json.dumps(
-                        {
-                            "runId": "manual-run-1",
-                            "entryClass": "CASE01",
-                            "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                            "javaFiles": diagnose_payload["javaFiles"],
-                            "proposal": proposal,
-                            "candidateProject": diagnose_body["candidateProject"],
-                        }
-                    ),
-                    headers=self.JSON_AUTH_HEADERS,
-                )
-                apply_response = connection.getresponse()
-                self.assertEqual(apply_response.status, 409)
-                apply_body = json.loads(apply_response.read().decode("utf-8"))
-            finally:
-                connection.close()
-
+            apply_status, apply_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-1/manual-compile-repair/apply/request",
+                {
+                    "runId": "manual-run-1",
+                    "previewId": preview_body["previewId"],
+                    "proposalId": proposal["proposalId"],
+                    "patchSha256": proposal["patchSha256"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(apply_status, 409)
             self.assertIn("pending approval", apply_body["error"])
+
+            second_preview_body = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-1",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+            second_diagnose_status, second_diagnose_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-1/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-1",
+                    "previewId": second_preview_body["previewId"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(second_diagnose_status, 200)
+            accepted_proposal = second_diagnose_body["proposal"]
+
+            sandbox_status, sandbox_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-1/manual-compile-repair/apply/request",
+                {
+                    "runId": "manual-run-1",
+                    "previewId": second_preview_body["previewId"],
+                    "proposalId": accepted_proposal["proposalId"],
+                    "patchSha256": accepted_proposal["patchSha256"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(sandbox_status, 200)
+            self.assertEqual(
+                sandbox_body["proposal"]["applicationState"],
+                "sandbox_applied",
+            )
+
+            accept_status, accept_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-1/manual-compile-repair/accept/request",
+                {
+                    "runId": "manual-run-1",
+                    "proposalId": accepted_proposal["proposalId"],
+                    "patchSha256": accepted_proposal["patchSha256"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(accept_status, 200)
+            self.assertEqual(accept_body["proposal"]["approvalState"], "approved")
+            self.assertEqual(accept_body["proposal"]["applicationState"], "applied")
             self.assertEqual(
                 [capability for capability, _ in state.capability_invocations],
-                ["build-test", "model-gateway"],
+                ["model-gateway", "model-gateway", "build-test"],
             )
         finally:
             mock_server.shutdown()
@@ -900,34 +983,35 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 "    }\n"
                 "}\n"
             )
+            runner.artifact_store.write_json(
+                "manual-run-2",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(state.build_test_responses[0]),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
-            connection = HTTPConnection(host, orchestrator_port, timeout=3)
-            try:
-                connection.request(
-                    "POST",
-                    "/v0/runs/manual-run-2/manual-compile-repair/diagnose/request",
-                    body=json.dumps(
-                        {
-                            "runId": "manual-run-2",
-                            "entryClass": "CASE01",
-                            "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                            "javaFiles": [
-                                {
-                                    "path": "src/main/java/com/c2c/generated/CASE01.java",
-                                    "content": current_java_source,
-                                }
-                            ],
-                        }
-                    ),
-                    headers=self.JSON_AUTH_HEADERS,
-                )
-                response = connection.getresponse()
-                self.assertEqual(response.status, 200)
-                body = json.loads(response.read().decode("utf-8"))
-            finally:
-                connection.close()
+            preview_body = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-2",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+            status, body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-2/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-2",
+                    "previewId": preview_body["previewId"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(status, 200)
 
             self.assertIsNone(body["proposal"])
             self.assertEqual(body["diagnosis"]["likelyRootCause"], "No safe repair is available.")
@@ -937,7 +1021,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(
                 [capability for capability, _ in state.capability_invocations],
-                ["build-test", "model-gateway"],
+                ["model-gateway"],
             )
         finally:
             mock_server.shutdown()
@@ -1128,38 +1212,28 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
+            runtime_preview = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-3",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"runtime manual edit\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                headers=self.JSON_AUTH_HEADERS,
+            )
             runtime_status, runtime_body = _post_json(
                 host,
                 orchestrator_port,
                 "/v0/runs/manual-run-3/manual-compile-repair/diagnose/request",
                 {
                     "runId": "manual-run-3",
-                    "entryClass": "CASE01",
-                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                    "javaFiles": [
-                        {
-                            "path": "src/main/java/com/c2c/generated/CASE01.java",
-                            "content": (
-                                "package com.c2c.generated;\n"
-                                "public class CASE01 {\n"
-                                "    public static void main(String[] args) {\n"
-                                "        System.out.println(\"runtime manual edit\")\n"
-                                "    }\n"
-                                "}\n"
-                            ),
-                        }
-                    ],
-                    "buildTestContext": {
-                        "status": "run-failed",
-                        "classification": "run-error",
-                        "compileStatus": "ok",
-                        "executionStatus": "failed",
-                        "outputRef": {
-                            "uri": "urn:studio/runtime-execution",
-                            "sha256": "1" * 64,
-                            "byteSize": 32,
-                        },
-                    },
+                    "previewId": runtime_preview["previewId"],
                 },
                 self.JSON_AUTH_HEADERS,
             )
@@ -1184,8 +1258,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 for capability, payload in state.capability_invocations
                 if capability == "build-test"
             ]
-            self.assertFalse(runtime_build_calls[-1]["options"]["skipExecution"])
-            self.assertFalse(runtime_build_calls[-1]["options"]["compareOutput"])
+            self.assertEqual(runtime_build_calls, [])
 
             runner.artifact_store.write_json(
                 "manual-run-3",
@@ -1195,81 +1268,28 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 kind=KIND_BUILD_TEST_RESULT,
             )
 
+            parity_preview = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-3",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"parity manual edit\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                headers=self.JSON_AUTH_HEADERS,
+            )
             parity_status, parity_body = _post_json(
                 host,
                 orchestrator_port,
                 "/v0/runs/manual-run-3/manual-compile-repair/diagnose/request",
                 {
                     "runId": "manual-run-3",
-                    "entryClass": "CASE01",
-                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                    "javaFiles": [
-                        {
-                            "path": "src/main/java/com/c2c/generated/CASE01.java",
-                            "content": (
-                                "package com.c2c.generated;\n"
-                                "public class CASE01 {\n"
-                                "    public static void main(String[] args) {\n"
-                                "        System.out.println(\"parity manual edit\")\n"
-                                "    }\n"
-                                "}\n"
-                            ),
-                        }
-                    ],
-                    "buildTestContext": {
-                        "status": "output-divergence",
-                        "classification": "true-golden-master-mismatch",
-                        "compileStatus": "ok",
-                        "executionStatus": "ok",
-                        "comparisonPolicy": "golden-master-v1",
-                        "expectedOutput": "EXPECTED",
-                        "outputRef": {
-                            "uri": "urn:studio/parity-execution",
-                            "sha256": "2" * 64,
-                            "byteSize": 32,
-                        },
-                        "expectedOutputRef": {
-                            "uri": "urn:studio/reference-output",
-                            "sha256": "3" * 64,
-                            "byteSize": 24,
-                        },
-                        "actualOutputRef": {
-                            "uri": "urn:studio/java-output",
-                            "sha256": "4" * 64,
-                            "byteSize": 24,
-                        },
-                        "comparison": {
-                            "status": "failed",
-                            "matched": False,
-                            "comparisonPolicyVersion": "golden-master-v1",
-                            "mismatchClassification": "content",
-                            "comparisonPolicyRef": {
-                                "uri": "urn:studio/comparison-policy",
-                                "sha256": "5" * 64,
-                                "byteSize": 16,
-                            },
-                            "comparisonResultRef": {
-                                "uri": "urn:studio/parity-comparison",
-                                "sha256": "6" * 64,
-                                "byteSize": 16,
-                            },
-                            "diffRef": {
-                                "uri": "urn:studio/oracle-diff",
-                                "sha256": "7" * 64,
-                                "byteSize": 16,
-                            },
-                            "expectedRef": {
-                                "uri": "urn:studio/reference-output",
-                                "sha256": "8" * 64,
-                                "byteSize": 24,
-                            },
-                            "actualRef": {
-                                "uri": "urn:studio/java-output",
-                                "sha256": "9" * 64,
-                                "byteSize": 24,
-                            },
-                        },
-                    },
+                    "previewId": parity_preview["previewId"],
                 },
                 self.JSON_AUTH_HEADERS,
             )
@@ -1305,12 +1325,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 for capability, payload in state.capability_invocations
                 if capability == "build-test"
             ]
-            self.assertFalse(parity_build_calls[-1]["options"]["skipExecution"])
-            self.assertTrue(parity_build_calls[-1]["options"]["compareOutput"])
-            self.assertEqual(
-                parity_build_calls[-1]["oracle"]["expectedOutput"],
-                "EXPECTED",
-            )
+            self.assertEqual(parity_build_calls, [])
         finally:
             mock_server.shutdown()
             mock_server.server_close()
@@ -1422,27 +1437,28 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
+            refusal_preview = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-4",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"broken\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                headers=self.JSON_AUTH_HEADERS,
+            )
             refusal_status, refusal_body = _post_json(
                 host,
                 orchestrator_port,
                 "/v0/runs/manual-run-4/manual-compile-repair/diagnose/request",
                 {
                     "runId": "manual-run-4",
-                    "entryClass": "CASE01",
-                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                    "javaFiles": [
-                        {
-                            "path": "src/main/java/com/c2c/generated/CASE01.java",
-                            "content": (
-                                "package com.c2c.generated;\n"
-                                "public class CASE01 {\n"
-                                "    public static void main(String[] args) {\n"
-                                "        System.out.println(\"broken\")\n"
-                                "    }\n"
-                                "}\n"
-                            ),
-                        }
-                    ],
+                    "previewId": refusal_preview["previewId"],
                 },
                 self.JSON_AUTH_HEADERS,
             )
@@ -1458,27 +1474,28 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 kind=KIND_BUILD_TEST_RESULT,
             )
 
+            escalation_preview = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-4",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=(
+                    "package com.c2c.generated;\n"
+                    "public class CASE01 {\n"
+                    "    public static void main(String[] args) {\n"
+                    "        System.out.println(\"broken\")\n"
+                    "    }\n"
+                    "}\n"
+                ),
+                headers=self.JSON_AUTH_HEADERS,
+            )
             escalation_status, escalation_body = _post_json(
                 host,
                 orchestrator_port,
                 "/v0/runs/manual-run-4/manual-compile-repair/diagnose/request",
                 {
                     "runId": "manual-run-4",
-                    "entryClass": "CASE01",
-                    "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
-                    "javaFiles": [
-                        {
-                            "path": "src/main/java/com/c2c/generated/CASE01.java",
-                            "content": (
-                                "package com.c2c.generated;\n"
-                                "public class CASE01 {\n"
-                                "    public static void main(String[] args) {\n"
-                                "        System.out.println(\"broken\")\n"
-                                "    }\n"
-                                "}\n"
-                            ),
-                        }
-                    ],
+                    "previewId": escalation_preview["previewId"],
                 },
                 self.JSON_AUTH_HEADERS,
             )

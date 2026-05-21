@@ -4574,6 +4574,102 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // Keep the legacy manual-compile-repair route stable, but forward the
       // request body opaquely so runtime/parity diagnosis fields survive
       // unchanged when the orchestrator emits the broader repair schema.
+      if (pathname === "/api/v0/manual-compile-repair/preview" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
+        const previewManualCompileRepair =
+          orchestrator.previewManualCompileRepair;
+        if (!orchestrator.enabled || !previewManualCompileRepair) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: orchestrator is not configured",
+          });
+          return;
+        }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const record = body as Record<string, unknown>;
+        const runId = typeof record.runId === "string" ? record.runId : "";
+        if (!runId) {
+          badRequest(res, "runId must be a non-empty string");
+          return;
+        }
+        const allowedFields = new Set([
+          "runId",
+          "entryClass",
+          "entryFilePath",
+          "javaFiles",
+          "manualEditOverlay",
+          "manualEditOverlays",
+        ]);
+        const extraFields = Object.keys(record).filter((field) => !allowedFields.has(field));
+        if (extraFields.length > 0) {
+          badRequest(res, `unsupported manual compile repair preview field(s): ${extraFields.join(", ")}`);
+          return;
+        }
+        const manualOverlayEnvelope =
+          Array.isArray(record.manualEditOverlays)
+            ? {
+                schemaVersion: "v0",
+                regions: (record.manualEditOverlays as unknown[]).flatMap((overlay) => {
+                  if (
+                    overlay &&
+                    typeof overlay === "object" &&
+                    !Array.isArray(overlay) &&
+                    Array.isArray((overlay as Record<string, unknown>).regions)
+                  ) {
+                    return (overlay as { regions: unknown[] }).regions;
+                  }
+                  return [];
+                }),
+              }
+            : record.manualEditOverlay;
+        const upstream = await previewManualCompileRepair(runId, {
+          ...record,
+          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+          manualOverlay: manualOverlayEnvelope,
+        });
+        if (!upstream) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: no orchestrator response",
+          });
+          return;
+        }
+        jsonResponse(
+          res,
+          upstream.status || 502,
+          sanitizeManualRepairResponseBody(upstream.body),
+        );
+        return;
+      }
+
       if (pathname === "/api/v0/manual-compile-repair/diagnose" && method === "POST") {
         if (
           rejectUnauthenticatedStudioJsonRequest({
@@ -4617,34 +4713,26 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
         const record = body as Record<string, unknown>;
         const runId = typeof record.runId === "string" ? record.runId : "";
+        const previewId = typeof record.previewId === "string" ? record.previewId : "";
         if (!runId) {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
-        // Preserve the single-file and multi-file Studio overlay shapes.
-        // The orchestrator still expects the legacy ``manualOverlay`` name,
-        // so we keep the compatibility shim in one place.
-        const manualOverlayEnvelope =
-          Array.isArray(record.manualEditOverlays)
-            ? {
-                schemaVersion: "v0",
-                regions: (record.manualEditOverlays as unknown[]).flatMap((overlay) => {
-                  if (
-                    overlay &&
-                    typeof overlay === "object" &&
-                    !Array.isArray(overlay) &&
-                    Array.isArray((overlay as Record<string, unknown>).regions)
-                  ) {
-                    return (overlay as { regions: unknown[] }).regions;
-                  }
-                  return [];
-                }),
-              }
-            : record.manualEditOverlay;
+        if (!previewId) {
+          badRequest(res, "previewId must be a non-empty string");
+          return;
+        }
+        const extraFields = Object.keys(record).filter(
+          (field) => !new Set(["runId", "previewId"]).has(field),
+        );
+        if (extraFields.length > 0) {
+          badRequest(res, `unsupported manual compile repair diagnose field(s): ${extraFields.join(", ")}`);
+          return;
+        }
         const upstream = await diagnoseManualCompileRepair(runId, {
-          ...record,
+          runId,
+          previewId,
           requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
-          manualOverlay: manualOverlayEnvelope,
         });
         if (!upstream) {
           jsonResponse(res, 503, {
@@ -4706,8 +4794,107 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
+        const previewId =
+          typeof record.previewId === "string" ? record.previewId : "";
+        const proposalId =
+          typeof record.proposalId === "string" ? record.proposalId : "";
+        const patchSha256 =
+          typeof record.patchSha256 === "string" ? record.patchSha256 : "";
+        if (!previewId || !proposalId || !patchSha256) {
+          badRequest(res, "previewId, proposalId, and patchSha256 must be non-empty strings");
+          return;
+        }
+        const extraFields = Object.keys(record).filter(
+          (field) =>
+            !new Set(["runId", "previewId", "proposalId", "patchSha256"]).has(field),
+        );
+        if (extraFields.length > 0) {
+          badRequest(res, `unsupported manual compile repair apply field(s): ${extraFields.join(", ")}`);
+          return;
+        }
         const upstream = await applyManualCompileRepair(runId, {
-          ...record,
+          runId,
+          previewId,
+          proposalId,
+          patchSha256,
+          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+        });
+        if (!upstream) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: no orchestrator response",
+          });
+          return;
+        }
+        jsonResponse(
+          res,
+          upstream.status || 502,
+          sanitizeManualRepairResponseBody(upstream.body),
+        );
+        return;
+      }
+
+      if (pathname === "/api/v0/manual-compile-repair/accept" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
+        const acceptManualCompileRepair =
+          orchestrator.acceptManualCompileRepair;
+        if (!orchestrator.enabled || !acceptManualCompileRepair) {
+          jsonResponse(res, 503, {
+            error: "manual compile repair unavailable: orchestrator is not configured",
+          });
+          return;
+        }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const record = body as Record<string, unknown>;
+        const runId = typeof record.runId === "string" ? record.runId : "";
+        const proposalId =
+          typeof record.proposalId === "string" ? record.proposalId : "";
+        const patchSha256 =
+          typeof record.patchSha256 === "string" ? record.patchSha256 : "";
+        if (!runId || !proposalId || !patchSha256) {
+          badRequest(res, "runId, proposalId, and patchSha256 must be non-empty strings");
+          return;
+        }
+        const extraFields = Object.keys(record).filter(
+          (field) => !new Set(["runId", "proposalId", "patchSha256"]).has(field),
+        );
+        if (extraFields.length > 0) {
+          badRequest(res, `unsupported manual compile repair accept field(s): ${extraFields.join(", ")}`);
+          return;
+        }
+        const upstream = await acceptManualCompileRepair(runId, {
+          runId,
+          proposalId,
+          patchSha256,
           requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
         });
         if (!upstream) {
@@ -4771,8 +4958,22 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
+        const proposalId =
+          typeof record.proposalId === "string" ? record.proposalId : "";
+        if (!proposalId) {
+          badRequest(res, "proposalId must be a non-empty string");
+          return;
+        }
+        const extraFields = Object.keys(record).filter(
+          (field) => !new Set(["runId", "proposalId"]).has(field),
+        );
+        if (extraFields.length > 0) {
+          badRequest(res, `unsupported manual compile repair reject field(s): ${extraFields.join(", ")}`);
+          return;
+        }
         const upstream = await rejectManualCompileRepair(runId, {
-          ...record,
+          runId,
+          proposalId,
           requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
         });
         if (!upstream) {

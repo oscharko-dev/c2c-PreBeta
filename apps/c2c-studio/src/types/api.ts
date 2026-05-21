@@ -868,6 +868,51 @@ export interface ManualCompileRepairProposalFile {
   diff?: string;
 }
 
+export interface ManualCompileRepairPreviewFile {
+  path: string;
+  sha256: string;
+  byteSize: number;
+  role: string;
+}
+
+export interface ManualCompileRepairPreviewDiagnostic {
+  severity: string;
+  code: string;
+  message: string;
+  filePath?: string;
+  line?: number;
+}
+
+export interface ManualCompileRepairPreview {
+  schemaVersion: "v0";
+  previewId: string;
+  runId: string;
+  workflowId?: string;
+  failureCategory: string;
+  sourceRevisionRef?: WorkflowArtifactRef | null;
+  currentHeadRef?: WorkflowArtifactRef | null;
+  buildTestResultRef?: WorkflowArtifactRef | null;
+  executionResultRef?: WorkflowArtifactRef | null;
+  comparisonResultRef?: WorkflowArtifactRef | null;
+  compileErrorRef?: WorkflowArtifactRef | null;
+  runtimeErrorRef?: WorkflowArtifactRef | null;
+  oracleDiffRef?: WorkflowArtifactRef | null;
+  baselineDiffRef?: WorkflowArtifactRef | null;
+  includedFiles: ManualCompileRepairPreviewFile[];
+  diagnostics: ManualCompileRepairPreviewDiagnostic[];
+  manualRegions: Array<{
+    filePath: string;
+    originClass: string;
+    startLine: number;
+    endLine: number;
+  }>;
+  constraints: Record<string, unknown>;
+  exclusionSummary: Record<string, unknown>;
+  entryClass?: string;
+  entryFilePath?: string;
+  createdAt?: string;
+}
+
 export interface ManualCompileRepairDiagnosis {
   schemaVersion?: "v0";
   diagnosisId?: string;
@@ -937,28 +982,40 @@ export interface ManualCompileRepairBuildTestContext {
 
 export interface ManualCompileRepairDiagnoseRequest {
   runId: string;
+  previewId: string;
+}
+
+export interface ManualCompileRepairApplyRequest {
+  runId: string;
+  previewId: string;
+  proposalId: string;
+  patchSha256: string;
+}
+
+export interface ManualCompileRepairRejectRequest {
+  runId: string;
+  proposalId: string;
+}
+
+export interface ManualCompileRepairPreviewRequest {
+  runId: string;
   entryClass?: string;
   entryFilePath: string;
   javaFiles: ManualCompileRepairJavaFile[];
   manualEditOverlay?: JavaOriginOverlay;
   manualEditOverlays?: JavaOriginOverlay[];
-  buildTestContext?: ManualCompileRepairBuildTestContext;
 }
 
-export interface ManualCompileRepairApplyRequest {
+export interface ManualCompileRepairAcceptRequest {
   runId: string;
-  entryClass?: string;
-  entryFilePath: string;
-  javaFiles: ManualCompileRepairJavaFile[];
-  proposal: ManualCompileRepairProposal;
-  candidateProject: ManualCompileRepairCandidateProject;
-  expectedOutput?: string;
-  oracleInput?: string;
+  proposalId: string;
+  patchSha256: string;
 }
 
-export interface ManualCompileRepairRejectRequest {
+export interface ManualCompileRepairPreviewResponse {
+  schemaVersion: "v0";
   runId: string;
-  proposal: ManualCompileRepairProposal;
+  preview: ManualCompileRepairPreview;
 }
 
 export interface ManualCompileRepairDiagnoseResponse {
@@ -971,6 +1028,14 @@ export interface ManualCompileRepairDiagnoseResponse {
 }
 
 export interface ManualCompileRepairApplyResponse {
+  schemaVersion: "v0";
+  runId: string;
+  proposal: ManualCompileRepairProposal;
+  candidateProject: ManualCompileRepairCandidateProject;
+  buildTest: BuildTestView;
+}
+
+export interface ManualCompileRepairAcceptResponse {
   schemaVersion: "v0";
   runId: string;
   proposal: ManualCompileRepairProposal;

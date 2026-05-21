@@ -146,8 +146,10 @@ interface ArtifactStubResponses {
     | ((path: string) => UpstreamResponse | undefined);
   buildTest?: UpstreamResponse;
   manualCompileRepair?: {
+    preview?: UpstreamResponse;
     diagnose?: UpstreamResponse;
     apply?: UpstreamResponse;
+    accept?: UpstreamResponse;
     reject?: UpstreamResponse;
   };
   evidence?: UpstreamResponse;
@@ -194,8 +196,10 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getArtifactFile: Array<{ runId: string; path: string }>;
     getBuildTest: number;
     manualCompileRepair: {
+      preview: Array<{ runId: string; payload: unknown }>;
       diagnose: Array<{ runId: string; payload: unknown }>;
       apply: Array<{ runId: string; payload: unknown }>;
+      accept: Array<{ runId: string; payload: unknown }>;
       reject: Array<{ runId: string; payload: unknown }>;
     };
     getEvidence: number;
@@ -239,8 +243,10 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     getArtifactFile: [] as Array<{ runId: string; path: string }>,
     getBuildTest: 0,
     manualCompileRepair: {
+      preview: [] as Array<{ runId: string; payload: unknown }>,
       diagnose: [] as Array<{ runId: string; payload: unknown }>,
       apply: [] as Array<{ runId: string; payload: unknown }>,
+      accept: [] as Array<{ runId: string; payload: unknown }>,
       reject: [] as Array<{ runId: string; payload: unknown }>,
     },
     getEvidence: 0,
@@ -337,6 +343,10 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
       calls.getBuildTest += 1;
       return artifactResponses.buildTest;
     },
+    async previewManualCompileRepair(runId: string, payload: unknown) {
+      calls.manualCompileRepair.preview.push({ runId, payload });
+      return artifactResponses.manualCompileRepair?.preview;
+    },
     async diagnoseManualCompileRepair(runId: string, payload: unknown) {
       calls.manualCompileRepair.diagnose.push({ runId, payload });
       return artifactResponses.manualCompileRepair?.diagnose;
@@ -344,6 +354,10 @@ function stubOrchestrator(artifactResponses: ArtifactStubResponses = {}): {
     async applyManualCompileRepair(runId: string, payload: unknown) {
       calls.manualCompileRepair.apply.push({ runId, payload });
       return artifactResponses.manualCompileRepair?.apply;
+    },
+    async acceptManualCompileRepair(runId: string, payload: unknown) {
+      calls.manualCompileRepair.accept.push({ runId, payload });
+      return artifactResponses.manualCompileRepair?.accept;
     },
     async rejectManualCompileRepair(runId: string, payload: unknown) {
       calls.manualCompileRepair.reject.push({ runId, payload });
@@ -7605,6 +7619,74 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     path: "src/main/java/com/c2c/generated/CASE01.java",
     content: "package com.c2c.generated;\npublic class CASE01 {}\n",
   };
+  const previewResponse = {
+    schemaVersion: "v0",
+    runId: "run-1",
+    preview: {
+      schemaVersion: "v0",
+      previewId: "preview-1",
+      runId: "run-1",
+      workflowId: "w0-migration-v0",
+      failureCategory: "oracle_mismatch",
+      sourceRevisionRef: {
+        uri: "urn:preview/run-1/source",
+        sha256: "0".repeat(64),
+        byteSize: 64,
+        kind: "generated-project-manifest",
+      },
+      currentHeadRef: {
+        uri: "urn:preview/run-1/head",
+        sha256: "1".repeat(64),
+        byteSize: 64,
+        kind: "manual-compile-repair-snapshot",
+      },
+      buildTestResultRef: {
+        uri: "urn:preview/run-1/build-test",
+        sha256: "2".repeat(64),
+        byteSize: 64,
+        kind: "build-test-result",
+      },
+      includedFiles: [
+        {
+          path: currentJavaFile.path,
+          sha256: "3".repeat(64),
+          byteSize: currentJavaFile.content.length,
+          role: "entry-file",
+        },
+      ],
+      diagnostics: [
+        {
+          severity: "error",
+          code: "cannot-find-symbol",
+          message: "cannot find symbol",
+          filePath: currentJavaFile.path,
+          line: 2,
+        },
+      ],
+      manualRegions: [
+        {
+          filePath: currentJavaFile.path,
+          originClass: "manual_modified",
+          startLine: 1,
+          endLine: 2,
+        },
+        {
+          filePath: currentJavaFile.path,
+          originClass: "manual_edit",
+          startLine: 3,
+          endLine: 4,
+        },
+      ],
+      constraints: {
+        reviewRequiredBeforeAgentStart: true,
+      },
+      exclusionSummary: {
+        excludedJavaFileCount: 0,
+        excludedDiagnosticCount: 0,
+        redactionsApplied: true,
+      },
+    },
+  };
   const diagnoseResponse = {
     schemaVersion: "v0",
     runId: "run-1",
@@ -7671,6 +7753,20 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     runId: "run-1",
     proposal: {
       ...diagnoseResponse.proposal,
+      applicationState: "sandbox_applied",
+      approvalState: "pending",
+    },
+    candidateProject: diagnoseResponse.candidateProject,
+    buildTest: {
+      status: "ok",
+      outputRef: { uri: "urn:build-output/run-1" },
+    },
+  };
+  const acceptResponse = {
+    schemaVersion: "v0",
+    runId: "run-1",
+    proposal: {
+      ...diagnoseResponse.proposal,
       applicationState: "applied",
       approvalState: "approved",
     },
@@ -7691,8 +7787,10 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
   };
   const { client: orch, calls } = stubOrchestrator({
     manualCompileRepair: {
+      preview: { status: 200, body: previewResponse },
       diagnose: { status: 200, body: diagnoseResponse },
       apply: { status: 200, body: applyResponse },
+      accept: { status: 200, body: acceptResponse },
       reject: { status: 200, body: rejectResponse },
     },
   });
@@ -7706,73 +7804,13 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
   });
   const server = await startTestServer(handler);
   try {
-    const diagnose = await fetchJson(
-      `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
+    const preview = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/preview`,
       auth.post({
         runId: "run-1",
         entryClass: "CASE01",
         entryFilePath: currentJavaFile.path,
         javaFiles: [currentJavaFile],
-        buildTestContext: {
-          status: "output-divergence",
-          classification: "true-golden-master-mismatch",
-          comparisonPolicy: "golden-master-v1",
-          expectedOutput: "EXPECTED",
-          outputRef: {
-            uri: "urn:diagnosis/run-1/execution-result",
-            sha256: "2".repeat(64),
-            byteSize: 96,
-            kind: "parity-execution-result",
-          },
-          expectedOutputRef: {
-            uri: "urn:diagnosis/run-1/reference-output",
-            sha256: "7".repeat(64),
-            byteSize: 64,
-            kind: "reference-output",
-          },
-          actualOutputRef: {
-            uri: "urn:diagnosis/run-1/java-output",
-            sha256: "8".repeat(64),
-            byteSize: 64,
-            kind: "java-output",
-          },
-          comparison: {
-            status: "failed",
-            matched: false,
-            comparisonPolicyVersion: "golden-master-v1",
-            mismatchClassification: "content",
-            comparisonPolicyRef: {
-              uri: "urn:diagnosis/run-1/comparison-policy",
-              sha256: "9".repeat(64),
-              byteSize: 32,
-              kind: "comparison-policy",
-            },
-            comparisonResultRef: {
-              uri: "urn:diagnosis/run-1/comparison-result",
-              sha256: "3".repeat(64),
-              byteSize: 80,
-              kind: "parity-comparison-result",
-            },
-            diffRef: {
-              uri: "urn:diagnosis/run-1/oracle-diff",
-              sha256: "a".repeat(64),
-              byteSize: 48,
-              kind: "oracle-diff",
-            },
-            expectedRef: {
-              uri: "urn:diagnosis/run-1/reference-output",
-              sha256: "b".repeat(64),
-              byteSize: 64,
-              kind: "reference-output",
-            },
-            actualRef: {
-              uri: "urn:diagnosis/run-1/java-output",
-              sha256: "c".repeat(64),
-              byteSize: 64,
-              kind: "java-output",
-            },
-          },
-        },
         manualEditOverlays: [
           {
             regions: [
@@ -7797,6 +7835,48 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
         ],
       }),
     );
+    assert.equal(preview.status, 200);
+    assert.equal(calls.manualCompileRepair.preview.length, 1);
+    const previewCall = calls.manualCompileRepair.preview[0];
+    assert.equal(previewCall?.runId, "run-1");
+    assert.deepEqual(
+      (previewCall?.payload as { manualOverlay: unknown; requester: string }).manualOverlay,
+      {
+        schemaVersion: "v0",
+        regions: [
+          {
+            filePath: currentJavaFile.path,
+            originClass: "manual_modified",
+            startLine: 1,
+            endLine: 2,
+          },
+          {
+            filePath: currentJavaFile.path,
+            originClass: "manual_edit",
+            startLine: 3,
+            endLine: 4,
+          },
+        ],
+      },
+    );
+    assert.equal(
+      (previewCall?.payload as { requester: string }).requester,
+      "studio:tenant-a:user-a",
+    );
+
+    const previewBody = preview.body as {
+      schemaVersion: string;
+      preview: { previewId: string };
+    };
+    assert.equal(previewBody.schemaVersion, "v0");
+
+    const diagnose = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
+      auth.post({
+        runId: "run-1",
+        previewId: previewBody.preview.previewId,
+      }),
+    );
     assert.equal(diagnose.status, 200);
     const diagnoseBody = diagnose.body as {
       schemaVersion: string;
@@ -7818,42 +7898,14 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     assert.equal(calls.manualCompileRepair.diagnose.length, 1);
     const diagnoseCall = calls.manualCompileRepair.diagnose[0];
     assert.equal(diagnoseCall?.runId, "run-1");
+    assert.deepEqual(diagnoseCall?.payload, {
+      runId: "run-1",
+      previewId: "preview-1",
+      requester: "studio:tenant-a:user-a",
+    });
     assert.equal(
-      ((diagnoseCall?.payload as { buildTestContext?: { expectedOutput?: string } })
-        .buildTestContext?.expectedOutput),
-      "EXPECTED",
-    );
-    assert.equal(
-      ((diagnoseCall?.payload as {
-        buildTestContext?: {
-          comparison?: { comparisonResultRef?: { sha256?: string } };
-        };
-      }).buildTestContext?.comparison?.comparisonResultRef?.sha256),
-      "3".repeat(64),
-    );
-    assert.deepEqual(
-      (diagnoseCall?.payload as { manualOverlay: unknown; requester: string }).manualOverlay,
-      {
-        schemaVersion: "v0",
-        regions: [
-          {
-            filePath: currentJavaFile.path,
-            originClass: "manual_modified",
-            startLine: 1,
-            endLine: 2,
-          },
-          {
-            filePath: currentJavaFile.path,
-            originClass: "manual_edit",
-            startLine: 3,
-            endLine: 4,
-          },
-        ],
-      },
-    );
-    assert.equal(
-      (diagnoseCall?.payload as { requester: string }).requester,
-      "studio:tenant-a:user-a",
+      diagnoseBody.proposal.proposalId,
+      "proposal-1",
     );
     assert.equal(diagnoseBody.diagnosis.failureClass, "runtime_failure");
     assert.equal(diagnoseBody.diagnosis.scopeClass, "generated_code");
@@ -7871,11 +7923,16 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       `${server.baseUrl}/api/v0/manual-compile-repair/reject`,
       auth.post({
         runId: "run-1",
-        proposal: diagnoseBody.proposal,
+        proposalId: diagnoseBody.proposal.proposalId,
       }),
     );
     assert.equal(reject.status, 200);
     assert.equal(calls.manualCompileRepair.reject.length, 1);
+    assert.deepEqual(calls.manualCompileRepair.reject[0]?.payload, {
+      runId: "run-1",
+      proposalId: "proposal-1",
+      requester: "studio:tenant-a:user-a",
+    });
     assert.equal(
       (calls.manualCompileRepair.reject[0]?.payload as { requester: string }).requester,
       "studio:tenant-a:user-a",
@@ -7885,19 +7942,51 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       `${server.baseUrl}/api/v0/manual-compile-repair/apply`,
       auth.post({
         runId: "run-1",
-        entryClass: diagnoseBody.candidateProject.entryClass,
-        entryFilePath: diagnoseBody.candidateProject.entryFilePath,
-        javaFiles: [currentJavaFile],
-        proposal: diagnoseBody.proposal,
-        candidateProject: diagnoseBody.candidateProject,
+        previewId: previewBody.preview.previewId,
+        proposalId: diagnoseBody.proposal.proposalId,
+        patchSha256: "a".repeat(64),
       }),
     );
     assert.equal(apply.status, 200);
     assert.equal(calls.manualCompileRepair.apply.length, 1);
+    assert.deepEqual(calls.manualCompileRepair.apply[0]?.payload, {
+      runId: "run-1",
+      previewId: "preview-1",
+      proposalId: "proposal-1",
+      patchSha256: "a".repeat(64),
+      requester: "studio:tenant-a:user-a",
+    });
     assert.equal(
       (calls.manualCompileRepair.apply[0]?.payload as { requester: string }).requester,
       "studio:tenant-a:user-a",
     );
+
+    const accept = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/accept`,
+      auth.post({
+        runId: "run-1",
+        proposalId: diagnoseBody.proposal.proposalId,
+        patchSha256: "a".repeat(64),
+      }),
+    );
+    assert.equal(accept.status, 200);
+    assert.equal(calls.manualCompileRepair.accept.length, 1);
+    assert.deepEqual(calls.manualCompileRepair.accept[0]?.payload, {
+      runId: "run-1",
+      proposalId: "proposal-1",
+      patchSha256: "a".repeat(64),
+      requester: "studio:tenant-a:user-a",
+    });
+
+    const invalidDiagnose = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
+      auth.post({
+        runId: "run-1",
+        previewId: "preview-1",
+        buildTestContext: { status: "forbidden" },
+      }),
+    );
+    assert.equal(invalidDiagnose.status, 400);
   } finally {
     await server.close();
   }
