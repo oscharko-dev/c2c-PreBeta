@@ -49,12 +49,12 @@ unbounded runtime substrates, or parity over unsupported mainframe features.
 Studio must distinguish the authoritative execution surfaces with explicit
 labels. The canonical labels are:
 
-| Surface | Canonical Studio label | Meaning |
-| --- | --- | --- |
-| Source/reference output | `Reference mode: curated fixture` | The source-side result comes from a controlled, repository-owned reference fixture. It is not live mainframe execution. |
-| Generated target output | `Target mode: generated Java` | The target-side result comes from generated Java built and executed through the controlled product pipeline. |
-| Comparison authority | `Comparison authority: deterministic` | Success or failure is decided by deterministic normalization, comparison, and evidence rules rather than model judgment. |
-| Repair proposal flow | `Repair mode: developer-approved sandbox` | A Coding Agent may propose a patch, but it is reviewed in a sandbox and applied only after explicit developer approval. |
+| Surface                 | Canonical Studio label                    | Meaning                                                                                                                  |
+| ----------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Source/reference output | `Reference mode: curated fixture`         | The source-side result comes from a controlled, repository-owned reference fixture. It is not live mainframe execution.  |
+| Generated target output | `Target mode: generated Java`             | The target-side result comes from generated Java built and executed through the controlled product pipeline.             |
+| Comparison authority    | `Comparison authority: deterministic`     | Success or failure is decided by deterministic normalization, comparison, and evidence rules rather than model judgment. |
+| Repair proposal flow    | `Repair mode: developer-approved sandbox` | A Coding Agent may propose a patch, but it is reviewed in a sandbox and applied only after explicit developer approval.  |
 
 Future source execution modes may be added, but the product must not present a
 fixture-backed reference as live COBOL execution without a distinct label.
@@ -63,15 +63,15 @@ fixture-backed reference as live COBOL execution without a distinct label.
 
 Responsibility for the trust workflow is fixed as follows:
 
-| Component | Authority |
-| --- | --- |
-| Studio | Presents run configuration, mode labels, diagnostics, diffs, evidence state, stale-state cues, and patch review surfaces. Studio is not the workflow authority. |
-| BFF | Exposes UI-facing APIs, resolves session/tenant context, and brokers only browser-safe interactions. The BFF does not become a hidden orchestrator. |
-| Orchestrator | Owns transformation, reference resolution, target execution sequencing, parity comparison orchestration, assist decisions, repair decisions, and final classification. |
-| Harness | Provides controlled execution and policy infrastructure, eventing, and ledgers. It does not decide parity outcomes. |
-| Build/Test Runner | Builds and executes generated Java, returns structured build/runtime diagnostics, and does not assert parity by itself. |
-| Evidence service | Stores run evidence, artifact references, comparison outputs, approval records, and audit metadata. |
-| Model Gateway | The only productive model boundary for diagnosis, repair proposals, or optional explanatory calls that the product treats as productive. |
+| Component         | Authority                                                                                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Studio            | Presents run configuration, mode labels, diagnostics, diffs, evidence state, stale-state cues, and patch review surfaces. Studio is not the workflow authority.        |
+| BFF               | Exposes UI-facing APIs, resolves session/tenant context, and brokers only browser-safe interactions. The BFF does not become a hidden orchestrator.                    |
+| Orchestrator      | Owns transformation, reference resolution, target execution sequencing, parity comparison orchestration, assist decisions, repair decisions, and final classification. |
+| Harness           | Provides controlled execution and policy infrastructure, eventing, and ledgers. It does not decide parity outcomes.                                                    |
+| Build/Test Runner | Builds and executes generated Java, returns structured build/runtime diagnostics, and does not assert parity by itself.                                                |
+| Evidence service  | Stores run evidence, artifact references, comparison outputs, approval records, and audit metadata.                                                                    |
+| Model Gateway     | The only productive model boundary for diagnosis, repair proposals, or optional explanatory calls that the product treats as productive.                               |
 
 ### 4. Deterministic parity remains authoritative
 
@@ -102,9 +102,11 @@ contract for the first supported repair loop is:
 4. Studio shows the failure class, the proposed patch, and the patch context in
    a reviewable sandbox.
 5. The developer explicitly approves or rejects the patch proposal.
-6. Approval records the exact patch payload hash that was reviewed.
-7. Only an approved patch whose payload matches the recorded approval hash may
-   be applied.
+6. Approval records the exact patch payload hash that was reviewed and the
+   authenticated identity of the approving developer; the approving identity
+   must match the run owner.
+7. Only an approved patch whose payload matches the recorded approval hash and
+   whose approving identity matches the run owner may be applied.
 8. Repair application is limited to the generated Java candidate and its
    reviewable patch artifact. It must not modify reference fixtures, comparison
    logic, evidence wiring, policy code, or other trust-governing surfaces.
@@ -147,9 +149,12 @@ credibility, not visual imitation of IntelliJ. The workflow therefore requires:
 - fast, predictable reruns for curated trust cases;
 - honest unsupported-state messaging when the workflow cannot prove parity.
 
-### 8. Security and sandboxing assumptions are part of the contract
+### 8. Security and sandboxing requirements are part of the contract
 
-The first trust workflow assumes:
+The first trust workflow requires these properties, with the Harness as the
+enforcement owner for runner isolation and the BFF and Orchestrator as the
+enforcement owners for transport authentication, authorization, and approver
+identity binding:
 
 - all productive model calls go through the Model Gateway;
 - model-bound context is previewable, policy-controlled, and redacted before
@@ -158,14 +163,22 @@ The first trust workflow assumes:
   substrates;
 - repair proposals are isolated to a sandboxed review/apply flow;
 - repair approvals are bound to the exact patch payload hash that Studio
-  reviewed; apply must reject a non-matching patch;
+  reviewed and to the authenticated identity of the approving developer; the
+  approving identity must match the run owner, and apply must reject either a
+  non-matching patch hash or a non-matching approving identity;
 - repair scope is limited to the generated Java candidate and may not alter
   reference artifacts, comparison logic, evidence logic, or policy surfaces;
-- runner isolation is minimum-guarded: no outbound network by default, no
-  secret-bearing environment variables, least-privilege filesystem access, and
-  no direct write path into evidence storage;
-- evidence records capture approvals, patch provenance, and the mode labels used
-  for the run;
+- runner isolation is Harness-enforced with no outbound network by default, no
+  secret-bearing environment variables, least-privilege filesystem access, no
+  direct write path into evidence storage, and a bounded runner resource
+  envelope: a maximum wall-clock duration, a maximum resident-set/heap size,
+  and bounded stdout/stderr capture so that a malformed or adversarial
+  generated Java program cannot exhaust runner capacity or evidence storage;
+- parity and repair trigger endpoints exposed through the BFF require an
+  authenticated session whose identity binds the run owner; unauthenticated
+  callers must be rejected before any Orchestrator work is dispatched;
+- evidence records capture approvals, patch provenance, the approving identity,
+  and the mode labels used for the run;
 - deterministic results remain the authority even when a model explanation or
   repair proposal is present.
 

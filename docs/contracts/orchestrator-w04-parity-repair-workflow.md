@@ -21,9 +21,14 @@ truth. Architectural decision context lives in
   deterministic authority for parity status.
 - Productive model calls for diagnosis or repair go through the Model Gateway
   only.
-- Repair proposals require explicit developer approval before application.
-- Evidence captures the mode labels, approvals, outputs, hashes, diagnostics,
-  comparisons, and provenance needed for audit.
+- Repair proposals require explicit developer approval before application, and
+  the approval is bound to the authenticated identity of the run owner as well
+  as to the exact patch payload hash that Studio rendered.
+- Parity and repair trigger endpoints exposed through the BFF are reachable
+  only through an authenticated session; unauthenticated callers are rejected
+  before Orchestrator dispatch.
+- Evidence captures the mode labels, approvals, approver identity, outputs,
+  hashes, diagnostics, comparisons, and provenance needed for audit.
 - The Orchestrator projects deterministic comparison lineage from the Java
   runner output into additive contract surfaces rather than recomputing
   parity independently.
@@ -32,14 +37,14 @@ truth. Architectural decision context lives in
 
 The first trust workflow is described in terms of these stable objects:
 
-| Object | Meaning |
-| --- | --- |
-| Trust case | An immutable, repository-owned catalog entry that binds one supported COBOL source, one controlled input fixture, one reference artifact, and the policies that govern the run. |
-| Parity run | One end-to-end execution of transformation, reference resolution, target build/run, comparison, and evidence capture for a trust case. |
-| Repair run | A bounded follow-on workflow for a failed parity run that collects deterministic failure context, obtains an optional repair proposal through the Model Gateway, and re-enters deterministic verification after explicit approval. |
-| Reference artifact | The controlled source/reference result used as the source-side authority for the first trust slice. |
-| Generated Java candidate | The target-side Java output selected for deterministic build and execution. |
-| Repair proposal | A reviewable patch candidate plus rationale, scope, and policy metadata. It is not proof and has no effect until approved. |
+| Object                   | Meaning                                                                                                                                                                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Trust case               | An immutable, repository-owned catalog entry that binds one supported COBOL source, one controlled input fixture, one reference artifact, and the policies that govern the run.                                                    |
+| Parity run               | One end-to-end execution of transformation, reference resolution, target build/run, comparison, and evidence capture for a trust case.                                                                                             |
+| Repair run               | A bounded follow-on workflow for a failed parity run that collects deterministic failure context, obtains an optional repair proposal through the Model Gateway, and re-enters deterministic verification after explicit approval. |
+| Reference artifact       | The controlled source/reference result used as the source-side authority for the first trust slice.                                                                                                                                |
+| Generated Java candidate | The target-side Java output selected for deterministic build and execution.                                                                                                                                                        |
+| Repair proposal          | A reviewable patch candidate plus rationale, scope, and policy metadata. It is not proof and has no effect until approved.                                                                                                         |
 
 ## Parity Workflow
 
@@ -96,9 +101,10 @@ The repair loop begins only after deterministic failure detection:
 4. Studio renders the patch proposal in a developer-reviewable sandbox.
 5. The developer approves or rejects the proposal explicitly.
 6. Approval captures the exact patch payload hash that Studio rendered for
-   review.
-7. Only an approved patch whose payload matches the recorded approval hash may
-   be applied.
+   review and the authenticated identity of the approving developer; the
+   approving identity must match the run's tenant/session owner.
+7. Only an approved patch whose payload matches the recorded approval hash and
+   whose approving identity matches the run owner may be applied.
 8. Repair application is limited to the generated Java candidate and its
    reviewable patch artifact. It must not modify reference fixtures,
    comparison/normalization logic, evidence logic, or policy surfaces.
@@ -129,12 +135,12 @@ must not silently carry over to a new run.
 
 Consumers must expose the first trust workflow with explicit mode labels:
 
-| Surface | Canonical label | Contract meaning |
-| --- | --- | --- |
-| Source/reference output | `Reference mode: curated fixture` | The source-side result is a controlled fixture-backed reference, not live mainframe execution. Trust-3 additionally stamps the adapter result with an explicit source mode such as `reference-fixture` or `native-cobol`. |
-| Generated target output | `Target mode: generated Java` | The target-side result is produced by generated Java built and executed by the product pipeline. |
-| Comparison | `Comparison authority: deterministic` | Deterministic normalization, comparison, and evidence decide parity status. |
-| Repair proposals | `Repair mode: developer-approved sandbox` | Repair suggestions are reviewed in a sandbox and require explicit approval before application. |
+| Surface                 | Canonical label                           | Contract meaning                                                                                                                                                                                                          |
+| ----------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source/reference output | `Reference mode: curated fixture`         | The source-side result is a controlled fixture-backed reference, not live mainframe execution. Trust-3 additionally stamps the adapter result with an explicit source mode such as `reference-fixture` or `native-cobol`. |
+| Generated target output | `Target mode: generated Java`             | The target-side result is produced by generated Java built and executed by the product pipeline.                                                                                                                          |
+| Comparison              | `Comparison authority: deterministic`     | Deterministic normalization, comparison, and evidence decide parity status.                                                                                                                                               |
+| Repair proposals        | `Repair mode: developer-approved sandbox` | Repair suggestions are reviewed in a sandbox and require explicit approval before application.                                                                                                                            |
 
 Future source/reference modes may extend this set, but consumers must not label
 fixture-backed reference behavior as live COBOL execution.
@@ -190,6 +196,10 @@ The export contract is intentionally conservative:
 - Failed, incomplete, or intentionally diverged evidence must be blocked.
 - Stale evidence and repair-verified/manual-edit-qualified evidence must remain
   explicitly labelled so the exported scaffold does not overstate its authority.
+- Exported scaffold files must pass the same secret and credential checks that
+  gate Evidence storage before they are made available for download; any value
+  rejected by those checks must be excluded or replaced with a redacted
+  content-addressed reference.
 - Generated scaffold paths must avoid overwriting developer-maintained tests
   unless the developer later promotes the scaffold deliberately.
 
@@ -204,15 +214,15 @@ becomes a standing quality gate.
 
 The trust workflow spans these stable responsibilities:
 
-| Component | Responsibility |
-| --- | --- |
-| Studio | Presents immutable trust-case selection, saved-preference controls, mode labels, diagnostics, diffs, stale-state cues, evidence state, and repair review surfaces. |
-| BFF | Owns browser-facing APIs, catalog summaries, saved trust-case preference, and session-safe request brokering only. |
-| Orchestrator | Owns workflow sequencing, parity orchestration, repair decisions, and final classification. |
-| Harness | Provides controlled execution, policy, and ledger infrastructure without deciding parity outcomes. |
-| Build/Test Runner | Compiles and executes generated Java and returns build/runtime diagnostics. |
-| Evidence service | Persists run evidence, artifact references, comparison material, approvals, and audit metadata. |
-| Model Gateway | The only productive model boundary for diagnosis, repair proposals, and any other productive model participation. |
+| Component         | Responsibility                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Studio            | Presents immutable trust-case selection, saved-preference controls, mode labels, diagnostics, diffs, stale-state cues, evidence state, and repair review surfaces. |
+| BFF               | Owns browser-facing APIs, catalog summaries, saved trust-case preference, and session-safe request brokering only.                                                 |
+| Orchestrator      | Owns workflow sequencing, parity orchestration, repair decisions, and final classification.                                                                        |
+| Harness           | Provides controlled execution, policy, and ledger infrastructure without deciding parity outcomes.                                                                 |
+| Build/Test Runner | Compiles and executes generated Java and returns build/runtime diagnostics.                                                                                        |
+| Evidence service  | Persists run evidence, artifact references, comparison material, approvals, and audit metadata.                                                                    |
+| Model Gateway     | The only productive model boundary for diagnosis, repair proposals, and any other productive model participation.                                                  |
 
 ## Failure Taxonomy
 
@@ -220,16 +230,16 @@ The executable truth for failure codes lives in code, schemas, and tests. This
 document defines the consumer-facing taxonomy that downstream APIs and Studio
 surfaces must preserve:
 
-| Failure family | Meaning | Typical owner |
-| --- | --- | --- |
-| Unsupported input | The COBOL shape, runtime dependency, or execution requirement is outside the supported trust slice. | Orchestrator classification with corpus/governance backing |
-| Reference or fixture issue | The curated reference fixture, trust-case input, or reference artifact is missing, inconsistent, or invalid. | Orchestrator / evidence / fixture governance |
-| Generation defect | The generated Java candidate cannot represent the supported source behavior within the contract. | Orchestrator + target Java generation workflow |
-| Build failure | Generated or repaired Java fails deterministic build or test execution. | Build/Test Runner |
-| Runtime failure | Generated or repaired Java builds but fails during controlled execution. | Build/Test Runner / Orchestrator |
-| Parity mismatch | Reference and target outputs execute but do not compare equal after deterministic normalization. | Deterministic comparison owned by the Orchestrator workflow |
-| Repair policy or budget block | A repair attempt is denied by policy, approval, or bounded budget rules. | Orchestrator + Model Gateway policy |
-| Evidence incomplete | Required run evidence, hashes, approvals, or artifact references are missing. | Evidence service + Orchestrator finalization |
+| Failure family                | Meaning                                                                                                      | Typical owner                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Unsupported input             | The COBOL shape, runtime dependency, or execution requirement is outside the supported trust slice.          | Orchestrator classification with corpus/governance backing  |
+| Reference or fixture issue    | The curated reference fixture, trust-case input, or reference artifact is missing, inconsistent, or invalid. | Orchestrator / evidence / fixture governance                |
+| Generation defect             | The generated Java candidate cannot represent the supported source behavior within the contract.             | Orchestrator + target Java generation workflow              |
+| Build failure                 | Generated or repaired Java fails deterministic build or test execution.                                      | Build/Test Runner                                           |
+| Runtime failure               | Generated or repaired Java builds but fails during controlled execution.                                     | Build/Test Runner / Orchestrator                            |
+| Parity mismatch               | Reference and target outputs execute but do not compare equal after deterministic normalization.             | Deterministic comparison owned by the Orchestrator workflow |
+| Repair policy or budget block | A repair attempt is denied by policy, approval, or bounded budget rules.                                     | Orchestrator + Model Gateway policy                         |
+| Evidence incomplete           | Required run evidence, hashes, approvals, or artifact references are missing.                                | Evidence service + Orchestrator finalization                |
 
 Failure classification may inform model-assisted diagnosis, but it still routes
 through deterministic evidence and final classification.
@@ -250,8 +260,9 @@ The first trust workflow must preserve at least these evidence classes:
 - deterministic comparison policy/version plus projected execution,
   comparison, and diff references;
 - mode labels presented to the developer;
-- repair proposal metadata, the approved patch payload hash, approval or
-  rejection decision, and any applied patch provenance;
+- repair proposal metadata, the approved patch payload hash, the authenticated
+  identity of the approving developer, approval or rejection decision, and any
+  applied patch provenance;
 - final run classification and any evidence completeness warnings.
 
 ## Evidence Storage Boundary
@@ -260,15 +271,15 @@ Evidence service stores durable proof, not working scratch space. For this
 workflow, the following fields may be persisted in Evidence when they are
 required for audit, replay, or deterministic verification:
 
-| Contract area | May be stored in Evidence |
-| --- | --- |
-| Run identity and status | trust-case identifiers and versions, run identifiers, workflow identifiers, mode labels, completeness status, final classification, and evidence-completeness warnings |
-| Deterministic artifacts | source COBOL references, input fixture references, reference artifact references, generated Java candidate references, build/test result references, runtime version references, harness event references, trajectory ledger references, and unsupported-feature references |
-| Comparison results | normalized comparison outputs, parity status, oracle comparison references, workflow/evidence `parityComparison` projections, comparison policy version/reference, execution/comparison result refs, diff refs, matched/mismatched outcome, and the hashes or byte sizes needed to verify the referenced artifacts |
-| Assist lineage | `assistDecision` outcome, reason code, selected agent role, decision timestamp, budget snapshots, and affected artifact references |
-| Repair lineage | `repairAttempts` metadata, decision refs, model invocation refs, approved patch payload hash, approval or rejection decision, and applied patch provenance |
-| Manual-edit provenance | `manualEditsCarriedOver`, `manualDriftRegionCount`, and the `manualEditOverlay` reference when manual edits are present |
-| Governance context | open assumptions that are safe to retain, validation summaries, and other non-secret audit metadata that can be represented as references or bounded text |
+| Contract area           | May be stored in Evidence                                                                                                                                                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Run identity and status | trust-case identifiers and versions, run identifiers, workflow identifiers, mode labels, completeness status, final classification, and evidence-completeness warnings                                                                                                                                             |
+| Deterministic artifacts | source COBOL references, input fixture references, reference artifact references, generated Java candidate references, build/test result references, runtime version references, harness event references, trajectory ledger references, and unsupported-feature references                                        |
+| Comparison results      | normalized comparison outputs, parity status, oracle comparison references, workflow/evidence `parityComparison` projections, comparison policy version/reference, execution/comparison result refs, diff refs, matched/mismatched outcome, and the hashes or byte sizes needed to verify the referenced artifacts |
+| Assist lineage          | `assistDecision` outcome, reason code, selected agent role, decision timestamp, budget snapshots, and affected artifact references                                                                                                                                                                                 |
+| Repair lineage          | `repairAttempts` metadata, decision refs, model invocation refs, approved patch payload hash, approving developer identity, approval or rejection decision, and applied patch provenance                                                                                                                           |
+| Manual-edit provenance  | `manualEditsCarriedOver`, `manualDriftRegionCount`, and the `manualEditOverlay` reference when manual edits are present                                                                                                                                                                                            |
+| Governance context      | open assumptions that are safe to retain, validation summaries, and other non-secret audit metadata that can be represented as references or bounded text                                                                                                                                                          |
 
 The following inputs must remain transient, upstream-only, or redacted before
 they reach Evidence storage:
@@ -287,24 +298,40 @@ store inline, Evidence should keep the content-addressed reference and hash
 only, while the full payload remains in the originating system or a redacted
 artifact store.
 
-## Security and Sandboxing Assumptions
+## Security and Sandboxing Requirements
 
-The trust workflow relies on these assumptions:
+The trust workflow imposes these requirements. The Harness is the enforcement
+owner for runner isolation; the BFF and Orchestrator are the enforcement owners
+for transport authentication, authorization, and approver identity binding;
+Build/Test Runner contract conformance must be validated before a trust case is
+promoted to a release-gated workflow.
 
 - productive model calls go through the Model Gateway only;
 - repair proposals remain reviewable and are not applied automatically;
 - generated Java build and execution stay inside controlled product execution
   substrates;
-- generated or repaired Java executes in an isolated runner contract with no
-  outbound network by default, no secret-bearing environment variables,
-  least-privilege filesystem access, and no direct write path into evidence
-  storage;
+- generated or repaired Java executes in an isolated runner contract enforced
+  by the Harness with no outbound network by default, no secret-bearing
+  environment variables, least-privilege filesystem access, and no direct write
+  path into evidence storage;
+- the isolated runner enforces a bounded resource envelope: a maximum
+  wall-clock duration, a maximum resident-set/heap size, and bounded
+  stdout/stderr capture, so that a malformed or adversarial generated Java
+  program cannot exhaust runner capacity or evidence storage; concrete envelope
+  values live with the Harness runner contract and are versioned alongside the
+  comparison policy;
+- parity and repair trigger endpoints exposed through the BFF require an
+  authenticated session; unauthenticated callers must be rejected before any
+  Orchestrator work is dispatched;
 - repair approvals are bound to the exact patch payload hash that Studio
-  reviewed; apply must reject a non-matching patch;
+  reviewed and to the authenticated identity of the approving developer; the
+  approving identity must match the run owner, and apply must reject either a
+  non-matching patch hash or a non-matching approving identity;
 - repair scope is limited to the generated Java candidate and may not alter
   reference artifacts, comparison logic, evidence logic, or policy surfaces;
 - policy, redaction, and approval metadata are preserved in the evidence path;
-- mode labels, approvals, and deterministic outcomes remain auditable;
+- mode labels, approvals, approver identity, and deterministic outcomes remain
+  auditable;
 - manual Java edits follow
   [ADR 0007](../adr/0007-studio-java-manual-edit-provenance.md) and do not
   weaken deterministic authority.
