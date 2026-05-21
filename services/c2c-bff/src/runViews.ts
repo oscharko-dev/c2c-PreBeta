@@ -48,10 +48,7 @@ type JavaOriginClass =
   | "manual_modified"
   | "manual_edit";
 
-type JavaVerificationOutcome =
-  | "oracle_passed"
-  | "oracle_failed"
-  | "no_oracle";
+type JavaVerificationOutcome = "oracle_passed" | "oracle_failed" | "no_oracle";
 
 type JavaMappingClass =
   | "direct"
@@ -219,7 +216,9 @@ function asString(value: unknown): string {
 }
 
 function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function asBoolean(value: unknown): boolean | undefined {
@@ -239,7 +238,8 @@ function asTimestampString(value: unknown): string | undefined {
 function normalizeTrustSummaryValue(value: unknown): unknown {
   if (value === null) return null;
   if (typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "number")
+    return Number.isFinite(value) ? value : undefined;
   if (Array.isArray(value)) {
     return value
       .map((entry) => normalizeTrustSummaryValue(entry))
@@ -305,21 +305,45 @@ function asStringRecord(value: unknown): Record<string, string> {
   );
 }
 
+const TRUST_CASE_FIELD_MAX = 128;
+const TRUST_CASE_DIGEST_MAX = 256;
+
 function trustCaseSnapshot(raw: unknown): TrustCaseSnapshot | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const trustCaseId = asString(record.trustCaseId);
+  const trustCaseId = asString(record.trustCaseId).slice(
+    0,
+    TRUST_CASE_FIELD_MAX,
+  );
   if (trustCaseId.length === 0) return null;
   return {
     trustCaseId,
-    version: asString(record.version),
-    catalogVersion: asString(record.catalogVersion),
-    catalogHash: asString(record.catalogHash),
-    configurationDigest: asString(record.configurationDigest),
-    sourceReferenceFixtureId: asString(record.sourceReferenceFixtureId),
-    sourceReferenceMode: asString(record.sourceReferenceMode),
-    environmentProfileId: asString(record.environmentProfileId),
-    comparisonPolicyVersion: asString(record.comparisonPolicyVersion),
+    version: asString(record.version).slice(0, TRUST_CASE_FIELD_MAX),
+    catalogVersion: asString(record.catalogVersion).slice(
+      0,
+      TRUST_CASE_FIELD_MAX,
+    ),
+    catalogHash: asString(record.catalogHash).slice(0, TRUST_CASE_DIGEST_MAX),
+    configurationDigest: asString(record.configurationDigest).slice(
+      0,
+      TRUST_CASE_DIGEST_MAX,
+    ),
+    sourceReferenceFixtureId: asString(record.sourceReferenceFixtureId).slice(
+      0,
+      TRUST_CASE_FIELD_MAX,
+    ),
+    sourceReferenceMode: asString(record.sourceReferenceMode).slice(
+      0,
+      TRUST_CASE_FIELD_MAX,
+    ),
+    environmentProfileId: asString(record.environmentProfileId).slice(
+      0,
+      TRUST_CASE_FIELD_MAX,
+    ),
+    comparisonPolicyVersion: asString(record.comparisonPolicyVersion).slice(
+      0,
+      TRUST_CASE_FIELD_MAX,
+    ),
   };
 }
 
@@ -665,7 +689,9 @@ export function normalizeOutputRef(raw: unknown): OutputRef | null {
   return ref;
 }
 
-function normalizeGeneratedFileRef(raw: unknown): Record<string, unknown> | null {
+function normalizeGeneratedFileRef(
+  raw: unknown,
+): Record<string, unknown> | null {
   const record = asRecord(raw);
   if (!record) return null;
   const path = asString(record.path);
@@ -680,14 +706,18 @@ function normalizeGeneratedFileRef(raw: unknown): Record<string, unknown> | null
   return ref;
 }
 
-export function normalizeGeneratedFileRefs(raw: unknown): Record<string, unknown>[] {
+export function normalizeGeneratedFileRefs(
+  raw: unknown,
+): Record<string, unknown>[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((entry) => normalizeGeneratedFileRef(entry))
     .filter((entry): entry is Record<string, unknown> => entry !== null);
 }
 
-export function normalizeRunArtifact(raw: unknown): Record<string, unknown> | null {
+export function normalizeRunArtifact(
+  raw: unknown,
+): Record<string, unknown> | null {
   const record = asRecord(raw);
   if (!record) return null;
   const sha256 = asString(record.sha256);
@@ -796,7 +826,11 @@ function deriveCompileStatus(
   }
   if (build) {
     const buildStatus = asString(build.status).toLowerCase();
-    if (buildStatus === "ok" || buildStatus === "success" || buildStatus === "passed") {
+    if (
+      buildStatus === "ok" ||
+      buildStatus === "success" ||
+      buildStatus === "passed"
+    ) {
       return "ok";
     }
     if (
@@ -824,7 +858,8 @@ function deriveExecutionStatus(
     if (execution.ran === false) {
       return status === "skipped" ? "skipped" : "not-run";
     }
-    if (typeof execution.ok === "boolean") return execution.ok ? "ok" : "failed";
+    if (typeof execution.ok === "boolean")
+      return execution.ok ? "ok" : "failed";
     const executionStatus = asString(execution.status).toLowerCase();
     if (
       executionStatus === "ok" ||
@@ -859,8 +894,10 @@ function deriveActualOutput(data: Record<string, unknown> | undefined): string {
   const execution = asRecord(data.execution);
   if (execution && typeof execution.actualOutput === "string")
     return execution.actualOutput;
-  if (execution && typeof execution.stdout === "string") return execution.stdout;
-  if (execution && typeof execution.output === "string") return execution.output;
+  if (execution && typeof execution.stdout === "string")
+    return execution.stdout;
+  if (execution && typeof execution.output === "string")
+    return execution.output;
   return "";
 }
 
@@ -1005,14 +1042,14 @@ export function deriveManualEditOverlayRef(
   return view;
 }
 
-export function normalizeGeneratedTraceability(
-  raw: unknown,
-): {
-  schemaVersion: "v0";
-  programId: string;
-  irId: string;
-  sourceHash: string;
-} | undefined {
+export function normalizeGeneratedTraceability(raw: unknown):
+  | {
+      schemaVersion: "v0";
+      programId: string;
+      irId: string;
+      sourceHash: string;
+    }
+  | undefined {
   const traceability = asRecord(raw);
   if (!traceability) return undefined;
   const programId = asString(traceability.programId);
@@ -1172,7 +1209,9 @@ function sanitizeProgressDiagnostic(
   if (status !== "failed") return sanitized;
   if (sanitized === fallback) return fallback;
   if (
-    UNSAFE_PROGRESS_DIAGNOSTIC_PATTERNS.some((pattern) => pattern.test(sanitized))
+    UNSAFE_PROGRESS_DIAGNOSTIC_PATTERNS.some((pattern) =>
+      pattern.test(sanitized),
+    )
   ) {
     return fallback;
   }
@@ -1256,7 +1295,8 @@ function asModelInvocationBudget(
 function deriveActiveAgent(activeStep: string | null): string | null {
   if (!activeStep) return null;
   const normalized = activeStep.replace(/_/g, "-").toLowerCase();
-  if (normalized.includes("transformation-agent")) return "transformation_agent";
+  if (normalized.includes("transformation-agent"))
+    return "transformation_agent";
   if (
     normalized.includes("verification-repair-agent") ||
     normalized.includes("verification-repair")
@@ -1329,7 +1369,9 @@ function sanitizeAssistDecision(value: unknown): AssistDecisionSummary | null {
   if (!record) return null;
   const outcome = asString(record.outcome) as AssistDecisionOutcome | "";
   if (!outcome || !ASSIST_DECISION_OUTCOMES.has(outcome)) return null;
-  const reasonCode = asString(record.reasonCode) as AssistDecisionReasonCode | "";
+  const reasonCode = asString(record.reasonCode) as
+    | AssistDecisionReasonCode
+    | "";
   if (!reasonCode || !ASSIST_DECISION_REASONS.has(reasonCode)) return null;
   const decidedAt = asString(record.decidedAt) || "";
   if (!decidedAt) return null;
@@ -1386,7 +1428,9 @@ export function snapshotFromContract(
   );
   const repairAttempts = sanitizeRepairAttempts(contract.repairAttempts);
   const assistDecision = sanitizeAssistDecision(contract.assistDecision);
-  const finalClassification = asFinalClassification(contract.finalClassification);
+  const finalClassification = asFinalClassification(
+    contract.finalClassification,
+  );
   const rawFailureCode = contract.failureCode;
   const rawFailureMessage = contract.failureMessage;
   let failureCode: W02UiErrorCode | null = null;

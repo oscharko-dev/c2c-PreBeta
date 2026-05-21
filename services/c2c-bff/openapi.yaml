@@ -1365,9 +1365,11 @@ components:
           default: standard
         trustCaseId:
           type: string
+          maxLength: 128
           description: Optional curated trust-case identifier for parity runs.
         sourceReferenceFixtureId:
           type: string
+          maxLength: 128
           description: Required for parity runs; forwarded to the Orchestrator.
         sourceReferenceMode:
           type: string
@@ -1782,8 +1784,8 @@ components:
         executionMode:
           type: string
           enum: [standard, parity]
-        trustCaseId: { type: string }
-        sourceReferenceFixtureId: { type: string }
+        trustCaseId: { type: string, maxLength: 128 }
+        sourceReferenceFixtureId: { type: string, maxLength: 128 }
         sourceReferenceMode:
           type: string
           enum: [reference-fixture, native-cobol, ""]
@@ -2697,7 +2699,7 @@ components:
         status:
           type: string
           enum: [passed, failed, blocked]
-        comparisonPolicyVersion: { type: string }
+        comparisonPolicyVersion: { type: string, maxLength: 128 }
         mismatchClassification:
           type: string
           enum:

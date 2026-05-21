@@ -509,14 +509,10 @@ function ensureEditorAssistLedgerParentDirectory(
     try {
       const stat = fs.lstatSync(currentPath);
       if (stat.isSymbolicLink()) {
-        throw new Error(
-          "editor-assist ledger parent path contains a symlink",
-        );
+        throw new Error("editor-assist ledger parent path contains a symlink");
       }
       if (!stat.isDirectory()) {
-        throw new Error(
-          "editor-assist ledger parent path is not a directory",
-        );
+        throw new Error("editor-assist ledger parent path is not a directory");
       }
     } catch (err) {
       if (!isErrnoCode(err, "ENOENT")) {
@@ -528,7 +524,9 @@ function ensureEditorAssistLedgerParentDirectory(
 
   const parentRealPath = fs.realpathSync.native(parentPath);
   if (!isPathWithin(rootRealPath, parentRealPath)) {
-    throw new Error("editor-assist ledger parent path escapes the allowed root");
+    throw new Error(
+      "editor-assist ledger parent path escapes the allowed root",
+    );
   }
 }
 
@@ -695,8 +693,9 @@ function trustCaseCatalogResponse(
 ): Record<string, unknown> {
   const trustCases = catalog.list(programId);
   const defaultTrustCaseId = programId
-    ? catalog.defaultForProgram(programId)?.trustCaseId ?? null
-    : trustCases.find((entry) => entry.defaultForProgram)?.trustCaseId ?? null;
+    ? (catalog.defaultForProgram(programId)?.trustCaseId ?? null)
+    : (trustCases.find((entry) => entry.defaultForProgram)?.trustCaseId ??
+      null);
   return {
     schemaVersion: catalog.schemaVersion,
     catalogVersion: catalog.catalogVersion,
@@ -787,10 +786,15 @@ function appendVaryHeader(res: http.ServerResponse, fieldName: string): void {
     res.setHeader("vary", fieldName);
     return;
   }
-  const value = Array.isArray(existing) ? existing.join(", ") : String(existing);
+  const value = Array.isArray(existing)
+    ? existing.join(", ")
+    : String(existing);
   const fields = value.split(",").map((field) => field.trim().toLowerCase());
   if (fields.includes("*") || fields.includes(fieldName.toLowerCase())) return;
-  res.setHeader("vary", value.length > 0 ? `${value}, ${fieldName}` : fieldName);
+  res.setHeader(
+    "vary",
+    value.length > 0 ? `${value}, ${fieldName}` : fieldName,
+  );
 }
 
 function applyLocalApiCors(
@@ -1154,7 +1158,9 @@ function sanitizeManualRepairArtifactRef(raw: unknown): OutputRef | null {
   return normalizeOutputRef(raw);
 }
 
-function sanitizeManualRepairDiagnosis(raw: unknown): Record<string, unknown> | null {
+function sanitizeManualRepairDiagnosis(
+  raw: unknown,
+): Record<string, unknown> | null {
   const record = asRecord(raw);
   if (!record) return null;
   const sanitized: Record<string, unknown> = { ...record };
@@ -1187,7 +1193,9 @@ function sanitizeManualRepairDiagnosis(raw: unknown): Record<string, unknown> | 
   return sanitized;
 }
 
-function sanitizeManualRepairProposal(raw: unknown): Record<string, unknown> | null {
+function sanitizeManualRepairProposal(
+  raw: unknown,
+): Record<string, unknown> | null {
   const record = asRecord(raw);
   if (!record) return null;
   const sanitized: Record<string, unknown> = { ...record };
@@ -1219,9 +1227,9 @@ function sanitizeManualRepairResponseBody(raw: unknown): unknown {
   return sanitized;
 }
 
-function extractCachedTrustSummary(raw: unknown): ReturnType<
-  typeof extractTrustSummary
-> {
+function extractCachedTrustSummary(
+  raw: unknown,
+): ReturnType<typeof extractTrustSummary> {
   const direct = extractTrustSummary(raw);
   if (direct) return direct;
   const record = asRecord(raw);
@@ -1236,9 +1244,7 @@ function sanitizeIntentionalDivergenceDecision(
   if (!record) return null;
   const sanitized: Record<string, unknown> = { ...record };
   if (record.decisionRecordRef !== undefined) {
-    sanitized.decisionRecordRef = normalizeOutputRef(
-      record.decisionRecordRef,
-    );
+    sanitized.decisionRecordRef = normalizeOutputRef(record.decisionRecordRef);
   }
   if (Array.isArray(record.evidenceRefs)) {
     sanitized.evidenceRefs = record.evidenceRefs.filter(
@@ -1344,7 +1350,8 @@ function sanitizeIntentionalDivergenceResponseBody(
     asString(decision?.behaviorChange) ??
     null;
   const linkedEvidenceRefs =
-    intentionalDecisionStringRefs(summaryDecision?.linkedEvidenceRefs).length > 0
+    intentionalDecisionStringRefs(summaryDecision?.linkedEvidenceRefs).length >
+    0
       ? intentionalDecisionStringRefs(summaryDecision?.linkedEvidenceRefs)
       : intentionalDecisionStringRefs(
           decision?.linkedEvidenceRefs ?? decision?.evidenceRefs,
@@ -1390,16 +1397,18 @@ function sanitizeIntentionalDivergenceResponseBody(
     supersedesPreviousDecision,
     invalidationNote,
     expiresAt:
-      asString(summaryDecision?.expiresAt) ?? asString(decision?.expiresAt) ?? null,
+      asString(summaryDecision?.expiresAt) ??
+      asString(decision?.expiresAt) ??
+      null,
     invalidatedAt:
       sanitized.trustSummary &&
       asString(trustSummaryComparison?.decisionStatus) &&
       asString(trustSummaryComparison?.decisionStatus) !== "active"
-        ? asString(summaryDecision?.updatedAt) ??
+        ? (asString(summaryDecision?.updatedAt) ??
           asString(decision?.updatedAt) ??
           asString(summaryDecision?.decidedAt) ??
           asString(decision?.recordedAt) ??
-          null
+          null)
         : null,
     createdAt:
       asString(summaryDecision?.decidedAt) ??
@@ -1420,17 +1429,14 @@ function sanitizeIntentionalDivergenceResponseBody(
   return sanitized;
 }
 
-const INTENTIONAL_DIVERGENCE_REASON_CODE =
-  "accepted_functional_change";
+const INTENTIONAL_DIVERGENCE_REASON_CODE = "accepted_functional_change";
 const INTENTIONAL_DIVERGENCE_DEFAULT_INVALIDATION_TRIGGERS = [
   "comparison_result_changed",
   "affected_outputs_changed",
   "linked_evidence_changed",
 ] as const;
 
-function normalizeIntentionalDivergenceAffectedOutputs(
-  raw: unknown,
-): string[] {
+function normalizeIntentionalDivergenceAffectedOutputs(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -1470,9 +1476,7 @@ function normalizeIntentionalDivergenceAffectedOutputs(
   return Array.from(normalized);
 }
 
-function mapIntentionalDivergenceRequestBody(
-  raw: Record<string, unknown>,
-): {
+function mapIntentionalDivergenceRequestBody(raw: Record<string, unknown>): {
   rationale: string;
   reviewer: string;
   linkedEvidenceRefs: string[];
@@ -1491,17 +1495,23 @@ function mapIntentionalDivergenceRequestBody(
     "invalidationNote",
     "expiresAt",
   ]);
-  const extraFields = Object.keys(raw).filter((field) => !allowedFields.has(field));
+  const extraFields = Object.keys(raw).filter(
+    (field) => !allowedFields.has(field),
+  );
   if (extraFields.length > 0) {
     return null;
   }
   const rationale = asString(raw.rationale)?.trim() ?? "";
   const reviewer = asString(raw.reviewer)?.trim() ?? "";
   const linkedEvidenceRefs = Array.isArray(raw.linkedEvidenceRefs)
-    ? raw.linkedEvidenceRefs.filter((entry): entry is string => typeof entry === "string")
+    ? raw.linkedEvidenceRefs.filter(
+        (entry): entry is string => typeof entry === "string",
+      )
     : [];
   const affectedOutputs = Array.isArray(raw.affectedOutputs)
-    ? raw.affectedOutputs.filter((entry): entry is string => typeof entry === "string")
+    ? raw.affectedOutputs.filter(
+        (entry): entry is string => typeof entry === "string",
+      )
     : [];
   const supersedesPreviousDecision =
     typeof raw.supersedesPreviousDecision === "boolean"
@@ -1664,7 +1674,11 @@ function deriveCompileStatus(
   }
   if (build) {
     const buildStatus = asString(build.status).toLowerCase();
-    if (buildStatus === "ok" || buildStatus === "success" || buildStatus === "passed") {
+    if (
+      buildStatus === "ok" ||
+      buildStatus === "success" ||
+      buildStatus === "passed"
+    ) {
       return "ok";
     }
     if (
@@ -1758,6 +1772,7 @@ function deriveExpectedOutput(
 
 const BUILD_TEST_TEXT_FIELD_MAX_CHARS = 16_384;
 const PARITY_DIFF_SUMMARY_MAX_CHARS = 4_000;
+const PARITY_IDENTIFIER_MAX_CHARS = 128;
 
 function boundedStudioText(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
@@ -1777,7 +1792,10 @@ function normalizeParityComparison(
   if (status.length > 0) result.status = status;
   const comparisonPolicyVersion = asString(comparison.comparisonPolicyVersion);
   if (comparisonPolicyVersion.length > 0) {
-    result.comparisonPolicyVersion = comparisonPolicyVersion;
+    result.comparisonPolicyVersion = comparisonPolicyVersion.slice(
+      0,
+      PARITY_IDENTIFIER_MAX_CHARS,
+    );
   }
   const mismatchClassification = asString(comparison.mismatchClassification);
   if (mismatchClassification.length > 0) {
@@ -2061,7 +2079,9 @@ async function loadOutputChangeRunArtifacts(
         ? asString(asRecord(generated.traceability)?.sourceHash)
         : null,
     actualOutput:
-      typeof buildTest.actualOutput === "string" ? buildTest.actualOutput : null,
+      typeof buildTest.actualOutput === "string"
+        ? buildTest.actualOutput
+        : null,
     actualOutputRef: normalizeOutputRef(buildTest.actualOutputRef),
     comparisonDiffRef:
       normalizeOutputRef(asRecord(buildTest.comparison)?.diffRef) ??
@@ -2106,7 +2126,12 @@ async function maybeBuildOutputChangeAiSummary(
     });
     const body = asRecord(upstream?.body);
     const explanation = asString(body?.explanation).trim();
-    if (!upstream || upstream.status < 200 || upstream.status >= 300 || explanation.length === 0) {
+    if (
+      !upstream ||
+      upstream.status < 200 ||
+      upstream.status >= 300 ||
+      explanation.length === 0
+    ) {
       return {
         status: "unavailable",
         label: "AI-assisted explanation",
@@ -2154,10 +2179,7 @@ type JavaOriginClass =
   | "manual_modified"
   | "manual_edit";
 
-type JavaVerificationOutcome =
-  | "oracle_passed"
-  | "oracle_failed"
-  | "no_oracle";
+type JavaVerificationOutcome = "oracle_passed" | "oracle_failed" | "no_oracle";
 
 type JavaMappingClass =
   | "direct"
@@ -2273,8 +2295,7 @@ async function liveTraceabilityView(
     return {
       view: {
         ...stubEnvelope,
-        note:
-          "Traceability upstream request failed; traceability cannot be served.",
+        note: "Traceability upstream request failed; traceability cannot be served.",
       },
       cacheJavaRegionClassification: false,
     };
@@ -2668,8 +2689,7 @@ function applyWorkflowSnapshotToStore(
     patch.trustCaseVersion = snapshot.trustCase.version;
     patch.trustCaseCatalogVersion = snapshot.trustCase.catalogVersion;
     patch.trustCaseCatalogHash = snapshot.trustCase.catalogHash;
-    patch.trustCaseConfigurationDigest =
-      snapshot.trustCase.configurationDigest;
+    patch.trustCaseConfigurationDigest = snapshot.trustCase.configurationDigest;
     patch.trustCaseEnvironmentProfileId =
       snapshot.trustCase.environmentProfileId;
     patch.trustCaseComparisonPolicyVersion =
@@ -2905,10 +2925,7 @@ function rejectUnauthenticatedStudioRequest(args: {
   return false;
 }
 
-function explicitStringField(
-  raw: unknown,
-  fieldName: string,
-): string | null {
+function explicitStringField(raw: unknown, fieldName: string): string | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const value = (raw as Record<string, unknown>)[fieldName];
   return typeof value === "string" && value.length > 0 ? value : null;
@@ -3357,9 +3374,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // — because the wrapping secret is the bootstrap response's
       // contract, not the sign-in's.
       if (pathname === "/api/v0/session/sign-in" && method === "POST") {
-        if (
-          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
-        ) {
+        if (rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)) {
           return;
         }
         if (!config.enableFixtureSessions) {
@@ -3424,9 +3439,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // user's device — but is treated with the same hygiene
       // (no logging, no echoing in error paths).
       if (pathname === "/api/v0/session/bootstrap" && method === "POST") {
-        if (
-          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
-        ) {
+        if (rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)) {
           return;
         }
         const sessionId = parseSessionCookieFromRequest(req);
@@ -3474,9 +3487,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // unreadable per ADR-0005 §2 "Rotation". Idempotent: returns
       // 204 whether or not the cookie / record existed.
       if (pathname === "/api/v0/session/logout" && method === "POST") {
-        if (
-          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
-        ) {
+        if (rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)) {
           return;
         }
         const sessionId = parseSessionCookieFromRequest(req);
@@ -3504,7 +3515,9 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             ? sessionTrustCasePreference(req, sessionStore, programId)
             : null;
           const savedSummary =
-            savedTrustCaseId === null ? undefined : catalog.get(savedTrustCaseId);
+            savedTrustCaseId === null
+              ? undefined
+              : catalog.get(savedTrustCaseId);
           appendVaryHeader(res, "Cookie");
           jsonResponse(
             res,
@@ -3512,7 +3525,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             trustCaseCatalogResponse(
               catalog,
               programId,
-              savedSummary && (!programId || savedSummary.programId === programId)
+              savedSummary &&
+                (!programId || savedSummary.programId === programId)
                 ? savedSummary.trustCaseId
                 : null,
             ),
@@ -3712,12 +3726,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         try {
-          const upstream = await buildTestRunner.formatJava({
-            content: validation.value.content,
-            ...(validation.value.filePath
-              ? { filePath: validation.value.filePath }
-              : {}),
-          }, config.formatJavaTimeoutMs, config.artifactContentMaxBytes);
+          const upstream = await buildTestRunner.formatJava(
+            {
+              content: validation.value.content,
+              ...(validation.value.filePath
+                ? { filePath: validation.value.filePath }
+                : {}),
+            },
+            config.formatJavaTimeoutMs,
+            config.artifactContentMaxBytes,
+          );
           if (!upstream) {
             jsonResponse(
               res,
@@ -3772,9 +3790,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // 0005 §4 (BFF receives already-redacted bytes + matching
       // byteHash). All model calls go through the Model Gateway.
       if (pathname === "/api/v0/editor/explain" && method === "POST") {
-        if (
-          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
-        ) {
+        if (rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)) {
           return;
         }
         await handleEditorExplain({
@@ -3796,9 +3812,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // primary action button when the per-session budget is already
       // exhausted (AC8 in the issue body).
       if (pathname === "/api/v0/editor/budget" && method === "GET") {
-        if (
-          rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)
-        ) {
+        if (rejectDisallowedBrowserOrigin(req, res, config.studioCorsOrigins)) {
           return;
         }
         const sessionIdRaw = requestUrl.searchParams.get("sessionId");
@@ -3818,7 +3832,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const userIdRaw = requestUrl.searchParams.get("userId");
         if (tenantIdRaw !== null) {
           if (tenantIdRaw.trim().length === 0) {
-            badRequest(res, "tenantId must be a non-empty string when provided");
+            badRequest(
+              res,
+              "tenantId must be a non-empty string when provided",
+            );
             return;
           }
           const tenantIdErr = validateEditorAssistIdentifier(
@@ -4134,7 +4151,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           (typeof trustCaseIdRaw !== "string" ||
             trustCaseIdRaw.trim().length === 0)
         ) {
-          badRequest(res, "trustCaseId must be a non-empty string when provided");
+          badRequest(
+            res,
+            "trustCaseId must be a non-empty string when provided",
+          );
           return;
         }
         if (
@@ -4169,7 +4189,9 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const oracleInput =
           typeof oracleInputRaw === "string" ? oracleInputRaw : undefined;
         const trustCaseId =
-          typeof trustCaseIdRaw === "string" ? trustCaseIdRaw.trim() : undefined;
+          typeof trustCaseIdRaw === "string"
+            ? trustCaseIdRaw.trim()
+            : undefined;
         const useTransformationAgent =
           typeof useTransformationAgentRaw === "boolean"
             ? useTransformationAgentRaw
@@ -4202,7 +4224,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             return;
           }
           if (!selectedTrustCase) {
-            badRequest(res, `unknown trustCaseId ${JSON.stringify(trustCaseId)}`);
+            badRequest(
+              res,
+              `unknown trustCaseId ${JSON.stringify(trustCaseId)}`,
+            );
             return;
           }
           if (selectedTrustCase.programId !== programId) {
@@ -4609,7 +4634,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             return;
           }
           if (!isSafeRequestJavaFilePath(entryRecord.path)) {
-            badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
+            badRequest(
+              res,
+              `javaFiles[${i}].path must be a safe relative path`,
+            );
             return;
           }
           if (!isJavaSourceFilePath(entryRecord.path)) {
@@ -4802,7 +4830,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             return;
           }
           if (!isSafeRequestJavaFilePath(entryRecord.path)) {
-            badRequest(res, `javaFiles[${i}].path must be a safe relative path`);
+            badRequest(
+              res,
+              `javaFiles[${i}].path must be a safe relative path`,
+            );
             return;
           }
           if (!isJavaSourceFilePath(entryRecord.path)) {
@@ -4933,7 +4964,9 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             manualDriftRegionCount += countManualRegions(overlay);
           }
         } else {
-          manualDriftRegionCount += countManualRegions(vRecord.manualEditOverlay);
+          manualDriftRegionCount += countManualRegions(
+            vRecord.manualEditOverlay,
+          );
         }
         manualEditsCarriedOver = manualDriftRegionCount > 0;
         try {
@@ -5023,7 +5056,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // Keep the legacy manual-compile-repair route stable, but forward the
       // request body opaquely so runtime/parity diagnosis fields survive
       // unchanged when the orchestrator emits the broader repair schema.
-      if (pathname === "/api/v0/manual-compile-repair/preview" && method === "POST") {
+      if (
+        pathname === "/api/v0/manual-compile-repair/preview" &&
+        method === "POST"
+      ) {
         if (
           rejectUnauthenticatedStudioJsonRequest({
             req,
@@ -5039,7 +5075,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           orchestrator.previewManualCompileRepair;
         if (!orchestrator.enabled || !previewManualCompileRepair) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: orchestrator is not configured",
+            error:
+              "manual compile repair unavailable: orchestrator is not configured",
           });
           return;
         }
@@ -5078,16 +5115,21 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           "manualEditOverlay",
           "manualEditOverlays",
         ]);
-        const extraFields = Object.keys(record).filter((field) => !allowedFields.has(field));
+        const extraFields = Object.keys(record).filter(
+          (field) => !allowedFields.has(field),
+        );
         if (extraFields.length > 0) {
-          badRequest(res, `unsupported manual compile repair preview field(s): ${extraFields.join(", ")}`);
+          badRequest(
+            res,
+            `unsupported manual compile repair preview field(s): ${extraFields.join(", ")}`,
+          );
           return;
         }
-        const manualOverlayEnvelope =
-          Array.isArray(record.manualEditOverlays)
-            ? {
-                schemaVersion: "v0",
-                regions: (record.manualEditOverlays as unknown[]).flatMap((overlay) => {
+        const manualOverlayEnvelope = Array.isArray(record.manualEditOverlays)
+          ? {
+              schemaVersion: "v0",
+              regions: (record.manualEditOverlays as unknown[]).flatMap(
+                (overlay) => {
                   if (
                     overlay &&
                     typeof overlay === "object" &&
@@ -5097,9 +5139,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
                     return (overlay as { regions: unknown[] }).regions;
                   }
                   return [];
-                }),
-              }
-            : record.manualEditOverlay;
+                },
+              ),
+            }
+          : record.manualEditOverlay;
         const upstream = await previewManualCompileRepair(runId, {
           ...record,
           requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
@@ -5107,7 +5150,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         });
         if (!upstream) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: no orchestrator response",
+            error:
+              "manual compile repair unavailable: no orchestrator response",
           });
           return;
         }
@@ -5119,7 +5163,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
-      if (pathname === "/api/v0/manual-compile-repair/diagnose" && method === "POST") {
+      if (
+        pathname === "/api/v0/manual-compile-repair/diagnose" &&
+        method === "POST"
+      ) {
         if (
           rejectUnauthenticatedStudioJsonRequest({
             req,
@@ -5135,7 +5182,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           orchestrator.diagnoseManualCompileRepair;
         if (!orchestrator.enabled || !diagnoseManualCompileRepair) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: orchestrator is not configured",
+            error:
+              "manual compile repair unavailable: orchestrator is not configured",
           });
           return;
         }
@@ -5162,7 +5210,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
         const record = body as Record<string, unknown>;
         const runId = typeof record.runId === "string" ? record.runId : "";
-        const previewId = typeof record.previewId === "string" ? record.previewId : "";
+        const previewId =
+          typeof record.previewId === "string" ? record.previewId : "";
         if (!runId) {
           badRequest(res, "runId must be a non-empty string");
           return;
@@ -5175,7 +5224,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           (field) => !new Set(["runId", "previewId"]).has(field),
         );
         if (extraFields.length > 0) {
-          badRequest(res, `unsupported manual compile repair diagnose field(s): ${extraFields.join(", ")}`);
+          badRequest(
+            res,
+            `unsupported manual compile repair diagnose field(s): ${extraFields.join(", ")}`,
+          );
           return;
         }
         const upstream = await diagnoseManualCompileRepair(runId, {
@@ -5185,7 +5237,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         });
         if (!upstream) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: no orchestrator response",
+            error:
+              "manual compile repair unavailable: no orchestrator response",
           });
           return;
         }
@@ -5197,7 +5250,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
-      if (pathname === "/api/v0/manual-compile-repair/apply" && method === "POST") {
+      if (
+        pathname === "/api/v0/manual-compile-repair/apply" &&
+        method === "POST"
+      ) {
         if (
           rejectUnauthenticatedStudioJsonRequest({
             req,
@@ -5212,7 +5268,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const applyManualCompileRepair = orchestrator.applyManualCompileRepair;
         if (!orchestrator.enabled || !applyManualCompileRepair) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: orchestrator is not configured",
+            error:
+              "manual compile repair unavailable: orchestrator is not configured",
           });
           return;
         }
@@ -5250,15 +5307,23 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const patchSha256 =
           typeof record.patchSha256 === "string" ? record.patchSha256 : "";
         if (!previewId || !proposalId || !patchSha256) {
-          badRequest(res, "previewId, proposalId, and patchSha256 must be non-empty strings");
+          badRequest(
+            res,
+            "previewId, proposalId, and patchSha256 must be non-empty strings",
+          );
           return;
         }
         const extraFields = Object.keys(record).filter(
           (field) =>
-            !new Set(["runId", "previewId", "proposalId", "patchSha256"]).has(field),
+            !new Set(["runId", "previewId", "proposalId", "patchSha256"]).has(
+              field,
+            ),
         );
         if (extraFields.length > 0) {
-          badRequest(res, `unsupported manual compile repair apply field(s): ${extraFields.join(", ")}`);
+          badRequest(
+            res,
+            `unsupported manual compile repair apply field(s): ${extraFields.join(", ")}`,
+          );
           return;
         }
         const upstream = await applyManualCompileRepair(runId, {
@@ -5270,7 +5335,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         });
         if (!upstream) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: no orchestrator response",
+            error:
+              "manual compile repair unavailable: no orchestrator response",
           });
           return;
         }
@@ -5282,7 +5348,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
-      if (pathname === "/api/v0/manual-compile-repair/accept" && method === "POST") {
+      if (
+        pathname === "/api/v0/manual-compile-repair/accept" &&
+        method === "POST"
+      ) {
         if (
           rejectUnauthenticatedStudioJsonRequest({
             req,
@@ -5298,7 +5367,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           orchestrator.acceptManualCompileRepair;
         if (!orchestrator.enabled || !acceptManualCompileRepair) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: orchestrator is not configured",
+            error:
+              "manual compile repair unavailable: orchestrator is not configured",
           });
           return;
         }
@@ -5330,14 +5400,21 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const patchSha256 =
           typeof record.patchSha256 === "string" ? record.patchSha256 : "";
         if (!runId || !proposalId || !patchSha256) {
-          badRequest(res, "runId, proposalId, and patchSha256 must be non-empty strings");
+          badRequest(
+            res,
+            "runId, proposalId, and patchSha256 must be non-empty strings",
+          );
           return;
         }
         const extraFields = Object.keys(record).filter(
-          (field) => !new Set(["runId", "proposalId", "patchSha256"]).has(field),
+          (field) =>
+            !new Set(["runId", "proposalId", "patchSha256"]).has(field),
         );
         if (extraFields.length > 0) {
-          badRequest(res, `unsupported manual compile repair accept field(s): ${extraFields.join(", ")}`);
+          badRequest(
+            res,
+            `unsupported manual compile repair accept field(s): ${extraFields.join(", ")}`,
+          );
           return;
         }
         const upstream = await acceptManualCompileRepair(runId, {
@@ -5348,7 +5425,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         });
         if (!upstream) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: no orchestrator response",
+            error:
+              "manual compile repair unavailable: no orchestrator response",
           });
           return;
         }
@@ -5360,7 +5438,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
-      if (pathname === "/api/v0/manual-compile-repair/reject" && method === "POST") {
+      if (
+        pathname === "/api/v0/manual-compile-repair/reject" &&
+        method === "POST"
+      ) {
         if (
           rejectUnauthenticatedStudioJsonRequest({
             req,
@@ -5376,7 +5457,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           orchestrator.rejectManualCompileRepair;
         if (!orchestrator.enabled || !rejectManualCompileRepair) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: orchestrator is not configured",
+            error:
+              "manual compile repair unavailable: orchestrator is not configured",
           });
           return;
         }
@@ -5417,7 +5499,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           (field) => !new Set(["runId", "proposalId"]).has(field),
         );
         if (extraFields.length > 0) {
-          badRequest(res, `unsupported manual compile repair reject field(s): ${extraFields.join(", ")}`);
+          badRequest(
+            res,
+            `unsupported manual compile repair reject field(s): ${extraFields.join(", ")}`,
+          );
           return;
         }
         const upstream = await rejectManualCompileRepair(runId, {
@@ -5427,7 +5512,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         });
         if (!upstream) {
           jsonResponse(res, 503, {
-            error: "manual compile repair unavailable: no orchestrator response",
+            error:
+              "manual compile repair unavailable: no orchestrator response",
           });
           return;
         }
@@ -5665,6 +5751,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "trustCaseId must be a non-empty string");
           return;
         }
+        if (trustCaseId && trustCaseId.length > PARITY_IDENTIFIER_MAX_CHARS) {
+          badRequest(res, "trustCaseId exceeds maximum length");
+          return;
+        }
         const sourceReferenceFixtureId =
           typeof requestBody.sourceReferenceFixtureId === "string" &&
           requestBody.sourceReferenceFixtureId.trim().length > 0
@@ -5675,7 +5765,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           requestBody.sourceReferenceFixtureId !== null &&
           sourceReferenceFixtureId === undefined
         ) {
-          badRequest(res, "sourceReferenceFixtureId must be a non-empty string");
+          badRequest(
+            res,
+            "sourceReferenceFixtureId must be a non-empty string",
+          );
+          return;
+        }
+        if (
+          sourceReferenceFixtureId &&
+          sourceReferenceFixtureId.length > PARITY_IDENTIFIER_MAX_CHARS
+        ) {
+          badRequest(res, "sourceReferenceFixtureId exceeds maximum length");
           return;
         }
         const parityRequested =
@@ -5687,7 +5787,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           executionMode = "parity";
           sourceReferenceMode = sourceReferenceMode ?? "reference-fixture";
           if (!sourceReferenceFixtureId) {
-            badRequest(res, "sourceReferenceFixtureId is required for parity runs");
+            badRequest(
+              res,
+              "sourceReferenceFixtureId is required for parity runs",
+            );
             return;
           }
         }
@@ -5783,7 +5886,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
-      if (method === "GET" && /^\/api\/v0\/runs\/[^\/]+(?:\/.*)?$/.test(pathname)) {
+      if (
+        method === "GET" &&
+        /^\/api\/v0\/runs\/[^\/]+(?:\/.*)?$/.test(pathname)
+      ) {
         if (
           rejectUnauthenticatedStudioRequest({
             req,
@@ -5871,7 +5977,9 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           storedTrustSummary?.comparisonResult,
         );
         const existingDecisionRef =
-          normalizeOutputRef(storedTrustSummary?.intentionalDivergenceDecisionRef) ??
+          normalizeOutputRef(
+            storedTrustSummary?.intentionalDivergenceDecisionRef,
+          ) ??
           normalizeOutputRef(storedComparisonResult?.decisionRecordRef) ??
           null;
         const upsertIntentionalDivergenceDecision =
@@ -5926,9 +6034,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const mappedAffectedOutputs = normalizeIntentionalDivergenceAffectedOutputs(
-          record.affectedOutputs,
-        );
+        const mappedAffectedOutputs =
+          normalizeIntentionalDivergenceAffectedOutputs(record.affectedOutputs);
         const invalidationTriggers = [
           ...INTENTIONAL_DIVERGENCE_DEFAULT_INVALIDATION_TRIGGERS,
           ...(record.expiresAt ? ["expires_at_reached"] : []),
@@ -5949,7 +6056,8 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         });
         if (!upstream) {
           jsonResponse(res, 503, {
-            error: "intentional divergence decision unavailable: no orchestrator response",
+            error:
+              "intentional divergence decision unavailable: no orchestrator response",
           });
           return;
         }
@@ -6407,17 +6515,15 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
-      const evidenceExportMatch = /^\/api\/v0\/runs\/([^\/]+)\/evidence\/export$/.exec(
-        pathname,
-      );
+      const evidenceExportMatch =
+        /^\/api\/v0\/runs\/([^\/]+)\/evidence\/export$/.exec(pathname);
       if (evidenceExportMatch && method === "POST") {
         let body: unknown;
         try {
           body = await readJsonBody(req, config.transformSourceMaxBytes);
         } catch (err) {
           jsonResponse(res, 400, {
-            error:
-              err instanceof Error ? err.message : "Invalid JSON body.",
+            error: err instanceof Error ? err.message : "Invalid JSON body.",
           });
           return;
         }
@@ -6435,7 +6541,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         try {
-          const upstream = await orchestrator.exportParityRegression?.(runId, body ?? {});
+          const upstream = await orchestrator.exportParityRegression?.(
+            runId,
+            body ?? {},
+          );
           if (!upstream) {
             jsonResponse(res, 503, {
               error: "orchestrator unavailable",
@@ -6473,8 +6582,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           body = await readJsonBody(req, config.transformSourceMaxBytes);
         } catch (err) {
           jsonResponse(res, 400, {
-            error:
-              err instanceof Error ? err.message : "Invalid JSON body.",
+            error: err instanceof Error ? err.message : "Invalid JSON body.",
           });
           return;
         }
