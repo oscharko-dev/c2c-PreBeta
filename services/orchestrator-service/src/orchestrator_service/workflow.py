@@ -564,6 +564,41 @@ def _is_allowed_repair_java_path(path: str) -> bool:
     return not any(normalized.startswith(prefix) for prefix in _FORBIDDEN_REPAIR_PREFIXES)
 
 
+_DIAGNOSTIC_MESSAGE_MAX_LENGTH = 4000
+_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL = "…[truncated]"
+
+
+def _bounded_diagnostic_message(value: str | None) -> str | None:
+    """Apply the 4000-char Evidence ceiling to orchestrator-emitted diagnostic
+    text.
+
+    Upstream tool output (the ``summary`` field on parity execution and build
+    results, the ``diffSummary`` field on parity comparison results, and the
+    ``failureMessage`` returned by repair and transformation agents) flows
+    through the orchestrator into evidence-eligible fields: ``StepRecord.
+    diagnostic`` (persisted in ``run-progress.json``), state-machine
+    transition ``message`` and ``failureMessage`` (persisted in
+    ``w02-run-contract.json``), the run-summary ``message`` (persisted in
+    ``run-summary.json``), and the Harness event ``output_payload.message``
+    (persisted in the event ledger). Without a producer-side bound, an
+    unbounded upstream string would land in those fields directly. The
+    schema ceilings for analogous fields are 4000 chars (see
+    ``parity-execution-result-v0.diagnostic.message`` from #351,
+    ``parity-comparison-result-v0.diffSummary`` from #354, and
+    ``parity-run-v0.summary``). This helper applies the same ceiling and
+    truncation sentinel that ``DiagnosticBounds.boundedMessage`` uses on
+    the Java side so producer-side bounds stay symmetric across services.
+    """
+    if value is None:
+        return None
+    if len(value) <= _DIAGNOSTIC_MESSAGE_MAX_LENGTH:
+        return value
+    keep = _DIAGNOSTIC_MESSAGE_MAX_LENGTH - len(_DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL)
+    if keep <= 0:
+        return value[:_DIAGNOSTIC_MESSAGE_MAX_LENGTH]
+    return value[:keep] + _DIAGNOSTIC_MESSAGE_TRUNCATION_SENTINEL
+
+
 def _bounded_preview_text(value: Any, *, limit: int = 400) -> str | None:
     if not isinstance(value, str):
         return None
@@ -3626,10 +3661,11 @@ class W0WorkflowRunner:
         ``oracle_mismatch``); otherwise it stays ``None`` and is set by
         :meth:`_finalize_w02` at the end of the run.
         """
+        bounded_message = _bounded_diagnostic_message(message) or ""
         try:
             transition = contract.state_machine.advance(
                 target,
-                message=message,
+                message=bounded_message,
                 failure_code=failure_code,
             )
         except IllegalTransitionError:
@@ -3643,7 +3679,7 @@ class W0WorkflowRunner:
         self._persist_w02_contract(context, contract)
         # Emit a Harness event for every major state change so the Harness
         # event ledger records the W0.2 workflow trace (Issue #166).
-        self._emit_w02_state_event(context, transition.state, message=message, failure_code=failure_code)
+        self._emit_w02_state_event(context, transition.state, message=bounded_message, failure_code=failure_code)
 
     def _emit_w02_state_event(
         self,
@@ -4025,6 +4061,7 @@ class W0WorkflowRunner:
         failure_code: str | None = None,
         failure_message: str | None = None,
     ) -> None:
+        failure_message = _bounded_diagnostic_message(failure_message)
         # Studio-IDE-6 (#248): stamp the per-file trust-pillar overlay on
         # the contract *before* finalisation so the persisted contract,
         # the workflow view, and the traceability route all read the
@@ -4408,12 +4445,13 @@ class W0WorkflowRunner:
 
         # noinspection PyShadowingNames
         def _write_summary(status: str, *, message: str, failed_step: str | None = None) -> None:
+            bounded_message = _bounded_diagnostic_message(message) or ""
             summary = {
                 "runId": context.run_id,
                 "workflowId": context.workflow_id,
                 "requester": context.requester,
                 "status": status,
-                "message": message,
+                "message": bounded_message,
                 "programId": program_id,
                 "completedSteps": list(completed_steps),
                 "failedStep": failed_step,
@@ -8579,7 +8617,7 @@ class W0WorkflowRunner:
             finished_at=_iso_now(),
             input_ref=_as_reference_payload(input_ref) if input_ref is not None else None,
             output_ref=_as_reference_payload(output_ref) if output_ref is not None else None,
-            diagnostic=diagnostic,
+            diagnostic=_bounded_diagnostic_message(diagnostic),
             latency_ms=latency_ms,
         )
         current = name if status == STEP_STATUS_RUNNING else None
