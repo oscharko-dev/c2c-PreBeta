@@ -513,6 +513,7 @@ const baseConfig: BffConfig = {
   orchestratorControlToken: "",
   evidenceUrl: "",
   experienceLearningUrl: "",
+  experienceLearningControlToken: "",
   modelGatewayUrl: "",
   harnessUrl: "",
   buildTestRunnerUrl: "",
@@ -2811,7 +2812,7 @@ test("transform derives program id, calls orchestrator, and returns the full tra
       targetLanguage: "java",
       expectedOutput: undefined,
       oracleInput: undefined,
-      useTransformationAgent: true,
+      useTransformationAgent: false,
     });
     assert.equal(runStore.list().length, 1);
 
@@ -2967,7 +2968,7 @@ test("transform carries trustCaseId through the parity-aware path only", async (
       targetLanguage: "java",
       expectedOutput: undefined,
       oracleInput: undefined,
-      useTransformationAgent: true,
+      useTransformationAgent: false,
       executionMode: "parity",
       trustCaseId: "HELLO01-DEFAULT",
     });

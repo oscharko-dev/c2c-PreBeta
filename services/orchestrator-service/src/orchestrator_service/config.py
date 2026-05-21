@@ -191,6 +191,7 @@ class OrchestratorConfig:
     model_policy_version: str = DEFAULT_MODEL_POLICY_VERSION
     run_artifact_root: str = DEFAULT_RUN_ARTIFACT_ROOT
     experience_learning_base_url: str = DEFAULT_EXPERIENCE_LEARNING_BASE_URL
+    experience_learning_control_token: str = ""
     repair_budget_max: int = DEFAULT_REPAIR_BUDGET_MAX
     # Issue #216 (W0.3-5): per-run assist and Model Gateway budgets surfaced
     # to consumers via the W0.2 run contract; values are clamped at load
@@ -296,6 +297,13 @@ def load_config() -> OrchestratorConfig:
     experience_learning_base_url = os.environ.get(
         "ORCHESTRATOR_EXPERIENCE_LEARNING_BASE_URL",
         os.environ.get("C2C_EXPERIENCE_LEARNING_URL", DEFAULT_EXPERIENCE_LEARNING_BASE_URL),
+    ).strip()
+    experience_learning_control_token = os.environ.get(
+        "ORCHESTRATOR_EXPERIENCE_LEARNING_CONTROL_TOKEN",
+        os.environ.get(
+            "C2C_EXPERIENCE_LEARNING_CONTROL_TOKEN",
+            os.environ.get("C2C_INTERNAL_CONTROL_TOKEN", ""),
+        ),
     ).strip()
 
     # Issue #166: the W0.2 repair loop is bounded by a small, configurable
@@ -469,6 +477,7 @@ def load_config() -> OrchestratorConfig:
         model_policy_version=model_policy_version,
         run_artifact_root=run_artifact_root,
         experience_learning_base_url=experience_learning_base_url,
+        experience_learning_control_token=experience_learning_control_token,
         repair_budget_max=repair_budget_max,
         assist_budget_max=assist_budget_max,
         model_invocation_budget_max=model_invocation_budget_max,

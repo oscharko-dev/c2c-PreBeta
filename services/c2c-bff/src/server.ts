@@ -379,6 +379,7 @@ function resolveDeps(deps: ServerDeps): ResolvedDeps {
         deps.config.experienceLearningUrl,
         httpClient,
         deps.config.upstreamTimeoutMs,
+        deps.config.experienceLearningControlToken ?? "",
       ),
     modelGateway:
       deps.modelGateway ??
@@ -2430,6 +2431,30 @@ function rejectUnauthenticatedStudioJsonRequest(args: {
   return false;
 }
 
+function rejectUnauthenticatedStudioRequest(args: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  allowedOrigins: readonly string[];
+  sessionStore: SessionStore;
+  forceSecureSessionCookies: boolean;
+}): boolean {
+  if (rejectDisallowedBrowserOrigin(args.req, args.res, args.allowedOrigins)) {
+    return true;
+  }
+  const session = resolveEditorAssistSession(
+    args.req,
+    args.res,
+    args.sessionStore,
+    args.forceSecureSessionCookies,
+  );
+  if (!session.ok) {
+    jsonResponse(args.res, 401, { error: session.message });
+    return true;
+  }
+  appendVaryHeader(args.res, "Cookie");
+  return false;
+}
+
 function explicitStringField(
   raw: unknown,
   fieldName: string,
@@ -3542,6 +3567,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       }
 
       if (pathname === "/api/v0/transform" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         let body: unknown;
         try {
           body = await readJsonBody(req, config.transformSourceMaxBytes);
@@ -3687,7 +3723,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const useTransformationAgent =
           typeof useTransformationAgentRaw === "boolean"
             ? useTransformationAgentRaw
-            : true;
+            : false;
 
         let selectedTrustCase: TrustCaseSummary | undefined;
         if (trustCaseId) {
@@ -3827,6 +3863,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       // /api/v0/transform, but signals "Generator-only invocation; verification
       // is invoked separately via /verify". Returns 201 with a `runMode` marker.
       if (pathname === "/api/v0/generate" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         let body: unknown;
         try {
           body = await readJsonBody(req, config.transformSourceMaxBytes);
@@ -3955,7 +4002,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const genUseTransformationAgent =
           typeof genUseTransformationAgentRaw === "boolean"
             ? genUseTransformationAgentRaw
-            : true;
+            : false;
         if (genUseTransformationAgent) {
           const gatewayAvailability =
             await verifyTransformationModelGatewayAvailable(modelGateway);
@@ -4881,6 +4928,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       }
 
       if (pathname === "/api/v0/runs" && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         let body: unknown;
         try {
           body = await readJsonBody(req);
@@ -5061,6 +5119,20 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         });
         res.end(JSON.stringify(runSummary(completed)));
         return;
+      }
+
+      if (method === "GET" && /^\/api\/v0\/runs\/[^\/]+(?:\/.*)?$/.test(pathname)) {
+        if (
+          rejectUnauthenticatedStudioRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
       }
 
       const runMatch = /^\/api\/v0\/runs\/([^\/]+)$/.exec(pathname);

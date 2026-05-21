@@ -42,6 +42,7 @@ const baseConfig: BffConfig = {
   orchestratorControlToken: "",
   evidenceUrl: "",
   experienceLearningUrl: "",
+  experienceLearningControlToken: "",
   modelGatewayUrl: "",
   harnessUrl: "",
   buildTestRunnerUrl: "",

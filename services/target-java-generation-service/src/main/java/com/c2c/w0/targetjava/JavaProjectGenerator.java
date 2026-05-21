@@ -1122,7 +1122,7 @@ final class JavaProjectGenerator {
     }
 
     private static String escapeComment(String raw) {
-        return raw.replace("*/", "* /").replace("\n", " ").replace("\r", " ");
+        return raw.replace("\\", "/").replace("*/", "* /").replace("\n", " ").replace("\r", " ");
     }
 
     @SuppressWarnings("unchecked")

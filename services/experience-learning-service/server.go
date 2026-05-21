@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -71,20 +72,52 @@ func NewExperienceLearningService(
 func (s *ExperienceLearningService) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v0/health", s.healthHandler)
-	mux.HandleFunc("/v0/config", s.configHandler)
-	mux.HandleFunc("/v0/harness-events", s.ingestHarnessEventsHandler)
-	mux.HandleFunc("/v0/trajectory-ledgers", s.ingestTrajectoryLedgersHandler)
-	mux.HandleFunc("/v0/events", s.experienceEventsHandler)
-	mux.HandleFunc("/v0/analyze", s.analyzeHandler)
-	mux.HandleFunc("/v0/runs", s.runCollectionHandler)
-	mux.HandleFunc("/v0/runs/", s.runItemHandler)
-	mux.HandleFunc("/v0/policy", s.policyHandler)
-	mux.HandleFunc("/v0/artifacts", s.artifactCollectionHandler)
-	mux.HandleFunc("/v0/artifacts/", s.artifactItemHandler)
+	mux.HandleFunc("/v0/config", s.requireControlToken(s.configHandler))
+	mux.HandleFunc("/v0/harness-events", s.requireControlToken(s.ingestHarnessEventsHandler))
+	mux.HandleFunc("/v0/trajectory-ledgers", s.requireControlToken(s.ingestTrajectoryLedgersHandler))
+	mux.HandleFunc("/v0/events", s.requireControlToken(s.experienceEventsHandler))
+	mux.HandleFunc("/v0/analyze", s.requireControlToken(s.analyzeHandler))
+	mux.HandleFunc("/v0/runs", s.requireControlToken(s.runCollectionHandler))
+	mux.HandleFunc("/v0/runs/", s.requireControlToken(s.runItemHandler))
+	mux.HandleFunc("/v0/policy", s.requireControlToken(s.policyHandler))
+	mux.HandleFunc("/v0/artifacts", s.requireControlToken(s.artifactCollectionHandler))
+	mux.HandleFunc("/v0/artifacts/", s.requireControlToken(s.artifactItemHandler))
 	// Studio-IDE-11 (#251): editor telemetry intake — closed-enum,
 	// tag-only learning signals from the Studio editor via the BFF.
-	mux.HandleFunc("/v0/editor-telemetry", s.editorTelemetryHandler)
+	mux.HandleFunc("/v0/editor-telemetry", s.requireControlToken(s.editorTelemetryHandler))
 	return mux
+}
+
+func (s *ExperienceLearningService) requireControlToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.controlToken == "" {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "experience-learning control token is not configured"})
+			return
+		}
+		if !constantTimeTokenEqual(bearerOrControlHeader(r), s.cfg.controlToken) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+func bearerOrControlHeader(r *http.Request) string {
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		return strings.TrimSpace(auth[len("bearer "):])
+	}
+	if token := strings.TrimSpace(r.Header.Get("X-C2C-Control-Token")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(r.Header.Get("X-Harness-Token"))
+}
+
+func constantTimeTokenEqual(actual string, expected string) bool {
+	if actual == "" || expected == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) == 1
 }
 
 func (s *ExperienceLearningService) healthHandler(w http.ResponseWriter, r *http.Request) {

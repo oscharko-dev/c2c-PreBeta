@@ -589,6 +589,7 @@ export function createExperienceLearningClient(
   baseUrl: string,
   http: HttpClient,
   timeoutMs: number,
+  controlToken = "",
 ): ExperienceLearningClient {
   if (!baseUrl) {
     return {
@@ -603,6 +604,10 @@ export function createExperienceLearningClient(
     };
   }
   const normalized = baseUrl.replace(/\/+$/, "");
+  const controlHeaders =
+    controlToken.trim().length > 0
+      ? { authorization: `Bearer ${controlToken.trim()}` }
+      : undefined;
   return {
     enabled: true,
     baseUrl: normalized,
@@ -610,12 +615,14 @@ export function createExperienceLearningClient(
       const safe = encodeURIComponent(runId);
       return http.request(`${normalized}/v0/runs/${safe}/summary`, {
         method: "GET",
+        headers: controlHeaders,
         timeoutMs,
       });
     },
     async submitEditorTelemetry(payload: unknown) {
       return http.request(`${normalized}/v0/editor-telemetry`, {
         method: "POST",
+        headers: controlHeaders,
         body: payload,
         timeoutMs,
       });

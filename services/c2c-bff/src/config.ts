@@ -11,6 +11,7 @@ export interface BffConfig {
   orchestratorControlToken: string;
   evidenceUrl: string;
   experienceLearningUrl: string;
+  experienceLearningControlToken?: string;
   modelGatewayUrl: string;
   harnessUrl: string;
   // Studio-IDE-14 (#256): the build-test-runner-service hosts the
@@ -83,11 +84,30 @@ function parsePort(raw: string | undefined, fallback: number): number {
   return value;
 }
 
-function parseHost(raw: string | undefined, fallback: string): string {
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]"
+  );
+}
+
+function parseHost(
+  raw: string | undefined,
+  fallback: string,
+  allowNonLoopback = false,
+): string {
   if (!raw || raw.trim() === "") return fallback;
   const value = raw.trim();
   if (/[\s/]/.test(value)) {
     throw new Error(`invalid host ${JSON.stringify(raw)}`);
+  }
+  if (!allowNonLoopback && !isLoopbackHost(value)) {
+    throw new Error(
+      `refusing non-loopback C2C_BFF_HOST ${JSON.stringify(value)}; set C2C_ALLOW_NON_LOOPBACK_BIND=true only behind a trusted reverse proxy`,
+    );
   }
   return value;
 }
@@ -230,13 +250,21 @@ export function loadConfig(
   return {
     serviceName: SERVICE_NAME,
     port: parsePort(env.C2C_BFF_PORT, DEFAULT_PORT),
-    host: parseHost(env.C2C_BFF_HOST, DEFAULT_HOST),
+    host: parseHost(
+      env.C2C_BFF_HOST,
+      DEFAULT_HOST,
+      parseBoolFlag(env.C2C_ALLOW_NON_LOOPBACK_BIND),
+    ),
     repoRoot,
     staticRoot: resolveStaticRoot(env, repoRoot),
     orchestratorUrl,
     orchestratorControlToken,
     evidenceUrl: env.C2C_EVIDENCE_URL?.trim() ?? "",
     experienceLearningUrl: env.C2C_EXPERIENCE_LEARNING_URL?.trim() ?? "",
+    experienceLearningControlToken:
+      env.C2C_EXPERIENCE_LEARNING_CONTROL_TOKEN?.trim() ??
+      env.C2C_INTERNAL_CONTROL_TOKEN?.trim() ??
+      "",
     modelGatewayUrl: env.C2C_MODEL_GATEWAY_URL?.trim() ?? "",
     harnessUrl: env.C2C_HARNESS_URL?.trim() ?? "",
     buildTestRunnerUrl: env.C2C_BUILD_TEST_RUNNER_URL?.trim() ?? "",

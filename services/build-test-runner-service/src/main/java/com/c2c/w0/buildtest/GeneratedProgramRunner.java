@@ -1,37 +1,32 @@
 package com.c2c.w0.buildtest;
 
 import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.net.URL;
-import java.net.URLClassLoader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
- * Executes a compiled generated program inside an isolated classloader on a
- * dedicated worker thread.
- * <p>
- * Stdout and stderr written by the generated {@code main} method are captured
- * and returned. The thread is interrupted and stopped after a configurable
- * timeout to avoid runaway programs blocking the runner.
- * <p>
- * The runner does NOT shell out — it loads classes from the on-disk class
- * output directory using a child {@link URLClassLoader}. The generated code
- * runs inside the same JVM with parent classloader access so the runtime
- * dependency ({@code c2c-target-java-runtime}) is reachable.
+ * Executes compiled generated Java in a forked JVM with a scrubbed environment.
+ *
+ * <p>The runner deliberately avoids loading generated classes into the service
+ * JVM. That keeps service secrets, harness tokens, global system properties and
+ * {@code System.exit(...)} side effects outside the generated program's process
+ * boundary while preserving the deterministic stdout/stderr contract.
  */
 final class GeneratedProgramRunner {
+
+    private static final int MAX_CAPTURE_BYTES = 1_048_576;
 
     private GeneratedProgramRunner() {
     }
@@ -41,90 +36,104 @@ final class GeneratedProgramRunner {
             return RunResult.skipped("missing-entry-class",
                     "entryClass is required to execute the generated program");
         }
-        URL[] urls;
+
+        List<String> command = new ArrayList<>();
+        command.add(javaBinary());
+        command.add("-Djava.awt.headless=true");
+        command.add("-Duser.language=en");
+        command.add("-Duser.country=US");
+        command.add("-Djava.io.tmpdir=" + classOutputDir.toAbsolutePath());
+        command.add("-cp");
+        command.add(classOutputDir.toAbsolutePath()
+                + File.pathSeparator
+                + System.getProperty("java.class.path", ""));
+        command.add(entryClass);
+
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.directory(classOutputDir.toFile());
+        Map<String, String> environment = builder.environment();
+        environment.clear();
+        environment.put("LANG", "C.UTF-8");
+        environment.put("LC_ALL", "C.UTF-8");
+        environment.put("TZ", "UTC");
+
+        long started = System.nanoTime();
+        Process process;
         try {
-            urls = new URL[]{classOutputDir.toUri().toURL()};
-        } catch (Exception e) {
-            return RunResult.runError("classpath-build", e);
+            process = builder.start();
+        } catch (IOException e) {
+            return RunResult.runError("process-start", e);
         }
-        try (URLClassLoader loader = new URLClassLoader(urls,
-                GeneratedProgramRunner.class.getClassLoader())) {
-            Class<?> mainClass;
-            try {
-                mainClass = Class.forName(entryClass, true, loader);
-            } catch (ClassNotFoundException e) {
-                return RunResult.runError("entry-class-not-found",
-                        new RuntimeException("Generated entry class not found: " + entryClass, e));
+
+        try (ExecutorService readers = Executors.newFixedThreadPool(2, runnable -> {
+            Thread thread = new Thread(runnable, "c2c-generated-java-output-reader");
+            thread.setDaemon(true);
+            return thread;
+        })) {
+            Future<String> stdoutFuture = readers.submit(() -> readStream(process.getInputStream()));
+            Future<String> stderrFuture = readers.submit(() -> readStream(process.getErrorStream()));
+
+            boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+            if (!finished) {
+                process.destroy();
+                if (!process.waitFor(250, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly();
+                }
+                long elapsed = (System.nanoTime() - started) / 1_000_000L;
+                return RunResult.timeout(Math.max(timeoutMs, elapsed),
+                        futureOutput(stdoutFuture),
+                        futureOutput(stderrFuture));
             }
-            Method main;
-            try {
-                main = mainClass.getMethod("main", String[].class);
-            } catch (NoSuchMethodException e) {
-                return RunResult.runError("entry-main-missing",
-                        new RuntimeException("Generated entry class has no main(String[]) method", e));
+
+            int exitCode = process.exitValue();
+            long elapsed = (System.nanoTime() - started) / 1_000_000L;
+            String stdout = futureOutput(stdoutFuture);
+            String stderr = futureOutput(stderrFuture);
+            if (exitCode == 0) {
+                return RunResult.success(stdout, stderr, elapsed);
             }
-            return invokeWithCapture(main, timeoutMs);
-        } catch (Exception e) {
-            return RunResult.runError("classloader", e);
+            return RunResult.processFailure(exitCode, stdout, stderr, elapsed);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            process.destroyForcibly();
+            return RunResult.runError("interrupted", e);
         }
     }
 
-    private static RunResult invokeWithCapture(Method main, long timeoutMs) {
-        ByteArrayOutputStream stdoutCapture = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderrCapture = new ByteArrayOutputStream();
-        // PrintStream wraps the in-memory ByteArrayOutputStream and owns no
-        // OS resources, but it is still AutoCloseable. try-with-resources
-        // guarantees flush+close even on exceptional paths and silences the
-        // Qodana "AutoCloseable used without 'try'-with-resources" warning.
-        try (PrintStream stdoutStream = new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8);
-             PrintStream stderrStream = new PrintStream(stderrCapture, true, StandardCharsets.UTF_8)) {
-            try (ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "c2c-build-test-runner");
-                t.setDaemon(true);
-                return t;
-            })) {
-                long started = System.nanoTime();
-                Future<?> task = executor.submit(() -> {
-                    PrintStream originalOut = System.out;
-                    PrintStream originalErr = System.err;
-                    System.setOut(stdoutStream);
-                    System.setErr(stderrStream);
-                    try {
-                        main.invoke(null, (Object) new String[0]);
-                    } catch (InvocationTargetException e) {
-                        Throwable cause = e.getCause() == null ? e : e.getCause();
-                        cause.printStackTrace(stderrStream);
-                        throw new RuntimeException(cause);
-                    } catch (IllegalAccessException e) {
-                        e.printStackTrace(stderrStream);
-                        throw new RuntimeException(e);
-                    } finally {
-                        System.setOut(originalOut);
-                        System.setErr(originalErr);
-                    }
-                });
-                try {
-                    task.get(timeoutMs, TimeUnit.MILLISECONDS);
-                    long elapsed = (System.nanoTime() - started) / 1_000_000L;
-                    return RunResult.success(stdoutCapture.toString(StandardCharsets.UTF_8),
-                            stderrCapture.toString(StandardCharsets.UTF_8), elapsed);
-                } catch (TimeoutException e) {
-                    task.cancel(true);
-                    return RunResult.timeout(timeoutMs,
-                            stdoutCapture.toString(StandardCharsets.UTF_8),
-                            stderrCapture.toString(StandardCharsets.UTF_8));
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause() == null ? e : e.getCause();
-                    return RunResult.runtimeFailure(cause,
-                            stdoutCapture.toString(StandardCharsets.UTF_8),
-                            stderrCapture.toString(StandardCharsets.UTF_8));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return RunResult.runError("interrupted", e);
-                } finally {
-                    executor.shutdownNow();
-                }
+    private static String javaBinary() {
+        String javaHome = System.getProperty("java.home", "");
+        if (!javaHome.isBlank()) {
+            return javaHome + File.separator + "bin" + File.separator + "java";
+        }
+        return "java";
+    }
+
+    private static String readStream(InputStream stream) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int total = 0;
+        int read;
+        while ((read = stream.read(chunk)) != -1) {
+            int remaining = MAX_CAPTURE_BYTES - buffer.size();
+            if (remaining > 0) {
+                buffer.write(chunk, 0, Math.min(read, remaining));
             }
+            total += read;
+        }
+        if (total > MAX_CAPTURE_BYTES) {
+            buffer.write(("\n[output truncated after " + MAX_CAPTURE_BYTES + " bytes]").getBytes(StandardCharsets.UTF_8));
+        }
+        return buffer.toString(StandardCharsets.UTF_8);
+    }
+
+    private static String futureOutput(Future<String> future) {
+        try {
+            return future.get(250, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "";
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -183,6 +192,13 @@ final class GeneratedProgramRunner {
                     "Generated program exceeded " + timeoutMs + "ms wall-clock budget");
         }
 
+        static RunResult processFailure(int exitCode, String stdout, String stderr, long durationMs) {
+            return new RunResult(true, false, exitCode, stdout, stderr, durationMs,
+                    "Generated program exited with status " + exitCode + ".",
+                    "process-exit-" + exitCode,
+                    firstLine(stderr));
+        }
+
         static RunResult runtimeFailure(Throwable cause, String stdout, String stderr) {
             return new RunResult(true, false, 1, stdout, stderr, 0,
                     safeRuntimeSummary(cause),
@@ -224,31 +240,35 @@ final class GeneratedProgramRunner {
                 }
                 log.append(errorMessage.trim());
             }
-            if (stderr != null && !stderr.isBlank()) {
-                if (log.length() > 0) {
-                    log.append(" | ");
-                }
-                log.append("stderr-bytes=").append(HashUtil.byteLength(stderr));
-            }
             if (stdout != null && !stdout.isBlank()) {
                 if (log.length() > 0) {
-                    log.append(" | ");
+                    log.append("\n--- stdout ---\n");
                 }
-                log.append("stdout-bytes=").append(HashUtil.byteLength(stdout));
+                log.append(stdout);
+            }
+            if (stderr != null && !stderr.isBlank()) {
+                if (log.length() > 0) {
+                    log.append("\n--- stderr ---\n");
+                }
+                log.append(stderr);
             }
             return log.toString();
         }
 
         private static String safeRuntimeSummary(Throwable cause) {
-            if (cause == null) {
-                return "Generated program failed with an unknown runtime exception.";
+            String name = cause == null ? "unknown" : cause.getClass().getSimpleName();
+            String message = cause == null || cause.getMessage() == null ? "" : cause.getMessage();
+            return message.isBlank()
+                    ? "Generated program failed at runtime: " + name
+                    : "Generated program failed at runtime: " + name + ": " + message;
+        }
+
+        private static String firstLine(String value) {
+            if (value == null || value.isBlank()) {
+                return "";
             }
-            String className = cause.getClass().getName();
-            String message = cause.getMessage();
-            if (message == null || message.isBlank()) {
-                return "Generated program failed with " + className + ".";
-            }
-            return "Generated program failed with " + className + ": " + message.trim();
+            int newline = value.indexOf('\n');
+            return (newline >= 0 ? value.substring(0, newline) : value).trim();
         }
     }
 }

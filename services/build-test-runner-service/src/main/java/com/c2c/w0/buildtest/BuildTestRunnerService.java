@@ -37,6 +37,23 @@ public final class BuildTestRunnerService {
     public static final String CAPABILITY = "build-test.run";
     public static final String SOURCE_REFERENCE_CAPABILITY = "source-reference.execute";
     public static final String SERVICE_NAME = "build-test-runner-service";
+    private static final List<String> GENERATED_JAVA_FORBIDDEN_TOKENS = List.of(
+            "Runtime.getRuntime",
+            "ProcessBuilder",
+            "System.exit",
+            "System.getenv",
+            "System.setProperty",
+            "System.setOut",
+            "System.setErr",
+            "java.nio.file.",
+            "java.io.",
+            "java.net.",
+            "javax.script.",
+            "java.lang.reflect.",
+            "ClassLoader",
+            "sun.misc.Unsafe",
+            "jdk.internal."
+    );
 
     private final Path repoRoot;
 
@@ -101,6 +118,29 @@ public final class BuildTestRunnerService {
         Map<String, String> files = stringMap(generatedProject.get("files"));
         String entryClass = string(generatedProject.get("entryClass"), null);
         String entryFilePath = string(generatedProject.get("entryFilePath"), null);
+
+        List<Map<String, Object>> safetyDiagnostics = generatedJavaSafetyDiagnostics(files);
+        if (!safetyDiagnostics.isEmpty()) {
+            applyClassification(response, ResultClassifier.compileFailure());
+            diagnostics.addAll(safetyDiagnostics);
+            Map<String, Object> build = failedBuild(response, generatedArtifactRef, diagnostics,
+                    "Generated Java contains APIs that are not allowed in the build/test sandbox.");
+            Map<String, Object> execution = emptyExecution(response, generatedArtifactRef, executionInputRef, sourceArtifactRef);
+            response.put("build", build);
+            response.put("buildResult", canonicalBuildResult(build));
+            response.put("execution", execution);
+            response.put("executionResult", canonicalExecutionResult(execution));
+            response.put("tests", emptyTests());
+            response.put("goldenMaster", Map.of());
+            response.put("comparison", Map.of(
+                    "matched", false,
+                    "skipped", true,
+                    "reason", "generated-java-policy-denied"));
+            response.put("diagnostics", diagnostics);
+            attachComparisonResult(response);
+            response.put("outputRef", reference(response));
+            return response;
+        }
 
         GeneratedProjectMaterializer.MaterializedProject materialised;
         try {
@@ -1345,6 +1385,41 @@ public final class BuildTestRunnerService {
             }
         }
         return new LinkedHashMap<>();
+    }
+
+    private static List<Map<String, Object>> generatedJavaSafetyDiagnostics(Map<String, String> files) {
+        List<Map<String, Object>> diagnostics = new ArrayList<>();
+        for (Map.Entry<String, String> entry : files.entrySet()) {
+            String path = entry.getKey();
+            if (path == null || !path.endsWith(".java")) {
+                continue;
+            }
+            String content = entry.getValue() == null ? "" : entry.getValue();
+            for (String token : GENERATED_JAVA_FORBIDDEN_TOKENS) {
+                int offset = content.indexOf(token);
+                if (offset >= 0) {
+                    diagnostics.add(diagnostic(
+                            "error",
+                            "generated-java-policy-denied",
+                            path,
+                            lineNumber(content, offset),
+                            1L,
+                            "Generated Java uses forbidden API token: " + token));
+                }
+            }
+        }
+        return diagnostics;
+    }
+
+    private static long lineNumber(String content, int offset) {
+        long line = 1L;
+        int limit = Math.max(0, Math.min(offset, content.length()));
+        for (int i = 0; i < limit; i++) {
+            if (content.charAt(i) == '\n') {
+                line++;
+            }
+        }
+        return line;
     }
 
     static Path detectRepoRoot() {

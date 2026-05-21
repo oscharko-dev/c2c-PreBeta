@@ -1167,9 +1167,15 @@ def create_configured_server(config: OrchestratorConfig) -> tuple[HTTPServer, W0
     artifact_store = RunArtifactStore(config.run_artifact_root, created_by=config.service_name)
     experience_learning: ExperienceLearningGateway | NullExperienceLearningGateway
     if config.experience_learning_base_url:
+        experience_learning_headers = (
+            {"Authorization": f"Bearer {config.experience_learning_control_token}"}
+            if config.experience_learning_control_token
+            else None
+        )
         experience_learning = ExperienceLearningGateway(
             config.experience_learning_base_url,
             http_client,
+            headers=experience_learning_headers,
         )
     else:
         experience_learning = NullExperienceLearningGateway()
