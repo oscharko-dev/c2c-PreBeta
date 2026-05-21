@@ -1,7 +1,5 @@
 package com.c2c.w0.buildtest;
 
-import java.util.regex.Pattern;
-
 /**
  * Producer-side bounds for diagnostic fields emitted into Evidence under
  * {@code parity-build-result-v0} and {@code parity-execution-result-v0}.
@@ -19,7 +17,16 @@ final class DiagnosticBounds {
     static final int MAX_MESSAGE_LENGTH = 4000;
     static final int MAX_FILEPATH_LENGTH = 500;
     static final String MESSAGE_TRUNCATION_SENTINEL = "…[truncated]";
-    private static final Pattern FILEPATH_ALLOWED = Pattern.compile("[A-Za-z0-9._/-]");
+
+    /**
+     * Bound on the raw input fed into {@link #boundedFilePath(String)} so that
+     * per-character sanitization cannot do unbounded work when an untrusted
+     * producer (e.g. {@code JavaFileObject.getName()} on a deeply-nested temp
+     * URI) hands in a multi-kilobyte path. Sized at {@code 2 ×
+     * MAX_FILEPATH_LENGTH} so a path with up to 50% invalid characters still
+     * has enough headroom to recover the schema-conformant prefix.
+     */
+    private static final int MAX_FILEPATH_RAW_INPUT = MAX_FILEPATH_LENGTH * 2;
 
     private DiagnosticBounds() {
     }
@@ -42,7 +49,10 @@ final class DiagnosticBounds {
      * Sanitize a candidate {@code filePath} so it satisfies the schema pattern
      * {@code ^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9._/-]+$} and the 500-char
      * cap. Absolute paths, parent-traversal segments, and pattern-illegal
-     * characters are stripped or replaced; an unrecoverable result falls back
+     * characters are stripped or replaced. Truncation is segment-based — a
+     * segment is appended only if it fits in full — so that no truncation can
+     * ever produce a synthetic {@code ".."} tail and re-trigger the
+     * schema-forbidden traversal pattern. An unrecoverable result falls back
      * to {@code "generated-project"} so the schema's {@code minLength: 1} is
      * preserved.
      */
@@ -50,14 +60,17 @@ final class DiagnosticBounds {
         if (filePath == null || filePath.isBlank()) {
             return "generated-project";
         }
-        String normalised = filePath.replace('\\', '/').trim();
+        String clamped = filePath.length() > MAX_FILEPATH_RAW_INPUT
+                ? filePath.substring(0, MAX_FILEPATH_RAW_INPUT)
+                : filePath;
+        String normalised = clamped.replace('\\', '/').trim();
         while (normalised.startsWith("/")) {
             normalised = normalised.substring(1);
         }
         StringBuilder sanitized = new StringBuilder(normalised.length());
         for (int i = 0; i < normalised.length(); i++) {
-            String character = normalised.substring(i, i + 1);
-            sanitized.append(FILEPATH_ALLOWED.matcher(character).matches() ? character : "_");
+            char character = normalised.charAt(i);
+            sanitized.append(isAllowedFilePathChar(character) ? character : '_');
         }
         String[] segments = sanitized.toString().split("/", -1);
         StringBuilder rebuilt = new StringBuilder();
@@ -65,7 +78,12 @@ final class DiagnosticBounds {
             if (segment.isEmpty() || "..".equals(segment)) {
                 continue;
             }
-            if (rebuilt.length() > 0) {
+            int separator = rebuilt.length() > 0 ? 1 : 0;
+            int projected = rebuilt.length() + separator + segment.length();
+            if (projected > MAX_FILEPATH_LENGTH) {
+                break;
+            }
+            if (separator == 1) {
                 rebuilt.append('/');
             }
             rebuilt.append(segment);
@@ -73,9 +91,16 @@ final class DiagnosticBounds {
         if (rebuilt.length() == 0) {
             return "generated-project";
         }
-        if (rebuilt.length() > MAX_FILEPATH_LENGTH) {
-            rebuilt.setLength(MAX_FILEPATH_LENGTH);
-        }
         return rebuilt.toString();
+    }
+
+    private static boolean isAllowedFilePathChar(char character) {
+        return (character >= 'A' && character <= 'Z')
+                || (character >= 'a' && character <= 'z')
+                || (character >= '0' && character <= '9')
+                || character == '.'
+                || character == '_'
+                || character == '/'
+                || character == '-';
     }
 }
