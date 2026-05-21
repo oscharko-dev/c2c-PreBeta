@@ -25,7 +25,8 @@ truth. Architectural decision context lives in
   the approval is bound to the authenticated identity of the run owner as well
   as to the exact patch payload hash that Studio rendered.
 - Parity and repair trigger endpoints exposed through the BFF are reachable
-  only through an authenticated session; unauthenticated callers are rejected
+  only through an authenticated session; the authenticated identity of that
+  session becomes the run owner, and unauthenticated callers are rejected
   before Orchestrator dispatch.
 - Evidence captures the mode labels, approvals, approver identity, outputs,
   hashes, diagnostics, comparisons, and provenance needed for audit.
@@ -102,7 +103,7 @@ The repair loop begins only after deterministic failure detection:
 5. The developer approves or rejects the proposal explicitly.
 6. Approval captures the exact patch payload hash that Studio rendered for
    review and the authenticated identity of the approving developer; the
-   approving identity must match the run's tenant/session owner.
+   approving identity must match the run owner.
 7. Only an approved patch whose payload matches the recorded approval hash and
    whose approving identity matches the run owner may be applied.
 8. Repair application is limited to the generated Java candidate and its
@@ -195,7 +196,7 @@ The export contract is intentionally conservative:
 - Only successful parity evidence is eligible for an unqualified export.
 - Failed, incomplete, or intentionally diverged evidence must be blocked.
 - Stale evidence and repair-verified/manual-edit-qualified evidence must remain
-  explicitly labelled so the exported scaffold does not overstate its authority.
+  explicitly labeled so the exported scaffold does not overstate its authority.
 - Exported scaffold files must pass the same secret and credential checks that
   gate Evidence storage before they are made available for download; any value
   rejected by those checks must be excluded or replaced with a redacted
@@ -314,12 +315,13 @@ promoted to a release-gated workflow.
   by the Harness with no outbound network by default, no secret-bearing
   environment variables, least-privilege filesystem access, and no direct write
   path into evidence storage;
-- the isolated runner enforces a bounded resource envelope: a maximum
-  wall-clock duration, a maximum resident-set/heap size, and bounded
-  stdout/stderr capture, so that a malformed or adversarial generated Java
-  program cannot exhaust runner capacity or evidence storage; concrete envelope
-  values live with the Harness runner contract and are versioned alongside the
-  comparison policy;
+- the isolated runner enforces a bounded resource envelope, which the Harness
+  runner contract expresses as separately measured caps: a maximum wall-clock
+  duration, a maximum resident set size (RSS) for the runner process, a
+  maximum JVM heap size for the generated-Java process, and a bounded
+  stdout/stderr capture; together these prevent a malformed or adversarial
+  generated Java program from exhausting runner capacity or evidence storage,
+  and the concrete cap values are versioned alongside the comparison policy;
 - parity and repair trigger endpoints exposed through the BFF require an
   authenticated session; unauthenticated callers must be rejected before any
   Orchestrator work is dispatched;

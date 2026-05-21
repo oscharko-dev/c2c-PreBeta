@@ -171,9 +171,11 @@ identity binding:
 - runner isolation is Harness-enforced with no outbound network by default, no
   secret-bearing environment variables, least-privilege filesystem access, no
   direct write path into evidence storage, and a bounded runner resource
-  envelope: a maximum wall-clock duration, a maximum resident-set/heap size,
-  and bounded stdout/stderr capture so that a malformed or adversarial
-  generated Java program cannot exhaust runner capacity or evidence storage;
+  envelope expressed as separately measured caps: a maximum wall-clock
+  duration, a maximum resident set size (RSS) for the runner process, a
+  maximum JVM heap size for the generated-Java process, and a bounded
+  stdout/stderr capture, so that a malformed or adversarial generated Java
+  program cannot exhaust runner capacity or evidence storage;
 - parity and repair trigger endpoints exposed through the BFF require an
   authenticated session whose identity binds the run owner; unauthenticated
   callers must be rejected before any Orchestrator work is dispatched;
