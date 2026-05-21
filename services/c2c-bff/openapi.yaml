@@ -794,6 +794,45 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/runs/{runId}/output-change-explanation:
+    post:
+      summary: Explain why the observed output changed between parity runs
+      description: >
+        Compares the selected completed parity run against a caller-selected
+        previous parity run and returns a deterministic, evidence-backed
+        explanation of likely change sources. The response separates
+        deterministic comparison data from the optional AI-assisted summary and
+        refuses to speculate when required evidence is missing.
+      operationId: explainOutputChange
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutputChangeExplanationRequest"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutputChangeExplanationResponse"
+        "400":
+          description: invalid request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/runs/{runId}/events:
     get:
       summary: Return a lightweight event view for the run
@@ -2777,6 +2816,209 @@ components:
             Reference to the persisted per-region manual-edit overlay
             artifact. Present iff ``manualEditsCarriedOver`` is true.
         note: { type: string }
+
+    OutputChangeExplanationRequest:
+      type: object
+      required: [previousRunId]
+      properties:
+        previousRunId:
+          type: string
+          minLength: 1
+        includeAiSummary:
+          type: boolean
+          description: >
+            When true, the BFF asks the Model Gateway for an advisory summary
+            grounded in the deterministic comparison result. The deterministic
+            explanation is always computed first.
+      additionalProperties: false
+
+    OutputChangeExplanationResponse:
+      type: object
+      required:
+        [
+          schemaVersion,
+          status,
+          currentRunId,
+          previousRunId,
+          programId,
+          currentTrustCaseId,
+          previousTrustCaseId,
+          determination,
+          primaryCategory,
+          summary,
+          categories,
+          outputDelta,
+          evidenceLinks,
+          aiSummary,
+        ]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        status:
+          type: string
+          enum: [available, unavailable]
+        unavailableReason:
+          type: string
+          enum:
+            [
+              previous_run_missing,
+              same_run_not_allowed,
+              run_not_completed,
+              non_parity_run,
+              missing_trust_summary,
+              missing_normalized_output,
+              missing_observed_output,
+              evidence_incomplete,
+            ]
+        currentRunId: { type: string }
+        previousRunId: { type: string }
+        programId: { type: string }
+        currentTrustCaseId:
+          oneOf:
+            - type: string
+            - type: 'null'
+        previousTrustCaseId:
+          oneOf:
+            - type: string
+            - type: 'null'
+        determination:
+          type: string
+          enum: [single_change, multiple_changes, not_determinable]
+        primaryCategory:
+          oneOf:
+            - $ref: "#/components/schemas/OutputChangeCategory"
+            - type: 'null'
+        summary: { type: string }
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutputChangeCategoryEntry"
+        outputDelta:
+          oneOf:
+            - $ref: "#/components/schemas/OutputChangeDeltaSummary"
+            - type: 'null'
+        evidenceLinks:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutputChangeEvidenceLink"
+        aiSummary:
+          $ref: "#/components/schemas/OutputChangeAiSummary"
+
+    OutputChangeCategory:
+      type: string
+      enum:
+        [
+          cobol_edit,
+          generated_java_refresh,
+          manual_java_edit,
+          repair_patch,
+          trust_case_change,
+          runtime_configuration_change,
+          normalization_rule_change,
+          cause_not_determinable,
+        ]
+
+    OutputChangeCategoryEntry:
+      type: object
+      required: [category, changed, title, detail, evidenceLinks]
+      properties:
+        category:
+          $ref: "#/components/schemas/OutputChangeCategory"
+        changed: { type: boolean }
+        title: { type: string }
+        detail: { type: string }
+        evidenceLinks:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutputChangeEvidenceLink"
+
+    OutputChangeEvidenceLink:
+      type: object
+      required: [label]
+      properties:
+        label: { type: string }
+        currentRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        previousRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+
+    OutputChangeDeltaSummary:
+      type: object
+      required:
+        [
+          changed,
+          addedLineCount,
+          removedLineCount,
+          excerpt,
+          currentNormalizedOutputRef,
+          previousNormalizedOutputRef,
+          currentComparisonDiffRef,
+          previousComparisonDiffRef,
+        ]
+      properties:
+        changed: { type: boolean }
+        addedLineCount:
+          type: integer
+          minimum: 0
+        removedLineCount:
+          type: integer
+          minimum: 0
+        excerpt:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutputChangeDeltaLine"
+        currentNormalizedOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        previousNormalizedOutputRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        currentComparisonDiffRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+        previousComparisonDiffRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: 'null'
+
+    OutputChangeDeltaLine:
+      type: object
+      required: [kind, content]
+      properties:
+        kind:
+          type: string
+          enum: [context, added, removed]
+        content: { type: string }
+
+    OutputChangeAiSummary:
+      type: object
+      required: [status, label, groundingLabel]
+      properties:
+        status:
+          type: string
+          enum: [available, unavailable]
+        label: { type: string }
+        groundingLabel: { type: string }
+        explanation: { type: string }
+        modelInvocationRef:
+          oneOf:
+            - type: string
+            - type: 'null'
+        ledgerRef:
+          oneOf:
+            - type: string
+            - type: 'null'
+        unavailableReason:
+          type: string
+          enum: [model_gateway_unavailable, insufficient_evidence]
 
     ManualEditOverlayView:
       type: object

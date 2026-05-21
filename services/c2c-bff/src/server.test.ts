@@ -522,6 +522,160 @@ function availableModelGateway(): ModelGatewayClient {
   };
 }
 
+function outputChangeOrchestrator(): OrchestratorClient {
+  const outputRef = (sha: string, kind = "artifact"): Record<string, unknown> => ({
+    sha256: sha,
+    byteSize: 12,
+    kind,
+    uri: `urn:test:${sha.slice(0, 8)}`,
+  });
+  const generatedBodies: Record<string, UpstreamResponse> = {
+    "live-prev": {
+      status: 200,
+      body: {
+        programId: FIXED_SAMPLE.programId,
+        runStatus: "completed",
+        artifactRef: outputRef("1".repeat(64), "generated-project-manifest"),
+        traceability: { sourceHash: "source-a" },
+      },
+    },
+    "live-current": {
+      status: 200,
+      body: {
+        programId: FIXED_SAMPLE.programId,
+        runStatus: "completed",
+        artifactRef: outputRef("1".repeat(64), "generated-project-manifest"),
+        traceability: { sourceHash: "source-a" },
+      },
+    },
+  };
+  const buildBodies: Record<string, UpstreamResponse> = {
+    "live-prev": {
+      status: 200,
+      body: {
+        programId: FIXED_SAMPLE.programId,
+        data: {
+          status: "ok",
+          classification: "match",
+          actualOutput: "RESULT=OLD\n",
+          comparisonResult: {
+            matched: true,
+            diffRef: outputRef("2".repeat(64), "parity-comparison-diff"),
+          },
+        },
+      },
+    },
+    "live-current": {
+      status: 200,
+      body: {
+        programId: FIXED_SAMPLE.programId,
+        data: {
+          status: "ok",
+          classification: "match",
+          actualOutput: "RESULT=NEW\n",
+          comparisonResult: {
+            matched: false,
+            diffRef: outputRef("3".repeat(64), "parity-comparison-diff"),
+          },
+        },
+      },
+    },
+  };
+  const evidenceBodies: Record<string, UpstreamResponse> = {
+    "live-prev": {
+      status: 200,
+      body: {
+        programId: FIXED_SAMPLE.programId,
+        artifactRef: outputRef("4".repeat(64), "evidence-pack-manifest"),
+        data: {
+          status: "complete",
+          packId: "pack-prev",
+        },
+      },
+    },
+    "live-current": {
+      status: 200,
+      body: {
+        programId: FIXED_SAMPLE.programId,
+        artifactRef: outputRef("5".repeat(64), "evidence-pack-manifest"),
+        data: {
+          status: "complete",
+          packId: "pack-current",
+        },
+      },
+    },
+  };
+  return {
+    enabled: true,
+    async startRun() {
+      return undefined;
+    },
+    async startTransformRun() {
+      return undefined;
+    },
+    async getRun() {
+      return undefined;
+    },
+    async getArtifacts() {
+      return undefined;
+    },
+    async getGenerated(runId: string) {
+      return generatedBodies[runId];
+    },
+    async getGeneratedFiles() {
+      return undefined;
+    },
+    async getGeneratedFile() {
+      return undefined;
+    },
+    async getArtifactFile() {
+      return undefined;
+    },
+    async getBuildTest(runId: string) {
+      return buildBodies[runId];
+    },
+    async getEvidence(runId: string) {
+      return evidenceBodies[runId];
+    },
+    async exportParityRegression() {
+      return undefined;
+    },
+    async getEvents() {
+      return undefined;
+    },
+    async getProgress() {
+      return undefined;
+    },
+    async getLearning() {
+      return undefined;
+    },
+    async getWorkflow() {
+      return undefined;
+    },
+    async upsertIntentionalDivergenceDecision() {
+      return undefined;
+    },
+    async getTraceability() {
+      return undefined;
+    },
+    async previewManualCompileRepair() {
+      return undefined;
+    },
+    async diagnoseManualCompileRepair() {
+      return undefined;
+    },
+    async applyManualCompileRepair() {
+      return undefined;
+    },
+    async acceptManualCompileRepair() {
+      return undefined;
+    },
+    async rejectManualCompileRepair() {
+      return undefined;
+    },
+  };
+}
+
 const baseRepoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "c2c-bff-test-root-"));
 
 const baseConfig: BffConfig = {
@@ -10626,6 +10780,203 @@ test("POST /api/v0/csp-report rejects oversize bodies with 413", async () => {
     );
     assert.equal(response.status, 413);
     assert.equal(sink.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs/:runId/output-change-explanation returns a deterministic repair-patch explanation", async () => {
+  const runStore = createRunStore();
+  const previous = runStore.create(FIXED_SAMPLE, "live", "live-prev", {
+    status: "completed",
+    executionMode: "parity",
+    trustCaseId: "HELLO01-DEFAULT",
+    trustCaseConfigurationDigest: "same-digest",
+    trustCaseEnvironmentProfileId: "env-v1",
+    trustCaseComparisonPolicyVersion: "deterministic-output-v1",
+    trustSummary: {
+      trustCase: {
+        trustCaseId: "HELLO01-DEFAULT",
+        configurationDigest: "same-digest",
+      },
+      cobolResult: { normalizedOutputRef: { sha256: "a".repeat(64) } },
+      javaResult: { normalizedOutputRef: { sha256: "b".repeat(64) } },
+      comparisonResult: { diffRef: { sha256: "2".repeat(64) } },
+      repair: { repairDecisionRef: { sha256: "6".repeat(64) } },
+      evidence: { status: "current" },
+    },
+  });
+  const current = runStore.create(FIXED_SAMPLE, "live", "live-current", {
+    status: "completed",
+    executionMode: "parity",
+    trustCaseId: "HELLO01-DEFAULT",
+    trustCaseConfigurationDigest: "same-digest",
+    trustCaseEnvironmentProfileId: "env-v1",
+    trustCaseComparisonPolicyVersion: "deterministic-output-v1",
+    trustSummary: {
+      trustCase: {
+        trustCaseId: "HELLO01-DEFAULT",
+        configurationDigest: "same-digest",
+      },
+      cobolResult: { normalizedOutputRef: { sha256: "a".repeat(64) } },
+      javaResult: { normalizedOutputRef: { sha256: "c".repeat(64) } },
+      comparisonResult: { diffRef: { sha256: "3".repeat(64) } },
+      repair: { repairDecisionRef: { sha256: "7".repeat(64) } },
+      evidence: { status: "current" },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    trustCases: stubTrustCases([FIXED_TRUST_CASE]),
+    runStore,
+    orchestrator: outputChangeOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: availableModelGateway(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { previousRunId: previous.runId },
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.status, "available");
+    assert.equal(body.primaryCategory, "repair_patch");
+    assert.match(String(body.summary), /repair patch/i);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs/:runId/output-change-explanation returns unavailable when the previous run is unknown", async () => {
+  const runStore = createRunStore();
+  const current = runStore.create(FIXED_SAMPLE, "live", "live-current", {
+    status: "completed",
+    executionMode: "parity",
+    trustSummary: {
+      trustCase: {
+        trustCaseId: "HELLO01-DEFAULT",
+        configurationDigest: "same-digest",
+      },
+      javaResult: { normalizedOutputRef: { sha256: "c".repeat(64) } },
+      evidence: { status: "current" },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    runStore,
+    orchestrator: outputChangeOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { previousRunId: "missing-run" },
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    assert.equal(body.status, "unavailable");
+    assert.equal(body.unavailableReason, "previous_run_missing");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs/:runId/output-change-explanation can attach an AI-assisted summary", async () => {
+  const runStore = createRunStore();
+  const previous = runStore.create(FIXED_SAMPLE, "live", "live-prev", {
+    status: "completed",
+    executionMode: "parity",
+    trustCaseId: "HELLO01-DEFAULT",
+    trustCaseConfigurationDigest: "same-digest",
+    trustCaseEnvironmentProfileId: "env-v1",
+    trustCaseComparisonPolicyVersion: "deterministic-output-v1",
+    trustSummary: {
+      trustCase: {
+        trustCaseId: "HELLO01-DEFAULT",
+        configurationDigest: "same-digest",
+      },
+      cobolResult: { normalizedOutputRef: { sha256: "a".repeat(64) } },
+      javaResult: { normalizedOutputRef: { sha256: "b".repeat(64) } },
+      comparisonResult: { diffRef: { sha256: "2".repeat(64) } },
+      repair: { repairDecisionRef: { sha256: "6".repeat(64) } },
+      evidence: { status: "current" },
+    },
+  });
+  const current = runStore.create(FIXED_SAMPLE, "live", "live-current", {
+    status: "completed",
+    executionMode: "parity",
+    trustCaseId: "HELLO01-DEFAULT",
+    trustCaseConfigurationDigest: "same-digest",
+    trustCaseEnvironmentProfileId: "env-v1",
+    trustCaseComparisonPolicyVersion: "deterministic-output-v1",
+    trustSummary: {
+      trustCase: {
+        trustCaseId: "HELLO01-DEFAULT",
+        configurationDigest: "same-digest",
+      },
+      cobolResult: { normalizedOutputRef: { sha256: "a".repeat(64) } },
+      javaResult: { normalizedOutputRef: { sha256: "c".repeat(64) } },
+      comparisonResult: { diffRef: { sha256: "3".repeat(64) } },
+      repair: { repairDecisionRef: { sha256: "7".repeat(64) } },
+      evidence: { status: "current" },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    trustCases: stubTrustCases([FIXED_TRUST_CASE]),
+    runStore,
+    orchestrator: outputChangeOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: {
+      ...availableModelGateway(),
+      async explain() {
+        return {
+          status: 200,
+          body: {
+            explanation:
+              "The repaired Java candidate changed the observed output.",
+            invocationId: "inv-output-change-1",
+            ledgerRef: "urn:ledger:output-change-1",
+          },
+        };
+      },
+    },
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          previousRunId: previous.runId,
+          includeAiSummary: true,
+        },
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    const aiSummary = body.aiSummary as Record<string, unknown>;
+    assert.equal(aiSummary.status, "available");
+    assert.match(String(aiSummary.explanation), /repaired Java candidate/i);
   } finally {
     await server.close();
   }

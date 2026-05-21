@@ -6,6 +6,7 @@ import { apiClient } from "../../lib/apiClient";
 import { useTransformationRun } from "../../stores/transformationRun";
 import { useSourceWorkspace } from "../../stores/sourceWorkspace";
 import { EquivalencePanel } from "./EquivalencePanel";
+import { OutputChangeExplanationPanel } from "./OutputChangeExplanationPanel";
 import { TrustSummaryCard } from "./TrustSummaryCard";
 import { MetadataRow } from "../ui/MetadataRow";
 import { StatusChip } from "../ui/StatusChip";
@@ -296,6 +297,12 @@ export function BuildTestPanel({
             manualDriftMessage={manualDriftMessage}
             parityEvidenceExport={parityEvidenceExport}
             onExportParityEvidenceScaffold={handleExportParityEvidenceScaffold}
+          />
+        </div>
+        <div className="mt-4">
+          <OutputChangeExplanationPanel
+            currentRunId={state.runId}
+            previousRunId={state.previousRun?.runId ?? null}
           />
         </div>
       </div>
