@@ -232,6 +232,10 @@ export interface OrchestratorClient {
   ): Promise<UpstreamResponse | undefined>;
   getBuildTest(runId: string): Promise<UpstreamResponse | undefined>;
   getEvidence(runId: string): Promise<UpstreamResponse | undefined>;
+  exportParityRegression?(
+    runId: string,
+    payload: unknown,
+  ): Promise<UpstreamResponse | undefined>;
   getEvents(runId: string): Promise<UpstreamResponse | undefined>;
   // Issue #96: step-level pipeline progress for UI-started runs.
   getProgress(runId: string): Promise<UpstreamResponse | undefined>;
@@ -324,6 +328,9 @@ export function createOrchestratorClient(
         return undefined;
       },
       async getEvidence() {
+        return undefined;
+      },
+      async exportParityRegression() {
         return undefined;
       },
       async getEvents() {
@@ -544,6 +551,18 @@ export function createOrchestratorClient(
     },
     async getEvidence(runId: string) {
       return getRunScopedArtifact(runId, "evidence");
+    },
+    async exportParityRegression(runId: string, payload: unknown) {
+      const safe = encodeURIComponent(runId);
+      return http.request(
+        `${baseUrl}/v0/runs/${safe}/evidence/export/request`,
+        {
+          method: "POST",
+          headers: controlHeaders,
+          body: payload,
+          timeoutMs,
+        },
+      );
     },
     async getEvents(runId: string) {
       return getRunScopedArtifact(runId, "events");

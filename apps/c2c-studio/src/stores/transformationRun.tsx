@@ -43,6 +43,8 @@ import {
   ManualCompileRepairPreviewResponse,
   ManualCompileRepairProposal,
   ManualCompileRepairRejectResponse,
+  ParityEvidenceExportRequest,
+  ParityEvidenceExportResponse,
 } from "../types/api";
 import { deriveSourceHash } from "../lib/sourceAnalysis";
 import {
@@ -197,6 +199,9 @@ export interface TransformationRunContextValue {
   // optional ``manualEditOverlay`` is forwarded to the BFF which stamps
   // the run-summary manual-edit fields from it per ADR-0007 §4.
   startVerify: (request: VerifyRequest) => Promise<ApiResult<VerifyResponse>>;
+  exportParityEvidenceScaffold: (
+    request?: ParityEvidenceExportRequest,
+  ) => Promise<ApiResult<ParityEvidenceExportResponse>>;
   setState: React.Dispatch<React.SetStateAction<TransformationRunState>>;
   // ----- Studio-IDE-3 Java buffer model --------------------------------
   javaBuffers: Record<string, JavaBufferEntry>;
@@ -323,6 +328,7 @@ export function TransformationRunProvider({
   const isMountedRef = useRef(true);
   const activeTransformRequestRef = useRef(0);
   const activeManualCompileRepairRequestRef = useRef(0);
+  const currentRunIdRef = useRef<string | null>(null);
   const pendingGenerateTelemetryRef =
     useRef<PendingGenerateTelemetry | null>(null);
   const [state, setState] = useState<TransformationRunState>({
@@ -376,6 +382,10 @@ export function TransformationRunProvider({
       isMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    currentRunIdRef.current = state.runId;
+  }, [state.runId]);
 
   useEffect(() => {
     return subscribeToDraftPersistenceEvents(() => {
@@ -533,6 +543,7 @@ export function TransformationRunProvider({
       payload: telemetry,
     });
     const startedAt = Date.now();
+    currentRunIdRef.current = null;
 
     setState((prev) => ({
       phase: "starting",
@@ -580,6 +591,7 @@ export function TransformationRunProvider({
       result.data.status,
       startedAt,
     );
+    currentRunIdRef.current = result.data.runId;
 
     setState((prev) => ({
       ...prev,
@@ -643,6 +655,7 @@ export function TransformationRunProvider({
       payload: telemetry,
     });
     const startedAt = Date.now();
+    currentRunIdRef.current = null;
 
     setState((prev) => ({
       phase: "starting",
@@ -690,6 +703,7 @@ export function TransformationRunProvider({
       result.data.status,
       startedAt,
     );
+    currentRunIdRef.current = result.data.runId;
 
     setState((prev) => ({
       ...prev,
@@ -783,6 +797,41 @@ export function TransformationRunProvider({
     setLatestVerifyResult(result.data);
     return result;
   };
+
+  const exportParityEvidenceScaffold = useCallback(
+    async (
+      request: ParityEvidenceExportRequest = {},
+    ): Promise<ApiResult<ParityEvidenceExportResponse>> => {
+      const runId = currentRunIdRef.current;
+      if (!runId) {
+        return {
+          ok: false,
+          message: "No completed run is available for export.",
+        };
+      }
+      const result = await apiClient.exportParityEvidenceScaffold(runId, request);
+      if (currentRunIdRef.current !== runId) {
+        return {
+          ok: false,
+          message: "The active run changed before the export completed.",
+        };
+      }
+      if (!result.ok) {
+        return result;
+      }
+      setState((prev) => ({
+        ...prev,
+        evidence: prev.evidence
+          ? {
+              ...prev.evidence,
+              exportRef: result.data.export.scaffoldRef,
+            }
+          : prev.evidence,
+      }));
+      return result;
+    },
+    [],
+  );
 
   const clearManualCompileRepair = useCallback(() => {
     setManualCompileRepair(null);
@@ -1628,6 +1677,7 @@ export function TransformationRunProvider({
         startTransform,
         startGenerate,
         startVerify,
+        exportParityEvidenceScaffold,
         setState,
         javaBuffers,
         javaConflict,

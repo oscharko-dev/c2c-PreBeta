@@ -320,6 +320,18 @@ class OrchestratorService:
                         if parts[4] == "reject" and parts[5] == "request":
                             self._write_json(200, service._manual_compile_repair_reject(run_id, payload))
                             return
+                    if (
+                        len(parts) == 6
+                        and parts[0] == "v0"
+                        and parts[1] == "runs"
+                        and parts[3] == "evidence"
+                        and parts[4] == "export"
+                        and parts[5] == "request"
+                    ):
+                        run_id = parts[2]
+                        payload = self._read_json()
+                        self._write_json(200, service._export_parity_regression(run_id, payload))
+                        return
                     self._write_json(404, {"error": "not found"})
                 except json.JSONDecodeError:
                     self._write_json(400, {"error": "invalid JSON body"})
@@ -515,6 +527,19 @@ class OrchestratorService:
             run_id=run_id,
             requester=requester,
             proposal={"proposalId": proposal_id},
+        )
+
+    def _export_parity_regression(
+        self,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        export_name = str(payload.get("exportName") or "").strip() or None
+        requester = str(payload.get("requester") or self.config.service_name).strip()
+        return self.runner.export_parity_regression_test(
+            run_id=run_id,
+            requester=requester,
+            export_name=export_name,
         )
 
     def _artifact_payload(

@@ -385,6 +385,171 @@ describe("apiClient", () => {
     });
   });
 
+  it("exports parity evidence as a Java regression scaffold and parses the scaffold reference", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: "run-1",
+          programId: "P1",
+          status: "created",
+          message: "Java parity regression scaffold exported as a run artifact.",
+          export: {
+            exportId: "hello-regression",
+            qualification: "clean",
+            scaffoldRef: {
+              sha256: "s".repeat(64),
+              byteSize: 512,
+              kind: "parity-regression-test-file",
+              path: "exports/java-regression/p1/hello/src/test/java/P1ParityRegressionTest.java",
+              createdAt: "2026-05-21T12:34:56.000Z",
+            },
+            projectRoot: "run-export-1",
+            scaffoldTestPath: "src/test/java/P1ParityRegressionTest.java",
+            projectManifestRef: {
+              sha256: "p".repeat(64),
+              byteSize: 128,
+              kind: "parity-regression-project-manifest",
+            },
+            manifestRef: {
+              sha256: "m".repeat(64),
+              byteSize: 128,
+              kind: "parity-regression-export-manifest",
+            },
+            expectedOutputRef: {
+              sha256: "e".repeat(64),
+              byteSize: 128,
+              kind: "parity-regression-expected-output",
+            },
+            createdAt: "2026-05-21T12:34:56.000Z",
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.exportParityEvidenceScaffold("run-1", {
+      exportName: "hello-regression",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v0/runs/run-1/evidence/export",
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exportName: "hello-regression" }),
+      },
+    );
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        runId: "run-1",
+        programId: "P1",
+        status: "created",
+        message: "Java parity regression scaffold exported as a run artifact.",
+        export: {
+          exportId: "hello-regression",
+          qualification: "clean",
+          scaffoldRef: {
+            sha256: "s".repeat(64),
+            byteSize: 512,
+            kind: "parity-regression-test-file",
+            path: "exports/java-regression/p1/hello/src/test/java/P1ParityRegressionTest.java",
+            createdAt: "2026-05-21T12:34:56.000Z",
+          },
+          projectRoot: "run-export-1",
+          scaffoldTestPath: "src/test/java/P1ParityRegressionTest.java",
+          projectManifestRef: {
+            sha256: "p".repeat(64),
+            byteSize: 128,
+            kind: "parity-regression-project-manifest",
+          },
+          manifestRef: {
+            sha256: "m".repeat(64),
+            byteSize: 128,
+            kind: "parity-regression-export-manifest",
+          },
+          expectedOutputRef: {
+            sha256: "e".repeat(64),
+            byteSize: 128,
+            kind: "parity-regression-expected-output",
+          },
+          createdAt: "2026-05-21T12:34:56.000Z",
+        },
+      },
+    });
+  });
+
+  it("posts parity evidence export requests and validates the response shape", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          runId: "run-1",
+          programId: "P1",
+          status: "created",
+          message: "Scaffold exported for review.",
+          export: {
+            exportId: "export-1",
+            projectRoot: "runs/run-1/exports/java-regression/case01",
+            scaffoldTestPath:
+              "runs/run-1/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java",
+            scaffoldRef: {
+              sha256: "s".repeat(64),
+              byteSize: 256,
+              kind: "parity-regression-test-file",
+              path: "runs/run-1/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java",
+              createdAt: "2026-05-21T13:00:00.000Z",
+              createdBy: "orchestrator-service",
+            },
+            projectManifestRef: null,
+            manifestRef: null,
+            expectedOutputRef: null,
+            createdAt: "2026-05-21T13:00:00.000Z",
+            qualification: "clean",
+          },
+        }),
+    } as Response);
+
+    const result = await apiClient.exportParityEvidenceScaffold("run-1", {
+      exportName: "case01",
+    });
+
+    expect(fetch).toHaveBeenCalledWith("/api/v0/runs/run-1/evidence/export", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exportName: "case01" }),
+    });
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        runId: "run-1",
+        programId: "P1",
+        status: "created",
+        message: "Scaffold exported for review.",
+        export: {
+          exportId: "export-1",
+          projectRoot: "runs/run-1/exports/java-regression/case01",
+          scaffoldTestPath:
+            "runs/run-1/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java",
+          scaffoldRef: {
+            sha256: "s".repeat(64),
+            byteSize: 256,
+            kind: "parity-regression-test-file",
+            path: "runs/run-1/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java",
+            createdAt: "2026-05-21T13:00:00.000Z",
+            createdBy: "orchestrator-service",
+          },
+          projectManifestRef: null,
+          manifestRef: null,
+          expectedOutputRef: null,
+          createdAt: "2026-05-21T13:00:00.000Z",
+          qualification: "clean",
+        },
+      },
+    });
+  });
+
   it("accepts valid build-test payloads with object outputRef metadata", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

@@ -32,6 +32,7 @@ import {
 vi.mock("@/lib/apiClient", () => ({
   apiClient: {
     transform: vi.fn(),
+    exportParityEvidenceScaffold: vi.fn(),
     getRun: vi.fn(),
     getGenerated: vi.fn(),
     getGeneratedFiles: vi.fn(),
@@ -267,7 +268,8 @@ function makeExperienceResult(
 }
 
 function RunHarness() {
-  const { state, startTransform } = useTransformationRun();
+  const { state, startTransform, exportParityEvidenceScaffold } =
+    useTransformationRun();
 
   return (
     <div>
@@ -297,6 +299,9 @@ function RunHarness() {
       </div>
       <div data-testid="evidence-sha">
         {state.evidence?.generatedArtifactRef?.sha256 ?? "none"}
+      </div>
+      <div data-testid="evidence-export-sha">
+        {state.evidence?.exportRef?.sha256 ?? "none"}
       </div>
       <div data-testid="events-count">{state.events?.events.length ?? 0}</div>
       <div data-testid="previous-run-id">
@@ -339,6 +344,9 @@ function RunHarness() {
         }
       >
         start-b
+      </button>
+      <button onClick={() => void exportParityEvidenceScaffold()}>
+        export
       </button>
     </div>
   );
@@ -465,6 +473,87 @@ describe("transformation run state machine", () => {
       "generated",
     );
     expect(screen.getByTestId("artifacts-count")).toHaveTextContent("1");
+  });
+
+  it("updates the in-memory evidence export ref after a successful parity export", async () => {
+    const runId = "run-export";
+    const fixtures = makeArtifactFixtures(runId, "P-A", "c".repeat(64));
+
+    vi.mocked(apiClient.transform).mockResolvedValueOnce(
+      makeTerminalResponse(runId, "P-A", "completed"),
+    );
+    vi.mocked(apiClient.getGenerated).mockResolvedValueOnce(fixtures.generated);
+    vi.mocked(apiClient.getGeneratedFiles).mockResolvedValueOnce(
+      fixtures.generatedFiles,
+    );
+    vi.mocked(apiClient.getBuildTest).mockResolvedValueOnce(fixtures.buildTest);
+    vi.mocked(apiClient.getEvidence).mockResolvedValueOnce(fixtures.evidence);
+    vi.mocked(apiClient.getRunEvents).mockResolvedValueOnce(fixtures.events);
+    vi.mocked(apiClient.getRunArtifacts).mockResolvedValueOnce(
+      fixtures.artifacts,
+    );
+    vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(
+      makeExperienceResult(runId, "P-A"),
+    );
+    vi.mocked(apiClient.getRunExperience).mockImplementation((currentRunId: string) =>
+      Promise.resolve(makeExperienceResult(currentRunId, "P-A")),
+    );
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() =>
+      Promise.resolve(okResult<ModelGatewayHealth>({ status: "ok" })),
+    );
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() =>
+      Promise.resolve(okResult<HarnessReady>({ status: "ok" })),
+    );
+    vi.mocked(apiClient.exportParityEvidenceScaffold).mockResolvedValueOnce(
+      okResult({
+        runId,
+        programId: "P-A",
+        status: "created",
+        export: {
+          exportId: "export-1",
+          projectRoot: "runs/run-export/exports/java-regression/case01",
+          scaffoldTestPath:
+            "runs/run-export/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java",
+          scaffoldRef: {
+            sha256: "9".repeat(64),
+            path: "runs/run-export/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java",
+          },
+          projectManifestRef: null,
+          manifestRef: null,
+          expectedOutputRef: null,
+          createdAt: "2026-05-21T13:00:00.000Z",
+          qualification: "clean" as const,
+        },
+      }),
+    );
+
+    render(
+      <TransformationRunProvider>
+        <RunHarness />
+      </TransformationRunProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("start-a"));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("phase")).toHaveTextContent("completed"),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("export"));
+    });
+
+    await waitFor(() =>
+      expect(apiClient.exportParityEvidenceScaffold).toHaveBeenCalledWith(
+        runId,
+        {},
+      ),
+    );
+    expect(screen.getByTestId("evidence-export-sha")).toHaveTextContent(
+      "9".repeat(64),
+    );
   });
 
   it("keeps a completed run incomplete when required artifact views are missing", async () => {

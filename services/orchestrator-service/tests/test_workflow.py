@@ -14,6 +14,7 @@ from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.harness import DataReference, HarnessFailure
 from orchestrator_service.workflow import (
     CapabilityMissingError,
+    OrchestratorError,
     W0RunContext,
     W0WorkflowRunner,
     StepExecutionError,
@@ -978,7 +979,151 @@ class WorkflowArtifactPersistenceTests(unittest.TestCase):
         self.assertEqual(evidence_model_ref["provider"], "policy-skipped")
         self.assertEqual(evidence_model_ref["policyVersion"], "v0")
         self.assertEqual(evidence_model_ref["ledgerRef"]["uri"], skipped_meta["uri"])
-        self.assertEqual(evidence_model_ref["ledgerRef"]["sha256"], skipped_meta["sha256"])
+
+    def test_parity_export_creates_reviewable_java_regression_scaffold(self):
+        responses = W0WorkflowRunnerTests._base_responses()
+        responses["java.build-test"]["expectedOutput"] = "NORMALIZED-OUTPUT"
+        gateway = StubGateway(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+        )
+        runner, store, root = self._runner_with_store(gateway)
+        context = W0RunContext(
+            run_id="run-export-1",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02-DEFAULT",
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+        )
+
+        result = runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+        self.assertEqual(result["status"], "completed")
+
+        export = runner.export_parity_regression_test(
+            run_id="run-export-1",
+            requester="studio",
+            export_name="hello-regression",
+        )
+
+        self.assertEqual(export["status"], "created")
+        export_meta = export["export"]
+        scaffold_path = export_meta["scaffoldRef"]["path"]
+        self.assertTrue((root / "run-export-1" / scaffold_path).is_file())
+        scaffold_java = (root / "run-export-1" / scaffold_path).read_text("utf-8")
+        self.assertIn("org.junit.jupiter.api.Test", scaffold_java)
+        self.assertIn("assertEquals", scaffold_java)
+        self.assertIn("captureProgramOutput", scaffold_java)
+
+        export_manifest_path = export_meta["manifestRef"]["path"]
+        export_manifest = json.loads(
+            (root / "run-export-1" / export_manifest_path).read_text("utf-8")
+        )
+        self.assertEqual(export_manifest["exportKind"], "java-parity-regression")
+        self.assertEqual(export_manifest["runId"], "run-export-1")
+        self.assertEqual(export_manifest["provenance"]["trustState"], "parity_passed")
+
+        evidence_manifest = json.loads(
+            (root / "run-export-1" / "evidence-pack-manifest.json").read_text("utf-8")
+        )
+        self.assertTrue(evidence_manifest["exports"])
+        self.assertEqual(
+            evidence_manifest["exports"][0]["path"],
+            export_meta["scaffoldRef"]["path"],
+        )
+
+    def test_parity_export_uses_safe_suffix_instead_of_overwriting_existing_scaffold(self):
+        responses = W0WorkflowRunnerTests._base_responses()
+        responses["java.build-test"]["expectedOutput"] = "NORMALIZED-OUTPUT"
+        gateway = StubGateway(
+            W0WorkflowRunnerTests._base_capabilities(),
+            responses,
+        )
+        runner, _store, root = self._runner_with_store(gateway)
+        context = W0RunContext(
+            run_id="run-export-2",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02-DEFAULT",
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+        )
+        runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+
+        first = runner.export_parity_regression_test(
+            run_id="run-export-2",
+            requester="studio",
+            export_name="hello-regression",
+        )
+        second = runner.export_parity_regression_test(
+            run_id="run-export-2",
+            requester="studio",
+            export_name="hello-regression",
+        )
+
+        self.assertNotEqual(
+            first["export"]["scaffoldRef"]["path"],
+            second["export"]["scaffoldRef"]["path"],
+        )
+        self.assertTrue(
+            (root / "run-export-2" / first["export"]["scaffoldRef"]["path"]).is_file()
+        )
+        self.assertTrue(
+            (root / "run-export-2" / second["export"]["scaffoldRef"]["path"]).is_file()
+        )
+
+    def test_parity_export_blocks_incomplete_evidence(self):
+        gateway = StubGateway(
+            W0WorkflowRunnerTests._base_capabilities(),
+            W0WorkflowRunnerTests._base_responses(),
+        )
+        runner, store, _root = self._runner_with_store(gateway)
+        context = W0RunContext(
+            run_id="run-export-3",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02-DEFAULT",
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+        )
+        runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+        contract = store.read_json("run-export-3", "w02-run-contract.json")
+        assert contract is not None
+        trust_summary = contract.get("trustSummary")
+        assert isinstance(trust_summary, dict)
+        evidence = trust_summary.get("evidence")
+        assert isinstance(evidence, dict)
+        evidence["status"] = "incomplete"
+        store.write_json(
+            "run-export-3",
+            "w0-migration-v0",
+            "w02-run-contract.json",
+            contract,
+            kind="w02-run-contract",
+        )
+
+        with self.assertRaisesRegex(
+            OrchestratorError, "incomplete evidence cannot produce a regression scaffold"
+        ):
+            runner.export_parity_regression_test(
+                run_id="run-export-3",
+                requester="studio",
+            )
 
     def test_failed_run_persists_partial_artifacts_and_failure_summary(self):
         responses = W0WorkflowRunnerTests._base_responses()

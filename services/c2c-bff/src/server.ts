@@ -5802,6 +5802,64 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         return;
       }
 
+      const evidenceExportMatch = /^\/api\/v0\/runs\/([^\/]+)\/evidence\/export$/.exec(
+        pathname,
+      );
+      if (evidenceExportMatch && method === "POST") {
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          jsonResponse(res, 400, {
+            error:
+              err instanceof Error ? err.message : "Invalid JSON body.",
+          });
+          return;
+        }
+        const runId = decodeURIComponent(evidenceExportMatch[1] ?? "");
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        if (stored.mode === "diagnostic-fixture") {
+          jsonResponse(res, 409, {
+            error:
+              "Diagnostic-fixture runs cannot export parity regression scaffolds.",
+          });
+          return;
+        }
+        try {
+          const upstream = await orchestrator.exportParityRegression?.(runId, body ?? {});
+          if (!upstream) {
+            jsonResponse(res, 503, {
+              error: "orchestrator unavailable",
+            });
+            return;
+          }
+          if (upstream.status < 200 || upstream.status >= 300) {
+            const envelope = asRecord(upstream.body);
+            jsonResponse(res, upstream.status, {
+              error: sanitizeUpstreamMessage(
+                asString(envelope?.error),
+                "orchestrator request failed",
+              ),
+            });
+            return;
+          }
+          jsonResponse(res, upstream.status, upstream.body);
+          return;
+        } catch (err) {
+          jsonResponse(res, 502, {
+            error: sanitizeUpstreamMessage(
+              err instanceof Error ? err.message : "",
+              "orchestrator request failed",
+            ),
+          });
+          return;
+        }
+      }
+
       const progressMatch = /^\/api\/v0\/runs\/([^\/]+)\/progress$/.exec(
         pathname,
       );

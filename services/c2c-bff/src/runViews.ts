@@ -921,13 +921,29 @@ export function deriveExportRef(
   if (!data) return null;
   const exports = data.exports;
   if (!Array.isArray(exports) || exports.length === 0) return null;
+  let chosen: Record<string, unknown> | null = null;
+  let chosenCreatedAt = "";
   for (const entry of exports) {
     const record = asRecord(entry);
     if (!record) continue;
     const ref = normalizeOutputRef(record);
-    if (ref) return ref;
+    if (!ref) continue;
+    const createdAt = asString(record.createdAt);
+    if (!chosen) {
+      chosen = record;
+      chosenCreatedAt = createdAt;
+      continue;
+    }
+    if (createdAt && (!chosenCreatedAt || createdAt > chosenCreatedAt)) {
+      chosen = record;
+      chosenCreatedAt = createdAt;
+      continue;
+    }
+    if (!createdAt && !chosenCreatedAt) {
+      chosen = record;
+    }
   }
-  return null;
+  return chosen ? normalizeOutputRef(chosen) : null;
 }
 
 export function deriveMissingFromValidation(

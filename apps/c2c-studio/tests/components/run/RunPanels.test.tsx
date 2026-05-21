@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BuildTestPanel } from '../../../src/components/run/BuildTestPanel';
 import { EvidencePackPanel } from '../../../src/components/run/EvidencePackPanel';
@@ -52,9 +52,11 @@ vi.mock('@/lib/editor/markerNavigation', () => ({
 describe('Run Panels', () => {
   let useTransformationRunMock: any;
   let useSourceWorkspaceMock: any;
+  let exportParityEvidenceScaffoldMock: any;
   
   beforeEach(async () => {
     vi.resetAllMocks();
+    exportParityEvidenceScaffoldMock = vi.fn();
     const mod = await import('../../../src/stores/transformationRun');
     useTransformationRunMock = mod.useTransformationRun;
     const sourceMod = await import('../../../src/stores/sourceWorkspace');
@@ -65,6 +67,10 @@ describe('Run Panels', () => {
         pendingReRun: false,
       },
       selectedTrustCase: null,
+    });
+    useTransformationRunMock.mockReturnValue({
+      state: mockState,
+      exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
     });
   });
 
@@ -431,6 +437,133 @@ describe('Run Panels', () => {
       expect(screen.getAllByText('Repair guardrail escalated to manual review.').length).toBeGreaterThan(0);
       expect(screen.getByText('pack-123')).toBeDefined();
       expect(screen.getByText('rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr')).toBeDefined();
+    });
+
+    it('exports a parity scaffold and surfaces the export status in the trust summary', async () => {
+      exportParityEvidenceScaffoldMock.mockResolvedValue({
+        ok: true,
+        data: {
+          runId: 'run-123',
+          programId: 'PROG-1',
+          status: 'created',
+          message: 'Scaffold exported for review.',
+          export: {
+            exportId: 'export-123',
+            projectRoot: 'runs/run-123/exports/java-regression/case01',
+            scaffoldTestPath:
+              'runs/run-123/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java',
+            scaffoldRef: {
+              sha256: 's'.repeat(64),
+              path: 'runs/run-123/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java',
+              createdAt: '2026-05-21T13:00:00.000Z',
+            },
+            projectManifestRef: {
+              sha256: 'p'.repeat(64),
+            },
+            manifestRef: {
+              sha256: 'm'.repeat(64),
+            },
+            expectedOutputRef: {
+              sha256: 'e'.repeat(64),
+            },
+            createdAt: '2026-05-21T13:00:00.000Z',
+            qualification: 'clean',
+          },
+        },
+      });
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          runId: 'run-123',
+          programId: 'PROG-1',
+          buildTest: {
+            runId: 'run-123',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'ok',
+            classification: 'match',
+            generatedArtifactRef: null,
+          },
+          evidence: {
+            runId: 'run-123',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'complete',
+            generatedArtifactRef: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+      });
+
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: /Export Java regression scaffold/i }),
+      );
+
+      await waitFor(() =>
+        expect(exportParityEvidenceScaffoldMock).toHaveBeenCalledTimes(1),
+      );
+      expect(screen.getByText('Scaffold exported for review.')).toBeDefined();
+      expect(screen.getByText('Clean export')).toBeDefined();
+      expect(
+        screen.getAllByText(
+          'runs/run-123/exports/java-regression/case01/src/test/java/com/demo/CASE01ParityRegressionTest.java',
+        ).length,
+      ).toBeGreaterThan(1);
+    });
+
+    it('surfaces export errors when parity evidence is not eligible', async () => {
+      exportParityEvidenceScaffoldMock.mockResolvedValue({
+        ok: false,
+        message:
+          'export blocked: incomplete evidence cannot produce a regression scaffold',
+      });
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          runId: 'run-123',
+          programId: 'PROG-1',
+          buildTest: {
+            runId: 'run-123',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'ok',
+            classification: 'match',
+            generatedArtifactRef: null,
+          },
+          evidence: {
+            runId: 'run-123',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'incomplete',
+            missingArtifacts: ['generatedJava'],
+            generatedArtifactRef: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+      });
+
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: /Export Java regression scaffold/i }),
+      );
+
+      await waitFor(() =>
+        expect(exportParityEvidenceScaffoldMock).toHaveBeenCalledTimes(1),
+      );
+      expect(
+        screen.getByText(
+          'Export failed: export blocked: incomplete evidence cannot produce a regression scaffold',
+        ),
+      ).toBeDefined();
     });
   });
 
