@@ -5752,7 +5752,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         if (trustCaseId && trustCaseId.length > PARITY_IDENTIFIER_MAX_CHARS) {
-          badRequest(res, "trustCaseId exceeds maximum length");
+          badRequest(
+            res,
+            `trustCaseId exceeds maximum length of ${PARITY_IDENTIFIER_MAX_CHARS} characters`,
+          );
           return;
         }
         const sourceReferenceFixtureId =
@@ -5775,7 +5778,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           sourceReferenceFixtureId &&
           sourceReferenceFixtureId.length > PARITY_IDENTIFIER_MAX_CHARS
         ) {
-          badRequest(res, "sourceReferenceFixtureId exceeds maximum length");
+          badRequest(
+            res,
+            `sourceReferenceFixtureId exceeds maximum length of ${PARITY_IDENTIFIER_MAX_CHARS} characters`,
+          );
           return;
         }
         const parityRequested =

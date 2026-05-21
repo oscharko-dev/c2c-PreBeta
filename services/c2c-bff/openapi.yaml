@@ -1785,6 +1785,12 @@ components:
           type: string
           enum: [standard, parity]
         trustCaseId: { type: string, maxLength: 128 }
+        trustCaseVersion: { type: string, maxLength: 128 }
+        trustCaseCatalogVersion: { type: string, maxLength: 128 }
+        trustCaseCatalogHash: { type: string, maxLength: 256 }
+        trustCaseConfigurationDigest: { type: string, maxLength: 256 }
+        trustCaseEnvironmentProfileId: { type: string, maxLength: 128 }
+        trustCaseComparisonPolicyVersion: { type: string, maxLength: 128 }
         sourceReferenceFixtureId: { type: string, maxLength: 128 }
         sourceReferenceMode:
           type: string
