@@ -1057,7 +1057,7 @@ describe("COBOL source input", () => {
     );
     const generate = await screen.findByTestId("topbar-generate-button");
     await waitFor(() => {
-      expect(generateAndVerify).toBeDisabled();
+      expect(generateAndVerify).not.toBeDisabled();
       expect(generate).not.toBeDisabled();
     });
 
@@ -1065,6 +1065,82 @@ describe("COBOL source input", () => {
 
     await waitFor(() => {
       expect(apiClient.generate).toHaveBeenCalledWith({
+        sourceText,
+        programId: undefined,
+        sourceName: "pasted-source.cbl",
+        targetLanguage: "java",
+        expectedOutput: undefined,
+        oracleInput: undefined,
+        useTransformationAgent: true,
+      });
+    });
+  });
+
+  it("submits a standard transform without trustCaseId when no catalog entries apply", async () => {
+    vi.mocked(apiClient.getTrustCases).mockResolvedValue(
+      okResult<TrustCasesResponse>({
+        schemaVersion: "v0",
+        catalogVersion: "2026-05-21",
+        catalogHash: "0".repeat(64),
+        programId: "NOCAT",
+        defaultTrustCaseId: null,
+        savedTrustCaseId: null,
+        trustCases: [],
+      }),
+    );
+    vi.mocked(apiClient.transform).mockResolvedValue({
+      ok: true,
+      data: {
+        runId: "std-1",
+        orchestratorRunId: "orch-std-1",
+        programId: "NOCAT",
+        status: "starting",
+        mode: "live",
+        productMode: "live",
+        createdAt: "2026-05-21T00:00:00.000Z",
+        updatedAt: "2026-05-21T00:00:00.000Z",
+        links: {
+          self: "/api/v0/runs/std-1",
+          generated: "/api/v0/runs/std-1/generated",
+          generatedFiles: "/api/v0/runs/std-1/generated/files",
+          buildTest: "/api/v0/runs/std-1/build-test",
+          evidence: "/api/v0/runs/std-1/evidence",
+          events: "/api/v0/runs/std-1/events",
+          artifacts: "/api/v0/runs/std-1/artifacts",
+        },
+      },
+    });
+
+    renderSourceWorkbench(
+      <>
+        <AppTopBar
+          apiState={{
+            health: { status: "ok" },
+            mode: { orchestrator: "live", evidence: "live" },
+            error: null,
+            errorKind: null,
+            loading: false,
+          }}
+        />
+        <CobolEditorPane />
+      </>,
+    );
+
+    fireEvent.click(screen.getByText("Start Typing"));
+    const sourceText =
+      "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. NOCAT.\n";
+    fireEvent.change(screen.getByRole("textbox", { name: /COBOL source editor/i }), {
+      target: { value: sourceText },
+    });
+
+    const generateAndVerify = await screen.findByTestId(
+      "topbar-generate-and-verify-button",
+    );
+    await waitFor(() => expect(generateAndVerify).not.toBeDisabled());
+    fireEvent.click(generateAndVerify);
+
+    await waitFor(() => {
+      expect(apiClient.transform).toHaveBeenCalledWith({
         sourceText,
         programId: undefined,
         sourceName: "pasted-source.cbl",

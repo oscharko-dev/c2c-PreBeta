@@ -400,7 +400,8 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     !isTransforming &&
     !modelGatewayUnavailable &&
     trustCaseStatus !== "loading" &&
-    selectedTrustCaseId !== null;
+    trustCaseStatus !== "error" &&
+    (trustCases.length === 0 || selectedTrustCaseId !== null);
   const canSubmitGenerate =
     sourceText.trim().length > 0 && !isTransforming && !modelGatewayUnavailable;
 
@@ -439,7 +440,25 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       return result;
     }
 
-    if (!selectedTrustCaseId) {
+    if (trustCaseStatus === "loading") {
+      const result = {
+        ok: false,
+        message: "Trust cases are still loading. Try again shortly.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+
+    if (trustCaseStatus === "error") {
+      const result = {
+        ok: false,
+        message: trustCaseError ?? "Trust-case catalog is unavailable.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+
+    if (trustCases.length > 0 && !selectedTrustCaseId) {
       const result = {
         ok: false,
         message:
@@ -456,7 +475,12 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       programId: undefined,
       sourceName: sourceName || DEFAULT_SOURCE_NAME,
       targetLanguage: "java",
-      trustCaseId: selectedTrustCaseId,
+      ...(selectedTrustCaseId
+        ? { trustCaseId: selectedTrustCaseId }
+        : {
+            expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
+            oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
+          }),
     } as const;
 
     const result = await startTransform(

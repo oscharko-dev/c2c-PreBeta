@@ -47,6 +47,13 @@ async function enterCobolSource(page: Page, content: string) {
   await expect(editor).toBeVisible({ timeout: 30_000 });
   await editor.click();
   await page.keyboard.insertText(content);
+  const aiAssistToggle = page.getByLabel(
+    "Allow AI assist after deterministic baseline",
+  );
+  if (await aiAssistToggle.isChecked()) {
+    await aiAssistToggle.click();
+  }
+  await expect(aiAssistToggle).not.toBeChecked();
 }
 
 async function replaceCobolSource(page: Page, content: string) {
