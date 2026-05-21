@@ -15,13 +15,25 @@ import datetime
 import tempfile
 import unittest
 from collections.abc import Mapping
-from orchestrator_service.artifacts import JsonValue, RunArtifactStore
-from orchestrator_service.artifacts import KIND_PARSE_OUTPUT, KIND_SOURCE_REF
+from orchestrator_service.artifacts import (
+    KIND_EVIDENCE_PACK_MANIFEST,
+    KIND_PARSE_OUTPUT,
+    KIND_SOURCE_REF,
+    JsonValue,
+    RunArtifactStore,
+)
 from orchestrator_service.run_contract import (
     ASSIST_AGENT_ROLE_TRANSFORMATION,
     ASSIST_OUTCOME_REQUIRED,
     ASSIST_REASON_BASELINE_OPEN_ASSUMPTIONS,
+    CLASSIFICATION_BLOCKED,
+    CLASSIFICATION_FAILED,
+    CLASSIFICATION_INCOMPLETE,
+    CLASSIFICATION_SUCCESS,
     AssistDecision,
+    FAILURE_EVIDENCE_INCOMPLETE,
+    FAILURE_JAVA_COMPILE_FAILED,
+    FAILURE_JAVA_RUNTIME_FAILED,
     new_run_contract,
 )
 from orchestrator_service.workflow import (
@@ -918,6 +930,255 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
             productive_model_invocations=[transformation_model_ref],
         )
         self.assertEqual(payload["artifacts"]["oracleComparison"]["oracleKind"], "absent")
+
+    def _trust_summary(
+        self,
+        *,
+        context: W0RunContext,
+        contract,
+        build_test_output: WorkflowStepResult | None,
+        final_classification: str,
+        failure_code: str | None,
+        evidence_materialized: bool,
+    ) -> dict[str, JsonValue]:
+        evidence_meta = self.runner.artifact_store.write_json(
+            context.run_id,
+            context.workflow_id,
+            "evidence-pack-manifest.json",
+            {"status": "complete" if evidence_materialized else "incomplete"},
+            kind=KIND_EVIDENCE_PACK_MANIFEST,
+        )
+        contract.set_evidence_pack_ref(
+            {
+                "uri": "urn:evidence-pack",
+                "sha256": "9" * 64,
+                "byteSize": 1,
+            }
+        )
+        summary = self.runner._build_trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=build_test_output,
+            evidence_pack_meta=evidence_meta,
+            final_classification=final_classification,
+            failure_code=failure_code,
+            evidence_materialized=evidence_materialized,
+        )
+        contract.set_trust_summary(summary)
+        return summary
+
+    def test_trust_summary_projects_parity_pass_and_evidence_refs(self) -> None:
+        trust_case = load_trust_case_catalog().resolve(
+            "HELLOW02-DEFAULT",
+            program_id="HELLOW02",
+        ).to_identity_payload()
+        context = W0RunContext(
+            run_id="run-evidence",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02-DEFAULT",
+            trust_case_resolution=trust_case,
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+            use_transformation_agent=True,
+        )
+        contract = self._w02_contract()
+        contract.set_build_test_result_ref({"uri": "urn:run/build-1", "sha256": "c" * 64, "byteSize": 1})
+        contract.set_parity_comparison(
+            {
+                "matched": True,
+                "comparisonResultRef": {
+                    "uri": "urn:run/comparison-result",
+                    "sha256": "2" * 64,
+                    "byteSize": 24,
+                    "kind": "parity-comparison-result",
+                },
+                "diffRef": {
+                    "uri": "urn:run/comparison-diff",
+                    "sha256": "3" * 64,
+                    "byteSize": 18,
+                    "kind": "parity-comparison-diff",
+                },
+            }
+        )
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=_step(
+                "compile-test-java",
+                payload={
+                    "status": "ok",
+                    "classification": "match",
+                    "comparison": {"matched": True},
+                    "goldenMaster": {"classification": "true"},
+                },
+                output_uri="urn:run/build-1",
+            ),
+            final_classification=CLASSIFICATION_SUCCESS,
+            failure_code=None,
+            evidence_materialized=True,
+        )
+
+        self.assertEqual(summary["trustState"], "parity_passed")
+        self.assertEqual(summary["trustCase"]["trustCaseId"], "HELLOW02-DEFAULT")
+        self.assertEqual(summary["comparisonResult"]["status"], "matched")
+        self.assertEqual(summary["repairStatus"], "not_attempted")
+        self.assertEqual(summary["coverageStatus"], "full")
+        self.assertEqual(summary["warningCodes"], [])
+        self.assertEqual(summary["evidence"]["packRef"]["uri"], "urn:evidence-pack")
+        self.assertEqual(
+            summary["evidence"]["recordedAt"],
+            contract.trust_summary["evidence"]["recordedAt"],
+        )
+
+    def test_trust_summary_projects_build_failure_and_known_coverage_gap_warning(self) -> None:
+        trust_case = load_trust_case_catalog().resolve(
+            "HELLOW02-DEFAULT",
+            program_id="HELLOW02",
+        ).to_identity_payload()
+        context = W0RunContext(
+            run_id="run-evidence",
+            workflow_id="w0-migration-v0",
+            requester="bff",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02-DEFAULT",
+            trust_case_resolution=trust_case,
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+            use_transformation_agent=True,
+        )
+        contract = self._w02_contract()
+        build_output = _step(
+            "compile-test-java",
+            payload={
+                "status": "failed",
+                "classification": "divergence-known-w0-coverage-gap",
+                "mismatchClassification": "known-w0-coverage-gap",
+                "goldenMaster": {"classification": "synthetic"},
+            },
+            output_uri="urn:run/build-failed",
+        )
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=build_output,
+            final_classification=CLASSIFICATION_BLOCKED,
+            failure_code=FAILURE_JAVA_COMPILE_FAILED,
+            evidence_materialized=True,
+        )
+
+        self.assertEqual(summary["trustState"], "build_failed")
+        self.assertEqual(summary["repairStatus"], "not_attempted")
+        self.assertEqual(summary["coverageStatus"], "limited")
+        warning_codes = summary["warningCodes"]
+        self.assertIn("limited_coverage", warning_codes)
+        self.assertIn("known_coverage_gap", warning_codes)
+
+    def test_trust_summary_projects_runtime_failure_and_evidence_incomplete(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        contract.record_repair_attempt(
+            {
+                "attemptNumber": 1,
+                "repairDecision": "refuse",
+                "failureCategory": "java_runtime_failed",
+                "buildTestResultRef": {
+                    "uri": "urn:run/build-runtime",
+                    "sha256": "c" * 64,
+                    "byteSize": 1,
+                },
+            }
+        )
+        build_output = _step(
+            "compile-test-java",
+            payload={
+                "status": "failed",
+                "classification": "runtime_failed",
+                "runtimeStatus": "failed",
+                "goldenMaster": {"classification": "synthetic"},
+            },
+            output_uri="urn:run/build-runtime",
+        )
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=build_output,
+            final_classification=CLASSIFICATION_FAILED,
+            failure_code=FAILURE_JAVA_RUNTIME_FAILED,
+            evidence_materialized=False,
+        )
+
+        self.assertEqual(summary["trustState"], "runtime_failed")
+        self.assertEqual(summary["javaResult"]["status"], "runtime_failed")
+        self.assertEqual(summary["evidence"]["status"], "incomplete")
+        self.assertEqual(summary["repairStatus"], "repair_blocked")
+        self.assertEqual(summary["evidence"]["packRef"]["uri"], "urn:evidence-pack")
+        self.assertEqual(
+            summary["evidence"]["recordedAt"],
+            contract.trust_summary["evidence"]["recordedAt"],
+        )
+
+    def test_trust_summary_projects_intentional_divergence_with_stale_evidence(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        contract.set_parity_comparison(
+            {
+                "matched": False,
+                "mismatchClassification": "intentional",
+                "completedAt": "9999-12-31T23:59:59Z",
+                "comparisonResultRef": {
+                    "uri": "urn:run/comparison-result",
+                    "sha256": "2" * 64,
+                    "byteSize": 24,
+                },
+                "decisionRecordRef": {
+                    "uri": "urn:run/decision-record",
+                    "sha256": "3" * 64,
+                    "byteSize": 10,
+                },
+            }
+        )
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=None,
+            final_classification=CLASSIFICATION_FAILED,
+            failure_code=None,
+            evidence_materialized=True,
+        )
+
+        self.assertEqual(summary["trustState"], "intentional_divergence")
+        self.assertEqual(summary["divergenceDisposition"], "intentional")
+        self.assertEqual(summary["evidence"]["status"], "stale")
+        self.assertEqual(
+            summary["comparisonResult"]["decisionRecordRef"]["uri"],
+            "urn:run/decision-record",
+        )
+
+    def test_trust_summary_projects_evidence_incomplete_without_runtime_or_build_failure(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=None,
+            final_classification=CLASSIFICATION_INCOMPLETE,
+            failure_code=FAILURE_EVIDENCE_INCOMPLETE,
+            evidence_materialized=False,
+        )
+
+        self.assertEqual(summary["trustState"], "blocked")
+        self.assertEqual(summary["evidence"]["status"], "incomplete")
+        self.assertEqual(summary["comparisonResult"]["status"], "not_available")
+        self.assertEqual(summary["repairStatus"], "not_attempted")
 
 
 class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):

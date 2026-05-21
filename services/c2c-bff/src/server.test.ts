@@ -5302,6 +5302,85 @@ test("GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source", 
   }
 });
 
+test("GET /api/v0/runs/{runId} preserves normalized trustSummary across repeated reads", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
+  const studioHeaders = auth.post({}, {}).headers;
+  const trustSummary = {
+    trustCaseId: "HELLO01-DEFAULT",
+    verdict: "pass",
+    evidenceRefs: ["urn:evidence/one", "urn:evidence/two"],
+    createdAt: "2026-05-21T10:00:00Z",
+    updatedAt: "2026-05-21T10:05:00Z",
+    manualReviewAt: "2026-05-21T10:06:00Z",
+    details: {
+      source: "orchestrator",
+      revision: 3,
+    },
+  };
+  const { client: orch, calls } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: "complete",
+        source: "live",
+        contract: {
+          currentState: "final_classification",
+          finalClassification: "success",
+          trustSummary,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+      headers: studioHeaders,
+    });
+    const startedBody = started.body as { runId: string };
+
+    const first = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: studioHeaders },
+    );
+    const second = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: studioHeaders },
+    );
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: studioHeaders },
+    );
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(workflow.status, 200);
+    const firstBody = first.body as { trustSummary: typeof trustSummary };
+    const secondBody = second.body as { trustSummary: typeof trustSummary };
+    const workflowBody = workflow.body as { trustSummary: typeof trustSummary };
+
+    assert.deepEqual(firstBody.trustSummary, trustSummary);
+    assert.deepEqual(secondBody.trustSummary, trustSummary);
+    assert.deepEqual(workflowBody.trustSummary, trustSummary);
+    assert.deepEqual(firstBody.trustSummary, secondBody.trustSummary);
+    assert.equal(calls.getRun, 2);
+    assert.equal(calls.getWorkflow, 3);
+  } finally {
+    await server.close();
+  }
+});
+
 test("GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);

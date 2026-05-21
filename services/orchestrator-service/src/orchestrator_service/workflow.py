@@ -116,6 +116,7 @@ from .run_contract import (
     ASSIST_REASON_SEMANTIC_IR_BOUNDED_AMBIGUITY,
     ASSIST_REASON_TRANSLATION_UNSUPPORTED_REPAIRABLE,
     AssistDecision,
+    SCHEMA_VERSION,
     STATE_BASELINE_GENERATION_ATTEMPTED,
     STATE_BUILD_TEST_RUNNING,
     STATE_COBOL_PARSE_ATTEMPTED,
@@ -4656,15 +4657,14 @@ class W0WorkflowRunner:
                     run_status="updating",
                     diagnostic="parity evidence captured",
                 )
-            _record_artifact(
-                self.artifact_store.write_json(
-                    context.run_id,
-                    context.workflow_id,
-                    "evidence-pack-manifest.json",
-                    dict(evidence_output.payload),
-                    kind=KIND_EVIDENCE_PACK_MANIFEST,
-                )
+            evidence_manifest_meta = self.artifact_store.write_json(
+                context.run_id,
+                context.workflow_id,
+                "evidence-pack-manifest.json",
+                dict(evidence_output.payload),
+                kind=KIND_EVIDENCE_PACK_MANIFEST,
             )
+            _record_artifact(evidence_manifest_meta)
             completed_steps.append("write-evidence")
 
             # Issue #166: classify evidence outcome for the W0.2 contract.
@@ -4712,10 +4712,25 @@ class W0WorkflowRunner:
                     ),
                 )
 
-            if w02_blocked:
-                final_classification = CLASSIFICATION_BLOCKED if w02_failure_code != FAILURE_EVIDENCE_INCOMPLETE else (
-                    CLASSIFICATION_INCOMPLETE
+            final_classification = (
+                CLASSIFICATION_BLOCKED
+                if w02_blocked and w02_failure_code != FAILURE_EVIDENCE_INCOMPLETE
+                else CLASSIFICATION_INCOMPLETE
+                if w02_blocked
+                else CLASSIFICATION_SUCCESS
+            )
+            w02_contract.set_trust_summary(
+                self._build_trust_summary(
+                    context=context,
+                    contract=w02_contract,
+                    build_test_output=build_test_output,
+                    evidence_pack_meta=evidence_manifest_meta,
+                    final_classification=final_classification,
+                    failure_code=w02_failure_code,
+                    evidence_materialized=evidence_materialized,
                 )
+            )
+            if w02_blocked:
                 self._finalize_w02(
                     context,
                     w02_contract,
@@ -5143,6 +5158,10 @@ class W0WorkflowRunner:
             "true-golden-master-reproduction-error",
         }:
             return "unknown"
+        if classification == "divergence-known-w0-coverage-gap":
+            return "known_coverage_gap"
+        if classification in {"intentional-divergence", "intentional_divergence"}:
+            return "intentional"
         if diff_summary and "line ending" in diff_summary.lower():
             return "line_endings"
         return "content"
@@ -5320,11 +5339,24 @@ class W0WorkflowRunner:
             "executionResultRef": execution_result_ref,
             "comparisonResultRef": comparison_result_ref,
             "mismatchClassification": canonical_comparison["mismatchClassification"],
+            "sourceNormalizedRef": source_normalized_ref,
+            "targetNormalizedRef": target_normalized_ref,
+            "completedAt": _text(canonical_comparison.get("createdAt")) or _iso_now(),
         }
         if comparison_policy_ref is not None:
             projection["comparisonPolicyRef"] = comparison_policy_ref
         if diff_ref is not None:
             projection["diffRef"] = diff_ref
+        decision_record_ref = (
+            self._artifact_ref_payload(comparison_result.get("decisionRecordRef"))
+            or self._artifact_ref_payload(comparison.get("decisionRecordRef"))
+            or self._artifact_ref_payload(comparison_result.get("documentedDecisionRef"))
+            or self._artifact_ref_payload(comparison.get("documentedDecisionRef"))
+            or self._artifact_ref_payload(comparison_result.get("dispositionRef"))
+            or self._artifact_ref_payload(comparison.get("dispositionRef"))
+        )
+        if decision_record_ref is not None:
+            projection["decisionRecordRef"] = decision_record_ref
         return projection, persisted
 
     # noinspection PyTypeHints
@@ -5956,6 +5988,279 @@ class W0WorkflowRunner:
             "repair": contract.repair_budget.to_dict(),
             "assist": contract.assist_budget.to_dict(),
             "modelInvocation": contract.model_invocation_budget.to_dict(),
+        }
+
+    @staticmethod
+    def _build_trust_summary(
+        *,
+        context: W0RunContext,
+        contract: W02RunContract,
+        build_test_output: WorkflowStepResult | None,
+        evidence_pack_meta: ArtifactMetadata | None,
+        final_classification: str,
+        failure_code: str | None,
+        evidence_materialized: bool,
+    ) -> JsonObject:
+        """Derive the immutable trust summary from contract and evidence state."""
+        def artifact_ref(raw: Mapping[str, JsonValue] | None) -> JsonObject | None:
+            if not isinstance(raw, Mapping):
+                return None
+            sha256 = str(raw.get("sha256") or "").strip()
+            if not sha256:
+                return None
+            ref: JsonObject = {"sha256": sha256}
+            byte_size = raw.get("byteSize")
+            if isinstance(byte_size, int) and byte_size >= 0:
+                ref["byteSize"] = byte_size
+            for key in (
+                "uri",
+                "kind",
+                "path",
+                "name",
+                "mimeType",
+                "createdBy",
+                "createdAt",
+            ):
+                value = _text(raw.get(key))
+                if value:
+                    ref[key] = value
+            return ref
+
+        build_payload = build_test_output.payload if build_test_output is not None else {}
+        parity_comparison = (
+            dict(contract.parity_comparison)
+            if isinstance(contract.parity_comparison, Mapping)
+            else {}
+        )
+        trust_case = (
+            dict(contract.resolved_trust_case)
+            if isinstance(contract.resolved_trust_case, Mapping)
+            else {}
+        )
+        matched = parity_comparison.get("matched")
+        parity_passed = bool(matched) if isinstance(matched, bool) else None
+
+        build_classification = (_text(build_payload.get("classification")) or "").lower()
+        mismatch_classification = (
+            _text(parity_comparison.get("mismatchClassification"))
+            or _text(build_payload.get("mismatchClassification"))
+            or build_classification
+            or "none"
+        ).lower()
+        build_failed = failure_code == FAILURE_JAVA_COMPILE_FAILED
+        runtime_failed = failure_code == FAILURE_JAVA_RUNTIME_FAILED
+        evidence_incomplete = (
+            not evidence_materialized
+            or final_classification == CLASSIFICATION_INCOMPLETE
+            or failure_code == FAILURE_EVIDENCE_INCOMPLETE
+        )
+        evidence_recorded_at = (
+            evidence_pack_meta.createdAt if evidence_pack_meta is not None else None
+        )
+        comparison_completed_at = (
+            _text(parity_comparison.get("completedAt"))
+            or _text(parity_comparison.get("createdAt"))
+            or contract.updated_at
+        )
+
+        source_normalized_ref = artifact_ref(
+            parity_comparison.get("sourceNormalizedRef")
+            if isinstance(parity_comparison.get("sourceNormalizedRef"), Mapping)
+            else None
+        )
+        target_normalized_ref = artifact_ref(
+            parity_comparison.get("targetNormalizedRef")
+            if isinstance(parity_comparison.get("targetNormalizedRef"), Mapping)
+            else None
+        )
+        execution_result_ref = artifact_ref(
+            parity_comparison.get("executionResultRef")
+            if isinstance(parity_comparison.get("executionResultRef"), Mapping)
+            else None
+        )
+        comparison_policy_ref = artifact_ref(
+            parity_comparison.get("comparisonPolicyRef")
+            if isinstance(parity_comparison.get("comparisonPolicyRef"), Mapping)
+            else None
+        )
+        comparison_result_ref = artifact_ref(
+            parity_comparison.get("comparisonResultRef")
+            if isinstance(parity_comparison.get("comparisonResultRef"), Mapping)
+            else None
+        )
+        diff_ref = artifact_ref(
+            parity_comparison.get("diffRef")
+            if isinstance(parity_comparison.get("diffRef"), Mapping)
+            else None
+        )
+        decision_record_ref = artifact_ref(
+            parity_comparison.get("decisionRecordRef")
+            if isinstance(parity_comparison.get("decisionRecordRef"), Mapping)
+            else None
+        )
+        evidence_pack_ref = artifact_ref(contract.evidence_pack_ref)
+
+        propose_candidate_attempts = [
+            entry
+            for entry in contract.repair_attempts
+            if isinstance(entry, Mapping)
+            and str(entry.get("repairDecision") or "").strip() == "propose_candidate"
+        ]
+        blocked_repair_attempt = any(
+            isinstance(entry, Mapping)
+            and str(entry.get("repairDecision") or "").strip() in {"refuse", "escalate"}
+            for entry in contract.repair_attempts
+        )
+        winning_attempt = propose_candidate_attempts[-1] if propose_candidate_attempts else None
+        if winning_attempt is not None and final_classification == CLASSIFICATION_SUCCESS:
+            repair_status = "repair_verified"
+        elif winning_attempt is not None:
+            repair_status = "repair_failed"
+        elif blocked_repair_attempt:
+            repair_status = "repair_blocked"
+        else:
+            repair_status = "not_attempted"
+
+        repair_decision_ref = artifact_ref(
+            winning_attempt if isinstance(winning_attempt, Mapping) else None
+        )
+        if repair_decision_ref is not None and "repairDecisionRef" in repair_decision_ref:
+            repair_decision_ref = artifact_ref(
+                winning_attempt.get("repairDecisionRef")
+                if isinstance(winning_attempt, Mapping)
+                and isinstance(winning_attempt.get("repairDecisionRef"), Mapping)
+                else None
+            )
+        else:
+            repair_decision_ref = artifact_ref(
+                winning_attempt.get("repairDecisionRef")
+                if isinstance(winning_attempt, Mapping)
+                and isinstance(winning_attempt.get("repairDecisionRef"), Mapping)
+                else None
+            )
+        repaired_build_test_ref = artifact_ref(
+            winning_attempt.get("buildTestResultRef")
+            if isinstance(winning_attempt, Mapping)
+            and isinstance(winning_attempt.get("buildTestResultRef"), Mapping)
+            else None
+        )
+        repaired_java_candidate_ref = artifact_ref(
+            winning_attempt.get("javaCandidateRef")
+            if isinstance(winning_attempt, Mapping)
+            and isinstance(winning_attempt.get("javaCandidateRef"), Mapping)
+            else None
+        )
+        repair_verified_at = (
+            _text(winning_attempt.get("createdAt"))
+            if isinstance(winning_attempt, Mapping)
+            else None
+        )
+
+        evidence_status = "current"
+        if evidence_incomplete or evidence_pack_ref is None:
+            evidence_status = "incomplete"
+        elif (
+            evidence_recorded_at
+            and comparison_completed_at
+            and evidence_recorded_at < comparison_completed_at
+        ):
+            evidence_status = "stale"
+
+        divergence_disposition = "none"
+        coverage_gap_detected = (
+            mismatch_classification == "known_coverage_gap"
+            or "coverage-gap" in mismatch_classification
+            or "coverage-gap" in build_classification
+        )
+
+        if coverage_gap_detected:
+            divergence_disposition = "known_coverage_gap"
+        elif mismatch_classification == "intentional" and decision_record_ref is not None:
+            divergence_disposition = "intentional"
+        elif mismatch_classification not in {"", "none"} and parity_passed is False:
+            divergence_disposition = "unknown"
+
+        warning_codes: list[str] = []
+        if coverage_gap_detected:
+            warning_codes.extend(["known_coverage_gap", "limited_coverage"])
+        if contract.manual_edits_carried_over:
+            warning_codes.append("manual_edits_carried_over")
+
+        coverage_status = "limited" if "limited_coverage" in warning_codes else "full"
+
+        if divergence_disposition == "intentional":
+            trust_state = "intentional_divergence"
+        elif build_failed:
+            trust_state = "build_failed"
+        elif runtime_failed:
+            trust_state = "runtime_failed"
+        elif parity_passed is True and not evidence_incomplete:
+            trust_state = "parity_passed"
+        elif parity_passed is False:
+            trust_state = "parity_failed"
+        else:
+            trust_state = "blocked"
+
+        cobol_status = "completed" if source_normalized_ref is not None else "not_available"
+        java_status = "not_available"
+        if build_failed:
+            java_status = "build_failed"
+        elif runtime_failed:
+            java_status = "runtime_failed"
+        elif execution_result_ref is not None or target_normalized_ref is not None:
+            java_status = "completed"
+
+        comparison_status = "not_available"
+        if parity_passed is True:
+            comparison_status = "matched"
+        elif parity_passed is False:
+            comparison_status = "mismatched"
+
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "trustState": trust_state,
+            "repairStatus": repair_status,
+            "coverageStatus": coverage_status,
+            "divergenceDisposition": divergence_disposition,
+            "warningCodes": warning_codes,
+            "trustCase": {
+                "trustCaseId": _text(trust_case.get("trustCaseId")) or context.trust_case_id or "",
+                "version": _text(trust_case.get("version")) or "",
+                "catalogVersion": _text(trust_case.get("catalogVersion")) or "",
+                "catalogHash": _text(trust_case.get("catalogHash")) or "",
+                "configurationDigest": _text(trust_case.get("configurationDigest")) or "",
+            },
+            "cobolResult": {
+                "status": cobol_status,
+                "normalizedOutputRef": source_normalized_ref,
+            },
+            "javaResult": {
+                "status": java_status,
+                "executionResultRef": execution_result_ref,
+                "normalizedOutputRef": target_normalized_ref,
+            },
+            "comparisonResult": {
+                "status": comparison_status,
+                "mismatchClassification": mismatch_classification,
+                "comparisonPolicyRef": comparison_policy_ref,
+                "comparisonResultRef": comparison_result_ref,
+                "diffRef": diff_ref,
+                "decisionRecordRef": decision_record_ref,
+            },
+            "repair": {
+                "status": repair_status,
+                "repairDecisionRef": repair_decision_ref,
+                "repairedBuildTestResultRef": repaired_build_test_ref,
+                "repairedJavaCandidateRef": repaired_java_candidate_ref,
+            },
+            "evidence": {
+                "status": evidence_status,
+                "recordedAt": evidence_recorded_at,
+                "packRef": evidence_pack_ref,
+            },
+            "comparisonCompletedAt": comparison_completed_at,
+            "summaryDerivedAt": _iso_now(),
+            "repairVerifiedAt": repair_verified_at,
         }
 
     @staticmethod

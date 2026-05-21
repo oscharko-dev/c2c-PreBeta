@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import datetime
 import threading
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -917,6 +918,7 @@ class W02RunContract:
     parity_comparison: JsonObject | None = None
     resolved_trust_case: JsonObject | None = None
     evidence_pack_ref: JsonObject | None = None
+    trust_summary: JsonObject | None = None
     final_classification: str | None = None
     failure_code: str | None = None
     failure_message: str | None = None
@@ -960,6 +962,8 @@ class W02RunContract:
             raise ValueError(
                 "manual_drift_region_count > 0 requires manual_edits_carried_over=True"
             )
+        if self.trust_summary is not None and not isinstance(self.trust_summary, Mapping):
+            raise ValueError("trust_summary must be an object")
 
     def touch(self, now: str | None = None) -> None:
         self.updated_at = now or _iso_now()
@@ -1098,6 +1102,18 @@ class W02RunContract:
         self.evidence_pack_ref = dict(ref) if ref else None
         self.touch()
 
+    def set_trust_summary(self, payload: Mapping[str, JsonValue] | None) -> None:
+        """Record the immutable trust summary derived by the orchestrator."""
+        if payload is None:
+            self.trust_summary = None
+            self.touch()
+            return
+        normalised = deepcopy(dict(payload))
+        if self.trust_summary is not None and self.trust_summary != normalised:
+            raise ValueError("trust_summary is immutable once set")
+        self.trust_summary = normalised
+        self.touch()
+
     def set_java_region_classification(
         self,
         classification: Mapping[str, list[JsonObject]] | None,
@@ -1197,6 +1213,7 @@ class W02RunContract:
             "parityComparison": dict(self.parity_comparison) if self.parity_comparison else None,
             "resolvedTrustCase": dict(self.resolved_trust_case) if self.resolved_trust_case else None,
             "evidencePackRef": dict(self.evidence_pack_ref) if self.evidence_pack_ref else None,
+            "trustSummary": deepcopy(self.trust_summary) if self.trust_summary else None,
             "finalClassification": self.final_classification,
             "failureCode": self.failure_code,
             "failureMessage": self.failure_message,

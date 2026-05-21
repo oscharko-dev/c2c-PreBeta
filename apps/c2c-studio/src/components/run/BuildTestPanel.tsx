@@ -6,6 +6,7 @@ import { apiClient } from "../../lib/apiClient";
 import { useTransformationRun } from "../../stores/transformationRun";
 import { useSourceWorkspace } from "../../stores/sourceWorkspace";
 import { EquivalencePanel } from "./EquivalencePanel";
+import { TrustSummaryCard } from "./TrustSummaryCard";
 import { MetadataRow } from "../ui/MetadataRow";
 import { StatusChip } from "../ui/StatusChip";
 import { Tabs } from "../ui/Tabs";
@@ -210,6 +211,16 @@ export function BuildTestPanel({
               </p>
             ) : null}
           </div>
+        </div>
+        <div className="mt-4">
+          <TrustSummaryCard
+            summary={displayedSummary}
+            buildTest={bt}
+            evidence={state.evidence}
+            workflow={state.workflow}
+            selectedTrustCase={selectedTrustCase}
+            manualDriftMessage={manualDriftMessage}
+          />
         </div>
       </div>
       <div className="flex min-h-0 flex-1">
