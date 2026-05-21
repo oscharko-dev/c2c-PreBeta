@@ -6,6 +6,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ParityComparisonTest {
 
@@ -62,6 +63,46 @@ class ParityComparisonTest {
 
         assertEquals("blocked", result.get("status"));
         assertEquals("unknown", result.get("mismatchClassification"));
+    }
+
+    @Test
+    void runtimeFailureReasonIsBoundedAtSchemaCeiling() {
+        String oversizeReason = "x".repeat(DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH + 500);
+        Map<String, Object> result = ParityComparison.runtimeFailure(
+                "run-oversize",
+                "wf-oversize",
+                fact("passed", 0, "", "", "reference"),
+                fact("failed", 1, "", "boom", "generated-java"),
+                oversizeReason);
+
+        Object diffSummary = result.get("diffSummary");
+        assertTrue(diffSummary instanceof String,
+                () -> "expected diffSummary to be a String, got: " + diffSummary);
+        String bounded = (String) diffSummary;
+        assertTrue(bounded.length() <= DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH,
+                () -> "expected diffSummary <= " + DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH
+                        + " chars, got " + bounded.length());
+        assertTrue(bounded.endsWith(DiagnosticBounds.MESSAGE_TRUNCATION_SENTINEL),
+                () -> "expected truncation sentinel suffix, got tail: "
+                        + bounded.substring(Math.max(0, bounded.length() - 20)));
+    }
+
+    @Test
+    void unsupportedReasonIsBoundedAtSchemaCeiling() {
+        String oversizeReason = "y".repeat(DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH + 100);
+        Map<String, Object> result = ParityComparison.unsupported(
+                "run-oversize-unsupported",
+                "wf-oversize-unsupported",
+                null,
+                fact("skipped", null, "", "", "generated-java"),
+                oversizeReason);
+
+        String bounded = (String) result.get("diffSummary");
+        assertTrue(bounded.length() <= DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH,
+                () -> "expected diffSummary <= " + DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH
+                        + " chars, got " + bounded.length());
+        assertTrue(bounded.endsWith(DiagnosticBounds.MESSAGE_TRUNCATION_SENTINEL),
+                () -> "expected truncation sentinel suffix");
     }
 
     private static ParityComparison.ExecutionFact fact(

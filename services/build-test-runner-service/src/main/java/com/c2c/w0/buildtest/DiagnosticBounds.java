@@ -1,8 +1,9 @@
 package com.c2c.w0.buildtest;
 
 /**
- * Producer-side bounds for diagnostic fields emitted into Evidence under
- * {@code parity-build-result-v0} and {@code parity-execution-result-v0}.
+ * Producer-side bounds for diagnostic and parity-comparison fields emitted
+ * into Evidence under {@code parity-build-result-v0},
+ * {@code parity-execution-result-v0}, and {@code parity-comparison-result-v0}.
  *
  * <p>The schemas (Issue #351, hardened by PR #397) reject {@code message} over
  * 4000 chars and {@code filePath} over 500 chars or carrying a leading slash
@@ -11,11 +12,19 @@ package com.c2c.w0.buildtest;
  * javax.tools.JavaFileObject#getName()} (typically a temp directory URI)
  * would fail evidence-ledger validation at ingest. Issue #353 closes that
  * gap symmetric with the COBOL-side cap added by PR #398.
+ *
+ * <p>The 4000-char ceiling on {@code diffSummary} in
+ * {@code parity-comparison-result-v0} (Issue #354) is enforced by the same
+ * helper via {@link #boundedDiffSummary(String)}, so that a long
+ * {@code reason} passed to {@link ParityComparison#runtimeFailure} or
+ * {@link ParityComparison#unsupported} cannot fail schema validation at
+ * ingest.
  */
 final class DiagnosticBounds {
 
     static final int MAX_MESSAGE_LENGTH = 4000;
     static final int MAX_FILEPATH_LENGTH = 500;
+    static final int MAX_DIFF_SUMMARY_LENGTH = 4000;
     static final String MESSAGE_TRUNCATION_SENTINEL = "…[truncated]";
 
     /**
@@ -43,6 +52,29 @@ final class DiagnosticBounds {
             return message.substring(0, MAX_MESSAGE_LENGTH);
         }
         return message.substring(0, keep) + MESSAGE_TRUNCATION_SENTINEL;
+    }
+
+    /**
+     * Apply the {@code parity-comparison-result-v0.diffSummary} ceiling
+     * (Issue #354) at the producer. Callers of
+     * {@link ParityComparison#runtimeFailure} and
+     * {@link ParityComparison#unsupported} pass a free-form {@code reason}
+     * string, which lands directly in the schema-bounded {@code diffSummary}
+     * field. Truncation reuses the {@link #MESSAGE_TRUNCATION_SENTINEL}
+     * suffix used by {@link #boundedMessage(String)}.
+     */
+    static String boundedDiffSummary(String diffSummary) {
+        if (diffSummary == null || diffSummary.isEmpty()) {
+            return diffSummary;
+        }
+        if (diffSummary.length() <= MAX_DIFF_SUMMARY_LENGTH) {
+            return diffSummary;
+        }
+        int keep = MAX_DIFF_SUMMARY_LENGTH - MESSAGE_TRUNCATION_SENTINEL.length();
+        if (keep <= 0) {
+            return diffSummary.substring(0, MAX_DIFF_SUMMARY_LENGTH);
+        }
+        return diffSummary.substring(0, keep) + MESSAGE_TRUNCATION_SENTINEL;
     }
 
     /**

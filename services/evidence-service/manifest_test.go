@@ -154,6 +154,48 @@ func TestJavaCandidateRefValidateRejectsSecretOrQueryBearingURI(t *testing.T) {
 	}
 }
 
+func TestOracleComparisonValidateRejectsOversizeDiffSummary(t *testing.T) {
+	o := OracleComparison{
+		OracleKind:  OracleKindCobolRuntime,
+		Status:      "failed",
+		DiffSummary: strings.Repeat("x", maxOracleComparisonTextLength+1),
+	}
+	err := o.Validate("oracleComparison")
+	if err == nil {
+		t.Fatalf("expected validation error for oversize diffSummary")
+	}
+	if !strings.Contains(err.Error(), "diffSummary") {
+		t.Fatalf("expected diffSummary in error, got %v", err)
+	}
+}
+
+func TestOracleComparisonValidateRejectsOversizeSummary(t *testing.T) {
+	o := OracleComparison{
+		OracleKind: OracleKindCobolRuntime,
+		Status:     "passed",
+		Summary:    strings.Repeat("y", maxOracleComparisonTextLength+1),
+	}
+	err := o.Validate("oracleComparison")
+	if err == nil {
+		t.Fatalf("expected validation error for oversize summary")
+	}
+	if !strings.Contains(err.Error(), "summary") {
+		t.Fatalf("expected summary in error, got %v", err)
+	}
+}
+
+func TestOracleComparisonValidateAcceptsDiffSummaryAtCeiling(t *testing.T) {
+	o := OracleComparison{
+		OracleKind:  OracleKindCobolRuntime,
+		Status:      "failed",
+		DiffSummary: strings.Repeat("z", maxOracleComparisonTextLength),
+		Summary:     strings.Repeat("w", maxOracleComparisonTextLength),
+	}
+	if err := o.Validate("oracleComparison"); err != nil {
+		t.Fatalf("expected exact-ceiling diffSummary/summary to validate, got %v", err)
+	}
+}
+
 func TestManifestRoundTripsJSON(t *testing.T) {
 	m := newCompleteManifest(t)
 	m.Artifacts.ModelInvocations[0].PolicyDecision = "policy allow"
