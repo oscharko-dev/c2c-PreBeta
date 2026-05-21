@@ -34,25 +34,35 @@ interface AppTopBarProps {
 
 type ClearDraftsMode = "scoped" | "origin";
 
+const noopSelectTrustCase = () => undefined;
+const unavailableTrustCasePreference = async () => ({
+  ok: false,
+  message: "Trust-case preference is unavailable in this session.",
+});
+
 export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
-  const {
-    canSubmitTransform,
-    canSubmitGenerate,
-    submitTransform,
-    submitGenerate,
-    expectedOutput,
-    oracleInput,
-    trustCases,
-    selectedTrustCaseId,
-    selectedTrustCase,
-    trustCaseStatus,
-    trustCaseError,
-    trustCasePreferenceSavedAt,
-    setSelectedTrustCaseId,
-    saveSelectedTrustCasePreference,
-  } = useSourceWorkspace();
+  const sourceWorkspace = useSourceWorkspace();
+  const canSubmitTransform = sourceWorkspace.canSubmitTransform;
+  const canSubmitGenerate =
+    sourceWorkspace.canSubmitGenerate ?? canSubmitTransform;
+  const submitTransform = sourceWorkspace.submitTransform;
+  const submitGenerate = sourceWorkspace.submitGenerate;
+  const expectedOutput = sourceWorkspace.expectedOutput;
+  const oracleInput = sourceWorkspace.oracleInput;
+  const trustCases = sourceWorkspace.trustCases ?? [];
+  const selectedTrustCaseId = sourceWorkspace.selectedTrustCaseId ?? null;
+  const selectedTrustCase = sourceWorkspace.selectedTrustCase ?? null;
+  const trustCaseStatus = sourceWorkspace.trustCaseStatus ?? "ready";
+  const trustCaseError = sourceWorkspace.trustCaseError ?? null;
+  const trustCasePreferenceSavedAt =
+    sourceWorkspace.trustCasePreferenceSavedAt ?? null;
+  const setSelectedTrustCaseId =
+    sourceWorkspace.setSelectedTrustCaseId ?? noopSelectTrustCase;
+  const saveSelectedTrustCasePreference =
+    sourceWorkspace.saveSelectedTrustCasePreference ??
+    unavailableTrustCasePreference;
   const { state: runState, javaBuffers, startVerify } = useTransformationRun();
   const canStart = readiness.startEnabled && !loading && canSubmitTransform;
   // Studio-IDE-14 (#256): Compile Check is rendered as a sibling of the
@@ -331,7 +341,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           <select
             id="topbar-trust-case-select"
             data-testid="topbar-trust-case-select"
-            className="min-w-0 flex-1 bg-transparent text-xs font-medium text-text outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-w-0 flex-1 truncate bg-transparent text-xs font-medium text-text outline-none disabled:cursor-not-allowed disabled:opacity-60"
             value={selectedTrustCaseId ?? ""}
             disabled={trustCaseStatus === "loading" || trustCases.length === 0}
             title={
