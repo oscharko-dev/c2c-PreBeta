@@ -140,7 +140,7 @@ final class JavaInMemoryCompiler {
             JavaFileObject source = d.getSource();
             String filePath = relativePathFor(project, source == null ? null : Path.of(source.toUri()));
             if (filePath != null && !filePath.isBlank()) {
-                entry.put("filePath", filePath);
+                entry.put("filePath", DiagnosticBounds.boundedFilePath(filePath));
             }
             if (d.getLineNumber() > 0) {
                 entry.put("line", d.getLineNumber());
@@ -148,7 +148,7 @@ final class JavaInMemoryCompiler {
             if (d.getColumnNumber() > 0) {
                 entry.put("column", d.getColumnNumber());
             }
-            entry.put("message", d.getMessage(Locale.ROOT));
+            entry.put("message", DiagnosticBounds.boundedMessage(d.getMessage(Locale.ROOT)));
             out.add(entry);
         }
         return out;
@@ -163,7 +163,7 @@ final class JavaInMemoryCompiler {
             entry.put("code", "javac-" + d.getCode());
             JavaFileObject source = d.getSource();
             if (source != null) {
-                entry.put("filePath", source.getName());
+                entry.put("filePath", DiagnosticBounds.boundedFilePath(source.getName()));
             }
             if (d.getLineNumber() > 0) {
                 entry.put("line", d.getLineNumber());
@@ -171,7 +171,7 @@ final class JavaInMemoryCompiler {
             if (d.getColumnNumber() > 0) {
                 entry.put("column", d.getColumnNumber());
             }
-            entry.put("message", d.getMessage(Locale.ROOT));
+            entry.put("message", DiagnosticBounds.boundedMessage(d.getMessage(Locale.ROOT)));
             out.add(entry);
         }
         return out;
