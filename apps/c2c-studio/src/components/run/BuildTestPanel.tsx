@@ -35,7 +35,7 @@ export function BuildTestPanel({
       baselineRunIds: [],
     }),
   } = useTransformationRun();
-  const { statusFlags } = useSourceWorkspace();
+  const { statusFlags, selectedTrustCase } = useSourceWorkspace();
   const [activeView, setActiveView] = useState<"outputs" | "diff">("outputs");
 
   if (state.phase === "idle") {
@@ -57,6 +57,16 @@ export function BuildTestPanel({
   );
   const bt =
     state.buildTest ?? (showingHistoricalBuildTest ? state.previousRun?.buildTest ?? null : null);
+  const displayedSummary =
+    showingHistoricalBuildTest && state.previousRun
+      ? state.previousRun.summary
+      : state.summary;
+  const trustCaseEvidenceMismatch = Boolean(
+    selectedTrustCase &&
+      displayedSummary?.trustCaseConfigurationDigest &&
+      displayedSummary.trustCaseConfigurationDigest !==
+        selectedTrustCase.configurationDigest,
+  );
   const isPending =
     !bt &&
     (state.phase === "running" || state.phase === "starting");
@@ -92,6 +102,14 @@ export function BuildTestPanel({
           </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col border-l border-line-2 pl-8 pr-2">
+          {trustCaseEvidenceMismatch ? (
+            <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
+              Existing parity results were produced from{" "}
+              {displayedSummary?.trustCaseId || "another trust case"} or a
+              different catalog version. Rerun to use{" "}
+              {selectedTrustCase?.trustCaseId ?? "the selected trust case"}.
+            </div>
+          ) : null}
           {statusFlags.pendingReRun ||
           showingHistoricalBuildTest ||
           manualDriftMessage ? (

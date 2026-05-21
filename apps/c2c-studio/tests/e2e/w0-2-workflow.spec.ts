@@ -204,7 +204,7 @@ test.describe("W0.2 release-gate browser acceptance", () => {
 
     await page.getByRole("tab", { name: "Build & Test" }).click();
     await expect(page.getByText("Pipeline Stages")).toBeVisible();
-    await expect(page.getByText("Equivalence Analysis")).toBeVisible();
+    await expect(page.getByText("Build & Test Parity")).toBeVisible();
     await expect(page.getByText("Match (Equivalent)")).toHaveCount(0);
 
     await page.getByRole("tab", { name: "Evidence Pack" }).click();

@@ -145,6 +145,51 @@ vi.mock("@/lib/editor/lineageNavigation", () => ({
   resolveCobolToJava: (...args: unknown[]) => resolveCobolToJavaMock(...args),
 }));
 
+vi.mock("@/lib/apiClient", () => ({
+  apiClient: {
+    getModelGatewayHealth: vi.fn(() =>
+      Promise.resolve({ ok: true, data: { status: "ok" } }),
+    ),
+    getHarnessReady: vi.fn(() =>
+      Promise.resolve({ ok: true, data: { status: "ok" } }),
+    ),
+    getTrustCases: vi.fn((programId?: string) =>
+      Promise.resolve({
+        ok: true,
+        data: {
+          schemaVersion: "v0",
+          catalogVersion: "2026-05-21",
+          catalogHash: "0".repeat(64),
+          programId: programId ?? null,
+          defaultTrustCaseId: programId ? `${programId}-DEFAULT` : null,
+          savedTrustCaseId: null,
+          trustCases: programId
+            ? [
+                {
+                  trustCaseId: `${programId}-DEFAULT`,
+                  version: "2026-05-21",
+                  catalogVersion: "2026-05-21",
+                  catalogHash: "0".repeat(64),
+                  configurationDigest: "1".repeat(64),
+                  programId,
+                  title: `${programId} default`,
+                  description: "Default trust case",
+                  defaultForProgram: true,
+                  sourceReferenceFixtureId: "HELLOW02",
+                  sourceReferenceMode: "reference-fixture",
+                  environmentProfileId: "generated-java-sandbox-v1",
+                  comparisonStrategy: "deterministic-output",
+                  comparisonPolicyVersion: "deterministic-output-v1",
+                  supportedSubset: ["DISPLAY"],
+                },
+              ]
+            : [],
+        },
+      }),
+    ),
+  },
+}));
+
 vi.mock("@/hooks/useC2cApi", () => ({
   useC2cApi: () => ({
     health: null,

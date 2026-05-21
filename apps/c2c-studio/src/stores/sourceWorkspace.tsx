@@ -16,11 +16,18 @@ import {
   deriveDetectedProgramId,
   deriveDraftProgramId,
 } from "../lib/sourceAnalysis";
-import { ApiResult, TransformResponse, GenerateResponse } from "../types/api";
+import {
+  ApiResult,
+  TransformResponse,
+  GenerateResponse,
+  TrustCasePreferenceResponse,
+  TrustCaseSummary,
+} from "../types/api";
 import {
   useTransformationRun,
   type GenerateTelemetryOptions,
 } from "./transformationRun";
+import { apiClient } from "../lib/apiClient";
 import {
   editorPersistence,
   getCurrentDraftScope,
@@ -63,6 +70,17 @@ export interface SourceWorkspaceState {
   transformError: string | null;
   isTransforming: boolean;
   canSubmitTransform: boolean;
+  canSubmitGenerate: boolean;
+  trustCases: TrustCaseSummary[];
+  selectedTrustCaseId: string | null;
+  selectedTrustCase: TrustCaseSummary | null;
+  trustCaseStatus: "idle" | "loading" | "ready" | "error";
+  trustCaseError: string | null;
+  trustCasePreferenceSavedAt: number | null;
+  setSelectedTrustCaseId: (trustCaseId: string) => void;
+  saveSelectedTrustCasePreference: () => Promise<
+    ApiResult<TrustCasePreferenceResponse>
+  >;
   // Studio-IDE-3 (#247): hash-relationship state for status chips and
   // conflict detection.
   bufferHash: string;
@@ -133,6 +151,17 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   );
   const [conflict, setConflict] = useState<CobolConflict | null>(null);
   const [saveNoticeAt, setSaveNoticeAt] = useState<number | null>(null);
+  const [trustCases, setTrustCases] = useState<TrustCaseSummary[]>([]);
+  const [selectedTrustCaseId, setSelectedTrustCaseIdInternal] = useState<
+    string | null
+  >(null);
+  const [trustCaseStatus, setTrustCaseStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [trustCaseError, setTrustCaseError] = useState<string | null>(null);
+  const [trustCasePreferenceSavedAt, setTrustCasePreferenceSavedAt] = useState<
+    number | null
+  >(null);
   const draftRestoreTokenRef = useRef(0);
 
   useEffect(() => {
@@ -157,6 +186,62 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
   // or a path-derived hash; unsourced pastes without either are skipped so
   // two files with the same display name cannot collide.
   const programId = runState.programId;
+  const activeTrustCaseProgramId =
+    programId ?? deriveDetectedProgramId(sourceText);
+  const selectedTrustCase =
+    trustCases.find((entry) => entry.trustCaseId === selectedTrustCaseId) ??
+    null;
+
+  useEffect(() => {
+    if (!activeTrustCaseProgramId) {
+      setTrustCases([]);
+      setSelectedTrustCaseIdInternal(null);
+      setTrustCaseStatus("idle");
+      setTrustCaseError(null);
+      setTrustCasePreferenceSavedAt(null);
+      return;
+    }
+    let cancelled = false;
+    setTrustCaseStatus("loading");
+    setTrustCaseError(null);
+    void apiClient.getTrustCases(activeTrustCaseProgramId).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setTrustCases([]);
+        setSelectedTrustCaseIdInternal(null);
+        setTrustCaseStatus("error");
+        setTrustCaseError(result.message);
+        return;
+      }
+      const available = result.data.trustCases;
+      const saved = available.find(
+        (entry) => entry.trustCaseId === result.data.savedTrustCaseId,
+      );
+      const fallback =
+        available.find(
+          (entry) => entry.trustCaseId === result.data.defaultTrustCaseId,
+        ) ??
+        available.find((entry) => entry.defaultForProgram) ??
+        available[0] ??
+        null;
+      setTrustCases(available);
+      setSelectedTrustCaseIdInternal((previous) => {
+        const existing = available.find(
+          (entry) => entry.trustCaseId === previous,
+        );
+        return (saved ?? existing ?? fallback)?.trustCaseId ?? null;
+      });
+      setTrustCaseStatus("ready");
+      setTrustCaseError(
+        available.length === 0
+          ? `No trust cases are available for ${activeTrustCaseProgramId}.`
+          : null,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTrustCaseProgramId]);
 
   // Recompute buffer hash on every text change, debounced to 500 ms per
   // the ADR-2 §2 budget. The hash is purely a UI signal (status chips +
@@ -268,10 +353,56 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
     setBufferHash("00000000");
     setConflict(null);
     setSaveNoticeAt(null);
+    setTrustCases([]);
+    setSelectedTrustCaseIdInternal(null);
+    setTrustCaseStatus("idle");
+    setTrustCaseError(null);
+    setTrustCasePreferenceSavedAt(null);
     lastSeenRunIdRef.current = null;
   };
 
+  const setSelectedTrustCaseId = (trustCaseId: string) => {
+    const selected = trustCases.find(
+      (entry) => entry.trustCaseId === trustCaseId,
+    );
+    if (!selected) return;
+    setSelectedTrustCaseIdInternal(selected.trustCaseId);
+    setTrustCaseError(null);
+    setTrustCasePreferenceSavedAt(null);
+  };
+
+  const saveSelectedTrustCasePreference = async (): Promise<
+    ApiResult<TrustCasePreferenceResponse>
+  > => {
+    if (!activeTrustCaseProgramId || !selectedTrustCaseId) {
+      const result = {
+        ok: false,
+        message: "Select a trust case before saving the preference.",
+      } as const;
+      setTrustCaseError(result.message);
+      return result;
+    }
+    const result = await apiClient.saveTrustCasePreference(
+      activeTrustCaseProgramId,
+      selectedTrustCaseId,
+    );
+    if (result.ok) {
+      setTrustCasePreferenceSavedAt(Date.now());
+      setTrustCaseError(null);
+    } else {
+      setTrustCaseError(result.message);
+    }
+    return result;
+  };
+
   const canSubmitTransform =
+    sourceText.trim().length > 0 &&
+    !isTransforming &&
+    !modelGatewayUnavailable &&
+    trustCaseStatus !== "loading" &&
+    trustCaseStatus !== "error" &&
+    (trustCases.length === 0 || selectedTrustCaseId !== null);
+  const canSubmitGenerate =
     sourceText.trim().length > 0 && !isTransforming && !modelGatewayUnavailable;
 
   const submitTransform = async (
@@ -309,6 +440,34 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       return result;
     }
 
+    if (trustCaseStatus === "loading") {
+      const result = {
+        ok: false,
+        message: "Trust cases are still loading. Try again shortly.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+
+    if (trustCaseStatus === "error") {
+      const result = {
+        ok: false,
+        message: trustCaseError ?? "Trust-case catalog is unavailable.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+
+    if (trustCases.length > 0 && !selectedTrustCaseId) {
+      const result = {
+        ok: false,
+        message:
+          "Select an immutable trust case before starting a parity-aware transformation.",
+      } as const;
+      setTransformError(result.message);
+      return result;
+    }
+
     setTransformError(null);
 
     const request = {
@@ -316,8 +475,12 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       programId: undefined,
       sourceName: sourceName || DEFAULT_SOURCE_NAME,
       targetLanguage: "java",
-      expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
-      oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
+      ...(selectedTrustCaseId
+        ? { trustCaseId: selectedTrustCaseId }
+        : {
+            expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
+            oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
+          }),
     } as const;
 
     const result = await startTransform(
@@ -633,6 +796,13 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         transformError,
         isTransforming,
         canSubmitTransform,
+        canSubmitGenerate,
+        trustCases,
+        selectedTrustCaseId,
+        selectedTrustCase,
+        trustCaseStatus,
+        trustCaseError,
+        trustCasePreferenceSavedAt,
         bufferHash,
         lastRunInputHash,
         lastRunInputContent,
@@ -645,6 +815,8 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
         setExpectedOutput,
         setOracleInput,
         setAllowAiAssist,
+        setSelectedTrustCaseId,
+        saveSelectedTrustCasePreference,
         clearWorkspace,
         submitTransform,
         submitGenerate,

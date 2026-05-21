@@ -368,7 +368,7 @@ test.describe("c2c Studio browser acceptance", () => {
     if (EXPECT_MODEL_POLICY_SKIPPED) {
       await expect(page.getByText("Model Policy Skipped")).toBeVisible();
     }
-    await expect(page.getByText("Equivalence Analysis")).toBeVisible();
+    await expect(page.getByText("Build & Test Parity")).toBeVisible();
 
     await page.getByRole("tab", { name: "Experience Learning" }).click();
     await expect(page.getByText("Experience Learning Summary")).toBeVisible();

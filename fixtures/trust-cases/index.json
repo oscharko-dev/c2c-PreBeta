@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "v0",
+  "catalogVersion": "2026-05-21",
+  "description": "Immutable trust-case catalog for parity-aware Studio transformations. Browser clients select a trustCaseId; the Orchestrator resolves the runtime and comparison semantics from this repo-owned catalog.",
+  "trustCases": [
+    {
+      "trustCaseId": "HELLOW02-DEFAULT",
+      "version": "2026-05-21",
+      "programId": "HELLOW02",
+      "title": "Hello W0.2 default parity",
+      "description": "Default controlled parity case for the supported HELLOW02 COBOL slice.",
+      "defaultForProgram": true,
+      "sourceReference": {
+        "fixtureId": "HELLOW02",
+        "mode": "reference-fixture"
+      },
+      "controlledInput": {
+        "stdin": null,
+        "dataSetIds": [],
+        "expectedOutputFixtureId": "HELLOW02"
+      },
+      "runtime": {
+        "programArgs": []
+      },
+      "environmentProfile": {
+        "profileId": "generated-java-sandbox-v1",
+        "description": "Generated Java executes inside the controlled build-test runner sandbox with no browser-authored environment variables.",
+        "variables": {}
+      },
+      "comparison": {
+        "strategy": "deterministic-output",
+        "policyVersion": "deterministic-output-v1"
+      },
+      "supportedProgramShape": {
+        "language": "cobol",
+        "programId": "HELLOW02",
+        "supportedSubset": [
+          "WORKING-STORAGE",
+          "PERFORM",
+          "PERFORM-VARYING",
+          "DISPLAY",
+          "ADD",
+          "STOP-RUN"
+        ]
+      },
+      "evidenceIdentity": {
+        "kind": "trust-case",
+        "artifactName": "executed-trust-case.json"
+      }
+    }
+  ]
+}

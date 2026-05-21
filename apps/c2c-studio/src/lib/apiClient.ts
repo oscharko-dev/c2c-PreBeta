@@ -51,6 +51,9 @@ import {
   GeneratedTraceability,
   JavaRegionClassification,
   JavaRegionClassificationMap,
+  TrustCasePreferenceResponse,
+  TrustCaseSummary,
+  TrustCasesResponse,
 } from "@/types/api";
 import {
   HarnessReady,
@@ -90,6 +93,48 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function hasOptionalStringField(
+  payload: Record<string, unknown>,
+  field: string,
+): boolean {
+  return payload[field] === undefined || isString(payload[field]);
+}
+
+function hasTrustCaseIdentityFields(payload: Record<string, unknown>): boolean {
+  return (
+    hasOptionalStringField(payload, "trustCaseId") &&
+    hasOptionalStringField(payload, "trustCaseVersion") &&
+    hasOptionalStringField(payload, "trustCaseCatalogVersion") &&
+    hasOptionalStringField(payload, "trustCaseCatalogHash") &&
+    hasOptionalStringField(payload, "trustCaseConfigurationDigest") &&
+    hasOptionalStringField(payload, "trustCaseEnvironmentProfileId") &&
+    hasOptionalStringField(payload, "trustCaseComparisonPolicyVersion") &&
+    hasOptionalStringField(payload, "sourceReferenceFixtureId") &&
+    hasOptionalStringField(payload, "sourceReferenceMode")
+  );
+}
+
+function isTrustCaseSummary(payload: unknown): payload is TrustCaseSummary {
+  return (
+    isRecord(payload) &&
+    isString(payload.trustCaseId) &&
+    isString(payload.version) &&
+    isString(payload.catalogVersion) &&
+    isString(payload.catalogHash) &&
+    isString(payload.configurationDigest) &&
+    isString(payload.programId) &&
+    isString(payload.title) &&
+    isString(payload.description) &&
+    typeof payload.defaultForProgram === "boolean" &&
+    isString(payload.sourceReferenceFixtureId) &&
+    isString(payload.sourceReferenceMode) &&
+    isString(payload.environmentProfileId) &&
+    isString(payload.comparisonStrategy) &&
+    isString(payload.comparisonPolicyVersion) &&
+    isStringArray(payload.supportedSubset)
+  );
 }
 
 function isRunStatus(value: unknown): value is RunSummary["status"] {
@@ -752,6 +797,7 @@ function isTransformResponsePayload(
       isStringArray(payload.evidenceRefs)) &&
     (payload.policyDecision === undefined ||
       isString(payload.policyDecision)) &&
+    hasTrustCaseIdentityFields(payload) &&
     hasW02ContractFields(payload)
   );
 }
@@ -1078,6 +1124,7 @@ function isRunSummaryPayload(payload: unknown): payload is RunSummary {
       isStringArray(payload.evidenceRefs)) &&
     (payload.policyDecision === undefined ||
       isString(payload.policyDecision)) &&
+    hasTrustCaseIdentityFields(payload) &&
     hasW02ContractFields(payload) &&
     (payload.javaRegionClassification === undefined ||
       payload.javaRegionClassification === null ||
@@ -1104,6 +1151,10 @@ function isRunWorkflowViewPayload(
     (payload.state === null || isString(payload.state)) &&
     (payload.activeStep === null || isString(payload.activeStep)) &&
     (payload.activeAgent === null || isW02ActiveAgent(payload.activeAgent)) &&
+    (payload.trustCase === undefined ||
+      payload.trustCase === null ||
+      (isRecord(payload.trustCase) &&
+        hasTrustCaseIdentityFields(payload.trustCase))) &&
     isNonNegativeInteger(payload.agentAttemptCount) &&
     (payload.repairBudget === null ||
       isRepairBudgetPayload(payload.repairBudget)) &&
@@ -1586,6 +1637,63 @@ function parseManualCompileRepairRejectResponse(
   };
 }
 
+function parseTrustCasesResponse(payload: unknown): ApiResult<TrustCasesResponse> {
+  if (
+    !isRecord(payload) ||
+    payload.schemaVersion !== "v0" ||
+    !isString(payload.catalogVersion) ||
+    !isString(payload.catalogHash) ||
+    !(payload.programId === null || isString(payload.programId)) ||
+    !(payload.defaultTrustCaseId === null || isString(payload.defaultTrustCaseId)) ||
+    !(payload.savedTrustCaseId === null || isString(payload.savedTrustCaseId)) ||
+    !Array.isArray(payload.trustCases) ||
+    !payload.trustCases.every(isTrustCaseSummary)
+  ) {
+    return createFailure(
+      "Contract error: TrustCases payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return {
+    ok: true,
+    data: {
+      schemaVersion: "v0",
+      catalogVersion: payload.catalogVersion,
+      catalogHash: payload.catalogHash,
+      programId: payload.programId,
+      defaultTrustCaseId: payload.defaultTrustCaseId,
+      savedTrustCaseId: payload.savedTrustCaseId,
+      trustCases: payload.trustCases,
+    },
+  };
+}
+
+function parseTrustCasePreferenceResponse(
+  payload: unknown,
+): ApiResult<TrustCasePreferenceResponse> {
+  if (
+    !isRecord(payload) ||
+    !isString(payload.programId) ||
+    !(payload.trustCaseId === null || isString(payload.trustCaseId)) ||
+    typeof payload.persisted !== "boolean" ||
+    (payload.selected !== undefined && !isTrustCaseSummary(payload.selected))
+  ) {
+    return createFailure(
+      "Contract error: TrustCasePreference payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return {
+    ok: true,
+    data: {
+      programId: payload.programId,
+      trustCaseId: payload.trustCaseId,
+      persisted: payload.persisted,
+      selected: payload.selected,
+    },
+  };
+}
+
 function parseRunSummary(payload: unknown): ApiResult<RunSummary> {
   if (!isRunSummaryPayload(payload)) {
     return createFailure(
@@ -1827,6 +1935,28 @@ function parseHarnessReady(payload: unknown): ApiResult<HarnessReady> {
 export const apiClient = {
   getHealth: () => fetchJson("/api/v0/health", parseHealthResponse),
   getMode: () => fetchJson("/api/v0/mode", parseModeResponse),
+  getTrustCases: (programId?: string) => {
+    const query =
+      programId && programId.length > 0
+        ? `?programId=${encodeURIComponent(programId)}`
+        : "";
+    return fetchJson(`/api/v0/trust-cases${query}`, parseTrustCasesResponse, {
+      credentials: "include",
+    });
+  },
+  saveTrustCasePreference: (programId: string, trustCaseId: string) =>
+    fetchJson(
+      "/api/v0/session/trust-case-preference",
+      parseTrustCasePreferenceResponse,
+      {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ programId, trustCaseId }),
+      },
+    ),
   transform: (request: TransformRequest) =>
     fetchJson("/api/v0/transform", parseTransformResponse, {
       method: "POST",

@@ -26,6 +26,7 @@ from .config import OrchestratorConfig, load_config
 from .client import HttpClientError
 from .experience import ExperienceLearningGateway, NullExperienceLearningGateway
 from .harness import HarnessFailure, HarnessGateway
+from .trust_cases import TrustCaseCatalogError, load_trust_case_catalog
 from . import region_classification
 from .workflow import (
     EXECUTION_MODE_PARITY,
@@ -146,6 +147,7 @@ class OrchestratorService:
         self.config = config
         self.runner = runner
         self.artifact_store = artifact_store or runner.artifact_store
+        self.trust_case_catalog = load_trust_case_catalog()
         self.lock = threading.Lock()
         self.logger = logging.getLogger(__name__)
 
@@ -936,6 +938,12 @@ class OrchestratorService:
         model_prompt = payload.get("modelPrompt")
         if model_prompt is not None and not isinstance(model_prompt, str):
             raise ValueError("modelPrompt must be a string")
+        program_id_raw = payload.get("programId")
+        program_id = ""
+        if isinstance(program_id_raw, str) and program_id_raw.strip():
+            program_id = program_id_raw.strip()
+        elif program_id_raw is not None:
+            raise ValueError("programId must be a string")
         execution_mode_raw = payload.get("executionMode", EXECUTION_MODE_STANDARD)
         if not isinstance(execution_mode_raw, str):
             raise ValueError("executionMode must be a string")
@@ -955,21 +963,32 @@ class OrchestratorService:
             trust_case_id = trust_case_id_raw.strip()
         elif trust_case_id_raw is not None:
             raise ValueError("trustCaseId must be a string")
+        reference_mode = ""
         if reference_mode_raw is None:
-            reference_mode = REFERENCE_MODE_REFERENCE_FIXTURE
+            reference_mode = ""
         elif isinstance(reference_mode_raw, str):
             reference_mode = reference_mode_raw.strip().lower()
         else:
             raise ValueError("sourceReferenceMode must be a string")
-        if reference_mode not in {REFERENCE_MODE_REFERENCE_FIXTURE, REFERENCE_MODE_NATIVE_COBOL}:
+        if reference_mode and reference_mode not in {REFERENCE_MODE_REFERENCE_FIXTURE, REFERENCE_MODE_NATIVE_COBOL}:
             raise ValueError("sourceReferenceMode must be reference-fixture or native-cobol")
         parity_mode = execution_mode == EXECUTION_MODE_PARITY or bool(fixture_id or trust_case_id)
+        trust_case_resolution = None
         if parity_mode:
             execution_mode = EXECUTION_MODE_PARITY
-            if not fixture_id:
-                raise ValueError("sourceReferenceFixtureId is required for parity runs")
             if not trust_case_id:
-                trust_case_id = fixture_id
+                raise ValueError("trustCaseId is required for parity runs")
+            try:
+                trust_case_resolution = self.trust_case_catalog.resolve(
+                    trust_case_id,
+                    program_id=program_id or None,
+                    source_reference_fixture_id=fixture_id or None,
+                    source_reference_mode=reference_mode or None,
+                ).to_identity_payload()
+            except TrustCaseCatalogError as exc:
+                raise ValueError(str(exc)) from exc
+            fixture_id = str(trust_case_resolution.get("sourceReferenceFixtureId") or "")
+            reference_mode = str(trust_case_resolution.get("sourceReferenceMode") or "")
         # Issue #169: optional opt-in for the productive Transformation
         # Agent. Defaults to ``False`` so existing W0 deterministic-only
         # callers retain their behaviour.
@@ -1037,6 +1056,7 @@ class OrchestratorService:
             model_prompt=str(model_prompt).strip() if model_prompt else None,
             execution_mode=execution_mode,
             trust_case_id=trust_case_id or None,
+            trust_case_resolution=trust_case_resolution,
             source_reference_fixture_id=fixture_id or None,
             source_reference_mode=reference_mode if parity_mode else None,
             use_transformation_agent=use_transformation_agent,

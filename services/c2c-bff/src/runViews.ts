@@ -56,6 +56,7 @@ export interface WorkflowSnapshot {
   state: string | null;
   activeStep: string | null;
   activeAgent: string | null;
+  trustCase: TrustCaseSnapshot | null;
   agentAttemptCount: number;
   repairBudget: StoredRepairBudget | null;
   assistBudget: StoredAssistBudget | null;
@@ -70,6 +71,18 @@ export interface WorkflowSnapshot {
   generatedJavaRef: OutputRef | null;
   buildTestResultRef: OutputRef | null;
   evidencePackRef: OutputRef | null;
+}
+
+interface TrustCaseSnapshot {
+  trustCaseId: string;
+  version: string;
+  catalogVersion: string;
+  catalogHash: string;
+  configurationDigest: string;
+  sourceReferenceFixtureId: string;
+  sourceReferenceMode: string;
+  environmentProfileId: string;
+  comparisonPolicyVersion: string;
 }
 
 interface AssistDecisionArtifactRef {
@@ -168,6 +181,7 @@ export const EMPTY_WORKFLOW_SNAPSHOT: WorkflowSnapshot = {
   state: null,
   activeStep: null,
   activeAgent: null,
+  trustCase: null,
   agentAttemptCount: 0,
   repairBudget: null,
   assistBudget: null,
@@ -219,6 +233,24 @@ function asStringRecord(value: unknown): Record<string, string> {
   );
 }
 
+function trustCaseSnapshot(raw: unknown): TrustCaseSnapshot | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const trustCaseId = asString(record.trustCaseId);
+  if (trustCaseId.length === 0) return null;
+  return {
+    trustCaseId,
+    version: asString(record.version),
+    catalogVersion: asString(record.catalogVersion),
+    catalogHash: asString(record.catalogHash),
+    configurationDigest: asString(record.configurationDigest),
+    sourceReferenceFixtureId: asString(record.sourceReferenceFixtureId),
+    sourceReferenceMode: asString(record.sourceReferenceMode),
+    environmentProfileId: asString(record.environmentProfileId),
+    comparisonPolicyVersion: asString(record.comparisonPolicyVersion),
+  };
+}
+
 function parseBooleanString(value: string): boolean | undefined {
   if (value === "true") return true;
   if (value === "false") return false;
@@ -256,6 +288,13 @@ export function runSummary(stored: StoredRun): Record<string, unknown> {
     programId: stored.programId,
     executionMode: stored.executionMode ?? "standard",
     trustCaseId: stored.trustCaseId ?? "",
+    trustCaseVersion: stored.trustCaseVersion ?? "",
+    trustCaseCatalogVersion: stored.trustCaseCatalogVersion ?? "",
+    trustCaseCatalogHash: stored.trustCaseCatalogHash ?? "",
+    trustCaseConfigurationDigest: stored.trustCaseConfigurationDigest ?? "",
+    trustCaseEnvironmentProfileId: stored.trustCaseEnvironmentProfileId ?? "",
+    trustCaseComparisonPolicyVersion:
+      stored.trustCaseComparisonPolicyVersion ?? "",
     sourceReferenceFixtureId: stored.sourceReferenceFixtureId ?? "",
     sourceReferenceMode: stored.sourceReferenceMode ?? "",
     status: stored.status,
@@ -1245,6 +1284,9 @@ export function snapshotFromContract(
   const modelInvocationBudget = asModelInvocationBudget(
     contract.modelInvocationBudget,
   );
+  const trustCase = trustCaseSnapshot(
+    contract.trustCase ?? contract.resolvedTrustCase,
+  );
   const repairAttempts = sanitizeRepairAttempts(contract.repairAttempts);
   const assistDecision = sanitizeAssistDecision(contract.assistDecision);
   const finalClassification = asFinalClassification(contract.finalClassification);
@@ -1283,6 +1325,7 @@ export function snapshotFromContract(
     state,
     activeStep,
     activeAgent: deriveActiveAgent(activeStep),
+    trustCase,
     agentAttemptCount,
     repairBudget,
     assistBudget,
@@ -1314,6 +1357,7 @@ export function workflowEnvelope(
     state: snapshot.state,
     activeStep: snapshot.activeStep,
     activeAgent: snapshot.activeAgent,
+    trustCase: snapshot.trustCase,
     agentAttemptCount: snapshot.agentAttemptCount,
     repairBudget: snapshot.repairBudget,
     assistBudget: snapshot.assistBudget,

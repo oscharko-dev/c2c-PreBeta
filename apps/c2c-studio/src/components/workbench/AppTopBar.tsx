@@ -34,16 +34,35 @@ interface AppTopBarProps {
 
 type ClearDraftsMode = "scoped" | "origin";
 
+const noopSelectTrustCase = () => undefined;
+const unavailableTrustCasePreference = async () => ({
+  ok: false,
+  message: "Trust-case preference is unavailable in this session.",
+});
+
 export function AppTopBar({ apiState }: AppTopBarProps) {
   const { loading } = apiState;
   const readiness = getWorkbenchReadiness(apiState);
-  const {
-    canSubmitTransform,
-    submitTransform,
-    submitGenerate,
-    expectedOutput,
-    oracleInput,
-  } = useSourceWorkspace();
+  const sourceWorkspace = useSourceWorkspace();
+  const canSubmitTransform = sourceWorkspace.canSubmitTransform;
+  const canSubmitGenerate =
+    sourceWorkspace.canSubmitGenerate ?? canSubmitTransform;
+  const submitTransform = sourceWorkspace.submitTransform;
+  const submitGenerate = sourceWorkspace.submitGenerate;
+  const expectedOutput = sourceWorkspace.expectedOutput;
+  const oracleInput = sourceWorkspace.oracleInput;
+  const trustCases = sourceWorkspace.trustCases ?? [];
+  const selectedTrustCaseId = sourceWorkspace.selectedTrustCaseId ?? null;
+  const selectedTrustCase = sourceWorkspace.selectedTrustCase ?? null;
+  const trustCaseStatus = sourceWorkspace.trustCaseStatus ?? "ready";
+  const trustCaseError = sourceWorkspace.trustCaseError ?? null;
+  const trustCasePreferenceSavedAt =
+    sourceWorkspace.trustCasePreferenceSavedAt ?? null;
+  const setSelectedTrustCaseId =
+    sourceWorkspace.setSelectedTrustCaseId ?? noopSelectTrustCase;
+  const saveSelectedTrustCasePreference =
+    sourceWorkspace.saveSelectedTrustCasePreference ??
+    unavailableTrustCasePreference;
   const { state: runState, javaBuffers, startVerify } = useTransformationRun();
   const canStart = readiness.startEnabled && !loading && canSubmitTransform;
   // Studio-IDE-14 (#256): Compile Check is rendered as a sibling of the
@@ -68,6 +87,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   // toolbar action always confirms first per the issue spec.
   const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);
   const [verifyPending, setVerifyPending] = useState(false);
+  const [trustCaseSavePending, setTrustCaseSavePending] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -153,8 +173,24 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     (runState.generatedFiles?.files.some((file) => javaBuffers[file.path]) ??
       Object.keys(javaBuffers).length > 0) &&
     !verifyPending;
-  const canGenerate = canStart;
-  const canRegenerate = canStart;
+  const canGenerate = readiness.startEnabled && !loading && canSubmitGenerate;
+  const canRegenerate = canGenerate;
+  const evidenceTrustCaseDigest =
+    runState.summary?.trustCaseConfigurationDigest ||
+    runState.previousRun?.summary?.trustCaseConfigurationDigest ||
+    "";
+  const evidenceTrustCaseId =
+    runState.summary?.trustCaseId ||
+    runState.previousRun?.summary?.trustCaseId ||
+    "";
+  const trustCaseEvidenceMismatch = Boolean(
+    selectedTrustCase &&
+      evidenceTrustCaseDigest &&
+      evidenceTrustCaseDigest !== selectedTrustCase.configurationDigest,
+  );
+  const trustCaseNotice = trustCaseEvidenceMismatch
+    ? `Existing evidence was produced from ${evidenceTrustCaseId || "another trust case"} or an older catalog version; rerun to use ${selectedTrustCase?.trustCaseId}.`
+    : trustCaseError;
 
   useKeyboardShortcuts({
     onStartTransform: () => {
@@ -255,6 +291,25 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     showFeedback,
   ]);
 
+  const onSaveTrustCasePreference = useCallback(async () => {
+    if (trustCaseSavePending) return;
+    setTrustCaseSavePending(true);
+    try {
+      const result = await saveSelectedTrustCasePreference();
+      if (result.ok) {
+        showFeedback("Saved trust-case preference for this Studio session.");
+      } else {
+        showFeedback(result.message);
+      }
+    } finally {
+      setTrustCaseSavePending(false);
+    }
+  }, [
+    saveSelectedTrustCasePreference,
+    showFeedback,
+    trustCaseSavePending,
+  ]);
+
   return (
     <header
       className="flex min-h-12 w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-bg-1 px-4 py-2 shrink-0"
@@ -275,11 +330,69 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
       </div>
 
       <div className="flex min-w-0 items-center gap-2">
-        <div className="flex min-w-0 items-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1">
-          <span className="text-xs text-text-dim">Run Config:</span>
-          <span className="truncate text-xs font-medium text-text">
-            Default Transform
-          </span>
+        <div className="flex min-w-[18rem] max-w-[30rem] items-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1">
+          <Settings className="h-3.5 w-3.5 text-text-faint" />
+          <label
+            className="sr-only"
+            htmlFor="topbar-trust-case-select"
+          >
+            Trust case
+          </label>
+          <select
+            id="topbar-trust-case-select"
+            data-testid="topbar-trust-case-select"
+            className="min-w-0 flex-1 truncate bg-transparent text-xs font-medium text-text outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            value={selectedTrustCaseId ?? ""}
+            disabled={trustCaseStatus === "loading" || trustCases.length === 0}
+            title={
+              selectedTrustCase
+                ? `${selectedTrustCase.title} (${selectedTrustCase.trustCaseId})`
+                : trustCaseStatus === "loading"
+                  ? "Loading immutable trust cases"
+                  : "No trust case available"
+            }
+            onChange={(event) => setSelectedTrustCaseId(event.target.value)}
+          >
+            {trustCaseStatus === "loading" ? (
+              <option value="">Loading trust cases…</option>
+            ) : trustCases.length === 0 ? (
+              <option value="">No trust cases</option>
+            ) : (
+              trustCases.map((trustCase) => (
+                <option
+                  key={trustCase.trustCaseId}
+                  value={trustCase.trustCaseId}
+                >
+                  {trustCase.title}
+                </option>
+              ))
+            )}
+          </select>
+          <button
+            type="button"
+            data-testid="topbar-save-trust-case-preference"
+            disabled={
+              !selectedTrustCaseId ||
+              trustCaseSavePending ||
+              trustCaseStatus !== "ready"
+            }
+            className="rounded p-0.5 text-text-faint hover:text-text disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-1 focus-visible:ring-accent outline-none"
+            title="Save selected trust case as the Studio preference"
+            aria-label="Save selected trust case as the Studio preference"
+            onClick={() => void onSaveTrustCasePreference()}
+          >
+            {trustCasePreferenceSavedAt ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-teal" />
+            ) : (
+              <ShieldCheck className="h-3.5 w-3.5" />
+            )}
+          </button>
+          {trustCaseEvidenceMismatch ? (
+            <AlertCircle
+              className="h-3.5 w-3.5 text-amber-300"
+              aria-label="Existing evidence was produced from another trust case or catalog version"
+            />
+          ) : null}
         </div>
         <button
           type="button"
@@ -432,6 +545,16 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
           className="absolute right-4 top-14 z-40 rounded border border-line-2 bg-bg-1 px-3 py-1 text-xs text-text shadow"
         >
           {feedback}
+        </div>
+      ) : null}
+
+      {trustCaseNotice ? (
+        <div
+          role={trustCaseEvidenceMismatch ? "status" : "alert"}
+          aria-live="polite"
+          className="absolute left-4 top-14 z-40 max-w-xl rounded border border-line-2 bg-bg-1 px-3 py-1 text-xs text-text shadow"
+        >
+          {trustCaseNotice}
         </div>
       ) : null}
 

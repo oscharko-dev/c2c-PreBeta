@@ -159,6 +159,41 @@ vi.mock("@/lib/editor/cobolHoverProvider", () => ({
 vi.mock("@/lib/apiClient", () => ({
   apiClient: {
     transform: vi.fn(),
+    getTrustCases: vi.fn((programId?: string) =>
+      Promise.resolve({
+        ok: true,
+        data: {
+          schemaVersion: "v0",
+          catalogVersion: "2026-05-21",
+          catalogHash: "0".repeat(64),
+          programId: programId ?? null,
+          defaultTrustCaseId: programId ? `${programId}-DEFAULT` : null,
+          savedTrustCaseId: null,
+          trustCases: programId
+            ? [
+                {
+                  trustCaseId: `${programId}-DEFAULT`,
+                  version: "2026-05-21",
+                  catalogVersion: "2026-05-21",
+                  catalogHash: "0".repeat(64),
+                  configurationDigest: "1".repeat(64),
+                  programId,
+                  title: `${programId} default`,
+                  description: "Default trust case",
+                  defaultForProgram: true,
+                  sourceReferenceFixtureId: "HELLOW02",
+                  sourceReferenceMode: "reference-fixture",
+                  environmentProfileId: "generated-java-sandbox-v1",
+                  comparisonStrategy: "deterministic-output",
+                  comparisonPolicyVersion: "deterministic-output-v1",
+                  supportedSubset: ["DISPLAY"],
+                },
+              ]
+            : [],
+        },
+      }),
+    ),
+    saveTrustCasePreference: vi.fn(),
     getRun: vi.fn(),
     getRunProgress: vi.fn(),
     getRunExperience: vi.fn(),

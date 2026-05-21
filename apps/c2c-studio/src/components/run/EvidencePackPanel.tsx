@@ -17,7 +17,7 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
       baselineRunIds: [],
     }),
   } = useTransformationRun();
-  const { statusFlags } = useSourceWorkspace();
+  const { statusFlags, selectedTrustCase } = useSourceWorkspace();
   const manualDrift = manualDriftSummary();
   const manualDriftMessage = describeManualDriftSummary(manualDrift);
 
@@ -51,6 +51,16 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
 
   const isComplete = ev.status === 'complete';
   const isInvalid = ev.status === 'invalid';
+  const displayedSummary =
+    showingHistoricalEvidence && state.previousRun
+      ? state.previousRun.summary
+      : state.summary;
+  const trustCaseEvidenceMismatch = Boolean(
+    selectedTrustCase &&
+      displayedSummary?.trustCaseConfigurationDigest &&
+      displayedSummary.trustCaseConfigurationDigest !==
+        selectedTrustCase.configurationDigest,
+  );
   const alignment = buildArtifactAlignment(
     showingHistoricalEvidence && state.previousRun
       ? {
@@ -67,6 +77,14 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
   
   return (
     <div className="p-4 h-full flex flex-col text-sm bg-bg-0">
+      {trustCaseEvidenceMismatch ? (
+        <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
+          Existing evidence was produced from{' '}
+          {displayedSummary?.trustCaseId || 'another trust case'} or a different
+          catalog version. Rerun to use{' '}
+          {selectedTrustCase?.trustCaseId ?? 'the selected trust case'}.
+        </div>
+      ) : null}
       {statusFlags.pendingReRun || showingHistoricalEvidence || manualDriftMessage ? (
         <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
           {showingHistoricalEvidence

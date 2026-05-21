@@ -71,6 +71,7 @@ export interface SessionRecord {
   // never logged, never re-sent by the Studio runtime.
   draftKeyWrappingSecret: string;
   studioRedactionPatternAdditions: RedactionPatternAddition[];
+  trustCasePreferences: Record<string, string>;
   createdAt: string;
 }
 
@@ -81,6 +82,12 @@ export interface SessionStore {
   // Returns the record for an existing session, or ``null`` if the
   // session is unknown (cookie expired, server restart, logout).
   get(sessionId: string): SessionRecord | null;
+  getTrustCasePreference(sessionId: string, programId: string): string | null;
+  setTrustCasePreference(
+    sessionId: string,
+    programId: string,
+    trustCaseId: string,
+  ): SessionRecord | null;
   // Deletes the session record. Returns ``true`` if the session was
   // present; ``false`` if it was already absent (idempotent logout).
   delete(sessionId: string): boolean;
@@ -214,6 +221,7 @@ export function createSessionStore(
         studioRedactionPatternAdditions: validateRedactionAdditions(
           identity.studioRedactionPatternAdditions ?? [],
         ),
+        trustCasePreferences: {},
         createdAt: new Date(currentMs).toISOString(),
       };
       sessions.set(sessionId, {
@@ -239,6 +247,31 @@ export function createSessionStore(
       }
       entry.lastAccessMs = currentMs;
       return entry.record;
+    },
+    getTrustCasePreference(sessionId: string, programId: string): string | null {
+      const record = this.get(sessionId);
+      if (!record || typeof programId !== "string" || programId.length === 0) {
+        return null;
+      }
+      return record.trustCasePreferences[programId] ?? null;
+    },
+    setTrustCasePreference(
+      sessionId: string,
+      programId: string,
+      trustCaseId: string,
+    ): SessionRecord | null {
+      const record = this.get(sessionId);
+      if (
+        !record ||
+        typeof programId !== "string" ||
+        programId.length === 0 ||
+        typeof trustCaseId !== "string" ||
+        trustCaseId.length === 0
+      ) {
+        return null;
+      }
+      record.trustCasePreferences[programId] = trustCaseId;
+      return record;
     },
     delete(sessionId: string): boolean {
       if (typeof sessionId !== "string" || sessionId.length === 0) {

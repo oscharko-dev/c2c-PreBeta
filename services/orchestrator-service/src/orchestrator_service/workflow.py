@@ -398,6 +398,7 @@ class W0RunContext:
     model_prompt: str | None = None
     execution_mode: str = EXECUTION_MODE_STANDARD
     trust_case_id: str | None = None
+    trust_case_resolution: JsonObject | None = None
     source_reference_fixture_id: str | None = None
     source_reference_mode: str | None = None
     # Issue #169: when ``True``, the orchestrator invokes the productive
@@ -2200,6 +2201,8 @@ class W0WorkflowRunner:
                 w02.DEFAULT_MODEL_INVOCATION_BUDGET,
             ),
         )
+        if isinstance(context.trust_case_resolution, Mapping) and context.trust_case_resolution:
+            contract.set_resolved_trust_case(context.trust_case_resolution)
         self._store_contract(contract)
         self._persist_w02_contract(context, contract)
         return contract
@@ -2283,6 +2286,32 @@ class W0WorkflowRunner:
             contract.to_dict(),
             kind=KIND_W02_RUN_CONTRACT,
         )
+
+    def _trust_case_artifact_ref(self, context: W0RunContext) -> JsonObject | None:
+        trust_case_resolution = context.trust_case_resolution
+        if not isinstance(trust_case_resolution, Mapping) or not trust_case_resolution:
+            return None
+        existing = self.artifact_store.find_metadata(context.run_id, "executed-trust-case.json")
+        if existing is None:
+            metadata = self.artifact_store.write_json(
+                context.run_id,
+                context.workflow_id,
+                "executed-trust-case.json",
+                dict(trust_case_resolution),
+                kind="trust-case",
+            )
+            return {
+                "uri": metadata.uri,
+                "sha256": metadata.sha256,
+                "byteSize": metadata.byteSize,
+                "kind": metadata.kind,
+            }
+        return {
+            "uri": str(existing.get("uri") or ""),
+            "sha256": str(existing.get("sha256") or ""),
+            "byteSize": int(existing.get("byteSize") or 0),
+            "kind": str(existing.get("kind") or "trust-case"),
+        }
 
     # ------------------------------------------------------------------
     # Issue #169: Transformation Agent integration helpers
@@ -5337,12 +5366,35 @@ class W0WorkflowRunner:
             artifacts["sourceReferenceExecution"] = _as_reference_payload(
                 source_reference_output.output_ref
             )
-            if context.source_reference_fixture_id:
-                artifacts["trustCase"] = {
-                    "id": context.trust_case_id or context.source_reference_fixture_id,
-                    "fixtureId": context.source_reference_fixture_id,
-                    "referenceMode": context.source_reference_mode or "",
+        if _is_parity_run(context):
+            trust_case_payload: JsonObject | None = None
+            if isinstance(context.trust_case_resolution, Mapping) and context.trust_case_resolution:
+                trust_case_payload = dict(context.trust_case_resolution)
+            if trust_case_payload is None and context.trust_case_id:
+                trust_case_payload = {
+                    "trustCaseId": context.trust_case_id,
                 }
+            if trust_case_payload is not None:
+                trust_case_payload.setdefault(
+                    "id",
+                    context.trust_case_id or context.source_reference_fixture_id or "",
+                )
+                trust_case_payload.setdefault(
+                    "trustCaseId",
+                    context.trust_case_id or context.source_reference_fixture_id or "",
+                )
+                trust_case_payload.setdefault(
+                    "sourceReferenceFixtureId",
+                    context.source_reference_fixture_id or "",
+                )
+                trust_case_payload.setdefault(
+                    "sourceReferenceMode",
+                    context.source_reference_mode or "",
+                )
+                trust_case_artifact_ref = self._trust_case_artifact_ref(context)
+                if trust_case_artifact_ref is not None:
+                    trust_case_payload["artifactRef"] = trust_case_artifact_ref
+                artifacts["trustCase"] = trust_case_payload
         if not (is_w02 and w02_blocked and not _is_parity_run(context)):
             artifacts["generatedJava"] = generated_java_payload
         # Issue #96: when experience-learning is configured, reference its

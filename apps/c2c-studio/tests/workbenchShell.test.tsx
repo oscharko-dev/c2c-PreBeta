@@ -336,7 +336,9 @@ describe("WorkbenchShell Layout & Topbar Readiness", () => {
     render(<WorkbenchShell />);
 
     expect(screen.getByText("main")).toHaveClass("truncate");
-    expect(screen.getByText("Default Transform")).toHaveClass("truncate");
+    expect(screen.getByTestId("topbar-trust-case-select")).toHaveClass(
+      "truncate",
+    );
     expect(screen.getByLabelText("Status Bar")).toHaveClass("flex-wrap");
   });
 });
