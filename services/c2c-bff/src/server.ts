@@ -98,6 +98,13 @@ import {
   transformResponse,
   type WorkflowSnapshot,
 } from "./runViews";
+import {
+  buildOutputChangeExplanation,
+  buildUnavailableOutputChangeExplanation,
+  withAiSummary,
+  type OutputChangeAiSummary,
+  type OutputChangeRunArtifacts,
+} from "./outputChangeExplanation";
 // Studio-IDE-5 (#244): typed Diagnostic surface. The shape and the
 // normalization rules live in `./diagnostics.ts` so the BFF handlers
 // and the dedicated unit tests share a single source of truth.
@@ -2001,6 +2008,116 @@ async function liveEvidenceView(
       manifestHash: "",
       validationStatus: "unknown",
       exportRef: null,
+    };
+  }
+}
+
+async function loadOutputChangeRunArtifacts(
+  stored: StoredRun,
+  orchestrator: OrchestratorClient,
+): Promise<OutputChangeRunArtifacts> {
+  const summary = runSummary(stored);
+  const summaryTrust = extractTrustSummary(summary);
+  const comparisonResult = asRecord(summaryTrust?.comparisonResult);
+  const generated = await liveGeneratedView(stored, orchestrator);
+  const buildTest = await liveBuildTestView(stored, orchestrator);
+  const evidence = await liveEvidenceView(stored, orchestrator);
+  return {
+    runId: stored.runId,
+    programId: stored.programId,
+    status: stored.status,
+    executionMode: stored.executionMode,
+    trustCaseId: asString(summary.trustCaseId) || undefined,
+    trustCaseConfigurationDigest:
+      asString(summary.trustCaseConfigurationDigest) || undefined,
+    trustCaseEnvironmentProfileId:
+      asString(summary.trustCaseEnvironmentProfileId) || undefined,
+    trustCaseComparisonPolicyVersion:
+      asString(summary.trustCaseComparisonPolicyVersion) || undefined,
+    sourceReferenceFixtureId:
+      asString(summary.sourceReferenceFixtureId) || undefined,
+    sourceReferenceMode: asString(summary.sourceReferenceMode) || undefined,
+    trustSummary: summaryTrust,
+    generatedArtifactRef: normalizeOutputRef(generated.artifactRef),
+    sourceHash:
+      asRecord(generated.traceability) &&
+      typeof asRecord(generated.traceability)?.sourceHash === "string"
+        ? asString(asRecord(generated.traceability)?.sourceHash)
+        : null,
+    actualOutput:
+      typeof buildTest.actualOutput === "string" ? buildTest.actualOutput : null,
+    actualOutputRef: normalizeOutputRef(buildTest.actualOutputRef),
+    comparisonDiffRef:
+      normalizeOutputRef(asRecord(buildTest.comparison)?.diffRef) ??
+      normalizeOutputRef(comparisonResult?.diffRef),
+    evidenceStatus:
+      typeof evidence.status === "string" ? evidence.status : null,
+    manualEditsCarriedOver: evidence.manualEditsCarriedOver === true,
+    manualDriftRegionCount:
+      typeof evidence.manualDriftRegionCount === "number" &&
+      Number.isInteger(evidence.manualDriftRegionCount) &&
+      evidence.manualDriftRegionCount >= 0
+        ? evidence.manualDriftRegionCount
+        : 0,
+  };
+}
+
+async function maybeBuildOutputChangeAiSummary(
+  analysis: ReturnType<typeof buildOutputChangeExplanation>,
+  modelGateway: ModelGatewayClient,
+): Promise<OutputChangeAiSummary> {
+  if (analysis.status !== "available") {
+    return {
+      status: "unavailable",
+      label: "AI-assisted explanation",
+      groundingLabel: "Grounded in deterministic evidence",
+      unavailableReason: "insufficient_evidence",
+    };
+  }
+  if (!modelGateway.enabled) {
+    return {
+      status: "unavailable",
+      label: "AI-assisted explanation",
+      groundingLabel: "Grounded in deterministic evidence",
+      unavailableReason: "model_gateway_unavailable",
+    };
+  }
+  try {
+    const upstream = await modelGateway.explain({
+      schemaVersion: "v0",
+      kind: "output-change-analysis",
+      analysis,
+    });
+    const body = asRecord(upstream?.body);
+    const explanation = asString(body?.explanation).trim();
+    if (!upstream || upstream.status < 200 || upstream.status >= 300 || explanation.length === 0) {
+      return {
+        status: "unavailable",
+        label: "AI-assisted explanation",
+        groundingLabel: "Grounded in deterministic evidence",
+        unavailableReason: "model_gateway_unavailable",
+      };
+    }
+    return {
+      status: "available",
+      label: "AI-assisted explanation",
+      groundingLabel: "Grounded in deterministic evidence",
+      explanation,
+      modelInvocationRef:
+        asString(body?.invocationId).trim().length > 0
+          ? asString(body?.invocationId).trim()
+          : null,
+      ledgerRef:
+        asString(body?.ledgerRef).trim().length > 0
+          ? asString(body?.ledgerRef).trim()
+          : null,
+    };
+  } catch {
+    return {
+      status: "unavailable",
+      label: "AI-assisted explanation",
+      groundingLabel: "Grounded in deterministic evidence",
+      unavailableReason: "model_gateway_unavailable",
     };
   }
 }
@@ -6322,6 +6439,69 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
+      }
+
+      const outputChangeMatch =
+        /^\/api\/v0\/runs\/([^\/]+)\/output-change-explanation$/.exec(pathname);
+      if (outputChangeMatch && method === "POST") {
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          jsonResponse(res, 400, {
+            error:
+              err instanceof Error ? err.message : "Invalid JSON body.",
+          });
+          return;
+        }
+        const runId = decodeURIComponent(outputChangeMatch[1] ?? "");
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        const requestBody = asRecord(body);
+        const previousRunId = asString(requestBody?.previousRunId).trim();
+        if (previousRunId.length === 0) {
+          badRequest(res, "previousRunId must be a non-empty string");
+          return;
+        }
+        const previousStored = runStore.get(previousRunId);
+        if (!previousStored) {
+          jsonResponse(
+            res,
+            200,
+            buildUnavailableOutputChangeExplanation(
+              { runId: stored.runId, programId: stored.programId },
+              previousRunId,
+              "previous_run_missing",
+              stored.trustCaseId ?? null,
+              null,
+            ),
+          );
+          return;
+        }
+        const includeAiSummary = requestBody?.includeAiSummary === true;
+        const currentArtifacts = await loadOutputChangeRunArtifacts(
+          stored,
+          orchestrator,
+        );
+        const previousArtifacts = await loadOutputChangeRunArtifacts(
+          previousStored,
+          orchestrator,
+        );
+        let explanation = buildOutputChangeExplanation(
+          currentArtifacts,
+          previousArtifacts,
+        );
+        if (includeAiSummary) {
+          explanation = withAiSummary(
+            explanation,
+            await maybeBuildOutputChangeAiSummary(explanation, modelGateway),
+          );
+        }
+        jsonResponse(res, 200, explanation);
+        return;
       }
 
       const progressMatch = /^\/api\/v0\/runs\/([^\/]+)\/progress$/.exec(

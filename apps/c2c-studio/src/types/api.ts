@@ -513,6 +513,92 @@ export interface EvidenceView {
   note?: string;
 }
 
+export type OutputChangeCategory =
+  | "cobol_edit"
+  | "generated_java_refresh"
+  | "manual_java_edit"
+  | "repair_patch"
+  | "trust_case_change"
+  | "runtime_configuration_change"
+  | "normalization_rule_change"
+  | "cause_not_determinable";
+
+export type OutputChangeUnavailableReason =
+  | "previous_run_missing"
+  | "same_run_not_allowed"
+  | "run_not_completed"
+  | "non_parity_run"
+  | "missing_trust_summary"
+  | "missing_normalized_output"
+  | "missing_observed_output"
+  | "evidence_incomplete";
+
+export interface OutputChangeEvidenceLink {
+  label: string;
+  currentRef?: OutputRef | null;
+  previousRef?: OutputRef | null;
+}
+
+export interface OutputDeltaLine {
+  kind: "context" | "added" | "removed";
+  content: string;
+}
+
+export interface OutputChangeCategoryEntry {
+  category: OutputChangeCategory;
+  changed: boolean;
+  title: string;
+  detail: string;
+  evidenceLinks: OutputChangeEvidenceLink[];
+}
+
+export interface OutputChangeDeltaSummary {
+  changed: boolean;
+  addedLineCount: number;
+  removedLineCount: number;
+  excerpt: OutputDeltaLine[];
+  currentNormalizedOutputRef: OutputRef | null;
+  previousNormalizedOutputRef: OutputRef | null;
+  currentComparisonDiffRef: OutputRef | null;
+  previousComparisonDiffRef: OutputRef | null;
+}
+
+export interface OutputChangeAiSummary {
+  status: "available" | "unavailable";
+  label: string;
+  groundingLabel: string;
+  explanation?: string;
+  modelInvocationRef?: string | null;
+  ledgerRef?: string | null;
+  unavailableReason?: "model_gateway_unavailable" | "insufficient_evidence";
+}
+
+export interface OutputChangeExplanationRequest {
+  previousRunId: string;
+  includeAiSummary?: boolean;
+}
+
+export interface OutputChangeExplanationResponse {
+  schemaVersion: "v0";
+  status: "available" | "unavailable";
+  unavailableReason?: OutputChangeUnavailableReason;
+  currentRunId: string;
+  previousRunId: string;
+  programId: string;
+  currentTrustCaseId: string | null;
+  previousTrustCaseId: string | null;
+  determination:
+    | "single_change"
+    | "multiple_changes"
+    | "not_determinable";
+  primaryCategory: OutputChangeCategory | null;
+  summary: string;
+  categories: OutputChangeCategoryEntry[];
+  outputDelta: OutputChangeDeltaSummary | null;
+  evidenceLinks: OutputChangeEvidenceLink[];
+  aiSummary: OutputChangeAiSummary;
+}
+
 export type ParityEvidenceExportQualification =
   | "clean"
   | "stale_evidence"

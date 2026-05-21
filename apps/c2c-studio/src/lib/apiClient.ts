@@ -11,6 +11,8 @@ import {
   GeneratedFilesIndex,
   BuildTestView,
   EvidenceView,
+  OutputChangeExplanationRequest,
+  OutputChangeExplanationResponse,
   ParityEvidenceExportQualification,
   ParityEvidenceExportRequest,
   ParityEvidenceExportResponse,
@@ -259,6 +261,28 @@ function isNullish(value: unknown): value is null | undefined {
 
 function isOptionalStringOrNull(value: unknown): boolean {
   return isNullish(value) || isString(value);
+}
+
+function isOutputChangeExplanationResponsePayload(
+  payload: unknown,
+): payload is OutputChangeExplanationResponse {
+  return (
+    isRecord(payload) &&
+    payload.schemaVersion === "v0" &&
+    (payload.status === "available" || payload.status === "unavailable") &&
+    isString(payload.currentRunId) &&
+    isString(payload.previousRunId) &&
+    isString(payload.programId) &&
+    (payload.currentTrustCaseId === null || isString(payload.currentTrustCaseId)) &&
+    (payload.previousTrustCaseId === null || isString(payload.previousTrustCaseId)) &&
+    isString(payload.determination) &&
+    (payload.primaryCategory === null || isString(payload.primaryCategory)) &&
+    isString(payload.summary) &&
+    Array.isArray(payload.categories) &&
+    (payload.outputDelta === null || isRecord(payload.outputDelta)) &&
+    Array.isArray(payload.evidenceLinks) &&
+    isRecord(payload.aiSummary)
+  );
 }
 
 function isOptionalPositiveIntegerOrNull(value: unknown): boolean {
@@ -2268,6 +2292,18 @@ function parseRunWorkflowView(payload: unknown): ApiResult<RunWorkflowView> {
   return { ok: true, data: payload };
 }
 
+function parseOutputChangeExplanationResponse(
+  payload: unknown,
+): ApiResult<OutputChangeExplanationResponse> {
+  if (!isOutputChangeExplanationResponsePayload(payload)) {
+    return createFailure(
+      "Contract error: OutputChangeExplanationResponse payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return { ok: true, data: payload };
+}
+
 function encodeGeneratedFilePath(filePath: string): string {
   const segments = filePath.split("/");
   if (
@@ -2541,6 +2577,22 @@ export const apiClient = {
     fetchJson(
       `/api/v0/runs/${encodeURIComponent(runId)}/evidence`,
       parseEvidenceView,
+    ),
+  getOutputChangeExplanation: (
+    runId: string,
+    request: OutputChangeExplanationRequest,
+  ) =>
+    fetchJson(
+      `/api/v0/runs/${encodeURIComponent(runId)}/output-change-explanation`,
+      parseOutputChangeExplanationResponse,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
     ),
   exportParityEvidenceScaffold: (
     runId: string,
