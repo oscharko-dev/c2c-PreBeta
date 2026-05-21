@@ -11,8 +11,12 @@ import (
 
 func TestHarnessEventsHandler_PostAcceptsRawHarnessStatuses(t *testing.T) {
 	cfgNow := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	const controlToken = "test-control-token"
 	service := NewExperienceLearningService(
-		experienceLearningConfig{autoAnalyzeOnIngest: true},
+		experienceLearningConfig{
+			autoAnalyzeOnIngest: true,
+			controlToken:        controlToken,
+		},
 		NewInMemoryHarnessEventStore(),
 		NewInMemoryTrajectoryLedgerStore(),
 		NewInMemoryExperienceEventStore(),
@@ -59,6 +63,7 @@ func TestHarnessEventsHandler_PostAcceptsRawHarnessStatuses(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v0/harness-events", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-C2C-Control-Token", controlToken)
 	res := httptest.NewRecorder()
 
 	service.Routes().ServeHTTP(res, req)

@@ -90,6 +90,7 @@ import {
   resolveTransformProgramId,
   runLinks,
   runSummary,
+  extractTrustSummary,
   snapshotFromContract,
   sanitizeUiRunEvent,
   workflowEnvelope,
@@ -3831,7 +3832,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               "content-type": "application/json; charset=utf-8",
               "cache-control": "no-store",
             });
-            res.end(JSON.stringify(transformResponse(synced)));
+            res.end(
+              JSON.stringify(
+                transformResponse(synced, extractTrustSummary(upstream.body)),
+              ),
+            );
             return;
           }
           const status = upstream?.status ?? 502;
@@ -4057,7 +4062,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             });
             res.end(
               JSON.stringify({
-                ...transformResponse(synced),
+                ...transformResponse(
+                  synced,
+                  extractTrustSummary(upstream.body),
+                ),
                 runMode: "generate",
               }),
             );
@@ -5070,7 +5078,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
                 "content-type": "application/json; charset=utf-8",
                 "cache-control": "no-store",
               });
-              res.end(JSON.stringify(runSummary(synced)));
+              res.end(
+                JSON.stringify(
+                  runSummary(synced, extractTrustSummary(upstream.body)),
+                ),
+              );
               return;
             }
             const status = upstream?.status ?? 502;
@@ -5144,6 +5156,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         let current = stored;
+        let trustSummary = null;
         if (
           current.mode === "live" &&
           orchestrator.enabled &&
@@ -5153,6 +5166,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             const upstream = await orchestrator.getRun(current.liveRunId);
             if (upstream && upstream.status >= 200 && upstream.status < 300) {
               current = applyLiveRunPayload(current, runStore, upstream.body);
+              trustSummary = extractTrustSummary(upstream.body);
             }
           } catch {
             // keep last-known state; UI shows updatedAt
@@ -5166,8 +5180,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             runStore,
           );
           current = workflowResult.stored;
+          if (workflowResult.snapshot.trustSummary) {
+            trustSummary = workflowResult.snapshot.trustSummary;
+          }
         }
-        jsonResponse(res, 200, runSummary(current));
+        jsonResponse(res, 200, runSummary(current, trustSummary));
         return;
       }
 

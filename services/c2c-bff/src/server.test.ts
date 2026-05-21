@@ -633,6 +633,7 @@ test("loadConfig surfaces exact Studio CORS origins", () => {
     {
       C2C_REPO_ROOT: "/tmp/c2c-test-root",
       C2C_BFF_HOST: "0.0.0.0",
+      C2C_ALLOW_NON_LOOPBACK_BIND: "true",
     } as NodeJS.ProcessEnv,
     __dirname,
   );
@@ -732,6 +733,7 @@ async function fetchJson(
 
 function createRouteAuth(): {
   sessionStore: SessionStore;
+  headers: Record<string, string>;
   post: (
     body: unknown,
     headers?: Record<string, string>,
@@ -744,6 +746,10 @@ function createRouteAuth(): {
   });
   return {
     sessionStore,
+    headers: {
+      origin: "http://127.0.0.1:3000",
+      cookie: `${SESSION_COOKIE_NAME}=${record.sessionId}`,
+    },
     post: (body, headers = {}) => ({
       method: "POST",
       headers: {
@@ -1016,17 +1022,20 @@ test("transform refuses to dispatch a programId that maps to an unsupported refe
     knownLimitations: ["no W0 coverage"],
   };
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([unsupported]),
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText:
           "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. UNSUP01.\n",
@@ -1059,12 +1068,14 @@ test("every shipped reference program is loadable and routes its source through 
   );
 
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: realRegistry,
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -1091,6 +1102,7 @@ test("every shipped reference program is loadable and routes its source through 
         `${server.baseUrl}/api/v0/transform`,
         {
           method: "POST",
+          headers: auth.headers,
           body: {
             sourceText: detail.cobolSource,
             programId: detail.programId,
@@ -1126,17 +1138,20 @@ test("every shipped reference program is loadable and routes its source through 
 test("product mode rejects POST /api/v0/runs with 503 when orchestrator is missing and diagnostic fixtures are not enabled", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples,
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const blocked = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(blocked.status, 503);
@@ -1161,17 +1176,20 @@ test("product mode rejects POST /api/v0/runs with 503 when orchestrator is missi
 test("diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, and productMode is unavailable", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, enableDiagnosticFixtures: true },
     samples,
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
@@ -1189,6 +1207,7 @@ test("diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
 
     const generated = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runBody.runId}/generated`,
+      { headers: auth.headers },
     );
     assert.equal(generated.status, 200);
     const genBody = generated.body as {
@@ -1208,6 +1227,7 @@ test("diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
 
     const buildTest = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runBody.runId}/build-test`,
+      { headers: auth.headers },
     );
     assert.equal(buildTest.status, 200);
     const btBody = buildTest.body as {
@@ -1225,6 +1245,7 @@ test("diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
 
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     assert.equal(evidence.status, 200);
     const evBody = evidence.body as {
@@ -1245,6 +1266,7 @@ test("diagnostic fixture mode is opt-in, produces diagnostic-fixture run mode, a
 test("starting a run surfaces orchestrator failures instead of silently falling back to mock", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const failingOrchestrator: OrchestratorClient = {
     enabled: true,
     async startRun() {
@@ -1299,11 +1321,13 @@ test("starting a run surfaces orchestrator failures instead of silently falling 
     orchestrator: failingOrchestrator,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const failed = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(failed.status, 502);
@@ -1317,6 +1341,7 @@ test("starting a run surfaces orchestrator failures instead of silently falling 
 test("starting a run with orchestrator non-2xx response returns 502 and creates no run", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const rejectingOrchestrator: OrchestratorClient = {
     enabled: true,
     async startRun() {
@@ -1371,11 +1396,13 @@ test("starting a run with orchestrator non-2xx response returns 502 and creates 
     orchestrator: rejectingOrchestrator,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const failed = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(failed.status, 502);
@@ -1390,17 +1417,20 @@ test("starting a run in live mode proxies the orchestrator, syncs status, and re
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
@@ -1420,6 +1450,7 @@ test("starting a run in live mode proxies the orchestrator, syncs status, and re
 
     const fetched = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
     );
     assert.equal(fetched.status, 200);
     const fetchedBody = fetched.body as { mode: string; status: string };
@@ -1429,6 +1460,7 @@ test("starting a run in live mode proxies the orchestrator, syncs status, and re
 
     const generated = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+      { headers: auth.headers },
     );
     assert.equal(generated.status, 200);
     const genBody = generated.body as {
@@ -1443,6 +1475,7 @@ test("starting a run in live mode proxies the orchestrator, syncs status, and re
 
     const buildTest = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
     );
     assert.equal(buildTest.status, 200);
     const btBody = buildTest.body as {
@@ -1459,6 +1492,7 @@ test("starting a run in live mode proxies the orchestrator, syncs status, and re
 
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     assert.equal(evidence.status, 200);
     const evBody = evidence.body as {
@@ -1481,17 +1515,20 @@ test("starting a parity run forwards curated reference configuration to the orch
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         programId: "BRNCH01",
         requester: "studio",
@@ -1528,6 +1565,7 @@ test("starting a parity run forwards curated reference configuration to the orch
 
     const fetched = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
     );
     assert.equal(fetched.status, 200);
     const fetchedBody = fetched.body as { executionMode: string };
@@ -1541,17 +1579,20 @@ test("starting a parity run rejects unsupported mode and missing fixture before 
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const unsupported = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01", executionMode: "repair" },
     });
     assert.equal(unsupported.status, 400);
@@ -1562,6 +1603,7 @@ test("starting a parity run rejects unsupported mode and missing fixture before 
 
     const missingFixture = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01", executionMode: "parity" },
     });
     assert.equal(missingFixture.status, 400);
@@ -1577,17 +1619,20 @@ test("starting a parity run rejects unsupported mode and missing fixture before 
 
 test("starting a parity run requires a configured orchestrator instead of diagnostic fixture fallback", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, enableDiagnosticFixtures: true },
     samples,
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         programId: "BRNCH01",
         executionMode: "parity",
@@ -1604,6 +1649,7 @@ test("starting a parity run requires a configured orchestrator instead of diagno
 test("live generated/build-test/evidence endpoints return real artifact contents when orchestrator has persisted them", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const generatedJava =
     "package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) {}\n}\n";
   const buildResult = {
@@ -1742,11 +1788,13 @@ test("live generated/build-test/evidence endpoints return real artifact contents
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
@@ -1754,6 +1802,7 @@ test("live generated/build-test/evidence endpoints return real artifact contents
 
     const generated = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+      { headers: auth.headers },
     );
     assert.equal(generated.status, 200);
     const genBody = generated.body as {
@@ -1770,6 +1819,7 @@ test("live generated/build-test/evidence endpoints return real artifact contents
 
     const buildTest = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
     );
     assert.equal(buildTest.status, 200);
     const btBody = buildTest.body as {
@@ -1785,6 +1835,7 @@ test("live generated/build-test/evidence endpoints return real artifact contents
 
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     assert.equal(evidence.status, 200);
     const evBody = evidence.body as {
@@ -1804,6 +1855,7 @@ test("live generated/build-test/evidence endpoints return real artifact contents
 
     const events = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/events`,
+      { headers: auth.headers },
     );
     assert.equal(events.status, 200);
     const evtBody = events.body as {
@@ -1824,6 +1876,7 @@ test("live generated/build-test/evidence endpoints return real artifact contents
 
     const artifacts = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts`,
+      { headers: auth.headers },
     );
     assert.equal(artifacts.status, 200);
     const artBody = artifacts.body as {
@@ -1843,6 +1896,7 @@ test("live generated/build-test/evidence endpoints return real artifact contents
 test("live generated endpoint exposes outputRef, diagnostics, and rejects placeholder markers from upstream payload", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const generatedJava =
     'package c2c;\npublic final class CASE01 {\n    public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); }\n}\n';
   const { client: orch } = stubOrchestrator({
@@ -1897,16 +1951,19 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const generated = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+      { headers: auth.headers },
     );
     assert.equal(generated.status, 200);
     const body = generated.body as {
@@ -1947,6 +2004,7 @@ test("live generated endpoint exposes outputRef, diagnostics, and rejects placeh
 test("live generated endpoint never inlines upstream Java content", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const oversizedJava = "A".repeat(1_200_000);
   const { client: orch } = stubOrchestrator({
     generated: {
@@ -1992,16 +2050,19 @@ test("live generated endpoint never inlines upstream Java content", async () => 
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const generated = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+      { headers: auth.headers },
     );
     assert.equal(generated.status, 200);
     const body = generated.body as {
@@ -2032,6 +2093,7 @@ test("live generated endpoint never inlines upstream Java content", async () => 
 test("live generated endpoint downgrades successful runs containing placeholder Java to incomplete", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   // Simulate a misbehaving upstream that returns a "complete" envelope but
   // the generated Java still contains the W0-STUB placeholder marker. The
   // BFF must refuse to surface this as `status: 'generated'`.
@@ -2074,16 +2136,19 @@ test("live generated endpoint downgrades successful runs containing placeholder 
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const generated = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+      { headers: auth.headers },
     );
     assert.equal(generated.status, 200);
     const body = generated.body as {
@@ -2108,6 +2173,7 @@ test("live generated endpoint downgrades successful runs containing placeholder 
 test("live build-test extracts execution.stdout, goldenMaster.expected, outputRef, diagnostics, and compile/execution status", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const buildResult = {
     status: "ok",
     classification: "match",
@@ -2187,16 +2253,19 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const buildTest = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
     );
     assert.equal(buildTest.status, 200);
     const body = buildTest.body as {
@@ -2270,6 +2339,7 @@ test("live build-test extracts execution.stdout, goldenMaster.expected, outputRe
 test("live build-test accepts Trust-2 shared build and execution fields", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const buildResult = {
     status: "ok",
     classification: "match",
@@ -2331,16 +2401,19 @@ test("live build-test accepts Trust-2 shared build and execution fields", async 
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const buildTest = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
     );
     assert.equal(buildTest.status, 200);
     const body = buildTest.body as {
@@ -2361,6 +2434,7 @@ test("live build-test accepts Trust-2 shared build and execution fields", async 
 test("live build-test surfaces compile failure as compileStatus=failed and executionStatus=not-run", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const buildResult = {
     status: "compile-failed",
     classification: "compile-error",
@@ -2406,16 +2480,19 @@ test("live build-test surfaces compile failure as compileStatus=failed and execu
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const buildTest = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
     );
     const body = buildTest.body as {
       status: string;
@@ -2435,6 +2512,7 @@ test("live build-test surfaces compile failure as compileStatus=failed and execu
 test("live evidence exposes manifestHash, validationStatus, exportRef, and aggregates missing artifacts", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const manifest = {
     schemaVersion: "v0",
     capability: "evidence.pack",
@@ -2485,16 +2563,19 @@ test("live evidence exposes manifestHash, validationStatus, exportRef, and aggre
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     const body = evidence.body as {
       status: string;
@@ -2524,6 +2605,7 @@ test("live evidence exposes manifestHash, validationStatus, exportRef, and aggre
 test("live evidence surfaces manualEditOverlay reference and run-summary fields", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const overlay = {
     uri: "urn:c2c/manual-edit-overlay/live-run-1",
     sha256: "a".repeat(64),
@@ -2581,16 +2663,19 @@ test("live evidence surfaces manualEditOverlay reference and run-summary fields"
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     assert.equal(evidence.status, 200);
     const body = evidence.body as {
@@ -2624,6 +2709,7 @@ test("live evidence surfaces manualEditOverlay reference and run-summary fields"
 test("live evidence omits manualEditOverlay and defaults run-summary fields when no manual edits", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const manifest = {
     schemaVersion: "v0",
     capability: "evidence.pack",
@@ -2668,16 +2754,19 @@ test("live evidence omits manualEditOverlay and defaults run-summary fields when
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     const body = evidence.body as {
       manualEditsCarriedOver: boolean;
@@ -2695,6 +2784,7 @@ test("live evidence omits manualEditOverlay and defaults run-summary fields when
 test("live evidence with missing manifest reports incomplete status and zero pack id; never claims complete", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator(); // no evidence stub => returns undefined
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
@@ -2702,16 +2792,19 @@ test("live evidence with missing manifest reports incomplete status and zero pac
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     const body = evidence.body as {
       status: string;
@@ -2732,17 +2825,20 @@ test("live evidence with missing manifest reports incomplete status and zero pac
 
 test("transform rejects blank source text and does not create a run", async () => {
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText: "   " },
     });
     assert.equal(rejected.status, 400);
@@ -2754,17 +2850,20 @@ test("transform rejects blank source text and does not create a run", async () =
 
 test("transform fails clearly when orchestrator url is missing", async () => {
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. TRANS01.\n" },
     });
     assert.equal(rejected.status, 503);
@@ -2781,6 +2880,7 @@ test("transform fails clearly when orchestrator url is missing", async () => {
 test("transform derives program id, calls orchestrator, and returns the full transform contract", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: {
       ...baseConfig,
@@ -2792,6 +2892,7 @@ test("transform derives program id, calls orchestrator, and returns the full tra
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -2799,6 +2900,7 @@ test("transform derives program id, calls orchestrator, and returns the full tra
       "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n";
     const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText, sourceName: "hello.cbl", options: { explain: true } },
     });
     assert.equal(started.status, 201);
@@ -2932,6 +3034,7 @@ test("trust-case catalog lists defaults and saves a session preference", async (
 test("transform carries trustCaseId through the parity-aware path only", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: {
       ...baseConfig,
@@ -2944,6 +3047,7 @@ test("transform carries trustCaseId through the parity-aware path only", async (
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -2951,6 +3055,7 @@ test("transform carries trustCaseId through the parity-aware path only", async (
       "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n";
     const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText,
         sourceName: "hello.cbl",
@@ -2984,6 +3089,7 @@ test("transform carries trustCaseId through the parity-aware path only", async (
 test("transform rejects unknown trust cases and browser-authored runtime internals", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -2992,6 +3098,7 @@ test("transform rejects unknown trust cases and browser-authored runtime interna
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -2999,6 +3106,7 @@ test("transform rejects unknown trust cases and browser-authored runtime interna
       "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO01.\n";
     const unknown = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText, trustCaseId: "MISSING-CASE" },
     });
     assert.equal(unknown.status, 400);
@@ -3006,6 +3114,7 @@ test("transform rejects unknown trust cases and browser-authored runtime interna
 
     const unsafe = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText,
         trustCaseId: "HELLO01-DEFAULT",
@@ -3027,6 +3136,7 @@ test("transform rejects unknown trust cases and browser-authored runtime interna
 test("transform uses a deterministic fallback program id when none is provided", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -3034,6 +3144,7 @@ test("transform uses a deterministic fallback program id when none is provided",
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -3042,6 +3153,7 @@ test("transform uses a deterministic fallback program id when none is provided",
     const expectedProgramId = `SRC-${createHash("sha256").update(sourceText, "utf8").digest("hex").slice(0, 12).toUpperCase()}`;
     const started = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText },
     });
     assert.equal(started.status, 201);
@@ -3058,6 +3170,7 @@ test("transform uses a deterministic fallback program id when none is provided",
 
 test("transform does not create a run when the orchestrator returns a non-2xx status", async () => {
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const client: OrchestratorClient = {
     enabled: true,
     async startRun() {
@@ -3113,11 +3226,13 @@ test("transform does not create a run when the orchestrator returns a non-2xx st
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL01.\n" },
     });
     assert.equal(rejected.status, 502);
@@ -3129,6 +3244,7 @@ test("transform does not create a run when the orchestrator returns a non-2xx st
 
 test("transform does not create a run when the orchestrator throws", async () => {
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const client: OrchestratorClient = {
     enabled: true,
     async startRun() {
@@ -3184,11 +3300,13 @@ test("transform does not create a run when the orchestrator throws", async () =>
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. FAIL02.\n" },
     });
     assert.equal(rejected.status, 502);
@@ -3201,6 +3319,7 @@ test("transform does not create a run when the orchestrator throws", async () =>
 test("transform rejects oversize source text before calling the orchestrator", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: {
       ...baseConfig,
@@ -3212,11 +3331,13 @@ test("transform rejects oversize source text before calling the orchestrator", a
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const rejected = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. BIG01.\n" },
     });
     assert.equal(rejected.status, 413);
@@ -3229,6 +3350,7 @@ test("transform rejects oversize source text before calling the orchestrator", a
 
 test("product transform calls only orchestrator URL, never capability endpoints", async () => {
   const observed: Array<{ url: string; method: string }> = [];
+  const auth = createRouteAuth();
   const recordingHttp: HttpClient = {
     async request(
       targetUrl: string,
@@ -3268,11 +3390,13 @@ test("product transform calls only orchestrator URL, never capability endpoints"
     orchestrator,
     evidence,
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const transformed = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. ISO01.\n",
         useTransformationAgent: false,
@@ -3282,6 +3406,7 @@ test("product transform calls only orchestrator URL, never capability endpoints"
 
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
@@ -3318,23 +3443,27 @@ test("product transform calls only orchestrator URL, never capability endpoints"
 });
 
 test("rejects malformed run start bodies", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const missing = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: {},
     });
     assert.equal(missing.status, 400);
 
     const unknown = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "NOPE" },
     });
     assert.equal(unknown.status, 404);
@@ -3344,12 +3473,14 @@ test("rejects malformed run start bodies", async () => {
 });
 
 test("returns 404 for unknown api paths and run ids", async () => {
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -3358,6 +3489,7 @@ test("returns 404 for unknown api paths and run ids", async () => {
 
     const unknownRun = await fetchJson(
       `${server.baseUrl}/api/v0/runs/run-bogus`,
+      { headers: auth.headers },
     );
     assert.equal(unknownRun.status, 404);
   } finally {
@@ -3643,6 +3775,7 @@ test("harness ready route keeps upstream ready payload parser-compatible for the
 test("progress route proxies orchestrator step timeline for live runs", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const { client: orch, calls } = stubOrchestrator({
     progress: {
       status: 200,
@@ -3707,11 +3840,13 @@ test("progress route proxies orchestrator step timeline for live runs", async ()
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(created.status, 201);
@@ -3719,6 +3854,7 @@ test("progress route proxies orchestrator step timeline for live runs", async ()
 
     const progress = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runId}/progress`,
+      { headers: auth.headers },
     );
     assert.equal(progress.status, 200);
     const body = progress.body as {
@@ -3754,6 +3890,7 @@ test("progress route proxies orchestrator step timeline for live runs", async ()
 test("progress route sanitizes failed step diagnostics and never reports success", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     progress: {
       status: 200,
@@ -3831,16 +3968,19 @@ test("progress route sanitizes failed step diagnostics and never reports success
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const runId = (created.body as { runId: string }).runId;
     const progress = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runId}/progress`,
+      { headers: auth.headers },
     );
     const body = progress.body as {
       runStatus: string;
@@ -3885,6 +4025,7 @@ test("learning route prefers live experience-learning client when configured", a
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   let learningCalls = 0;
   const liveLearning = {
     enabled: true,
@@ -3916,16 +4057,19 @@ test("learning route prefers live experience-learning client when configured", a
     evidence: disabledEvidence(),
     experienceLearning: liveLearning,
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const runId = (created.body as { runId: string }).runId;
     const learning = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runId}/learning`,
+      { headers: auth.headers },
     );
     assert.equal(learning.status, 200);
     const body = learning.body as {
@@ -3954,6 +4098,7 @@ test("experience route maps live learning summaries into the Studio contract", a
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator();
+  const auth = createRouteAuth();
   const liveLearning = {
     enabled: true,
     baseUrl: "http://el.test",
@@ -3996,16 +4141,19 @@ test("experience route maps live learning summaries into the Studio contract", a
     evidence: disabledEvidence(),
     experienceLearning: liveLearning,
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const runId = (created.body as { runId: string }).runId;
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runId}/experience`,
+      { headers: auth.headers },
     );
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, {
@@ -4052,6 +4200,7 @@ test("learning route falls back to orchestrator-cached summary when EL is unavai
       },
     },
   });
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples,
@@ -4059,16 +4208,19 @@ test("learning route falls back to orchestrator-cached summary when EL is unavai
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const runId = (created.body as { runId: string }).runId;
     const learning = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runId}/learning`,
+      { headers: auth.headers },
     );
     const body = learning.body as {
       source: string;
@@ -4087,6 +4239,7 @@ test("learning route falls back to orchestrator-cached summary when EL is unavai
 test("progress route is unavailable for diagnostic-fixture runs", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, enableDiagnosticFixtures: true },
     samples,
@@ -4094,16 +4247,19 @@ test("progress route is unavailable for diagnostic-fixture runs", async () => {
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const created = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const runId = (created.body as { runId: string }).runId;
     const progress = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${runId}/progress`,
+      { headers: auth.headers },
     );
     assert.equal(progress.status, 200);
     const body = progress.body as {
@@ -4161,6 +4317,7 @@ test("product-mode responses never advertise diagnostic-fixture mode or unavaila
   const runStore = createRunStore();
   const generatedJava =
     'package c2c;\npublic final class CASE01 { public static void main(String[] a) { System.out.println("APPROVED-COUNT=2"); } }\n';
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     generated: {
       status: 200,
@@ -4228,11 +4385,13 @@ test("product-mode responses never advertise diagnostic-fixture mode or unavaila
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
@@ -4254,6 +4413,7 @@ test("product-mode responses never advertise diagnostic-fixture mode or unavaila
     for (const endpoint of endpoints) {
       const response = await fetchJson(
         `${server.baseUrl}/api/v0/runs/${startedBody.runId}/${endpoint}`,
+        { headers: auth.headers },
       );
       assert.equal(
         response.status,
@@ -4361,6 +4521,7 @@ test("W0 browser acceptance fixtures do not enable diagnostic fixtures", () => {
 test("Issue #97: generated/files index proxies orchestrator response and exposes artifactRef", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const javaContent = "package c2c;\npublic final class CASE01 {}\n";
   const comparisonContent = "comparison ok\n";
   const filesIndex = [
@@ -4447,11 +4608,13 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     assert.equal(started.status, 201);
@@ -4459,6 +4622,7 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
 
     const index = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files`,
+      { headers: auth.headers },
     );
     assert.equal(index.status, 200);
     const indexBody = index.body as {
@@ -4482,6 +4646,7 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
 
     const file = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/CASE01.java`,
+      { headers: auth.headers },
     );
     assert.equal(file.status, 200);
     const fileBody = file.body as {
@@ -4505,6 +4670,7 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
 
     const artifact = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/logs/studio/comparison.log`,
+      { headers: auth.headers },
     );
     assert.equal(artifact.status, 200);
     const artifactBody = artifact.body as {
@@ -4530,17 +4696,20 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
     // Path traversal attempts are rejected by the BFF before reaching the orchestrator.
     const traversal = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/..%2F..%2Fetc%2Fpasswd`,
+      { headers: auth.headers },
     );
     assert.equal(traversal.status, 400);
 
     const artifactTraversal = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/..%2F..%2Fetc%2Fpasswd`,
+      { headers: auth.headers },
     );
     assert.equal(artifactTraversal.status, 400);
 
     // Unknown file inside the generated tree returns 404, not 200.
     const missing = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/does/not/exist.java`,
+      { headers: auth.headers },
     );
     assert.equal(missing.status, 404);
   } finally {
@@ -4551,6 +4720,7 @@ test("Issue #97: generated/files index proxies orchestrator response and exposes
 test("Issue #97: /generated, /build-test, and /evidence all carry the same generated artifact hash", async () => {
   const samples = stubSamples([FIXED_SAMPLE]);
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const javaContent =
     "package c2c;\npublic final class CASE01 { public static void main(String[] a) {} }\n";
   const manifestHash = "f".repeat(64);
@@ -4631,17 +4801,20 @@ test("Issue #97: /generated, /build-test, and /evidence all carry the same gener
     orchestrator: orch,
     evidence: liveEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
     const generated = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated`,
+      { headers: auth.headers },
     );
     const genBody = generated.body as {
       artifactRef: { sha256: string } | null;
@@ -4659,6 +4832,7 @@ test("Issue #97: /generated, /build-test, and /evidence all carry the same gener
 
     const buildTest = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
     );
     const btBody = buildTest.body as {
       generatedArtifactRef: { sha256: string } | null;
@@ -4667,6 +4841,7 @@ test("Issue #97: /generated, /build-test, and /evidence all carry the same gener
 
     const evidence = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence`,
+      { headers: auth.headers },
     );
     const evBody = evidence.body as {
       generatedArtifactRef: { sha256: string } | null;
@@ -4687,6 +4862,7 @@ test("Issue #97: /generated, /build-test, and /evidence all carry the same gener
 test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps the failure code", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -4761,17 +4937,20 @@ test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     assert.equal(workflow.status, 200);
     const wfBody = workflow.body as {
@@ -4849,6 +5028,7 @@ test("GET /api/v0/runs/{runId}/workflow normalizes the W0.2 contract and maps th
     assert.equal(wfBody.evidencePackRef?.sha256, "d".repeat(64));
     const summary = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
     );
     const summaryBody = summary.body as {
       manualEditsCarriedOver: boolean;
@@ -4874,6 +5054,7 @@ test("GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate w
   // ``agentAttemptCount`` or ``activeAgent``.
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -4921,16 +5102,19 @@ test("GET /api/v0/runs/{runId}/workflow surfaces the W0.3 assist-decision gate w
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     assert.equal(workflow.status, 200);
     const body = workflow.body as {
@@ -4977,6 +5161,7 @@ test("GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty
   for (const reasonCode of uncertaintyCodes) {
     const runStore = createRunStore();
     const samples = stubSamples([FIXED_SAMPLE]);
+    const auth = createRouteAuth();
     const { client: orch } = stubOrchestrator({
       workflow: {
         status: 200,
@@ -5023,16 +5208,19 @@ test("GET /api/v0/runs/{runId}/workflow passes through deterministic uncertainty
       orchestrator: orch,
       evidence: disabledEvidence(),
       runStore,
+      sessionStore: auth.sessionStore,
     });
     const server = await startTestServer(handler);
     try {
       const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
         method: "POST",
+        headers: auth.headers,
         body: { programId: "BRNCH01" },
       });
       const startedBody = started.body as { runId: string };
       const workflow = await fetchJson(
         `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+        { headers: auth.headers },
       );
       const body = workflow.body as {
         assistDecision: Record<string, unknown> | null;
@@ -5060,6 +5248,7 @@ test("GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason
   // unknown-outcome case from #214.
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -5090,16 +5279,19 @@ test("GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown reason
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     const body = workflow.body as { assistDecision: unknown };
     assert.equal(body.assistDecision, null);
@@ -5115,6 +5307,7 @@ test("GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcom
   // unknown reason silently.
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -5144,16 +5337,19 @@ test("GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcom
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     const body = workflow.body as { assistDecision: unknown };
     assert.equal(body.assistDecision, null);
@@ -5165,6 +5361,7 @@ test("GET /api/v0/runs/{runId}/workflow drops assistDecision with unknown outcom
 test("GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -5189,16 +5386,19 @@ test("GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary"
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const run = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
     );
     const body = run.body as {
       activeStep: string;
@@ -5222,6 +5422,7 @@ test("GET /api/v0/runs/{runId} surfaces W0.2 contract fields on the run summary"
 test("GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -5265,16 +5466,19 @@ test("GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source", 
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     assert.equal(workflow.status, 200);
     const body = workflow.body as {
@@ -5302,9 +5506,89 @@ test("GET /api/v0/runs/{runId}/workflow preserves cached W0.2 contract source", 
   }
 });
 
+test("GET /api/v0/runs/{runId} preserves normalized trustSummary across repeated reads", async () => {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
+  const studioHeaders = auth.post({}, {}).headers;
+  const trustSummary = {
+    trustCaseId: "HELLO01-DEFAULT",
+    verdict: "pass",
+    evidenceRefs: ["urn:evidence/one", "urn:evidence/two"],
+    createdAt: "2026-05-21T10:00:00Z",
+    updatedAt: "2026-05-21T10:05:00Z",
+    manualReviewAt: "2026-05-21T10:06:00Z",
+    details: {
+      source: "orchestrator",
+      revision: 3,
+    },
+  };
+  const { client: orch, calls } = stubOrchestrator({
+    workflow: {
+      status: 200,
+      body: {
+        status: "complete",
+        source: "live",
+        contract: {
+          currentState: "final_classification",
+          finalClassification: "success",
+          trustSummary,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+      headers: studioHeaders,
+    });
+    const startedBody = started.body as { runId: string };
+
+    const first = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: studioHeaders },
+    );
+    const second = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: studioHeaders },
+    );
+    const workflow = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: studioHeaders },
+    );
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(workflow.status, 200);
+    const firstBody = first.body as { trustSummary: typeof trustSummary };
+    const secondBody = second.body as { trustSummary: typeof trustSummary };
+    const workflowBody = workflow.body as { trustSummary: typeof trustSummary };
+
+    assert.deepEqual(firstBody.trustSummary, trustSummary);
+    assert.deepEqual(secondBody.trustSummary, trustSummary);
+    assert.deepEqual(workflowBody.trustSummary, trustSummary);
+    assert.deepEqual(firstBody.trustSummary, secondBody.trustSummary);
+    assert.equal(calls.getRun, 2);
+    assert.equal(calls.getWorkflow, 3);
+  } finally {
+    await server.close();
+  }
+});
+
 test("GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator(); // no workflow stub -> undefined
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
@@ -5312,16 +5596,19 @@ test("GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the 
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     assert.equal(workflow.status, 200);
     const body = workflow.body as {
@@ -5350,6 +5637,7 @@ test("GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the 
 test("GET /api/v0/runs/{runId}/workflow returns internal_error when contract reports a blocked run without a canonical code", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -5374,16 +5662,19 @@ test("GET /api/v0/runs/{runId}/workflow returns internal_error when contract rep
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     const body = workflow.body as { failureCode: string };
     assert.equal(body.failureCode, "internal_error");
@@ -5395,6 +5686,7 @@ test("GET /api/v0/runs/{runId}/workflow returns internal_error when contract rep
 test("POST /api/v0/transform rejects unsupported targetLanguage", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -5402,11 +5694,13 @@ test("POST /api/v0/transform rejects unsupported targetLanguage", async () => {
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         targetLanguage: "python",
@@ -5423,6 +5717,7 @@ test("POST /api/v0/transform rejects unsupported targetLanguage", async () => {
 test("POST /api/v0/transform forwards expectedOutput and oracleInput to the orchestrator client", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -5430,11 +5725,13 @@ test("POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         targetLanguage: "java",
@@ -5456,6 +5753,7 @@ test("POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
 test("POST /api/v0/transform disables transformation-agent assist by default", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: {
       ...baseConfig,
@@ -5467,11 +5765,13 @@ test("POST /api/v0/transform disables transformation-agent assist by default", a
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         targetLanguage: "java",
@@ -5488,17 +5788,20 @@ test("POST /api/v0/transform disables transformation-agent assist by default", a
 test("POST /api/v0/transform does not require model gateway when assist flag is omitted", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         targetLanguage: "java",
@@ -5516,6 +5819,7 @@ test("POST /api/v0/transform does not require model gateway when assist flag is 
 test("POST /api/v0/transform forwards explicit transformation-agent opt-out", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: {
       ...baseConfig,
@@ -5526,11 +5830,13 @@ test("POST /api/v0/transform forwards explicit transformation-agent opt-out", as
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         targetLanguage: "java",
@@ -5548,17 +5854,20 @@ test("POST /api/v0/transform forwards explicit transformation-agent opt-out", as
 test("POST /api/v0/transform rejects non-boolean transformation-agent opt-in", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         useTransformationAgent: "true",
@@ -5574,17 +5883,20 @@ test("POST /api/v0/transform rejects non-boolean transformation-agent opt-in", a
 test("POST /api/v0/transform rejects expectedOutput when it is not a string", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         expectedOutput: 42,
@@ -5601,6 +5913,7 @@ test("GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact 
   const runStore = createRunStore();
   const oversizedContent = "A".repeat(2048);
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     generatedFile: {
       status: 200,
@@ -5628,16 +5941,19 @@ test("GET /api/v0/runs/{runId}/generated/files/{path} returns 413 when artifact 
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/BRNCH01.java`,
+      { headers: auth.headers },
     );
     assert.equal(response.status, 413);
     const body = response.body as {
@@ -5657,6 +5973,7 @@ test("GET /api/v0/runs/{runId}/generated/files/{path} measures content when upst
   const runStore = createRunStore();
   const oversizedContent = "A".repeat(2048);
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     generatedFile: {
       status: 200,
@@ -5684,16 +6001,19 @@ test("GET /api/v0/runs/{runId}/generated/files/{path} measures content when upst
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/generated/files/src/main/java/c2c/BRNCH01.java`,
+      { headers: auth.headers },
     );
     assert.equal(response.status, 413);
     const body = response.body as {
@@ -5713,6 +6033,7 @@ test("GET /api/v0/runs/{runId}/artifacts/files/{path} returns 413 when artifact 
   const runStore = createRunStore();
   const oversizedContent = "A".repeat(2048);
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     artifactFile: {
       status: 200,
@@ -5740,16 +6061,19 @@ test("GET /api/v0/runs/{runId}/artifacts/files/{path} returns 413 when artifact 
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/logs/studio/comparison.log`,
+      { headers: auth.headers },
     );
     assert.equal(response.status, 413);
     const body = response.body as {
@@ -5769,6 +6093,7 @@ test("GET /api/v0/runs/{runId}/artifacts/files/{path} measures content when upst
   const runStore = createRunStore();
   const oversizedContent = "A".repeat(2048);
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     artifactFile: {
       status: 200,
@@ -5796,16 +6121,19 @@ test("GET /api/v0/runs/{runId}/artifacts/files/{path} measures content when upst
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/artifacts/files/logs/studio/comparison.log`,
+      { headers: auth.headers },
     );
     assert.equal(response.status, 413);
     const body = response.body as {
@@ -5824,6 +6152,7 @@ test("GET /api/v0/runs/{runId}/artifacts/files/{path} measures content when upst
 test("transform 502 response carries a UI-safe failureCode and never leaks orchestrator URL", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const failingOrchestrator: OrchestratorClient = {
     enabled: true,
     async startRun() {
@@ -5881,11 +6210,13 @@ test("transform 502 response carries a UI-safe failureCode and never leaks orche
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: { sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n" },
     });
     assert.equal(response.status, 502);
@@ -5912,6 +6243,7 @@ test("concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
   // when all polls settle — i.e. there is no torn write.
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   let workflowCallCount = 0;
   const failureCode = "java_compile_failed";
   const contract = {
@@ -6007,11 +6339,13 @@ test("concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
@@ -6022,7 +6356,9 @@ test("concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
     // half-applied patch.
     const polls = await Promise.all(
       Array.from({ length: 12 }, () =>
-        fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`),
+        fetchJson(`${server.baseUrl}/api/v0/runs/${startedBody.runId}`, {
+          headers: auth.headers,
+        }),
       ),
     );
     for (const poll of polls) {
@@ -6062,6 +6398,7 @@ test("concurrent /api/v0/runs/{runId} polls produce a deterministic final cached
 test("GET /api/v0/runs/{runId}/workflow surfaces the W0.3-5 assist + model invocation budgets", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -6090,16 +6427,19 @@ test("GET /api/v0/runs/{runId}/workflow surfaces the W0.3-5 assist + model invoc
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     assert.equal(workflow.status, 200);
     const body = workflow.body as {
@@ -6124,6 +6464,7 @@ test("GET /api/v0/runs/{runId}/workflow rejects malformed budget shapes", async 
   // negative so the UI never renders a corrupt {limit: NaN} budget.
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -6152,16 +6493,19 @@ test("GET /api/v0/runs/{runId}/workflow rejects malformed budget shapes", async 
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     const body = workflow.body as {
       assistBudget: unknown;
@@ -6184,6 +6528,7 @@ test("GET /api/v0/runs/{runId}/workflow accepts the assist_budget_exhausted reas
   // hard-termination signal causally.
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -6223,16 +6568,19 @@ test("GET /api/v0/runs/{runId}/workflow accepts the assist_budget_exhausted reas
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     const workflow = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     const body = workflow.body as {
       assistDecision: Record<string, unknown> | null;
@@ -6259,6 +6607,7 @@ test("GET /api/v0/runs/{runId}/workflow accepts the assist_budget_exhausted reas
 test("GET /api/v0/runs/{runId} surfaces the W0.3-5 budgets on the run summary", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     workflow: {
       status: 200,
@@ -6285,20 +6634,24 @@ test("GET /api/v0/runs/{runId} surfaces the W0.3-5 budgets on the run summary", 
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
     // Drive the workflow fetch so the BFF caches the budgets on the run.
     await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/workflow`,
+      { headers: auth.headers },
     );
     const summary = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
     );
     const body = summary.body as {
       assistBudget: { limit: number; used: number; remaining: number };
@@ -6322,6 +6675,7 @@ test("GET /api/v0/runs/{runId} surfaces the W0.3-5 budgets on the run summary", 
 test("GET /api/v0/runs/{runId}/traceability returns the traceability envelope on happy path", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const traceabilityBody = {
     schemaVersion: "v0",
     runId: "live-run-1",
@@ -6375,17 +6729,20 @@ test("GET /api/v0/runs/{runId}/traceability returns the traceability envelope on
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
     const result = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+      { headers: auth.headers },
     );
     assert.equal(result.status, 200);
     const body = result.body as {
@@ -6422,6 +6779,7 @@ test("GET /api/v0/runs/{runId}/traceability returns the traceability envelope on
 
     const summary = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
     );
     const summaryBody = summary.body as {
       schemaVersion?: string;
@@ -6439,6 +6797,7 @@ test("GET /api/v0/runs/{runId}/traceability returns the traceability envelope on
 test("GET /api/v0/runs/{runId}/traceability preserves cached classifications across upstream outages", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const classification = {
     schemaVersion: "v0",
     lineRange: { startLine: 10, endLine: 15 },
@@ -6468,17 +6827,20 @@ test("GET /api/v0/runs/{runId}/traceability preserves cached classifications acr
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
     await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+      { headers: auth.headers },
     );
     artifactResponses.traceability = {
       status: 503,
@@ -6486,6 +6848,7 @@ test("GET /api/v0/runs/{runId}/traceability preserves cached classifications acr
     };
     const outage = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+      { headers: auth.headers },
     );
     const outageBody = outage.body as {
       javaRegionClassification: unknown;
@@ -6500,6 +6863,7 @@ test("GET /api/v0/runs/{runId}/traceability preserves cached classifications acr
 
     const summary = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}`,
+      { headers: auth.headers },
     );
     const summaryBody = summary.body as {
       javaRegionClassification: Record<string, unknown[]> | null;
@@ -6515,6 +6879,7 @@ test("GET /api/v0/runs/{runId}/traceability preserves cached classifications acr
 test("GET /api/v0/runs/{runId}/traceability reports request failures distinctly", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator();
   const throwingOrchestrator: OrchestratorClient = {
     ...orch,
@@ -6528,17 +6893,20 @@ test("GET /api/v0/runs/{runId}/traceability reports request failures distinctly"
     orchestrator: throwingOrchestrator,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string };
 
     const result = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+      { headers: auth.headers },
     );
     const body = result.body as {
       javaRegionClassification: unknown;
@@ -6558,6 +6926,7 @@ test("GET /api/v0/runs/{runId}/traceability reports request failures distinctly"
 test("GET /api/v0/runs/{runId}/traceability returns 404 for unknown run", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
@@ -6565,11 +6934,13 @@ test("GET /api/v0/runs/{runId}/traceability returns 404 for unknown run", async 
     orchestrator: orch,
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const result = await fetchJson(
       `${server.baseUrl}/api/v0/runs/does-not-exist/traceability`,
+      { headers: auth.headers },
     );
     assert.equal(result.status, 404);
     const body = result.body as { error: string };
@@ -6585,6 +6956,7 @@ test("GET /api/v0/runs/{runId}/traceability returns 404 for unknown run", async 
 test("GET /api/v0/runs/{runId}/traceability returns stub envelope for diagnostic-fixture run", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
   // diagnostic-fixture mode requires a disabled orchestrator (no orchestratorUrl)
   const handler = createApp({
     config: { ...baseConfig, enableDiagnosticFixtures: true },
@@ -6592,11 +6964,13 @@ test("GET /api/v0/runs/{runId}/traceability returns stub envelope for diagnostic
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "BRNCH01" },
     });
     const startedBody = started.body as { runId: string; mode: string };
@@ -6604,6 +6978,7 @@ test("GET /api/v0/runs/{runId}/traceability returns stub envelope for diagnostic
 
     const result = await fetchJson(
       `${server.baseUrl}/api/v0/runs/${startedBody.runId}/traceability`,
+      { headers: auth.headers },
     );
     assert.equal(result.status, 200);
     const body = result.body as {
@@ -6657,6 +7032,7 @@ function disabledBuildTestRunner(): BuildTestRunnerClient {
 test("POST /api/v0/generate returns 400 when sourceText is missing", async () => {
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6664,11 +7040,13 @@ test("POST /api/v0/generate returns 400 when sourceText is missing", async () =>
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
       method: "POST",
+      headers: auth.headers,
       body: { programId: "HELLO01" },
     });
     assert.equal(response.status, 400);
@@ -6683,6 +7061,7 @@ test("POST /api/v0/generate returns 400 when sourceText is missing", async () =>
 test("POST /api/v0/generate returns 413 when body is too large", async () => {
   const runStore = createRunStore();
   const { client: orch } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: {
       ...baseConfig,
@@ -6694,11 +7073,13 @@ test("POST /api/v0/generate returns 413 when body is too large", async () => {
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
       },
@@ -6712,6 +7093,7 @@ test("POST /api/v0/generate returns 413 when body is too large", async () => {
 test("POST /api/v0/generate happy path returns 201 with runMode=generate", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6719,11 +7101,13 @@ test("POST /api/v0/generate happy path returns 201 with runMode=generate", async
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         useTransformationAgent: false,
@@ -6752,6 +7136,7 @@ test("POST /api/v0/transform does NOT forward generateOnly to the orchestrator",
   // /generate validation for /transform, this assertion fires.
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: { ...baseConfig, orchestratorUrl: "http://upstream" },
     samples: stubSamples([FIXED_SAMPLE]),
@@ -6759,11 +7144,13 @@ test("POST /api/v0/transform does NOT forward generateOnly to the orchestrator",
     evidence: disabledEvidence(),
     modelGateway: availableModelGateway(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/transform`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
         useTransformationAgent: false,
@@ -6781,17 +7168,20 @@ test("POST /api/v0/transform does NOT forward generateOnly to the orchestrator",
 
 test("POST /api/v0/generate returns 503 when orchestrator is not configured", async () => {
   const runStore = createRunStore();
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: disabledOrchestrator(),
     evidence: disabledEvidence(),
     runStore,
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
     const response = await fetchJson(`${server.baseUrl}/api/v0/generate`, {
       method: "POST",
+      headers: auth.headers,
       body: {
         sourceText: "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO01.\n",
       },

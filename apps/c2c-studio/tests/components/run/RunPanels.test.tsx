@@ -105,7 +105,7 @@ describe('Run Panels', () => {
       render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
       expect(screen.getByRole('tab', { name: /COBOL Reference Execution/ })).toBeDefined();
       expect(screen.getAllByText('Waiting for backend evidence').length).toBeGreaterThan(0);
-      expect(screen.getByText(/Not executed/i)).toBeDefined();
+      expect(screen.getAllByText(/Not executed/i).length).toBeGreaterThan(0);
     });
 
     it('renders live orchestrator progress steps when available', () => {
@@ -249,6 +249,188 @@ describe('Run Panels', () => {
       expect(screen.getAllByText('Blocked by compilation failure').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Java compilation failed before equivalence could run.').length).toBeGreaterThan(0);
       expect(screen.getAllByText('javac failed with type mismatch').length).toBeGreaterThan(0);
+    });
+
+    it('renders the trust summary card with read-only trust, result, and evidence data', () => {
+      useSourceWorkspaceMock.mockReturnValue({
+        statusFlags: {
+          clean: true,
+          pendingReRun: false,
+        },
+        selectedTrustCase: {
+          trustCaseId: 'TC-ALPHA',
+          version: 'v7',
+          catalogVersion: '2026.05',
+          catalogHash: 'catalog-hash',
+          configurationDigest: 'config-hash',
+          programId: 'PROG-1',
+          title: 'Trust Case Alpha',
+          description: 'Read-only trust case for verification.',
+          defaultForProgram: true,
+          sourceReferenceFixtureId: 'fixture-alpha',
+          sourceReferenceMode: 'live',
+          environmentProfileId: 'env-prod',
+          comparisonStrategy: 'strict',
+          comparisonPolicyVersion: 'policy-4',
+          supportedSubset: [],
+        },
+      });
+
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: 'completed',
+          summary: {
+            ...mockState.summary,
+            runId: 'run-123',
+            programId: 'PROG-1',
+            trustCaseId: 'TC-ALPHA',
+            trustCaseVersion: 'v7',
+            trustCaseCatalogVersion: '2026.05',
+            trustCaseConfigurationDigest: 'config-hash',
+            trustCaseEnvironmentProfileId: 'env-prod',
+            trustCaseComparisonPolicyVersion: 'policy-4',
+          },
+          buildTest: {
+            runId: 'run-123',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'ok',
+            classification: 'match',
+            compileStatus: 'ok',
+            executionStatus: 'ok',
+            expectedOutput: 'COBOL',
+            actualOutput: 'JAVA',
+            expectedOutputRef: {
+              sha256: 'e'.repeat(64),
+              byteSize: 12,
+              kind: 'cobol-oracle-stdout',
+            },
+            actualOutputRef: {
+              sha256: 'a'.repeat(64),
+              byteSize: 13,
+              kind: 'java-stdout',
+            },
+            generatedArtifactRef: {
+              sha256: 'g'.repeat(64),
+              byteSize: 21,
+              kind: 'generated-artifact',
+            },
+            comparison: {
+              status: 'complete',
+              comparisonPolicyRef: {
+                sha256: 'p'.repeat(64),
+                byteSize: 7,
+                kind: 'comparison-policy',
+              },
+              comparisonResultRef: {
+                sha256: 'r'.repeat(64),
+                byteSize: 8,
+                kind: 'comparison-result',
+              },
+              diffRef: {
+                sha256: 'd'.repeat(64),
+                byteSize: 9,
+                kind: 'comparison-diff',
+              },
+              expectedRef: {
+                sha256: 'e'.repeat(64),
+                byteSize: 12,
+                kind: 'cobol-oracle-stdout',
+              },
+              actualRef: {
+                sha256: 'a'.repeat(64),
+                byteSize: 13,
+                kind: 'java-stdout',
+              },
+            },
+            note: 'Comparison summary is published for audit.',
+          },
+          evidence: {
+            runId: 'run-123',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            status: 'complete',
+            packId: 'pack-123',
+            manifestHash: 'manifest-123',
+            artifactRef: {
+              sha256: 'm'.repeat(64),
+              byteSize: 17,
+              kind: 'evidence-manifest',
+              createdAt: '2026-05-21T12:34:56.000Z',
+            },
+            exportRef: {
+              sha256: 'x'.repeat(64),
+              byteSize: 19,
+              kind: 'evidence-export',
+            },
+            generatedArtifactRef: {
+              sha256: 'g'.repeat(64),
+              byteSize: 21,
+              kind: 'generated-artifact',
+            },
+            note: 'Evidence bundle is signed and archived.',
+          },
+          workflow: {
+            runId: 'run-123',
+            programId: 'PROG-1',
+            mode: 'live',
+            productMode: 'live',
+            source: 'live',
+            state: 'verifying',
+            activeStep: 'verification-repair',
+            activeAgent: 'verification_repair_agent',
+            trustCase: {
+              trustCaseId: 'TC-ALPHA',
+            },
+            agentAttemptCount: 1,
+            repairBudget: {
+              limit: 3,
+              used: 1,
+              remaining: 2,
+            },
+            assistBudget: null,
+            modelInvocationBudget: null,
+            repairAttempts: [
+              {
+                attemptNumber: 1,
+                repairDecision: 'propose_candidate',
+                failureCategory: null,
+                hasModelInvocation: true,
+                hasRepairInput: true,
+                hasJavaCandidate: true,
+                rationale: 'Repair candidate accepted for review.',
+              },
+            ],
+            assistDecision: null,
+            finalClassification: 'failed',
+            failureCode: 'oracle_mismatch',
+            failureMessage: 'Repair guardrail escalated to manual review.',
+            generatedJavaRef: null,
+            buildTestResultRef: null,
+            evidencePackRef: null,
+          },
+        },
+      });
+
+      render(<BuildTestPanel emptyState={{ title: 'Empty', message: 'Message' }} />);
+
+      expect(screen.getByText('Trust Summary')).toBeDefined();
+      expect(screen.getByText('Trust Case Alpha')).toBeDefined();
+      expect(screen.getByText('TC-ALPHA')).toBeDefined();
+      expect(screen.getByText('COBOL result')).toBeDefined();
+      expect(screen.getByText('Java result')).toBeDefined();
+      expect(screen.getAllByText('Comparison result').length).toBeGreaterThan(0);
+      expect(screen.getByText('Repair status')).toBeDefined();
+      expect(screen.getByText('Evidence timestamp')).toBeDefined();
+      expect(screen.getAllByText('2026-05-21T12:34:56.000Z').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Comparison summary is published for audit.').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Evidence bundle is signed and archived.').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Repair guardrail escalated to manual review.').length).toBeGreaterThan(0);
+      expect(screen.getByText('pack-123')).toBeDefined();
+      expect(screen.getByText('rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr')).toBeDefined();
     });
   });
 

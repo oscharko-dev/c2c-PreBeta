@@ -51,6 +51,7 @@ import {
   GeneratedTraceability,
   JavaRegionClassification,
   JavaRegionClassificationMap,
+  TrustSummaryView,
   TrustCasePreferenceResponse,
   TrustCaseSummary,
   TrustCasesResponse,
@@ -955,6 +956,187 @@ function isWorkflowArtifactRefPayload(
   );
 }
 
+function isTrustState(value: unknown): value is TrustSummaryView["trustState"] {
+  return (
+    value === "parity_passed" ||
+    value === "parity_failed" ||
+    value === "build_failed" ||
+    value === "runtime_failed" ||
+    value === "intentional_divergence" ||
+    value === "blocked"
+  );
+}
+
+function isTrustRepairStatus(
+  value: unknown,
+): value is TrustSummaryView["repairStatus"] {
+  return (
+    value === "not_attempted" ||
+    value === "repair_verified" ||
+    value === "repair_failed" ||
+    value === "repair_blocked"
+  );
+}
+
+function isTrustCoverageStatus(
+  value: unknown,
+): value is TrustSummaryView["coverageStatus"] {
+  return value === "full" || value === "limited";
+}
+
+function isTrustDivergenceDisposition(
+  value: unknown,
+): value is TrustSummaryView["divergenceDisposition"] {
+  return (
+    value === "none" ||
+    value === "known_coverage_gap" ||
+    value === "intentional" ||
+    value === "unknown"
+  );
+}
+
+function isTrustWarningCode(
+  value: unknown,
+): value is TrustSummaryView["warningCodes"][number] {
+  return (
+    value === "limited_coverage" ||
+    value === "known_coverage_gap" ||
+    value === "manual_edits_carried_over"
+  );
+}
+
+function isTrustSummaryTrustCasePayload(
+  payload: unknown,
+): payload is TrustSummaryView["trustCase"] {
+  return (
+    isRecord(payload) &&
+    isString(payload.trustCaseId) &&
+    isString(payload.version) &&
+    isString(payload.catalogVersion) &&
+    isString(payload.catalogHash) &&
+    isString(payload.configurationDigest)
+  );
+}
+
+function isTrustSummaryCobolResultPayload(
+  payload: unknown,
+): payload is TrustSummaryView["cobolResult"] {
+  return (
+    isRecord(payload) &&
+    (payload.status === "completed" ||
+      payload.status === "failed" ||
+      payload.status === "not_available") &&
+    (payload.normalizedOutputRef === undefined ||
+      payload.normalizedOutputRef === null ||
+      isOutputRef(payload.normalizedOutputRef))
+  );
+}
+
+function isTrustSummaryJavaResultPayload(
+  payload: unknown,
+): payload is TrustSummaryView["javaResult"] {
+  return (
+    isRecord(payload) &&
+    (payload.status === "completed" ||
+      payload.status === "build_failed" ||
+      payload.status === "runtime_failed" ||
+      payload.status === "not_available") &&
+    (payload.executionResultRef === undefined ||
+      payload.executionResultRef === null ||
+      isOutputRef(payload.executionResultRef)) &&
+    (payload.normalizedOutputRef === undefined ||
+      payload.normalizedOutputRef === null ||
+      isOutputRef(payload.normalizedOutputRef))
+  );
+}
+
+function isTrustSummaryComparisonResultPayload(
+  payload: unknown,
+): payload is TrustSummaryView["comparisonResult"] {
+  return (
+    isRecord(payload) &&
+    (payload.status === "matched" ||
+      payload.status === "mismatched" ||
+      payload.status === "not_available") &&
+    isString(payload.mismatchClassification) &&
+    (payload.comparisonPolicyRef === undefined ||
+      payload.comparisonPolicyRef === null ||
+      isOutputRef(payload.comparisonPolicyRef)) &&
+    (payload.comparisonResultRef === undefined ||
+      payload.comparisonResultRef === null ||
+      isOutputRef(payload.comparisonResultRef)) &&
+    (payload.diffRef === undefined ||
+      payload.diffRef === null ||
+      isOutputRef(payload.diffRef)) &&
+    (payload.decisionRecordRef === undefined ||
+      payload.decisionRecordRef === null ||
+      isOutputRef(payload.decisionRecordRef))
+  );
+}
+
+function isTrustSummaryRepairPayload(
+  payload: unknown,
+): payload is TrustSummaryView["repair"] {
+  return (
+    isRecord(payload) &&
+    isTrustRepairStatus(payload.status) &&
+    (payload.repairDecisionRef === undefined ||
+      payload.repairDecisionRef === null ||
+      isOutputRef(payload.repairDecisionRef)) &&
+    (payload.repairedBuildTestResultRef === undefined ||
+      payload.repairedBuildTestResultRef === null ||
+      isOutputRef(payload.repairedBuildTestResultRef)) &&
+    (payload.repairedJavaCandidateRef === undefined ||
+      payload.repairedJavaCandidateRef === null ||
+      isOutputRef(payload.repairedJavaCandidateRef))
+  );
+}
+
+function isTrustSummaryEvidencePayload(
+  payload: unknown,
+): payload is TrustSummaryView["evidence"] {
+  return (
+    isRecord(payload) &&
+    (payload.status === "current" ||
+      payload.status === "stale" ||
+      payload.status === "incomplete") &&
+    (payload.recordedAt === undefined ||
+      payload.recordedAt === null ||
+      isString(payload.recordedAt)) &&
+    (payload.packRef === undefined ||
+      payload.packRef === null ||
+      isOutputRef(payload.packRef))
+  );
+}
+
+function isTrustSummaryPayload(
+  payload: unknown,
+): payload is TrustSummaryView {
+  return (
+    isRecord(payload) &&
+    (payload.schemaVersion === undefined || isString(payload.schemaVersion)) &&
+    isTrustState(payload.trustState) &&
+    isTrustRepairStatus(payload.repairStatus) &&
+    isTrustCoverageStatus(payload.coverageStatus) &&
+    isTrustDivergenceDisposition(payload.divergenceDisposition) &&
+    Array.isArray(payload.warningCodes) &&
+    payload.warningCodes.every(isTrustWarningCode) &&
+    isTrustSummaryTrustCasePayload(payload.trustCase) &&
+    isTrustSummaryCobolResultPayload(payload.cobolResult) &&
+    isTrustSummaryJavaResultPayload(payload.javaResult) &&
+    isTrustSummaryComparisonResultPayload(payload.comparisonResult) &&
+    isTrustSummaryRepairPayload(payload.repair) &&
+    isTrustSummaryEvidencePayload(payload.evidence) &&
+    (payload.comparisonCompletedAt === undefined ||
+      payload.comparisonCompletedAt === null ||
+      isString(payload.comparisonCompletedAt)) &&
+    isString(payload.summaryDerivedAt) &&
+    (payload.repairVerifiedAt === undefined ||
+      payload.repairVerifiedAt === null ||
+      isString(payload.repairVerifiedAt))
+  );
+}
+
 // Issue #218 (W0.3-7): closed-set assist-decision guards. The BFF drops
 // any unknown outcome / reason / agent-role at sanitisation time and the
 // Studio enforces the same closed sets here so a regression upstream
@@ -1122,6 +1304,9 @@ function isRunSummaryPayload(payload: unknown): payload is RunSummary {
     (payload.message === undefined || isString(payload.message)) &&
     (payload.evidenceRefs === undefined ||
       isStringArray(payload.evidenceRefs)) &&
+    (payload.trustSummary === undefined ||
+      payload.trustSummary === null ||
+      isTrustSummaryPayload(payload.trustSummary)) &&
     (payload.policyDecision === undefined ||
       isString(payload.policyDecision)) &&
     hasTrustCaseIdentityFields(payload) &&
@@ -1173,6 +1358,9 @@ function isRunWorkflowViewPayload(
     // outcome/reason/agent-role triple is required.
     (payload.assistDecision === null ||
       isAssistDecisionSummaryPayload(payload.assistDecision)) &&
+    (payload.trustSummary === undefined ||
+      payload.trustSummary === null ||
+      isTrustSummaryPayload(payload.trustSummary)) &&
     (payload.finalClassification === null ||
       isRunFinalClassification(payload.finalClassification)) &&
     (payload.failureCode === null || isW02UiErrorCode(payload.failureCode)) &&

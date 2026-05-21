@@ -26,6 +26,13 @@ export interface OutputRef {
   createdAt?: string;
 }
 
+export interface TrustSummary {
+  evidenceRefs?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  [key: string]: unknown;
+}
+
 interface JavaRegionClassification {
   schemaVersion: "v0";
   lineRange: { startLine: number; endLine: number };
@@ -63,6 +70,7 @@ export interface WorkflowSnapshot {
   modelInvocationBudget: StoredModelInvocationBudget | null;
   repairAttempts: SanitizedRepairAttempt[];
   assistDecision: AssistDecisionSummary | null;
+  trustSummary: TrustSummary | null;
   finalClassification: RunFinalClassification | null;
   failureCode: W02UiErrorCode | null;
   failureMessage: string | null;
@@ -188,6 +196,7 @@ export const EMPTY_WORKFLOW_SNAPSHOT: WorkflowSnapshot = {
   modelInvocationBudget: null,
   repairAttempts: [],
   assistDecision: null,
+  trustSummary: null,
   finalClassification: null,
   failureCode: null,
   failureMessage: null,
@@ -220,6 +229,69 @@ function asBoolean(value: unknown): boolean | undefined {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function asTimestampString(value: unknown): string | undefined {
+  const timestamp = asString(value);
+  return timestamp.length > 0 ? timestamp : undefined;
+}
+
+function normalizeTrustSummaryValue(value: unknown): unknown {
+  if (value === null) return null;
+  if (typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeTrustSummaryValue(entry))
+      .filter((entry): entry is unknown => entry !== undefined);
+  }
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    const child = normalizeTrustSummaryValue(entry);
+    if (child !== undefined) {
+      normalized[key] = child;
+    }
+  }
+  return normalized;
+}
+
+export function normalizeTrustSummary(raw: unknown): TrustSummary | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const summary: TrustSummary = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (key === "evidenceRefs") {
+      summary.evidenceRefs = asStringArray(value);
+      continue;
+    }
+    if (key === "createdAt" || key === "updatedAt" || key.endsWith("At")) {
+      const timestamp = asTimestampString(value);
+      if (timestamp !== undefined) summary[key] = timestamp;
+      continue;
+    }
+    const normalized = normalizeTrustSummaryValue(value);
+    if (normalized !== undefined) {
+      summary[key] = normalized;
+    }
+  }
+  return Object.keys(summary).length > 0 ? summary : null;
+}
+
+export function extractTrustSummary(raw: unknown): TrustSummary | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const candidates = [
+    record.trustSummary,
+    asRecord(record.run)?.trustSummary,
+    asRecord(record.contract)?.trustSummary,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeTrustSummary(candidate);
+    if (normalized) return normalized;
+  }
+  return null;
 }
 
 function asStringRecord(value: unknown): Record<string, string> {
@@ -281,7 +353,10 @@ export function productModeOf(stored: StoredRun): "live" | "unavailable" {
   return stored.mode === "live" ? "live" : "unavailable";
 }
 
-export function runSummary(stored: StoredRun): Record<string, unknown> {
+export function runSummary(
+  stored: StoredRun,
+  trustSummary: TrustSummary | null = null,
+): Record<string, unknown> {
   const summary: Record<string, unknown> = {
     schemaVersion: "v0",
     runId: stored.runId,
@@ -303,6 +378,7 @@ export function runSummary(stored: StoredRun): Record<string, unknown> {
     message: stored.message,
     policyDecision: stored.policyDecision,
     evidenceRefs: [],
+    trustSummary,
     orchestratorRunId: stored.liveRunId ?? "",
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
@@ -363,9 +439,12 @@ export function transformLinks(runId: string): Record<string, string> {
   };
 }
 
-export function transformResponse(stored: StoredRun): Record<string, unknown> {
+export function transformResponse(
+  stored: StoredRun,
+  trustSummary: TrustSummary | null = null,
+): Record<string, unknown> {
   return {
-    ...runSummary(stored),
+    ...runSummary(stored, trustSummary),
     links: transformLinks(stored.runId),
   };
 }
@@ -1284,6 +1363,7 @@ export function snapshotFromContract(
   const modelInvocationBudget = asModelInvocationBudget(
     contract.modelInvocationBudget,
   );
+  const trustSummary = extractTrustSummary(contract);
   const trustCase = trustCaseSnapshot(
     contract.trustCase ?? contract.resolvedTrustCase,
   );
@@ -1332,6 +1412,7 @@ export function snapshotFromContract(
     modelInvocationBudget,
     repairAttempts,
     assistDecision,
+    trustSummary,
     finalClassification,
     failureCode,
     failureMessage,
@@ -1364,6 +1445,7 @@ export function workflowEnvelope(
     modelInvocationBudget: snapshot.modelInvocationBudget,
     repairAttempts: snapshot.repairAttempts,
     assistDecision: snapshot.assistDecision,
+    trustSummary: snapshot.trustSummary,
     finalClassification: snapshot.finalClassification,
     failureCode: snapshot.failureCode,
     failureMessage: snapshot.failureMessage,

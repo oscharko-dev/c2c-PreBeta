@@ -152,6 +152,92 @@ export interface TrustCasePreferenceResponse {
   selected?: TrustCaseSummary;
 }
 
+export type TrustState =
+  | "parity_passed"
+  | "parity_failed"
+  | "build_failed"
+  | "runtime_failed"
+  | "intentional_divergence"
+  | "blocked";
+
+export type TrustRepairStatus =
+  | "not_attempted"
+  | "repair_verified"
+  | "repair_failed"
+  | "repair_blocked";
+
+export type TrustCoverageStatus = "full" | "limited";
+
+export type TrustDivergenceDisposition =
+  | "none"
+  | "known_coverage_gap"
+  | "intentional"
+  | "unknown";
+
+export type TrustWarningCode =
+  | "limited_coverage"
+  | "known_coverage_gap"
+  | "manual_edits_carried_over";
+
+export interface TrustSummaryTrustCase {
+  trustCaseId: string;
+  version: string;
+  catalogVersion: string;
+  catalogHash: string;
+  configurationDigest: string;
+}
+
+export interface TrustSummaryCobolResult {
+  status: "completed" | "failed" | "not_available";
+  normalizedOutputRef?: OutputRef | null;
+}
+
+export interface TrustSummaryJavaResult {
+  status: "completed" | "build_failed" | "runtime_failed" | "not_available";
+  executionResultRef?: OutputRef | null;
+  normalizedOutputRef?: OutputRef | null;
+}
+
+export interface TrustSummaryComparisonResult {
+  status: "matched" | "mismatched" | "not_available";
+  mismatchClassification: string;
+  comparisonPolicyRef?: OutputRef | null;
+  comparisonResultRef?: OutputRef | null;
+  diffRef?: OutputRef | null;
+  decisionRecordRef?: OutputRef | null;
+}
+
+export interface TrustSummaryRepair {
+  status: TrustRepairStatus;
+  repairDecisionRef?: OutputRef | null;
+  repairedBuildTestResultRef?: OutputRef | null;
+  repairedJavaCandidateRef?: OutputRef | null;
+}
+
+export interface TrustSummaryEvidence {
+  status: "current" | "stale" | "incomplete";
+  recordedAt?: string | null;
+  packRef?: OutputRef | null;
+}
+
+export interface TrustSummaryView {
+  schemaVersion?: string;
+  trustState: TrustState;
+  repairStatus: TrustRepairStatus;
+  coverageStatus: TrustCoverageStatus;
+  divergenceDisposition: TrustDivergenceDisposition;
+  warningCodes: TrustWarningCode[];
+  trustCase: TrustSummaryTrustCase;
+  cobolResult: TrustSummaryCobolResult;
+  javaResult: TrustSummaryJavaResult;
+  comparisonResult: TrustSummaryComparisonResult;
+  repair: TrustSummaryRepair;
+  evidence: TrustSummaryEvidence;
+  comparisonCompletedAt?: string | null;
+  summaryDerivedAt: string;
+  repairVerifiedAt?: string | null;
+}
+
 export interface TransformResponse
   extends W02RunContractFields,
     TrustCaseIdentityFields {
@@ -188,6 +274,7 @@ export interface RunSummary extends W02RunContractFields, TrustCaseIdentityField
   productMode: "live" | "unavailable";
   message?: string;
   evidenceRefs?: string[];
+  trustSummary?: TrustSummaryView | null;
   policyDecision?: string;
   createdAt: string;
   updatedAt: string;
@@ -574,6 +661,7 @@ export interface RunWorkflowView {
   // outcome marks it as AI-assisted with the selected agent role and the
   // reason code that justified activation.
   assistDecision: AssistDecisionSummary | null;
+  trustSummary?: TrustSummaryView | null;
   finalClassification: RunFinalClassification | null;
   failureCode: W02UiErrorCode | null;
   failureMessage: string | null;
