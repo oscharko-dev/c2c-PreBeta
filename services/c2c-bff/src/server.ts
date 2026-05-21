@@ -4273,7 +4273,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const useTransformationAgent =
           typeof useTransformationAgentRaw === "boolean"
             ? useTransformationAgentRaw
-            : true;
+            : false;
 
         const referenceMatch = samples.get(programId);
         if (referenceMatch && !referenceMatch.supportedInProductMode) {

@@ -4854,13 +4854,13 @@ test("POST /api/v0/transform forwards expectedOutput and oracleInput to the orch
     assert.equal(calls.startTransformRun[0]?.targetLanguage, "java");
     assert.equal(calls.startTransformRun[0]?.expectedOutput, "HELLO WORLD\n");
     assert.equal(calls.startTransformRun[0]?.oracleInput, "");
-    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, true);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, false);
   } finally {
     await server.close();
   }
 });
 
-test("POST /api/v0/transform enables transformation-agent assist by default", async () => {
+test("POST /api/v0/transform disables transformation-agent assist by default", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
@@ -4886,13 +4886,13 @@ test("POST /api/v0/transform enables transformation-agent assist by default", as
     });
     assert.equal(response.status, 201);
     assert.equal(calls.startTransformRun.length, 1);
-    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, true);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, false);
   } finally {
     await server.close();
   }
 });
 
-test("POST /api/v0/transform rejects default AI assist when no model is available", async () => {
+test("POST /api/v0/transform does not require model gateway when assist flag is omitted", async () => {
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
@@ -4911,13 +4911,10 @@ test("POST /api/v0/transform rejects default AI assist when no model is availabl
         targetLanguage: "java",
       },
     });
-    assert.equal(response.status, 503);
-    assert.equal(
-      (response.body as { failureCode: string }).failureCode,
-      "model_gateway_unavailable",
-    );
-    assert.equal(calls.startTransformRun.length, 0);
-    assert.equal(runStore.list().length, 0);
+    assert.equal(response.status, 201);
+    assert.equal(calls.startTransformRun.length, 1);
+    assert.equal(calls.startTransformRun[0]?.useTransformationAgent, false);
+    assert.equal(runStore.list().length, 1);
   } finally {
     await server.close();
   }
