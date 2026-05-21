@@ -29,6 +29,9 @@ final class CobolRuntimeExecutor {
     private static final long DEFAULT_TIMEOUT_MS = Duration.ofSeconds(10).toMillis();
     private static final int MAX_SOURCE_BYTES = 1_048_576;
     private static final int MAX_STDIN_BYTES = 1_048_576;
+    static final int MAX_OUTPUT_BYTES = 1_048_576;
+    static final String OUTPUT_TRUNCATED_SENTINEL =
+            "\n[c2c: output truncated at " + MAX_OUTPUT_BYTES + " bytes]\n";
     private static final Pattern PROGRAM_ID_PATTERN =
             Pattern.compile("(?im)^\\s*PROGRAM-ID\\s*\\.\\s*([A-Za-z][A-Za-z0-9_-]{0,62})\\s*\\.");
     private static final Pattern MODULE_NAME_PATTERN =
@@ -341,9 +344,18 @@ final class CobolRuntimeExecutor {
         }
     }
 
-    private static String readAll(InputStream stream) {
+    static String readAll(InputStream stream) {
         try (stream) {
-            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            byte[] buf = stream.readNBytes(MAX_OUTPUT_BYTES);
+            int remaining = stream.read();
+            if (remaining == -1) {
+                return new String(buf, StandardCharsets.UTF_8);
+            }
+            byte[] drain = new byte[8192];
+            while (stream.read(drain) != -1) {
+                // discard excess output to unblock the producer process
+            }
+            return new String(buf, StandardCharsets.UTF_8) + OUTPUT_TRUNCATED_SENTINEL;
         } catch (IOException e) {
             return "";
         }
