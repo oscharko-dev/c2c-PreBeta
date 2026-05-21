@@ -3679,7 +3679,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const useTransformationAgent =
           typeof useTransformationAgentRaw === "boolean"
             ? useTransformationAgentRaw
-            : true;
+            : false;
 
         let selectedTrustCase: TrustCaseSummary | undefined;
         if (trustCaseId) {
