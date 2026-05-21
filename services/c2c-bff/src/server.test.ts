@@ -2781,7 +2781,11 @@ test("transform derives program id, calls orchestrator, and returns the full tra
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      modelGatewayUrl: "http://gateway",
+    },
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
@@ -2928,7 +2932,11 @@ test("transform carries trustCaseId through the parity-aware path only", async (
   const runStore = createRunStore();
   const { client: orch, calls } = stubOrchestrator();
   const handler = createApp({
-    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    config: {
+      ...baseConfig,
+      orchestratorUrl: "http://upstream",
+      modelGatewayUrl: "http://gateway",
+    },
     samples: stubSamples([FIXED_SAMPLE]),
     trustCases: stubTrustCases([FIXED_TRUST_CASE]),
     orchestrator: orch,
