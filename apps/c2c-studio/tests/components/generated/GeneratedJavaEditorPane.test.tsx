@@ -299,6 +299,8 @@ const saveJavaDraftSpy = vi.fn();
 const setJavaManualOverlaySpy = vi.fn();
 const recordJavaDiffSnapshotSpy = vi.fn();
 const requestJavaMergeReviewSpy = vi.fn();
+const startManualCompileRepairDiagnoseSpy = vi.fn();
+const clearManualCompileRepairSpy = vi.fn();
 const javaStatusFlagsSpy = vi.fn().mockReturnValue({
   clean: false,
   pendingReRun: false,
@@ -342,6 +344,11 @@ vi.mock("@/stores/transformationRun", async (importOriginal) => {
         requestJavaMergeReview: requestJavaMergeReviewSpy,
         applyJavaMergeSelections: vi.fn(),
         cancelJavaMergeReview: vi.fn(),
+        manualCompileRepair: null,
+        startManualCompileRepairDiagnose: startManualCompileRepairDiagnoseSpy,
+        applyManualCompileRepair: vi.fn(),
+        rejectManualCompileRepair: vi.fn(),
+        clearManualCompileRepair: clearManualCompileRepairSpy,
         javaDiffHistory: javaDiffHistorySpy(),
         cobolDiffHistory: cobolDiffHistorySpy(),
         recordJavaDiffSnapshot: recordJavaDiffSnapshotSpy,
@@ -534,6 +541,8 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     setJavaManualOverlaySpy.mockClear();
     recordJavaDiffSnapshotSpy.mockClear();
     requestJavaMergeReviewSpy.mockClear();
+    startManualCompileRepairDiagnoseSpy.mockClear();
+    clearManualCompileRepairSpy.mockClear();
     manualDriftSummarySpy.mockReset();
     manualDriftSummarySpy.mockReturnValue({
       hasManualEdits: false,
@@ -1029,6 +1038,208 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       );
     });
   });
+
+  it.each([
+    {
+      label: "runtime exception",
+      failureCode: "java_runtime_failed" as const,
+      failureMessage: "java.lang.NullPointerException",
+    },
+    {
+      label: "parity mismatch",
+      failureCode: "oracle_mismatch" as const,
+      failureMessage: "oracle output diverged",
+    },
+  ])(
+    "shows Ask Coding Agent for $label after manual Java edits",
+    async ({ failureCode, failureMessage }) => {
+      startManualCompileRepairDiagnoseSpy.mockResolvedValue({
+        ok: true,
+        data: {
+          schemaVersion: "v0",
+          runId: "run-123",
+          diagnosis: { runId: "run-123" },
+          proposal: null,
+          candidateProject: {
+            entryClass: "App",
+            entryFilePath: "src/App.java",
+            files: { "src/App.java": "public class App {}" },
+          },
+          buildTest: {
+            runId: "run-123",
+            programId: "APP",
+            mode: "live",
+            productMode: "live",
+            status: "run-failed",
+            classification: "run-error",
+            compileStatus: "ok",
+            executionStatus: "failed",
+            generatedArtifactRef: null,
+          },
+        },
+      });
+      javaStatusFlagsSpy.mockReturnValue({
+        clean: false,
+        pendingReRun: false,
+        staleJava: false,
+        manualEditsPresent: true,
+      });
+      manualDriftSummarySpy.mockReturnValue({
+        hasManualEdits: true,
+        fileCount: 1,
+        regionCount: 1,
+        baselineRunIds: ["run-123"],
+      });
+      mockTransformationState.mockReturnValue({
+        ...completedRunWith(["src/App.java"]),
+        summary: {
+          status: "failed",
+          finalClassification: "failed",
+          failureCode,
+          failureMessage,
+          message: failureMessage,
+        },
+        buildTest: {
+          runId: "run-123",
+          programId: "APP",
+          mode: "live",
+          productMode: "live",
+          status:
+            failureCode === "oracle_mismatch" ? "output-divergence" : "run-failed",
+          classification:
+            failureCode === "oracle_mismatch"
+              ? "true-golden-master-mismatch"
+              : "run-error",
+          compileStatus: "ok",
+          executionStatus: "failed",
+          comparisonPolicy: "golden-master-v1",
+          expectedOutput: "EXPECTED",
+          outputRef: {
+            path: "/tmp/runtime-output.txt",
+            content: "",
+            sha256: "1".repeat(64),
+            byteSize: 12,
+            mimeType: "text/plain",
+          },
+          expectedOutputRef: {
+            path: "/tmp/reference-output.txt",
+            content: "",
+            sha256: "2".repeat(64),
+            byteSize: 8,
+            mimeType: "text/plain",
+          },
+          actualOutputRef: {
+            path: "/tmp/java-output.txt",
+            content: "",
+            sha256: "3".repeat(64),
+            byteSize: 12,
+            mimeType: "text/plain",
+          },
+          comparison:
+            failureCode === "oracle_mismatch"
+              ? {
+                  status: "failed",
+                  matched: false,
+                  comparisonPolicyVersion: "golden-master-v1",
+                  mismatchClassification: "content",
+                  comparisonPolicyRef: {
+                    path: "/tmp/policy.json",
+                    content: "",
+                    sha256: "4".repeat(64),
+                    byteSize: 16,
+                    mimeType: "application/json",
+                  },
+                  comparisonResultRef: {
+                    path: "/tmp/comparison.json",
+                    content: "",
+                    sha256: "5".repeat(64),
+                    byteSize: 16,
+                    mimeType: "application/json",
+                  },
+                  diffRef: {
+                    path: "/tmp/diff.txt",
+                    content: "",
+                    sha256: "6".repeat(64),
+                    byteSize: 16,
+                    mimeType: "text/plain",
+                  },
+                  expectedRef: {
+                    path: "/tmp/reference-output.txt",
+                    content: "",
+                    sha256: "7".repeat(64),
+                    byteSize: 8,
+                    mimeType: "text/plain",
+                  },
+                  actualRef: {
+                    path: "/tmp/java-output.txt",
+                    content: "",
+                    sha256: "8".repeat(64),
+                    byteSize: 12,
+                    mimeType: "text/plain",
+                  },
+                }
+              : null,
+          generatedArtifactRef: null,
+        },
+      });
+      javaBuffersSpy.mockReturnValue({
+        "src/App.java": {
+          content: "public class App {}",
+          bufferHash: "b".repeat(64),
+          lastRunInputHash: null,
+          lastRunInputContent: null,
+          displayedArtifactSourceHash: null,
+          generatorBaselineContent: "public class App {}",
+          generatorBaselineHash: "c".repeat(64),
+          generatorBaselineRunId: "run-123",
+          manualEditOverlay: {
+            schemaVersion: "v0",
+            runId: "run-123",
+            javaFile: "src/App.java",
+            regions: [
+              {
+                schemaVersion: "v0",
+                lineRange: { startLine: 1, endLine: 1 },
+                originClass: "manual_edit",
+              },
+            ],
+          },
+          isDirty: true,
+          lastSavedAt: null,
+        },
+      });
+      mockGeneratedFileContents({ "src/App.java": "public class App {}" });
+
+      renderPane();
+
+      const button = await screen.findByTestId("java-manual-compile-repair-button");
+      expect(button).toBeDefined();
+      expect(
+        screen.getByTestId("java-manual-compile-repair-inline-button"),
+      ).toBeDefined();
+      expect(
+        screen.getByText(
+          /governed repair workflow and returns a reviewable patch proposal for compile, runtime, or parity failures\./i,
+        ),
+      ).toBeDefined();
+      fireEvent.click(button);
+      await waitFor(() => {
+        expect(startManualCompileRepairDiagnoseSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            runId: "run-123",
+            entryFilePath: "src/App.java",
+            buildTestContext: expect.objectContaining({
+              status:
+                failureCode === "oracle_mismatch"
+                  ? "output-divergence"
+                  : "run-failed",
+              expectedOutput: "EXPECTED",
+            }),
+          }),
+        );
+      });
+    },
+  );
 
   it("does not call setJavaBufferContent for read-only artifacts", async () => {
     vi.useFakeTimers();

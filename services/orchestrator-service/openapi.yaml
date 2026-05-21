@@ -275,6 +275,103 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/manual-compile-repair/diagnose/request:
+    post:
+      summary: Diagnose a manual Java repair candidate
+      description: >
+        Extends the existing manual compile-repair lane into a generalized
+        manual diagnosis/repair path for compile failures, runtime
+        exceptions, and parity mismatches after manual Java edits. The
+        orchestrator still uses the Model Gateway for productive calls and
+        returns a diagnosis envelope that may or may not include a repair
+        proposal.
+      operationId: manualCompileRepairDiagnose
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualRepairDiagnoseRequest" }
+      responses:
+        "200":
+          description: Manual diagnosis envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualRepairDiagnoseResponse" }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Run not found or diagnosis contract violation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/manual-compile-repair/apply/request:
+    post:
+      summary: Apply an approved manual repair proposal
+      operationId: manualCompileRepairApply
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualRepairApplyRequest" }
+      responses:
+        "200":
+          description: Applied manual repair envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualRepairApplyResponse" }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Run not found or approval contract violation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/manual-compile-repair/reject/request:
+    post:
+      summary: Reject a manual repair proposal
+      operationId: manualCompileRepairReject
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualRepairRejectRequest" }
+      responses:
+        "200":
+          description: Rejected manual repair envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualRepairRejectResponse" }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Run not found or rejection contract violation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   schemas:
     HealthResponse:
@@ -394,6 +491,165 @@ components:
         message:
           type: string
           example: orchestrator run started
+    ManualRepairDiagnoseRequest:
+      type: object
+      required: [runId, javaFiles]
+      additionalProperties: false
+      properties:
+        runId:
+          type: string
+        requester:
+          type: string
+        entryClass:
+          type: string
+        entryFilePath:
+          type: string
+        javaFiles:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [path, content]
+            properties:
+              path:
+                type: string
+              content:
+                type: string
+        manualOverlay:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+        buildTestContext:
+          type: object
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+            classification:
+              type: string
+            compileStatus:
+              type: string
+            executionStatus:
+              type: string
+            comparisonPolicy:
+              type: string
+            expectedOutput:
+              type: string
+            outputRef:
+              type: object
+              additionalProperties: true
+            expectedOutputRef:
+              type: object
+              additionalProperties: true
+            actualOutputRef:
+              type: object
+              additionalProperties: true
+            comparison:
+              type: object
+              additionalProperties: true
+    ManualRepairDiagnoseResponse:
+      type: object
+      required: [schemaVersion, runId, diagnosis, candidateProject, buildTest]
+      additionalProperties: true
+      properties:
+        schemaVersion:
+          type: string
+        runId:
+          type: string
+        diagnosis:
+          type: object
+          additionalProperties: true
+        proposal:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        candidateProject:
+          type: object
+          additionalProperties: true
+        buildTest:
+          type: object
+          additionalProperties: true
+    ManualRepairApplyRequest:
+      type: object
+      required: [runId, javaFiles, proposal, candidateProject]
+      additionalProperties: false
+      properties:
+        runId:
+          type: string
+        requester:
+          type: string
+        entryClass:
+          type: string
+        entryFilePath:
+          type: string
+        javaFiles:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [path, content]
+            properties:
+              path:
+                type: string
+              content:
+                type: string
+        proposal:
+          type: object
+          additionalProperties: true
+        candidateProject:
+          type: object
+          additionalProperties: true
+        expectedOutput:
+          type: string
+        oracleInput:
+          type: string
+    ManualRepairApplyResponse:
+      type: object
+      required: [schemaVersion, runId, proposal, candidateProject, buildTest]
+      additionalProperties: true
+      properties:
+        schemaVersion:
+          type: string
+        runId:
+          type: string
+        proposal:
+          type: object
+          additionalProperties: true
+        candidateProject:
+          type: object
+          additionalProperties: true
+        buildTest:
+          type: object
+          additionalProperties: true
+    ManualRepairRejectRequest:
+      type: object
+      required: [runId, proposal]
+      additionalProperties: false
+      properties:
+        runId:
+          type: string
+        requester:
+          type: string
+        proposal:
+          type: object
+          additionalProperties: true
+    ManualRepairRejectResponse:
+      type: object
+      required: [schemaVersion, runId, proposal]
+      additionalProperties: true
+      properties:
+        schemaVersion:
+          type: string
+        runId:
+          type: string
+        proposal:
+          type: object
+          additionalProperties: true
     DataReferenceLike:
       type: object
       required: [uri]

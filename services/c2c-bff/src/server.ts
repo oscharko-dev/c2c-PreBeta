@@ -1025,6 +1025,75 @@ interface OutputRef {
   createdAt?: string;
 }
 
+function sanitizeManualRepairArtifactRef(raw: unknown): OutputRef | null {
+  return normalizeOutputRef(raw);
+}
+
+function sanitizeManualRepairDiagnosis(raw: unknown): Record<string, unknown> | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const sanitized: Record<string, unknown> = { ...record };
+  for (const key of [
+    "buildResultRef",
+    "executionResultRef",
+    "comparisonResultRef",
+    "sourceRevisionRef",
+    "currentHeadRef",
+  ] as const) {
+    if (record[key] !== undefined) {
+      sanitized[key] = sanitizeManualRepairArtifactRef(record[key]);
+    }
+  }
+  if (Array.isArray(record.evidenceRefs)) {
+    sanitized.evidenceRefs = record.evidenceRefs
+      .map((entry) => sanitizeManualRepairArtifactRef(entry))
+      .filter((entry): entry is OutputRef => entry !== null);
+  }
+  const followUp = asRecord(record.followUpRecommendation);
+  if (followUp) {
+    const sanitizedFollowUp: Record<string, unknown> = { ...followUp };
+    if (Array.isArray(followUp.evidenceRefs)) {
+      sanitizedFollowUp.evidenceRefs = followUp.evidenceRefs
+        .map((entry) => sanitizeManualRepairArtifactRef(entry))
+        .filter((entry): entry is OutputRef => entry !== null);
+    }
+    sanitized.followUpRecommendation = sanitizedFollowUp;
+  }
+  return sanitized;
+}
+
+function sanitizeManualRepairProposal(raw: unknown): Record<string, unknown> | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const sanitized: Record<string, unknown> = { ...record };
+  for (const key of ["sourceRevisionRef", "currentHeadRef"] as const) {
+    if (record[key] !== undefined) {
+      sanitized[key] = sanitizeManualRepairArtifactRef(record[key]);
+    }
+  }
+  if (Array.isArray(record.evidenceRefs)) {
+    sanitized.evidenceRefs = record.evidenceRefs
+      .map((entry) => sanitizeManualRepairArtifactRef(entry))
+      .filter((entry): entry is OutputRef => entry !== null);
+  }
+  return sanitized;
+}
+
+function sanitizeManualRepairResponseBody(raw: unknown): unknown {
+  const record = asRecord(raw);
+  if (!record) return raw;
+  const sanitized: Record<string, unknown> = { ...record };
+  if (record.diagnosis !== undefined) {
+    sanitized.diagnosis =
+      sanitizeManualRepairDiagnosis(record.diagnosis) ?? record.diagnosis;
+  }
+  if (record.proposal !== undefined && record.proposal !== null) {
+    sanitized.proposal =
+      sanitizeManualRepairProposal(record.proposal) ?? record.proposal;
+  }
+  return sanitized;
+}
+
 async function liveGeneratedView(
   stored: StoredRun,
   orchestrator: OrchestratorClient,
@@ -4120,6 +4189,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
       }
 
+      // Issue #361: generalized manual diagnosis/repair lane.
+      // Keep the legacy manual-compile-repair route stable, but forward the
+      // request body opaquely so runtime/parity diagnosis fields survive
+      // unchanged when the orchestrator emits the broader repair schema.
       if (pathname === "/api/v0/manual-compile-repair/diagnose" && method === "POST") {
         if (
           rejectUnauthenticatedStudioJsonRequest({
@@ -4167,6 +4240,9 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
+        // Preserve the single-file and multi-file Studio overlay shapes.
+        // The orchestrator still expects the legacy ``manualOverlay`` name,
+        // so we keep the compatibility shim in one place.
         const manualOverlayEnvelope =
           Array.isArray(record.manualEditOverlays)
             ? {
@@ -4195,7 +4271,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
-        jsonResponse(res, upstream.status || 502, upstream.body);
+        jsonResponse(
+          res,
+          upstream.status || 502,
+          sanitizeManualRepairResponseBody(upstream.body),
+        );
         return;
       }
 
@@ -4255,7 +4335,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
-        jsonResponse(res, upstream.status || 502, upstream.body);
+        jsonResponse(
+          res,
+          upstream.status || 502,
+          sanitizeManualRepairResponseBody(upstream.body),
+        );
         return;
       }
 
@@ -4316,7 +4400,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
-        jsonResponse(res, upstream.status || 502, upstream.body);
+        jsonResponse(
+          res,
+          upstream.status || 502,
+          sanitizeManualRepairResponseBody(upstream.body),
+        );
         return;
       }
 

@@ -418,6 +418,115 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/manual-compile-repair/diagnose:
+    post:
+      summary: Diagnose a manual repair candidate
+      description: >
+        Legacy compatibility route for the Studio manual diagnosis/repair
+        lane. The BFF accepts compile-failure and runtime/parity-failure
+        diagnosis payloads, preserves the Studio single-file and multi-file
+        manual overlay shapes, and forwards backend-shape fields unchanged to
+        the Orchestrator. The response body is also passed through verbatim so
+        the broader diagnosis envelope can surface runtime/parity refs when the
+        backend emits them.
+      operationId: diagnoseManualCompileRepair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualCompileRepairDiagnoseRequest" }
+      responses:
+        "200":
+          description: diagnosis returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualCompileRepairDiagnoseResponse" }
+        "400":
+          description: validation error or malformed request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: session cookie missing or expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable or not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/manual-compile-repair/apply:
+    post:
+      summary: Apply a manual repair proposal
+      description: >
+        Compatibility route for the Studio manual diagnosis/repair lane. The
+        BFF forwards the request body unchanged apart from the Studio requester
+        identity that it injects for auditability.
+      operationId: applyManualCompileRepair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualCompileRepairApplyRequest" }
+      responses:
+        "200":
+          description: repair application returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualCompileRepairApplyResponse" }
+        "400":
+          description: validation error or malformed request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: session cookie missing or expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable or not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/manual-compile-repair/reject:
+    post:
+      summary: Reject a manual repair proposal
+      description: >
+        Compatibility route for the Studio manual diagnosis/repair lane. The
+        BFF forwards the proposal payload unchanged apart from the injected
+        Studio requester identity used by the Orchestrator audit trail.
+      operationId: rejectManualCompileRepair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualCompileRepairRejectRequest" }
+      responses:
+        "200":
+          description: rejection returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualCompileRepairRejectResponse" }
+        "400":
+          description: validation error or malformed request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: session cookie missing or expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable or not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/runs:
     post:
       summary: Start a sample-backed standard or parity run through the Orchestrator
@@ -1206,6 +1315,350 @@ components:
         options:
           type: object
           additionalProperties: true
+
+    ManualCompileRepairJavaFile:
+      type: object
+      required: [path, content]
+      properties:
+        path: { type: string }
+        content: { type: string }
+
+    ManualCompileRepairOverlayInput:
+      type: object
+      description: >
+        Opaque manual-edit overlay envelope accepted by the diagnosis route.
+        The BFF only inspects the optional `regions` array when it needs to
+        flatten multi-file overlays for the legacy `manualOverlay` shim and
+        forwards the rest unchanged.
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        runId: { type: string }
+        javaFile: { type: string }
+        regions:
+          type: array
+          items:
+            type: object
+            required: [filePath, originClass, startLine, endLine]
+            properties:
+              filePath: { type: string }
+              originClass:
+                type: string
+                enum:
+                  [
+                    deterministic,
+                    agent_proposed,
+                    repair_attempted,
+                    manual_modified,
+                    manual_edit,
+                  ]
+              startLine: { type: integer, minimum: 1 }
+              endLine: { type: integer, minimum: 1 }
+              startColumn: { type: integer, minimum: 1 }
+              endColumn: { type: integer, minimum: 1 }
+      additionalProperties: true
+
+    ManualCompileRepairDiagnoseRequest:
+      type: object
+      required: [runId, entryFilePath, javaFiles]
+      description: >
+        Studio manual diagnosis request for compile, runtime, and parity
+        repair flows. `buildTestContext` carries the bounded verification
+        evidence from the current manual Java snapshot so runtime/parity
+        diagnosis can stay attached to the exact edited files the developer
+        just verified.
+      properties:
+        runId: { type: string }
+        entryClass: { type: string }
+        entryFilePath: { type: string }
+        javaFiles:
+          type: array
+          items: { $ref: "#/components/schemas/ManualCompileRepairJavaFile" }
+        manualEditOverlay:
+          oneOf:
+            - $ref: "#/components/schemas/ManualCompileRepairOverlayInput"
+            - type: "null"
+        manualEditOverlays:
+          type: array
+          items: { $ref: "#/components/schemas/ManualCompileRepairOverlayInput" }
+        buildTestContext:
+          type: object
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+            classification:
+              type: string
+            compileStatus:
+              type: string
+            executionStatus:
+              type: string
+            comparisonPolicy:
+              type: string
+            expectedOutput:
+              type: string
+            outputRef:
+              oneOf:
+                - $ref: "#/components/schemas/OutputRef"
+                - type: "null"
+            expectedOutputRef:
+              oneOf:
+                - $ref: "#/components/schemas/OutputRef"
+                - type: "null"
+            actualOutputRef:
+              oneOf:
+                - $ref: "#/components/schemas/OutputRef"
+                - type: "null"
+            comparison:
+              type: object
+              additionalProperties: false
+              properties:
+                matched:
+                  type: boolean
+                status:
+                  type: string
+                comparisonPolicyVersion:
+                  type: string
+                mismatchClassification:
+                  type: string
+                diffSummary:
+                  type: string
+                comparisonPolicyRef:
+                  oneOf:
+                    - $ref: "#/components/schemas/OutputRef"
+                    - type: "null"
+                comparisonResultRef:
+                  oneOf:
+                    - $ref: "#/components/schemas/OutputRef"
+                    - type: "null"
+                diffRef:
+                  oneOf:
+                    - $ref: "#/components/schemas/OutputRef"
+                    - type: "null"
+                expectedRef:
+                  oneOf:
+                    - $ref: "#/components/schemas/OutputRef"
+                    - type: "null"
+                actualRef:
+                  oneOf:
+                    - $ref: "#/components/schemas/OutputRef"
+                    - type: "null"
+      additionalProperties: true
+
+    ManualCompileRepairDiagnosis:
+      type: object
+      required: [diagnosisId, runId, failureClass, scopeClass, likelyRootCause, confidence, evidenceRefs, createdAt]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+          default: v0
+        diagnosisId: { type: string }
+        runId: { type: string }
+        workflowId: { type: string }
+        buildResultRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
+        executionResultRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
+        comparisonResultRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
+        sourceRevisionRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
+        currentHeadRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
+        failureClass:
+          type: string
+          enum:
+            [
+              build_failure,
+              runtime_failure,
+              comparison_mismatch,
+              policy_block,
+              fixture_issue,
+              generated_code_defect,
+              manual_edit_issue,
+              out_of_scope,
+              unknown,
+            ]
+        scopeClass:
+          type: string
+          enum: [manual_edit, generated_code, fixture_reference, out_of_scope, unknown]
+        likelyRootCause: { type: string }
+        summary: { type: string }
+        confidence:
+          type: object
+          required: [level]
+          properties:
+            level:
+              type: string
+              enum: [low, medium, high]
+            basis: { type: string }
+        recommendedNextAction:
+          type: string
+          enum: [repair_generated_code, repair_fixture, retry_build, escalate, stop]
+        evidenceRefs:
+          type: array
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/OutputRef"
+              - type: "null"
+        createdAt: { type: string }
+      additionalProperties: true
+
+    ManualCompileRepairProposal:
+      type: object
+      required: [proposalId, runId, patchSha256, applicationState, approvalState, files, sourceRevisionRef, currentHeadRef, evidenceRefs, createdAt]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+          default: v0
+        proposalId: { type: string }
+        runId: { type: string }
+        workflowId: { type: string }
+        diagnosisId: { type: string }
+        proposedBy: { type: string }
+        patchSha256: { type: string }
+        summary: { type: string }
+        applicationState:
+          type: string
+          enum: [draft, review_pending, applied, rejected]
+        approvalState:
+          type: string
+          enum: [pending, approved, rejected]
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, changeType]
+            properties:
+              path: { type: string }
+              changeType:
+                type: string
+                enum: [add, modify, delete]
+              beforeSha256: { type: string }
+              afterSha256: { type: string }
+              diff: { type: string }
+        sourceRevisionRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
+        currentHeadRef:
+          oneOf:
+            - $ref: "#/components/schemas/OutputRef"
+            - type: "null"
+        evidenceRefs:
+          type: array
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/OutputRef"
+              - type: "null"
+        developerApproval:
+          type: object
+          properties:
+            approvedBy: { type: string }
+            approvedAt: { type: string }
+            approvedPatchSha256: { type: string }
+        approvedAt: { type: string }
+        appliedAt: { type: string }
+      additionalProperties: true
+
+    ManualCompileRepairCandidateProject:
+      type: object
+      required: [entryClass, entryFilePath, files]
+      properties:
+        entryClass: { type: string }
+        entryFilePath: { type: string }
+        files:
+          type: object
+          additionalProperties:
+            type: string
+
+    ManualCompileRepairDiagnoseResponse:
+      type: object
+      required: [schemaVersion, runId, diagnosis, candidateProject, buildTest]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        runId: { type: string }
+        diagnosis:
+          $ref: "#/components/schemas/ManualCompileRepairDiagnosis"
+        proposal:
+          oneOf:
+            - $ref: "#/components/schemas/ManualCompileRepairProposal"
+            - type: "null"
+        candidateProject:
+          $ref: "#/components/schemas/ManualCompileRepairCandidateProject"
+        buildTest:
+          $ref: "#/components/schemas/BuildTestView"
+      additionalProperties: true
+
+    ManualCompileRepairApplyRequest:
+      type: object
+      required: [runId, entryFilePath, javaFiles, proposal, candidateProject]
+      properties:
+        runId: { type: string }
+        entryClass: { type: string }
+        entryFilePath: { type: string }
+        javaFiles:
+          type: array
+          items: { $ref: "#/components/schemas/ManualCompileRepairJavaFile" }
+        proposal:
+          $ref: "#/components/schemas/ManualCompileRepairProposal"
+        candidateProject:
+          $ref: "#/components/schemas/ManualCompileRepairCandidateProject"
+        expectedOutput: { type: string }
+        oracleInput: { type: string }
+      additionalProperties: true
+
+    ManualCompileRepairApplyResponse:
+      type: object
+      required: [schemaVersion, runId, proposal, candidateProject, buildTest]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        runId: { type: string }
+        proposal:
+          $ref: "#/components/schemas/ManualCompileRepairProposal"
+        candidateProject:
+          $ref: "#/components/schemas/ManualCompileRepairCandidateProject"
+        buildTest:
+          $ref: "#/components/schemas/BuildTestView"
+      additionalProperties: true
+
+    ManualCompileRepairRejectRequest:
+      type: object
+      required: [runId, proposal]
+      properties:
+        runId: { type: string }
+        proposal:
+          $ref: "#/components/schemas/ManualCompileRepairProposal"
+      additionalProperties: true
+
+    ManualCompileRepairRejectResponse:
+      type: object
+      required: [schemaVersion, runId, proposal]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        runId: { type: string }
+        proposal:
+          $ref: "#/components/schemas/ManualCompileRepairProposal"
+      additionalProperties: true
 
     RunSummary:
       type: object

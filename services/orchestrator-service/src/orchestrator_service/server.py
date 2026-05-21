@@ -407,6 +407,7 @@ class OrchestratorService:
         entry_class = str(payload.get("entryClass") or "").strip()
         manual_overlay_regions = _extract_manual_overlay_regions(payload.get("manualOverlay"))
         requester = str(payload.get("requester") or self.config.service_name).strip()
+        build_test_context = payload.get("buildTestContext")
         return self.runner.manual_compile_repair_diagnose(
             run_id=run_id,
             requester=requester,
@@ -414,6 +415,7 @@ class OrchestratorService:
             entry_class=entry_class,
             entry_file_path=entry_file_path,
             manual_overlay_regions=manual_overlay_regions,
+            build_test_context=build_test_context if isinstance(build_test_context, Mapping) else None,
         )
 
     def _manual_compile_repair_apply(

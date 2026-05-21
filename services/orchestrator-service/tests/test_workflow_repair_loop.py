@@ -29,6 +29,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from collections.abc import Mapping
+from types import SimpleNamespace
 from orchestrator_service.artifacts import JsonObject, JsonValue, RunArtifactStore
 from orchestrator_service.config import OrchestratorConfig
 from orchestrator_service.harness import HarnessFailure
@@ -1007,6 +1008,162 @@ class RepairLoopGatewayUnavailableTests(_BaseRepairLoopFixture):
         self.assertEqual(contract["failureCode"], FAILURE_MODEL_POLICY_DENIED)
         self.assertEqual(contract["finalClassification"], CLASSIFICATION_BLOCKED)
         self.assertEqual(len(contract["repairAttempts"]), 1)
+
+
+class ManualDiagnosisClassificationTests(_BaseRepairLoopFixture):
+    def test_failure_class_and_follow_up_mappings_cover_runtime_parity_and_scope(self):
+        runtime_result = SimpleNamespace(
+            proposed_candidate=False,
+            is_escalation=False,
+            escalation_code=None,
+            is_refusal=False,
+            refusal_code=None,
+        )
+        scope_result = SimpleNamespace(
+            proposed_candidate=False,
+            is_escalation=True,
+            escalation_code="out_of_scope_for_w0_2",
+            is_refusal=False,
+            refusal_code=None,
+        )
+        refusal_result = SimpleNamespace(
+            proposed_candidate=False,
+            is_escalation=False,
+            escalation_code=None,
+            is_refusal=True,
+            refusal_code="insufficient_context",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_failure_class(
+                "java_runtime_failed",
+                build_payload={},
+                manual_overlay_regions=(),
+                repair_result=runtime_result,
+            ),
+            "generated_code_defect",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_failure_class(
+                "oracle_mismatch",
+                build_payload={},
+                manual_overlay_regions=(),
+                repair_result=runtime_result,
+            ),
+            "generated_code_defect",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_failure_class(
+                "java_compile_failed",
+                build_payload={},
+                manual_overlay_regions=(),
+                repair_result=runtime_result,
+            ),
+            "generated_code_defect",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_failure_class(
+                "oracle_mismatch",
+                build_payload={},
+                manual_overlay_regions=(),
+                repair_result=scope_result,
+            ),
+            "out_of_scope",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_follow_up(
+                runtime_result,
+                build_payload={"classification": "missing-golden-master"},
+            ),
+            "repair_fixture",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_follow_up(
+                refusal_result,
+                build_payload={},
+            ),
+            "stop",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_scope_class(
+                build_payload={},
+                manual_overlay_regions=({"filePath": "A.java"},),
+                repair_result=runtime_result,
+            ),
+            "manual_edit",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_failure_class(
+                "oracle_mismatch",
+                build_payload={"classification": "missing-golden-master"},
+                manual_overlay_regions=(),
+                repair_result=runtime_result,
+            ),
+            "fixture_issue",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_scope_class(
+                build_payload={"classification": "missing-golden-master"},
+                manual_overlay_regions=(),
+                repair_result=runtime_result,
+            ),
+            "fixture_reference",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_failure_class(
+                None,
+                build_payload={},
+                manual_overlay_regions=({"filePath": "A.java"},),
+                repair_result=runtime_result,
+            ),
+            "manual_edit_issue",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_scope_class(
+                build_payload={},
+                manual_overlay_regions=(),
+                repair_result=scope_result,
+            ),
+            "out_of_scope",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_failure_class(
+                "oracle_mismatch",
+                build_payload={},
+                manual_overlay_regions=(),
+                repair_result=refusal_result,
+            ),
+            "unknown",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_scope_class(
+                build_payload={},
+                manual_overlay_regions=(),
+                repair_result=refusal_result,
+            ),
+            "unknown",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_follow_up(
+                SimpleNamespace(
+                    proposed_candidate=False,
+                    is_escalation=False,
+                    escalation_code=None,
+                ),
+                build_payload={},
+            ),
+            "stop",
+        )
+        self.assertEqual(
+            W0WorkflowRunner._manual_diagnosis_follow_up(
+                SimpleNamespace(
+                    proposed_candidate=False,
+                    is_escalation=True,
+                    escalation_code="out_of_scope_for_w0_2",
+                ),
+                build_payload={},
+            ),
+            "escalate",
+        )
 
 
 if __name__ == "__main__":

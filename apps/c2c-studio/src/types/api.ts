@@ -785,6 +785,19 @@ export interface ManualCompileRepairCandidateProject {
   files: Record<string, string>;
 }
 
+export interface ManualCompileRepairBuildTestContext {
+  status?: BuildTestView["status"];
+  classification?: BuildTestView["classification"];
+  compileStatus?: BuildTestView["compileStatus"];
+  executionStatus?: BuildTestView["executionStatus"];
+  comparisonPolicy?: BuildTestView["comparisonPolicy"];
+  expectedOutput?: string;
+  outputRef?: OutputRef | null;
+  expectedOutputRef?: OutputRef | null;
+  actualOutputRef?: OutputRef | null;
+  comparison?: BuildTestView["comparison"];
+}
+
 export interface ManualCompileRepairDiagnoseRequest {
   runId: string;
   entryClass?: string;
@@ -792,6 +805,7 @@ export interface ManualCompileRepairDiagnoseRequest {
   javaFiles: ManualCompileRepairJavaFile[];
   manualEditOverlay?: JavaOriginOverlay;
   manualEditOverlays?: JavaOriginOverlay[];
+  buildTestContext?: ManualCompileRepairBuildTestContext;
 }
 
 export interface ManualCompileRepairApplyRequest {

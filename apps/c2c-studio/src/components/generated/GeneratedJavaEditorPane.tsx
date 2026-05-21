@@ -1254,14 +1254,22 @@ export function GeneratedJavaEditorPane() {
     return entries;
   }, [javaBuffers, state.generatedFiles]);
 
+  const hasCompileOrTestFailure =
+    compileCheckDiagnostics.some((d) => d.severity === "error") ||
+    state.buildTest?.classification === "compile-error" ||
+    state.buildTest?.classification === "run-error" ||
+    state.buildTest?.status === "compile-failed" ||
+    state.buildTest?.status === "run-failed";
+  const hasManualEditContext =
+    flags.manualEditsPresent || hasManualJavaDrift;
+  const hasRuntimeOrParityFailure =
+    productState.state === "build-failed" ||
+    productState.state === "equivalence-mismatch";
   const canAskCodingAgent =
     state.runId !== null &&
     selectedFilePath !== null &&
-    (compileCheckDiagnostics.some((d) => d.severity === "error") ||
-      state.buildTest?.classification === "compile-error" ||
-      state.buildTest?.classification === "run-error" ||
-      state.buildTest?.status === "compile-failed" ||
-      state.buildTest?.status === "run-failed");
+    (hasCompileOrTestFailure ||
+      (hasManualEditContext && hasRuntimeOrParityFailure));
 
   const manualCompileRepairPending =
     manualCompileRepairSession?.status === "loading" ||
@@ -1280,6 +1288,20 @@ export function GeneratedJavaEditorPane() {
     const manualEditOverlays = entries.flatMap(([, entry]) =>
       entry.manualEditOverlay ? [entry.manualEditOverlay] : [],
     );
+    const buildTestContext = state.buildTest
+      ? {
+          status: state.buildTest.status,
+          classification: state.buildTest.classification,
+          compileStatus: state.buildTest.compileStatus,
+          executionStatus: state.buildTest.executionStatus,
+          comparisonPolicy: state.buildTest.comparisonPolicy,
+          expectedOutput: state.buildTest.expectedOutput,
+          outputRef: state.buildTest.outputRef,
+          expectedOutputRef: state.buildTest.expectedOutputRef,
+          actualOutputRef: state.buildTest.actualOutputRef,
+          comparison: state.buildTest.comparison ?? undefined,
+        }
+      : undefined;
     const result = await startManualCompileRepairDiagnose({
       runId: state.runId,
       javaFiles,
@@ -1291,6 +1313,7 @@ export function GeneratedJavaEditorPane() {
         ? { manualEditOverlay: manualEditOverlays[0] }
         : {}),
       ...(manualEditOverlays.length > 1 ? { manualEditOverlays } : {}),
+      ...(buildTestContext ? { buildTestContext } : {}),
     });
     if (!result.ok) {
       setFormatNotice({
@@ -1778,7 +1801,8 @@ export function GeneratedJavaEditorPane() {
               type="button"
               onClick={() => void diagnoseManualCompileRepair()}
               data-testid="java-manual-compile-repair-button"
-              aria-label="Ask Coding Agent to diagnose the compile failure"
+              aria-label="Ask Coding Agent to diagnose the failure"
+              title="Ask Coding Agent for a governed repair proposal"
               className="rounded border border-line px-2 py-0.5 text-[10px] font-medium text-text-dim hover:bg-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={manualCompileRepairPending}
             >
@@ -1971,15 +1995,16 @@ export function GeneratedJavaEditorPane() {
                 type="button"
                 onClick={() => void diagnoseManualCompileRepair()}
                 data-testid="java-manual-compile-repair-inline-button"
+                aria-label="Ask Coding Agent to diagnose the failure"
                 className="rounded border border-line px-3 py-1 text-xs font-medium text-text hover:bg-bg-2 disabled:opacity-50"
                 disabled={manualCompileRepairPending}
               >
                 {manualCompileRepairPending
-                  ? "Diagnosing compile failure…"
+                  ? "Diagnosing…"
                   : "Ask Coding Agent"}
               </button>
               <p className="text-xs text-text-dim">
-                The diagnosis runs through the governed repair workflow and returns a reviewable patch proposal.
+                The diagnosis runs through the governed repair workflow and returns a reviewable patch proposal for compile, runtime, or parity failures.
               </p>
             </div>
           ) : null}

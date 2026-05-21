@@ -84,10 +84,12 @@ from .run_contract import (
     FAILURE_AGENT_TIMEOUT,
     FAILURE_EVIDENCE_INCOMPLETE,
     FAILURE_GENERATE_ONLY_COMPLETE,
+    FAILURE_JAVA_COMPILE_FAILED,
     FAILURE_JAVA_GENERATION_FAILED,
     FAILURE_SOURCE_REFERENCE_FAILED,
     FAILURE_MODEL_GATEWAY_UNAVAILABLE,
     FAILURE_MODEL_POLICY_DENIED,
+    FAILURE_JAVA_RUNTIME_FAILED,
     FAILURE_ORACLE_MISMATCH,
     FAILURE_UNSUPPORTED_COBOL,
     IllegalTransitionError,
@@ -1259,6 +1261,7 @@ class W0WorkflowRunner:
         entry_class: str,
         entry_file_path: str,
         manual_overlay_regions: Sequence[Mapping[str, JsonValue]] = (),
+        build_test_context: Mapping[str, JsonValue] | None = None,
     ) -> JsonObject:
         if not self.artifact_store.has_run(run_id):
             raise OrchestratorError("run not found")
@@ -1297,44 +1300,85 @@ class W0WorkflowRunner:
             sha256=str(snapshot_ref.get("sha256") or ""),
             byte_size=int(snapshot_ref.get("byteSize") or 0),
         )
-        build_input: JsonObject = {
-            "runId": run_id,
-            "programId": _text(summary.get("programId")) or run_id,
-            "generatedProject": {
-                "files": dict(java_files),
-                "entryClass": entry_class,
-                "entryFilePath": entry_file_path,
-            },
-            "options": {
+        prior_build_payload = self.artifact_store.read_json(run_id, "build-test-result.json")
+        prior_build_ref = self.artifact_store.find_metadata(run_id, "build-test-result.json")
+        prior_failure_code: str | None = None
+        if isinstance(prior_build_payload, Mapping):
+            _prior_build_ok, prior_failure_code = build_test_outcome(prior_build_payload)
+        requested_failure_code = W0WorkflowRunner._manual_diagnosis_requested_failure_code(
+            build_test_context
+        )
+        use_prior_build_result = (
+            build_test_context is None
+            and
+            java_files == baseline_files
+            and prior_failure_code in {
+            FAILURE_JAVA_RUNTIME_FAILED,
+            FAILURE_ORACLE_MISMATCH,
+            }
+            and isinstance(prior_build_ref, Mapping)
+        )
+
+        if use_prior_build_result:
+            build_payload = dict(prior_build_payload)
+            build_ref = (
+                self._artifact_ref_payload(prior_build_ref)
+                or _first_non_empty_mapping(prior_build_ref)
+            )
+        else:
+            build_options: JsonObject = {
                 "skipExecution": True,
                 "compareOutput": False,
                 "timeoutMs": 5000,
-            },
-            "oracle": {},
-        }
-        build_output = self._invoke_step(
-            context,
-            STEP_COMPILE_TEST_JAVA,
-            self._require_capability(run_id, self.config.build_test_capability_id),
-            DATA_CLASS_BUILD_TEST,
-            build_input,
-            input_ref,
-        )
-        build_ref = _as_reference_payload(build_output.output_ref)
-        self.artifact_store.write_json(
-            run_id,
-            workflow_id,
-            f"{MANUAL_COMPILE_REPAIR_DIR}/compile-check-result.json",
-            dict(build_output.payload),
-            kind=KIND_BUILD_TEST_RESULT,
-        )
-        compile_ok, failure_code = build_test_outcome(build_output.payload)
-        if compile_ok or failure_code != FAILURE_JAVA_COMPILE_FAILED:
+            }
+            oracle: JsonObject = {}
+            if requested_failure_code == FAILURE_JAVA_RUNTIME_FAILED:
+                build_options["skipExecution"] = False
+            elif requested_failure_code == FAILURE_ORACLE_MISMATCH:
+                build_options["skipExecution"] = False
+                build_options["compareOutput"] = True
+                expected_output = (
+                    _text(build_test_context.get("expectedOutput"))
+                    if isinstance(build_test_context, Mapping)
+                    else ""
+                )
+                if expected_output:
+                    oracle["expectedOutput"] = expected_output
+            build_input: JsonObject = {
+                "runId": run_id,
+                "programId": _text(summary.get("programId")) or run_id,
+                "generatedProject": {
+                    "files": dict(java_files),
+                    "entryClass": entry_class,
+                    "entryFilePath": entry_file_path,
+                },
+                "options": build_options,
+                "oracle": oracle,
+            }
+            build_output = self._invoke_step(
+                context,
+                STEP_COMPILE_TEST_JAVA,
+                self._require_capability(run_id, self.config.build_test_capability_id),
+                DATA_CLASS_BUILD_TEST,
+                build_input,
+                input_ref,
+            )
+            build_payload = dict(build_output.payload)
+            build_ref = _as_reference_payload(build_output.output_ref)
+            self.artifact_store.write_json(
+                run_id,
+                workflow_id,
+                f"{MANUAL_COMPILE_REPAIR_DIR}/compile-check-result.json",
+                build_payload,
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+        build_ok, failure_code = build_test_outcome(build_payload)
+        if build_ok:
             raise OrchestratorError(
-                "manual compile diagnosis requires a deterministic compile failure on the current Java snapshot"
+                "manual diagnosis requires a deterministic build failure on the current Java snapshot"
             )
 
-        diagnostics = build_output.payload.get("diagnostics")
+        diagnostics = build_payload.get("diagnostics")
         diagnostic_paths: set[str] = set()
         if isinstance(diagnostics, Sequence) and not isinstance(diagnostics, (str, bytes, bytearray)):
             for entry in diagnostics:
@@ -1348,14 +1392,66 @@ class W0WorkflowRunner:
         if not prompt_files:
             prompt_files[entry_file_path] = java_files.get(entry_file_path) or next(iter(java_files.values()))
         trimmed_build_payload: JsonObject = {
-            "status": _text(build_output.payload.get("status")) or "failed",
-            "summary": _text(build_output.payload.get("summary")) or "compile failed",
+            "status": _text(build_payload.get("status")) or "failed",
+            "summary": _text(build_payload.get("summary")) or "build failed",
             "diagnostics": [
                 dict(entry)
                 for entry in (diagnostics or [])
                 if isinstance(entry, Mapping)
             ][:10],
         }
+        if isinstance(build_test_context, Mapping):
+            build_context_summary = self._manual_diagnosis_build_payload_from_context(
+                build_test_context,
+                failure_code=requested_failure_code,
+            )
+            for key in ("classification", "comparisonPolicy", "expectedOutput"):
+                value = build_context_summary.get(key)
+                if value not in (None, "") and key not in trimmed_build_payload:
+                    trimmed_build_payload[key] = value
+        parity_comparison = self._manual_diagnosis_parity_projection(build_payload)
+        if not parity_comparison and isinstance(build_test_context, Mapping):
+            parity_comparison = self._manual_diagnosis_parity_projection(
+                self._manual_diagnosis_build_payload_from_context(
+                    build_test_context,
+                    failure_code=requested_failure_code,
+                )
+            )
+        if parity_comparison:
+            trimmed_build_payload["parityComparison"] = dict(parity_comparison)
+        manual_edit_diff_ref = (
+            dict(baseline_diff_ref) if baseline_diff_ref is not None else None
+        )
+        if manual_edit_diff_ref is not None:
+            trimmed_build_payload["manualEditDiffRef"] = manual_edit_diff_ref
+        compile_error_ref, runtime_error_ref, oracle_diff_ref = self._build_manual_diagnosis_refs(
+            build_payload,
+            parity_comparison=parity_comparison,
+        )
+        execution_result_ref = self._manual_diagnosis_execution_result_ref(
+            build_payload,
+            parity_comparison=parity_comparison,
+        )
+        if execution_result_ref is None and isinstance(build_test_context, Mapping):
+            execution_result_ref = self._manual_diagnosis_execution_result_ref(
+                self._manual_diagnosis_build_payload_from_context(
+                    build_test_context,
+                    failure_code=requested_failure_code,
+                ),
+                parity_comparison=parity_comparison,
+            )
+        comparison_result_ref = self._manual_diagnosis_comparison_result_ref(
+            build_payload,
+            parity_comparison=parity_comparison,
+        )
+        if comparison_result_ref is None and isinstance(build_test_context, Mapping):
+            comparison_result_ref = self._manual_diagnosis_comparison_result_ref(
+                self._manual_diagnosis_build_payload_from_context(
+                    build_test_context,
+                    failure_code=requested_failure_code,
+                ),
+                parity_comparison=parity_comparison,
+            )
 
         contract = self.workflow_contract(run_id)
         if contract is None:
@@ -1374,14 +1470,17 @@ class W0WorkflowRunner:
             previous_java_files=prompt_files,
             build_test_result_ref=build_ref,
             build_test_payload=trimmed_build_payload,
-            failure_category=FAILURE_JAVA_COMPILE_FAILED,
+            failure_category=failure_code or FAILURE_JAVA_COMPILE_FAILED,
             source_text=None,
             source_cobol_ref=None,
             oracle_payload=None,
             semantic_ir=None,
             semantic_ir_ref=None,
+            compile_error_ref=compile_error_ref,
+            runtime_error_ref=runtime_error_ref,
             previous_repair_decision_refs=(),
             repair_budget_remaining=1,
+            oracle_diff_ref=oracle_diff_ref,
         )
 
         candidate_files = dict(java_files)
@@ -1413,6 +1512,16 @@ class W0WorkflowRunner:
 
         diagnosis_id = f"{run_id}-compile-diagnosis"
         evidence_refs: list[JsonObject] = [dict(snapshot_ref), dict(build_ref)]
+        if execution_result_ref is not None:
+            evidence_refs.append(dict(execution_result_ref))
+        if comparison_result_ref is not None:
+            evidence_refs.append(dict(comparison_result_ref))
+        if compile_error_ref is not None:
+            evidence_refs.append(dict(compile_error_ref))
+        if runtime_error_ref is not None:
+            evidence_refs.append(dict(runtime_error_ref))
+        if oracle_diff_ref is not None:
+            evidence_refs.append(dict(oracle_diff_ref))
         if baseline_diff_ref is not None:
             evidence_refs.append(dict(baseline_diff_ref))
         if repair_result.model_invocation_ref:
@@ -1423,24 +1532,48 @@ class W0WorkflowRunner:
             "runId": run_id,
             "workflowId": workflow_id,
             "buildResultRef": dict(build_ref),
+            "executionResultRef": dict(execution_result_ref) if execution_result_ref else None,
+            "comparisonResultRef": dict(comparison_result_ref) if comparison_result_ref else None,
             "sourceRevisionRef": dict(baseline_ref),
             "currentHeadRef": dict(snapshot_ref),
-            "failureClass": "manual_edit_issue" if manual_overlay_regions else "build_failure",
-            "scopeClass": "manual_edit" if manual_overlay_regions else "generated_code",
-            "likelyRootCause": repair_result.rationale or "The current manual Java snapshot does not compile.",
+            "failureClass": W0WorkflowRunner._manual_diagnosis_failure_class(
+                failure_code,
+                build_payload=build_payload,
+                manual_overlay_regions=manual_overlay_regions,
+                repair_result=repair_result,
+            ),
+            "scopeClass": W0WorkflowRunner._manual_diagnosis_scope_class(
+                manual_overlay_regions=manual_overlay_regions,
+                build_payload=build_payload,
+                repair_result=repair_result,
+            ),
+            "followUpRecommendation": W0WorkflowRunner._manual_diagnosis_follow_up_recommendation(
+                repair_result=repair_result,
+                failure_code=failure_code,
+                evidence_refs=evidence_refs,
+            ),
+            "likelyRootCause": repair_result.rationale
+            or self._manual_diagnosis_root_cause(failure_code),
             "summary": repair_result.candidate.explanation if repair_result.candidate else repair_result.rationale,
             "confidence": {
                 "level": _confidence_level(repair_result.confidence),
-                "basis": "Deterministic compile diagnostics plus the governed verification-repair model output.",
+                "basis": "Deterministic build diagnostics plus the governed verification-repair model output.",
             },
-            "recommendedNextAction": (
-                "repair_generated_code"
-                if proposal_files
-                else "stop"
+            "recommendedNextAction": "repair_generated_code"
+            if proposal_files
+            else W0WorkflowRunner._manual_diagnosis_follow_up(
+                repair_result,
+                build_payload=build_payload,
             ),
             "evidenceRefs": evidence_refs,
             "createdAt": _iso_now(),
         }
+        if execution_result_ref is None:
+            diagnosis_payload.pop("executionResultRef")
+        if comparison_result_ref is None:
+            diagnosis_payload.pop("comparisonResultRef")
+        if diagnosis_payload["followUpRecommendation"] is None:
+            diagnosis_payload.pop("followUpRecommendation")
         diagnosis_meta = self.artifact_store.write_json(
             run_id,
             workflow_id,
@@ -1492,8 +1625,25 @@ class W0WorkflowRunner:
                 "entryFilePath": entry_file_path,
                 "files": candidate_files,
             },
-            "buildTest": dict(build_output.payload),
+            "buildTest": dict(build_payload),
         }
+
+    def _manual_compile_repair_proposal_path(self, proposal_id: str) -> str:
+        return f"{MANUAL_COMPILE_REPAIR_DIR}/proposal-{proposal_id}.json"
+
+    def _load_manual_compile_repair_proposal(
+        self,
+        *,
+        run_id: str,
+        proposal_id: str,
+    ) -> JsonObject:
+        stored = self.artifact_store.read_json(
+            run_id,
+            self._manual_compile_repair_proposal_path(proposal_id),
+        )
+        if not isinstance(stored, Mapping):
+            raise OrchestratorError("proposal state not found")
+        return dict(stored)
 
     def manual_compile_repair_apply(
         self,
@@ -1514,15 +1664,37 @@ class W0WorkflowRunner:
         files = proposal.get("files")
         if not isinstance(files, Sequence) or isinstance(files, (str, bytes, bytearray)):
             raise OrchestratorError("proposal.files must be an array")
+        proposal_id = _text(proposal.get("proposalId"))
+        if not proposal_id:
+            raise OrchestratorError("proposal.proposalId must be a non-empty string")
+        persisted_proposal = self._load_manual_compile_repair_proposal(
+            run_id=run_id,
+            proposal_id=proposal_id,
+        )
+        if (
+            _text(persisted_proposal.get("applicationState")) != "review_pending"
+            or _text(persisted_proposal.get("approvalState")) != "pending"
+        ):
+            raise OrchestratorError("proposal is no longer pending approval")
         expected_patch_sha = _text(proposal.get("patchSha256"))
         if expected_patch_sha != _canonical_patch_sha([entry for entry in files if isinstance(entry, Mapping)]):
             raise OrchestratorError("proposal patch hash does not match proposal file diffs")
+        if expected_patch_sha != _text(persisted_proposal.get("patchSha256")):
+            raise OrchestratorError("proposal patch hash does not match persisted proposal state")
+        persisted_files = persisted_proposal.get("files")
+        if not isinstance(persisted_files, Sequence) or isinstance(
+            persisted_files, (str, bytes, bytearray)
+        ):
+            raise OrchestratorError("persisted proposal state is invalid")
+        if _canonical_patch_sha([entry for entry in persisted_files if isinstance(entry, Mapping)]) != expected_patch_sha:
+            raise OrchestratorError("persisted proposal patch hash does not match stored file diffs")
 
         candidate_files_raw = candidate_project.get("files")
         if not isinstance(candidate_files_raw, Mapping):
             raise OrchestratorError("candidateProject.files must be an object")
         candidate_files = {str(path): str(content) for path, content in candidate_files_raw.items()}
-        for entry in files:
+        expected_candidate_files = dict(current_java_files)
+        for entry in persisted_files:
             if not isinstance(entry, Mapping):
                 continue
             path = _text(entry.get("path"))
@@ -1534,6 +1706,18 @@ class W0WorkflowRunner:
             after_sha = _text(entry.get("afterSha256"))
             if after_sha and sha256(str(candidate_files.get(path, "")).encode("utf-8")).hexdigest() != after_sha:
                 raise OrchestratorError(f"candidate Java hash mismatch for {path}")
+            change_type = _text(entry.get("changeType")) or "modify"
+            if change_type == "delete":
+                expected_candidate_files.pop(path, None)
+                continue
+            if path not in candidate_files:
+                raise OrchestratorError(f"candidate Java content missing for {path}")
+            expected_candidate_files[path] = candidate_files[path]
+        if set(candidate_files) != set(expected_candidate_files):
+            raise OrchestratorError("candidate project contains unreviewed file changes")
+        for path, expected_content in expected_candidate_files.items():
+            if candidate_files.get(path) != expected_content:
+                raise OrchestratorError(f"candidate Java content does not match the approved proposal for {path}")
 
         candidate_ref = self._persist_manual_compile_candidate(
             run_id,
@@ -1544,7 +1728,7 @@ class W0WorkflowRunner:
         )
         approved_at = _iso_now()
         updated_proposal: JsonObject = {
-            **dict(proposal),
+            **persisted_proposal,
             "applicationState": "applied",
             "approvalState": "approved",
             "developerApproval": {
@@ -1555,11 +1739,10 @@ class W0WorkflowRunner:
             "approvedAt": approved_at,
             "appliedAt": approved_at,
         }
-        proposal_id = _text(proposal.get("proposalId")) or f"{run_id}-{expected_patch_sha[:12]}"
         self.artifact_store.write_json(
             run_id,
             workflow_id,
-            f"{MANUAL_COMPILE_REPAIR_DIR}/proposal-{proposal_id}.json",
+            self._manual_compile_repair_proposal_path(proposal_id),
             updated_proposal,
             kind=MANUAL_COMPILE_REPAIR_PROPOSAL_KIND,
         )
@@ -1647,17 +1830,28 @@ class W0WorkflowRunner:
         if not self.artifact_store.has_run(run_id):
             raise OrchestratorError("run not found")
         workflow_id = _text((self.artifact_store.read_summary(run_id) or {}).get("workflowId")) or self.config.workflow_id
-        proposal_id = _text(proposal.get("proposalId")) or "manual-compile-repair"
+        proposal_id = _text(proposal.get("proposalId"))
+        if not proposal_id:
+            raise OrchestratorError("proposal.proposalId must be a non-empty string")
+        persisted_proposal = self._load_manual_compile_repair_proposal(
+            run_id=run_id,
+            proposal_id=proposal_id,
+        )
+        if (
+            _text(persisted_proposal.get("applicationState")) != "review_pending"
+            or _text(persisted_proposal.get("approvalState")) != "pending"
+        ):
+            raise OrchestratorError("proposal is no longer pending approval")
         rejected_at = _iso_now()
         updated_proposal: JsonObject = {
-            **dict(proposal),
+            **persisted_proposal,
             "applicationState": "rejected",
             "approvalState": "rejected",
         }
         self.artifact_store.write_json(
             run_id,
             workflow_id,
-            f"{MANUAL_COMPILE_REPAIR_DIR}/proposal-{proposal_id}.json",
+            self._manual_compile_repair_proposal_path(proposal_id),
             updated_proposal,
             kind=MANUAL_COMPILE_REPAIR_PROPOSAL_KIND,
         )
@@ -1671,7 +1865,7 @@ class W0WorkflowRunner:
                 "decision": "rejected",
                 "rejectedBy": requester or self.config.service_name,
                 "rejectedAt": rejected_at,
-                "patchSha256": _text(proposal.get("patchSha256")),
+                "patchSha256": _text(persisted_proposal.get("patchSha256")),
             },
             kind=MANUAL_COMPILE_REPAIR_APPROVAL_KIND,
         )
@@ -1680,6 +1874,296 @@ class W0WorkflowRunner:
             "runId": run_id,
             "proposal": updated_proposal,
         }
+
+    def _build_manual_diagnosis_refs(
+        self,
+        build_payload: Mapping[str, JsonValue],
+        *,
+        parity_comparison: Mapping[str, JsonValue] | None = None,
+    ) -> tuple[JsonObject | None, JsonObject | None, JsonObject | None]:
+        compile_error_ref = self._artifact_ref_payload(build_payload.get("compileErrorRef"))
+        runtime_error_ref = self._artifact_ref_payload(build_payload.get("runtimeErrorRef"))
+        oracle_diff_ref = self._artifact_ref_payload(build_payload.get("oracleDiffRef"))
+        if oracle_diff_ref is None:
+            payload_parity_comparison = _first_non_empty_mapping(build_payload.get("parityComparison"))
+            if isinstance(payload_parity_comparison, Mapping):
+                oracle_diff_ref = self._artifact_ref_payload(payload_parity_comparison.get("diffRef"))
+        if oracle_diff_ref is None and isinstance(parity_comparison, Mapping):
+            oracle_diff_ref = self._artifact_ref_payload(parity_comparison.get("diffRef"))
+        return compile_error_ref, runtime_error_ref, oracle_diff_ref
+
+    def _manual_diagnosis_failure_class(
+        failure_code: str | None,
+        *,
+        build_payload: Mapping[str, JsonValue],
+        manual_overlay_regions: Sequence[Mapping[str, JsonValue]],
+        repair_result: RepairAgentResult,
+    ) -> str:
+        if repair_result.is_escalation and repair_result.escalation_code == "out_of_scope_for_w0_2":
+            return "out_of_scope"
+        if repair_result.is_refusal and repair_result.refusal_code == "insufficient_context":
+            return "unknown"
+        if manual_overlay_regions:
+            return "manual_edit_issue"
+        if W0WorkflowRunner._manual_diagnosis_is_fixture_issue(build_payload):
+            return "fixture_issue"
+        if failure_code in {
+            FAILURE_JAVA_COMPILE_FAILED,
+            FAILURE_JAVA_RUNTIME_FAILED,
+            FAILURE_ORACLE_MISMATCH,
+        }:
+            return "generated_code_defect"
+        return "unknown"
+
+    @staticmethod
+    def _manual_diagnosis_scope_class(
+        *,
+        manual_overlay_regions: Sequence[Mapping[str, JsonValue]],
+        build_payload: Mapping[str, JsonValue],
+        repair_result: RepairAgentResult,
+    ) -> str:
+        if repair_result.is_escalation and repair_result.escalation_code == "out_of_scope_for_w0_2":
+            return "out_of_scope"
+        if repair_result.is_refusal and repair_result.refusal_code == "insufficient_context":
+            return "unknown"
+        if manual_overlay_regions:
+            return "manual_edit"
+        if W0WorkflowRunner._manual_diagnosis_is_fixture_issue(build_payload):
+            return "fixture_reference"
+        if W0WorkflowRunner._manual_diagnosis_has_generated_context(build_payload):
+            return "generated_code"
+        return "unknown"
+
+    @staticmethod
+    def _manual_diagnosis_root_cause(failure_code: str | None) -> str:
+        if failure_code == FAILURE_JAVA_RUNTIME_FAILED:
+            return "The current manual Java snapshot fails at runtime."
+        if failure_code == FAILURE_ORACLE_MISMATCH:
+            return "The current manual Java snapshot diverges from the parity oracle."
+        if failure_code == FAILURE_JAVA_COMPILE_FAILED:
+            return "The current manual Java snapshot does not compile."
+        return "The current manual Java snapshot failed deterministic verification."
+
+    @staticmethod
+    def _manual_diagnosis_follow_up(
+        repair_result: RepairAgentResult,
+        *,
+        build_payload: Mapping[str, JsonValue],
+    ) -> str:
+        if repair_result.proposed_candidate:
+            return "repair_generated_code"
+        if repair_result.is_escalation:
+            return "escalate"
+        if W0WorkflowRunner._manual_diagnosis_is_fixture_issue(build_payload):
+            return "repair_fixture"
+        return "stop"
+
+    @staticmethod
+    def _manual_diagnosis_follow_up_recommendation(
+        *,
+        repair_result: RepairAgentResult,
+        failure_code: str | None,
+        evidence_refs: Sequence[Mapping[str, JsonValue]],
+    ) -> JsonObject | None:
+        if not (repair_result.is_escalation and repair_result.escalation_code == "out_of_scope_for_w0_2"):
+            return None
+        failure_label = {
+            FAILURE_JAVA_RUNTIME_FAILED: "runtime failure",
+            FAILURE_ORACLE_MISMATCH: "parity mismatch",
+            FAILURE_JAVA_COMPILE_FAILED: "compile failure",
+        }.get(failure_code or "", "verification failure")
+        return {
+            "title": "Create a follow-up issue for out-of-scope repair diagnosis",
+            "summary": repair_result.rationale
+            or f"The current {failure_label} is valid but outside the W0.2 repair scope.",
+            "suggestedIssueType": "follow-up",
+            "evidenceRefs": [
+                dict(ref)
+                for ref in evidence_refs
+                if isinstance(ref, Mapping)
+            ],
+        }
+
+    @staticmethod
+    def _manual_diagnosis_is_fixture_issue(
+        build_payload: Mapping[str, JsonValue],
+    ) -> bool:
+        classification = _text(build_payload.get("classification")) or ""
+        mismatch = _text(build_payload.get("mismatchClassification")) or ""
+        combined = f"{classification} {mismatch}".lower()
+        return any(
+            marker in combined
+            for marker in (
+                "oracle-unavailable",
+                "oracle_invalid_request",
+                "oracle-invalid-request",
+                "missing-golden-master",
+                "fixture",
+                "reference",
+            )
+        )
+
+    @staticmethod
+    def _manual_diagnosis_has_generated_context(
+        build_payload: Mapping[str, JsonValue],
+    ) -> bool:
+        return bool(build_payload)
+
+    @staticmethod
+    def _manual_diagnosis_requested_failure_code(
+        build_test_context: Mapping[str, JsonValue] | None,
+    ) -> str | None:
+        if not isinstance(build_test_context, Mapping):
+            return None
+        status = (_text(build_test_context.get("status")) or "").lower()
+        classification = (_text(build_test_context.get("classification")) or "").lower()
+        compile_status = (_text(build_test_context.get("compileStatus")) or "").lower()
+        execution_status = (_text(build_test_context.get("executionStatus")) or "").lower()
+        comparison = _first_non_empty_mapping(build_test_context.get("comparison"))
+        comparison_status = (_text(comparison.get("status")) or "").lower()
+        if (
+            status == "output-divergence"
+            or "mismatch" in classification
+            or comparison_status == "failed"
+        ):
+            return FAILURE_ORACLE_MISMATCH
+        if (
+            status == "run-failed"
+            or classification == "run-error"
+            or execution_status == "failed"
+        ):
+            return FAILURE_JAVA_RUNTIME_FAILED
+        if (
+            status == "compile-failed"
+            or classification == "compile-error"
+            or compile_status == "failed"
+        ):
+            return FAILURE_JAVA_COMPILE_FAILED
+        return None
+
+    @staticmethod
+    def _manual_diagnosis_build_payload_from_context(
+        build_test_context: Mapping[str, JsonValue],
+        *,
+        failure_code: str | None,
+    ) -> JsonObject:
+        payload: JsonObject = {}
+        for key in (
+            "status",
+            "classification",
+            "compileStatus",
+            "executionStatus",
+            "comparisonPolicy",
+            "expectedOutput",
+        ):
+            value = build_test_context.get(key)
+            if value not in (None, ""):
+                payload[key] = value
+        output_ref = _first_non_empty_mapping(build_test_context.get("outputRef"))
+        if output_ref:
+            payload["executionResultRef"] = dict(output_ref)
+        comparison = _first_non_empty_mapping(build_test_context.get("comparison"))
+        parity_projection: JsonObject = {}
+        if comparison:
+            for key in (
+                "status",
+                "matched",
+                "comparisonPolicyVersion",
+                "mismatchClassification",
+                "comparisonPolicyRef",
+                "comparisonResultRef",
+                "diffRef",
+                "expectedRef",
+                "actualRef",
+            ):
+                value = comparison.get(key)
+                if value not in (None, ""):
+                    parity_projection[key] = value
+        expected_output_ref = _first_non_empty_mapping(build_test_context.get("expectedOutputRef"))
+        if expected_output_ref and "expectedRef" not in parity_projection:
+            parity_projection["expectedRef"] = dict(expected_output_ref)
+        actual_output_ref = _first_non_empty_mapping(build_test_context.get("actualOutputRef"))
+        if actual_output_ref and "actualRef" not in parity_projection:
+            parity_projection["actualRef"] = dict(actual_output_ref)
+        if output_ref and "executionResultRef" not in parity_projection:
+            parity_projection["executionResultRef"] = dict(output_ref)
+        comparison_result_ref = _first_non_empty_mapping(
+            comparison.get("comparisonResultRef") if comparison else None
+        )
+        if comparison_result_ref:
+            payload["comparisonResultRef"] = dict(comparison_result_ref)
+        if parity_projection:
+            payload["parityComparison"] = parity_projection
+        summary = {
+            FAILURE_JAVA_RUNTIME_FAILED: "runtime exception",
+            FAILURE_ORACLE_MISMATCH: "parity mismatch",
+            FAILURE_JAVA_COMPILE_FAILED: "compile failure",
+        }.get(failure_code or "", "deterministic verification failure")
+        payload.setdefault("summary", summary)
+        payload.setdefault("status", "failed")
+        return payload
+
+    def _manual_diagnosis_parity_projection(
+        self,
+        build_payload: Mapping[str, JsonValue],
+    ) -> JsonObject:
+        direct_projection = _first_non_empty_mapping(build_payload.get("parityComparison"))
+        if direct_projection:
+            return direct_projection
+        comparison_result = _first_non_empty_mapping(build_payload.get("comparisonResult"))
+        if not comparison_result:
+            return {}
+        projection: JsonObject = {}
+        for key in (
+            "status",
+            "matched",
+            "comparisonPolicyVersion",
+            "comparisonPolicyRef",
+            "executionResultRef",
+            "comparisonResultRef",
+            "diffRef",
+            "expectedRef",
+            "actualRef",
+            "mismatchClassification",
+        ):
+            value = comparison_result.get(key)
+            if value not in (None, ""):
+                projection[key] = value
+        return projection
+
+    def _manual_diagnosis_execution_result_ref(
+        self,
+        build_payload: Mapping[str, JsonValue],
+        *,
+        parity_comparison: Mapping[str, JsonValue] | None = None,
+    ) -> JsonObject | None:
+        execution_result = _first_non_empty_mapping(build_payload.get("executionResult"))
+        return (
+            self._artifact_ref_payload(build_payload.get("executionResultRef"))
+            or self._artifact_ref_payload(execution_result.get("outputRef"))
+            or (
+                self._artifact_ref_payload(parity_comparison.get("executionResultRef"))
+                if isinstance(parity_comparison, Mapping)
+                else None
+            )
+        )
+
+    def _manual_diagnosis_comparison_result_ref(
+        self,
+        build_payload: Mapping[str, JsonValue],
+        *,
+        parity_comparison: Mapping[str, JsonValue] | None = None,
+    ) -> JsonObject | None:
+        comparison_result = _first_non_empty_mapping(build_payload.get("comparisonResult"))
+        return (
+            self._artifact_ref_payload(build_payload.get("comparisonResultRef"))
+            or self._artifact_ref_payload(comparison_result.get("outputRef"))
+            or (
+                self._artifact_ref_payload(parity_comparison.get("comparisonResultRef"))
+                if isinstance(parity_comparison, Mapping)
+                else None
+            )
+        )
 
     def _store_contract(self, contract: W02RunContract) -> None:
         with self._contract_lock:
@@ -1958,6 +2442,9 @@ class W0WorkflowRunner:
         oracle_payload: Mapping[str, JsonValue] | None,
         semantic_ir: Mapping[str, JsonValue] | None,
         semantic_ir_ref: Mapping[str, JsonValue] | None,
+        compile_error_ref: Mapping[str, JsonValue] | None,
+        runtime_error_ref: Mapping[str, JsonValue] | None,
+        oracle_diff_ref: Mapping[str, JsonValue] | None,
         previous_repair_decision_refs: Sequence[Mapping[str, JsonValue]],
         repair_budget_remaining: int,
     ) -> RepairAgentResult:
@@ -2015,10 +2502,16 @@ class W0WorkflowRunner:
             repair_budget_remaining=int(repair_budget_remaining),
             source_text=source_text,
             source_cobol_ref=dict(source_cobol_ref) if source_cobol_ref else None,
+            compile_error_ref=dict(compile_error_ref) if compile_error_ref else None,
+            runtime_error_ref=dict(runtime_error_ref) if runtime_error_ref else None,
             oracle_diff_ref=(
-                dict(parity_comparison["diffRef"])
-                if isinstance(parity_comparison.get("diffRef"), Mapping)
-                else None
+                dict(oracle_diff_ref)
+                if oracle_diff_ref
+                else (
+                    dict(parity_comparison["diffRef"])
+                    if isinstance(parity_comparison.get("diffRef"), Mapping)
+                    else None
+                )
             ),
             oracle_payload=dict(oracle_payload) if isinstance(oracle_payload, Mapping) and oracle_payload else None,
             semantic_ir=dict(semantic_ir) if isinstance(semantic_ir, Mapping) and semantic_ir else None,
@@ -3627,6 +4120,10 @@ class W0WorkflowRunner:
                     )
                     break
                 try:
+                    compile_error_ref, runtime_error_ref, oracle_diff_ref = self._build_manual_diagnosis_refs(
+                        build_test_output.payload,
+                        parity_comparison=parity_comparison,
+                    )
                     repair_result = self._invoke_repair_agent(
                         context,
                         w02_contract,
@@ -3645,6 +4142,9 @@ class W0WorkflowRunner:
                         ),
                         semantic_ir=ir_document,
                         semantic_ir_ref=_as_reference_payload(ir_output.output_ref),
+                        compile_error_ref=compile_error_ref,
+                        runtime_error_ref=runtime_error_ref,
+                        oracle_diff_ref=oracle_diff_ref,
                         previous_repair_decision_refs=list(previous_repair_decision_refs),
                         repair_budget_remaining=w02_contract.repair_budget.remaining,
                     )

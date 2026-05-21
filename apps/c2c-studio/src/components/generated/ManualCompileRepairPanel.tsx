@@ -32,6 +32,7 @@ export function ManualCompileRepairPanel({
   onClose,
 }: ManualCompileRepairPanelProps) {
   const {
+    state,
     manualCompileRepair,
     javaBuffers,
     startManualCompileRepairDiagnose,
@@ -95,11 +96,27 @@ export function ManualCompileRepairPanel({
       entryFilePath: session.entryFilePath,
       entryClass: session.entryClass ?? undefined,
       javaFiles,
+      ...(state.buildTest
+        ? {
+            buildTestContext: {
+              status: state.buildTest.status,
+              classification: state.buildTest.classification,
+              compileStatus: state.buildTest.compileStatus,
+              executionStatus: state.buildTest.executionStatus,
+              comparisonPolicy: state.buildTest.comparisonPolicy,
+              expectedOutput: state.buildTest.expectedOutput,
+              outputRef: state.buildTest.outputRef,
+              expectedOutputRef: state.buildTest.expectedOutputRef,
+              actualOutputRef: state.buildTest.actualOutputRef,
+              comparison: state.buildTest.comparison ?? undefined,
+            },
+          }
+        : {}),
       manualEditOverlays: Object.values(javaBuffers)
         .map((entry) => entry.manualEditOverlay)
         .filter((overlay): overlay is JavaOriginOverlay => overlay !== null),
     });
-  }, [javaBuffers, session, startManualCompileRepairDiagnose]);
+  }, [javaBuffers, session, startManualCompileRepairDiagnose, state.buildTest]);
 
   const handleApply = useCallback(() => {
     void applyManualCompileRepair().then((result) => {
@@ -134,17 +151,18 @@ export function ManualCompileRepairPanel({
             id="manual-compile-repair-title"
             className="truncate text-sm font-semibold text-text"
           >
-            Manual Compile Repair
+            Governed Repair Review
           </h2>
           <p className="truncate text-xs text-text-dim">
-            Ask Coding Agent for a diagnostic repair proposal, then review the
-            candidate before applying it.
+            Ask Coding Agent for a reviewable repair proposal after compile
+            failures, runtime exceptions, or parity mismatches, then review
+            the candidate before applying it.
           </p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close manual compile repair panel"
+          aria-label="Close governed repair panel"
           className="rounded p-1 text-text-dim hover:bg-bg-2 hover:text-text"
         >
           <X size={16} />
@@ -155,11 +173,11 @@ export function ManualCompileRepairPanel({
         {session?.status === "loading" ? (
           <div className="flex h-full items-center justify-center gap-3 text-text-dim">
             <Loader2 className="animate-spin text-accent" size={18} />
-            <span>Diagnosing compile failure context...</span>
+            <span>Diagnosing governed repair context...</span>
           </div>
         ) : session?.status === "error" ? (
           <div className="rounded border border-error/20 bg-error/10 p-4 text-sm text-text">
-            <p className="font-medium text-error">Manual repair unavailable.</p>
+            <p className="font-medium text-error">Governed repair unavailable.</p>
             <p className="mt-1 text-text-dim">{session.error}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -246,7 +264,7 @@ export function ManualCompileRepairPanel({
               <section className="rounded border border-line bg-bg-1 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-text-dim">
-                    Proposal Review
+                    Candidate Review
                   </p>
                   {session.proposal.patchSha256 ? (
                     <span className="rounded border border-line bg-bg-0 px-2 py-0.5 font-mono text-[10px] text-text-dim">
@@ -330,7 +348,7 @@ export function ManualCompileRepairPanel({
 
             <section className="rounded border border-line bg-bg-1 p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-text-dim">
-                Build/Test
+                Run evidence
               </p>
               {session.buildTest ? (
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -365,7 +383,7 @@ export function ManualCompileRepairPanel({
       <div className="shrink-0 border-t border-line bg-bg-1 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-xs text-text-dim">
-            Review the candidate before approving it. Reject leaves the current
+            Review the candidate before applying it. Reject leaves the current
             buffer unchanged.
           </div>
           <div className="flex flex-wrap gap-2">

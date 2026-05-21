@@ -101,6 +101,33 @@
       "type": "string",
       "enum": ["repair_generated_code", "repair_fixture", "retry_build", "escalate", "stop"]
     },
+    "followUpRecommendation": {
+      "type": "object",
+      "required": ["title", "summary", "suggestedIssueType", "evidenceRefs"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "suggestedIssueType": {
+          "type": "string",
+          "enum": ["follow-up"]
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactReference"
+          }
+        }
+      }
+    },
     "evidenceRefs": {
       "type": "array",
       "items": {
