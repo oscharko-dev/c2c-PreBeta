@@ -149,4 +149,31 @@ class DiagnosticBoundsTest {
         assertEquals("generated-project", DiagnosticBounds.boundedFilePath("../.."));
         assertEquals("generated-project", DiagnosticBounds.boundedFilePath("/../"));
     }
+
+    @Test
+    void diffSummaryBelowLimitPassesThrough() {
+        String summary = "Normalized stdout mismatch (content) at character 12; sourceLength=42 targetLength=43.";
+        assertEquals(summary, DiagnosticBounds.boundedDiffSummary(summary));
+    }
+
+    @Test
+    void oversizedDiffSummaryIsTruncatedWithSentinel() {
+        String oversize = "x".repeat(DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH + 500);
+        String bounded = DiagnosticBounds.boundedDiffSummary(oversize);
+        assertTrue(bounded.length() <= DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH,
+                () -> "expected <= " + DiagnosticBounds.MAX_DIFF_SUMMARY_LENGTH
+                        + " chars, got " + bounded.length());
+        assertTrue(bounded.endsWith(DiagnosticBounds.MESSAGE_TRUNCATION_SENTINEL),
+                () -> "expected truncation sentinel suffix, got: " + bounded);
+    }
+
+    @Test
+    void nullDiffSummaryIsPreserved() {
+        assertEquals(null, DiagnosticBounds.boundedDiffSummary(null));
+    }
+
+    @Test
+    void emptyDiffSummaryIsPreserved() {
+        assertEquals("", DiagnosticBounds.boundedDiffSummary(""));
+    }
 }

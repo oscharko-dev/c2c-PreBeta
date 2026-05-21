@@ -106,7 +106,7 @@ final class ParityComparison {
         comparison.put("javaNormalizedOutputRef", target.normalizedStdoutRef());
         comparison.put("diffRef", diffRef);
         comparison.put("normalizedDiffRef", diffRef);
-        comparison.put("diffSummary", diffSummary);
+        comparison.put("diffSummary", DiagnosticBounds.boundedDiffSummary(diffSummary));
         comparison.put("mismatchClassification", mismatch);
         comparison.put("startedAt", now.toString());
         comparison.put("completedAt", now.toString());
@@ -203,7 +203,7 @@ final class ParityComparison {
         }
         comparison.put("diffRef", diffRef);
         comparison.put("normalizedDiffRef", diffRef);
-        comparison.put("diffSummary", reason);
+        comparison.put("diffSummary", DiagnosticBounds.boundedDiffSummary(reason));
         comparison.put("mismatchClassification", mismatch);
         comparison.put("startedAt", now.toString());
         comparison.put("completedAt", now.toString());
