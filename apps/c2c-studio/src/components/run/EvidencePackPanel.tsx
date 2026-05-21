@@ -5,6 +5,7 @@ import { StatusChip } from '../ui/StatusChip';
 import {
   buildArtifactAlignment,
   describeManualDriftSummary,
+  isIntentionalDivergenceTrustSummary,
 } from './runPanelUtils';
 
 export function EvidencePackPanel({ emptyState }: { emptyState: { title: string; message: string } }) {
@@ -55,6 +56,11 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
     showingHistoricalEvidence && state.previousRun
       ? state.previousRun.summary
       : state.summary;
+  const displayedTrustSummary =
+    displayedSummary?.trustSummary ?? state.workflow?.trustSummary ?? null;
+  const intentionalDivergence = isIntentionalDivergenceTrustSummary(
+    displayedTrustSummary,
+  );
   const trustCaseEvidenceMismatch = Boolean(
     selectedTrustCase &&
       displayedSummary?.trustCaseConfigurationDigest &&
@@ -77,6 +83,13 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
   
   return (
     <div className="p-4 h-full flex flex-col text-sm bg-bg-0">
+      {intentionalDivergence ? (
+        <div className="mb-4 rounded border border-warn/20 bg-warn-soft px-4 py-3 text-xs text-warn">
+          This evidence pack supports an intentional divergence decision. The
+          run is governed as not equivalent, so do not treat the evidence as a
+          parity pass.
+        </div>
+      ) : null}
       {trustCaseEvidenceMismatch ? (
         <div className="mb-4 rounded border border-orange/20 bg-orange-soft px-4 py-3 text-xs text-orange">
           Existing evidence was produced from{' '}
@@ -97,9 +110,19 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
         </div>
       ) : null}
       <div className="flex items-center gap-4 mb-6">
-        <StatusChip variant={hasAlignedEvidence ? 'success' : isInvalid ? 'blocked' : 'error'} />
+        <StatusChip
+          variant={
+            intentionalDivergence
+              ? 'warning'
+              : hasAlignedEvidence
+                ? 'success'
+                : isInvalid
+                  ? 'blocked'
+                  : 'error'
+          }
+        />
         <h2 className="text-lg font-medium text-text">
-          {showingHistoricalEvidence ? 'Previous Evidence Pack' : 'Evidence Pack'} {hasAlignedEvidence ? 'Complete' : isInvalid ? 'Invalid' : isComplete ? 'Mismatch Detected' : 'Incomplete'}
+          {showingHistoricalEvidence ? 'Previous Evidence Pack' : 'Evidence Pack'} {intentionalDivergence ? 'Intentionally Diverged' : hasAlignedEvidence ? 'Complete' : isInvalid ? 'Invalid' : isComplete ? 'Mismatch Detected' : 'Incomplete'}
         </h2>
       </div>
       
@@ -125,10 +148,12 @@ export function EvidencePackPanel({ emptyState }: { emptyState: { title: string;
 
           <div className="bg-bg-1 border border-line-2 rounded p-4">
             <h3 className="font-medium text-text mb-3">Artifact Lineage</h3>
-            <div className={`mb-3 text-xs ${alignment.aligned ? 'text-success' : 'text-error'}`}>
-              {alignment.aligned
-                ? 'Displayed Java, build/test, and evidence all reference the same generated artifact.'
-                : 'Artifact references are not aligned across generated Java, build/test, and evidence.'}
+            <div className={`mb-3 text-xs ${intentionalDivergence ? 'text-warn' : alignment.aligned ? 'text-success' : 'text-error'}`}>
+              {intentionalDivergence
+                ? 'Displayed Java, build/test, and evidence are intentionally governed as not equivalent.'
+                : alignment.aligned
+                  ? 'Displayed Java, build/test, and evidence all reference the same generated artifact.'
+                  : 'Artifact references are not aligned across generated Java, build/test, and evidence.'}
             </div>
             {manualDriftMessage ? (
               <div className="mb-3 rounded border border-orange/20 bg-orange-soft px-3 py-2 text-xs text-orange">

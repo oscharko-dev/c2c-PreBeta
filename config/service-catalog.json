@@ -70,6 +70,7 @@
         "schemas/parity-execution-result-v0.json",
         "schemas/parity-run-v0.json",
         "schemas/patch-proposal-v0.json",
+        "schemas/intentional-divergence-decision-v0.json",
         "schemas/repair-diagnosis-v0.json",
         "schemas/trust-case-v0.json"
       ],

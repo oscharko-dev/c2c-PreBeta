@@ -226,6 +226,7 @@ export interface TrustSummaryView {
   repairStatus: TrustRepairStatus;
   coverageStatus: TrustCoverageStatus;
   divergenceDisposition: TrustDivergenceDisposition;
+  intentionalDivergenceDecisionRef?: OutputRef | null;
   warningCodes: TrustWarningCode[];
   trustCase: TrustSummaryTrustCase;
   cobolResult: TrustSummaryCobolResult;
@@ -236,6 +237,42 @@ export interface TrustSummaryView {
   comparisonCompletedAt?: string | null;
   summaryDerivedAt: string;
   repairVerifiedAt?: string | null;
+}
+
+export interface IntentionalDivergenceDecisionRequest {
+  decisionId?: string | null;
+  rationale: string;
+  reviewer: string;
+  linkedEvidenceRefs: string[];
+  affectedOutputs: string[];
+  supersedesPreviousDecision: boolean;
+  invalidationNote?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface IntentionalDivergenceDecisionRecord {
+  decisionId: string;
+  decisionRef: OutputRef;
+  runId: string;
+  programId: string;
+  reviewer: string;
+  rationale: string;
+  linkedEvidenceRefs: string[];
+  affectedOutputs: string[];
+  supersedesPreviousDecision: boolean;
+  invalidationNote?: string | null;
+  expiresAt?: string | null;
+  invalidatedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IntentionalDivergenceDecisionResponse {
+  runId: string;
+  programId: string;
+  status: "created" | "updated";
+  decision: IntentionalDivergenceDecisionRecord;
+  trustSummary: TrustSummaryView | null;
 }
 
 export interface TransformResponse

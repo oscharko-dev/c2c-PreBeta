@@ -357,6 +357,7 @@ export function runSummary(
   stored: StoredRun,
   trustSummary: TrustSummary | null = null,
 ): Record<string, unknown> {
+  const resolvedTrustSummary = trustSummary ?? stored.trustSummary ?? null;
   const summary: Record<string, unknown> = {
     schemaVersion: "v0",
     runId: stored.runId,
@@ -378,7 +379,7 @@ export function runSummary(
     message: stored.message,
     policyDecision: stored.policyDecision,
     evidenceRefs: [],
-    trustSummary,
+    trustSummary: resolvedTrustSummary,
     orchestratorRunId: stored.liveRunId ?? "",
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,

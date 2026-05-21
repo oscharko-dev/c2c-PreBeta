@@ -17,6 +17,7 @@ import {
   describeManualDriftSummary,
   getBuildTestMetadataItems,
   getEvidenceArtifactCandidates,
+  isIntentionalDivergenceTrustSummary,
   type EvidenceArtifactCandidate,
   type TimelineStageDetail,
 } from "./runPanelUtils";
@@ -76,6 +77,11 @@ export function BuildTestPanel({
     showingHistoricalBuildTest && state.previousRun
       ? state.previousRun.summary
       : state.summary;
+  const displayedTrustSummary =
+    displayedSummary?.trustSummary ?? state.workflow?.trustSummary ?? null;
+  const intentionalDivergence = isIntentionalDivergenceTrustSummary(
+    displayedTrustSummary,
+  );
   const trustCaseEvidenceMismatch = Boolean(
     selectedTrustCase &&
       displayedSummary?.trustCaseConfigurationDigest &&
@@ -217,7 +223,7 @@ export function BuildTestPanel({
     );
   }
 
-  const result = describeBuildTestResult(bt);
+  const result = describeBuildTestResult(bt, intentionalDivergence);
   const diagnostics = collectDiagnostics(state);
 
   return (
@@ -231,27 +237,40 @@ export function BuildTestPanel({
         />
       ) : null}
       <div className="border-b border-line-2 p-4">
-        {trustCaseEvidenceMismatch ? (
-          <Banner tone="warning">
-            Existing parity results were produced from{" "}
-            {displayedSummary?.trustCaseId || "another trust case"} or a
-            different catalog version. Rerun to use{" "}
-            {selectedTrustCase?.trustCaseId ?? "the selected trust case"}.
-          </Banner>
-        ) : null}
-        {statusFlags.pendingReRun ||
+      {trustCaseEvidenceMismatch ? (
+        <Banner tone="warning">
+          Existing parity results were produced from{" "}
+          {displayedSummary?.trustCaseId || "another trust case"} or a
+          different catalog version. Rerun to use{" "}
+          {selectedTrustCase?.trustCaseId ?? "the selected trust case"}.
+        </Banner>
+      ) : null}
+      {intentionalDivergence ? (
+        <Banner tone="warning">
+          This run was intentionally documented as not equivalent. Review the
+          governed divergence decision and evidence instead of treating the
+          output as a parity failure.
+        </Banner>
+      ) : null}
+      {statusFlags.pendingReRun ||
         showingHistoricalBuildTest ||
         manualDriftMessage ? (
-          <Banner tone="warning">
-            {showingHistoricalBuildTest
-              ? state.phase === "failed"
-                ? "Latest rerun failed. Showing the previous parity results as stale so the last completed comparison remains accessible."
-                : "Showing the previous parity results while the latest rerun is in progress. These results are stale until the rerun completes."
+        <Banner tone="warning">
+          {showingHistoricalBuildTest
+            ? state.phase === "failed"
+                ? intentionalDivergence
+                  ? "Latest rerun failed. Showing the previous intentionally diverged parity results as stale so the last completed decision remains accessible."
+                  : "Latest rerun failed. Showing the previous parity results as stale so the last completed comparison remains accessible."
+                : intentionalDivergence
+                  ? "Showing the previous intentionally diverged parity results while the latest rerun is in progress. These results are stale until the rerun completes."
+                  : "Showing the previous parity results while the latest rerun is in progress. These results are stale until the rerun completes."
               : manualDriftMessage
                 ? manualDriftMessage
-                : "COBOL source changed after the last completed parity run. These parity results are stale until you rerun."}
-          </Banner>
-        ) : null}
+                : intentionalDivergence
+                  ? "COBOL source changed after the last completed intentionally diverged run. These parity results are stale until you rerun."
+                  : "COBOL source changed after the last completed parity run. These parity results are stale until you rerun."}
+        </Banner>
+      ) : null}
         <div className="mt-4 flex items-start gap-3 rounded border border-line-2 bg-bg-1 p-4">
           <StatusChip variant={result.tone} />
           <div className="min-w-0">
@@ -413,6 +432,7 @@ export function BuildTestPanel({
                     buildTest={bt}
                     isPending={isPending}
                     view={comparisonView}
+                    intentionalDivergence={intentionalDivergence}
                   />
                 </div>
               </div>

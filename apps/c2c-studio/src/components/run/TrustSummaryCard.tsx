@@ -1,13 +1,16 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { copyToClipboard, useCopyFeedback } from "../ui/copyFeedback";
+import { useTransformationRun } from "../../stores/transformationRun";
 import type {
   BuildTestView,
   EvidenceView,
   OutputRef,
   ParityEvidenceExportResponse,
+  IntentionalDivergenceDecisionRequest,
+  IntentionalDivergenceDecisionResponse,
   RunSummary,
   RunWorkflowView,
   TrustCaseSummary,
@@ -16,6 +19,7 @@ import type {
 import {
   describeBuildTestResult,
   getBuildTestArtifactRefs,
+  isIntentionalDivergenceTrustSummary,
   type ArtifactReferenceEntry,
 } from "./runPanelUtils";
 
@@ -43,14 +47,44 @@ export function TrustSummaryCard({
   onExportParityEvidenceScaffold: () => Promise<void>;
 }) {
   const trust = summary?.trustSummary ?? null;
-  const comparison = describeBuildTestResult(buildTest);
+  const intentionalDivergence = isIntentionalDivergenceTrustSummary(trust);
+  const {
+    intentionalDivergenceDecision,
+    intentionalDivergenceDecisionStatus,
+    intentionalDivergenceDecisionError,
+    submitIntentionalDivergenceDecision,
+  } = useTransformationRun();
+  const comparison = describeBuildTestResult(buildTest, intentionalDivergence);
   const buildTestRefs = getBuildTestArtifactRefs(buildTest);
   const comparisonRefs = collectComparisonRefs(buildTest, trust);
   const evidenceRefs = collectEvidenceRefs(evidence, trust);
+  const [decisionDraft, setDecisionDraft] = useState<DecisionDraft>(() =>
+    buildDecisionDraft(trust, intentionalDivergenceDecision),
+  );
+  const [decisionValidation, setDecisionValidation] = useState<string[]>([]);
+  const currentDecision = intentionalDivergenceDecision?.decision ?? null;
+  const decisionFormVisible = Boolean(
+    summary?.runId &&
+      (intentionalDivergence ||
+        currentDecision ||
+        buildTest?.classification?.startsWith("divergence")),
+  );
+  const decisionBusy = intentionalDivergenceDecisionStatus === "saving";
+  const decisionError =
+    intentionalDivergenceDecisionError ??
+    (intentionalDivergenceDecisionStatus === "error"
+      ? "The divergence decision could not be saved."
+      : null);
+
+  useEffect(() => {
+    setDecisionDraft(buildDecisionDraft(trust, intentionalDivergenceDecision));
+  }, [trust, intentionalDivergenceDecision]);
+
   const riskNotes = Array.from(
     new Set(
       [
         ...(trust ? trustWarningNotes(trust) : []),
+        ...(intentionalDivergence ? [intentionalDivergenceNote(trust)] : []),
         summary?.failureMessage,
         buildTest?.note,
         evidence?.note,
@@ -59,6 +93,43 @@ export function TrustSummaryCard({
       ].filter((note): note is string => Boolean(note)),
     ),
   );
+
+  async function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDecisionValidation([]);
+
+    const validation = validateDecisionDraft(decisionDraft);
+    if (validation.length > 0) {
+      setDecisionValidation(validation);
+      return;
+    }
+
+    if (!summary?.runId) {
+      setDecisionValidation([
+        "A completed run is required before recording a divergence decision.",
+      ]);
+      return;
+    }
+
+    const request: IntentionalDivergenceDecisionRequest = {
+      decisionId: currentDecision?.decisionId ?? null,
+      rationale: decisionDraft.rationale.trim(),
+      reviewer: decisionDraft.reviewer.trim(),
+      linkedEvidenceRefs: parseListField(decisionDraft.linkedEvidenceRefs),
+      affectedOutputs: parseListField(decisionDraft.affectedOutputs),
+      supersedesPreviousDecision:
+        decisionDraft.supersedesPreviousDecision || currentDecision !== null,
+      invalidationNote: decisionDraft.invalidationNote.trim() || null,
+      expiresAt: decisionDraft.expiresAt
+        ? new Date(decisionDraft.expiresAt).toISOString()
+        : null,
+    };
+
+    const result = await submitIntentionalDivergenceDecision(request);
+    if (!result.ok) {
+      setDecisionValidation([result.message]);
+    }
+  }
 
   return (
     <section className="rounded border border-line-2 bg-bg-1 p-4 shadow-sm">
@@ -203,14 +274,142 @@ export function TrustSummaryCard({
               />
               <SummaryField
                 label="Trust state"
-                value={trust?.trustState ?? "Unavailable"}
+                value={describeTrustState(trust)}
                 secondary={
                   trust
-                    ? `Coverage ${trust.coverageStatus} · divergence ${trust.divergenceDisposition}`
+                    ? `Coverage ${trust.coverageStatus} · divergence ${describeDivergenceDisposition(trust.divergenceDisposition)}`
                     : "No repair workflow published."
                 }
               />
             </div>
+          </SummarySection>
+
+          <SummarySection title="Intentional divergence decision">
+            {decisionFormVisible ? (
+              <form className="space-y-3" onSubmit={handleDecisionSubmit}>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <LabelField
+                    label="Reviewer"
+                    value={decisionDraft.reviewer}
+                    onChange={(value) =>
+                      setDecisionDraft((prev) => ({ ...prev, reviewer: value }))
+                    }
+                    placeholder="Reviewer name or role"
+                  />
+                  <LabelField
+                    label="Expiration"
+                    value={decisionDraft.expiresAt}
+                    onChange={(value) =>
+                      setDecisionDraft((prev) => ({ ...prev, expiresAt: value }))
+                    }
+                    placeholder="2026-05-21T12:00"
+                    type="datetime-local"
+                  />
+                </div>
+                <TextAreaField
+                  label="Rationale"
+                  value={decisionDraft.rationale}
+                  onChange={(value) =>
+                    setDecisionDraft((prev) => ({
+                      ...prev,
+                      rationale: value,
+                    }))
+                  }
+                  placeholder="Explain why the run is intentionally not equivalent."
+                />
+                <TextAreaField
+                  label="Linked evidence refs"
+                  value={decisionDraft.linkedEvidenceRefs}
+                  onChange={(value) =>
+                    setDecisionDraft((prev) => ({
+                      ...prev,
+                      linkedEvidenceRefs: value,
+                    }))
+                  }
+                  placeholder="Comma-separated artifact URIs from the current run"
+                />
+                <TextAreaField
+                  label="Affected outputs"
+                  value={decisionDraft.affectedOutputs}
+                  onChange={(value) =>
+                    setDecisionDraft((prev) => ({
+                      ...prev,
+                      affectedOutputs: value,
+                    }))
+                  }
+                  placeholder="java_output, normalized_output, stderr, exit_code, evidence_summary"
+                />
+                <TextAreaField
+                  label="Invalidation note"
+                  value={decisionDraft.invalidationNote}
+                  onChange={(value) =>
+                    setDecisionDraft((prev) => ({
+                      ...prev,
+                      invalidationNote: value,
+                    }))
+                  }
+                  placeholder="Describe what would invalidate this divergence decision."
+                />
+                <label className="flex items-start gap-2 text-xs text-text-dim">
+                  <input
+                    type="checkbox"
+                    checked={decisionDraft.supersedesPreviousDecision}
+                    onChange={(event) =>
+                      setDecisionDraft((prev) => ({
+                        ...prev,
+                        supersedesPreviousDecision: event.target.checked,
+                      }))
+                    }
+                    className="mt-0.5 h-4 w-4 rounded border-line bg-bg-0 text-accent focus:ring-accent"
+                  />
+                  <span>
+                    Supersedes the previous decision and invalidates any prior approval.
+                  </span>
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled={decisionBusy}
+                    className="rounded border border-line-2 bg-bg-0 px-3 py-2 text-xs font-medium text-text transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {decisionBusy
+                      ? "Saving..."
+                      : currentDecision
+                        ? "Record updated decision"
+                        : "Record decision"}
+                  </button>
+                </div>
+                {decisionValidation.length > 0 ? (
+                  <div className="rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-700">
+                    <ul className="list-disc space-y-1 pl-4">
+                      {decisionValidation.map((message) => (
+                        <li key={message}>{message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {decisionError ? (
+                  <div className="rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-700">
+                    {decisionError}
+                  </div>
+                ) : null}
+                {currentDecision ? (
+                  <div className="rounded border border-line bg-bg-0 px-3 py-2 text-xs text-text-dim">
+                    Saved decision {currentDecision.decisionId} ·{" "}
+                    {currentDecision.reviewer} ·{" "}
+                    {currentDecision.supersedesPreviousDecision
+                      ? "supersedes prior decision"
+                      : "current decision"}
+                  </div>
+                ) : null}
+              </form>
+            ) : (
+              <p className="text-xs text-text-dim">
+                Record the rationale, reviewer, evidence, affected outputs, and
+                expiration metadata once the run has been intentionally marked
+                as not equivalent.
+              </p>
+            )}
           </SummarySection>
         </div>
 
@@ -511,6 +710,10 @@ function collectComparisonRefs(
       label: "Decision record",
       ref: trust?.comparisonResult.decisionRecordRef,
     },
+    {
+      label: "Intentional divergence decision",
+      ref: trust?.intentionalDivergenceDecisionRef,
+    },
     { label: "Comparison policy", ref: buildTest?.comparison?.comparisonPolicyRef },
     { label: "Comparison result", ref: buildTest?.comparison?.comparisonResultRef },
     { label: "Diff", ref: buildTest?.comparison?.diffRef },
@@ -537,6 +740,10 @@ function collectEvidenceRefs(
     { label: "Artifact", ref: evidence?.artifactRef },
     { label: "Export", ref: evidence?.exportRef },
     { label: "Generated artifact", ref: evidence?.generatedArtifactRef },
+    {
+      label: "Intentional divergence decision",
+      ref: trust?.intentionalDivergenceDecisionRef,
+    },
   ]);
 }
 
@@ -551,6 +758,174 @@ function trustWarningNotes(trust: TrustSummaryView): string[] {
         return "Manual edits were carried into the verified Java artifact and should be reviewed alongside the deterministic evidence.";
     }
   });
+}
+
+function intentionalDivergenceNote(trust: TrustSummaryView | null): string {
+  return trust
+    ? "Intentional divergence: the run is governed as not equivalent, with a reviewable rationale and evidence trail."
+    : "Intentional divergence: the run is governed as not equivalent.";
+}
+
+function describeTrustState(trust: TrustSummaryView | null): string {
+  if (!trust) {
+    return "Unavailable";
+  }
+
+  if (trust.trustState === "intentional_divergence") {
+    return "Intentionally diverged";
+  }
+
+  return trust.trustState;
+}
+
+function describeDivergenceDisposition(
+  disposition: TrustSummaryView["divergenceDisposition"],
+): string {
+  switch (disposition) {
+    case "intentional":
+      return "intentional divergence";
+    case "known_coverage_gap":
+      return "known coverage gap";
+    case "none":
+      return "none";
+    case "unknown":
+      return "unknown";
+    default:
+      return disposition;
+  }
+}
+
+type DecisionDraft = {
+  rationale: string;
+  reviewer: string;
+  linkedEvidenceRefs: string;
+  affectedOutputs: string;
+  supersedesPreviousDecision: boolean;
+  invalidationNote: string;
+  expiresAt: string;
+};
+
+function buildDecisionDraft(
+  trust: TrustSummaryView | null,
+  response: IntentionalDivergenceDecisionResponse | null,
+): DecisionDraft {
+  const trustEvidence =
+    trust?.evidence.packRef?.sha256 ??
+    trust?.comparisonResult.decisionRecordRef?.sha256 ??
+    "";
+  return {
+    rationale: response?.decision.rationale ?? "",
+    reviewer: response?.decision.reviewer ?? "",
+    linkedEvidenceRefs:
+      response?.decision.linkedEvidenceRefs.join(", ") ?? trustEvidence,
+    affectedOutputs: response?.decision.affectedOutputs.join(", ") ?? "",
+    supersedesPreviousDecision:
+      response?.decision.supersedesPreviousDecision ?? false,
+    invalidationNote: response?.decision.invalidationNote ?? "",
+    expiresAt: formatDateTimeLocalValue(response?.decision.expiresAt),
+  };
+}
+
+function formatDateTimeLocalValue(value?: string | null): string {
+  if (!value) {
+    return "";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function parseListField(value: string): string[] {
+  return value
+    .split(/[\n,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function validateDecisionDraft(draft: DecisionDraft): string[] {
+  const errors: string[] = [];
+  if (draft.rationale.trim().length < 12) {
+    errors.push("Rationale must be at least 12 characters long.");
+  }
+  if (draft.reviewer.trim().length === 0) {
+    errors.push("Reviewer is required.");
+  }
+  const linkedEvidenceRefs = parseListField(draft.linkedEvidenceRefs);
+  const affectedOutputs = parseListField(draft.affectedOutputs);
+  if (linkedEvidenceRefs.length === 0 && affectedOutputs.length === 0) {
+    errors.push("At least one linked evidence ref or affected output is required.");
+  }
+  if (
+    draft.supersedesPreviousDecision &&
+    draft.invalidationNote.trim().length === 0
+  ) {
+    errors.push("An invalidation note is required when superseding a prior decision.");
+  }
+  if (draft.expiresAt.trim().length > 0 && Number.isNaN(Date.parse(draft.expiresAt))) {
+    errors.push("Expiration must be a valid date-time value.");
+  }
+  return errors;
+}
+
+function LabelField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: "text" | "datetime-local";
+}) {
+  return (
+    <label className="block text-xs text-text-dim">
+      <span className="mb-1 block font-medium text-text">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded border border-line bg-bg-0 px-3 py-2 text-xs text-text outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+      />
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block text-xs text-text-dim">
+      <span className="mb-1 block font-medium text-text">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        rows={3}
+        className="w-full rounded border border-line bg-bg-0 px-3 py-2 text-xs text-text outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+      />
+    </label>
+  );
 }
 
 function describeExportQualification(

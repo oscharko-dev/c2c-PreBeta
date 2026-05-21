@@ -324,6 +324,18 @@ class OrchestratorService:
                         len(parts) == 6
                         and parts[0] == "v0"
                         and parts[1] == "runs"
+                        and parts[3] == "intentional-divergence"
+                        and parts[4] == "decision"
+                        and parts[5] == "request"
+                    ):
+                        run_id = parts[2]
+                        payload = self._read_json()
+                        self._write_json(200, service._intentional_divergence_decision(run_id, payload))
+                        return
+                    if (
+                        len(parts) == 6
+                        and parts[0] == "v0"
+                        and parts[1] == "runs"
                         and parts[3] == "evidence"
                         and parts[4] == "export"
                         and parts[5] == "request"
@@ -540,6 +552,18 @@ class OrchestratorService:
             run_id=run_id,
             requester=requester,
             export_name=export_name,
+        )
+
+    def _intentional_divergence_decision(
+        self,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> JsonObject:
+        requester = str(payload.get("requester") or self.config.service_name).strip()
+        return self.runner.document_intentional_divergence(
+            run_id=run_id,
+            requester=requester,
+            decision=payload,
         )
 
     def _artifact_payload(

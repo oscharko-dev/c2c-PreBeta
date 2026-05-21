@@ -25,14 +25,19 @@ export function EquivalencePanel({
   buildTest,
   isPending,
   view,
+  intentionalDivergence = false,
 }: {
   buildTest: BuildTestView | null;
   isPending: boolean;
   view?: OutputTab | 'outputs';
+  intentionalDivergence?: boolean;
 }) {
   const tabIdBase = useId();
   const [activeTab, setActiveTab] = useState<OutputTab>('split');
-  const result = useMemo(() => describeBuildTestResult(buildTest), [buildTest]);
+  const result = useMemo(
+    () => describeBuildTestResult(buildTest, intentionalDivergence),
+    [buildTest, intentionalDivergence],
+  );
   const isControlled = view !== undefined;
   const resolvedTab: OutputTab =
     view === 'diff'
@@ -127,6 +132,14 @@ export function EquivalencePanel({
           <MetaPair label="Product mode" value={describeBuildTestProductMode(buildTest)} />
         </div>
       </section>
+
+      {intentionalDivergence ? (
+        <section className="rounded border border-warn/20 bg-warn-soft px-4 py-3 text-xs text-warn">
+          This comparison was intentionally documented as not equivalent. Review
+          the governed divergence decision before treating the result as a
+          product regression.
+        </section>
+      ) : null}
 
       <section className="flex min-h-0 flex-1 flex-col rounded border border-line-2 bg-bg-0">
         {renderOutputBody({

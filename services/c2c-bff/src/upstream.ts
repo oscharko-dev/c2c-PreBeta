@@ -245,6 +245,20 @@ export interface OrchestratorClient {
   // Issue #361 extends the same lane to generalized manual diagnosis/repair
   // payloads, including runtime/parity-failure diagnosis envelopes.
   getWorkflow(runId: string): Promise<UpstreamResponse | undefined>;
+  upsertIntentionalDivergenceDecision?(
+    runId: string,
+    payload: {
+      reasonCode: string;
+      rationaleSummary: string;
+      behaviorChange: string;
+      reviewer: string;
+      evidenceRefs: string[];
+      affectedOutputs: string[];
+      invalidationTriggers: string[];
+      expiresAt?: string;
+      requester?: string;
+    },
+  ): Promise<UpstreamResponse | undefined>;
   // Studio-IDE-6 (#248): per-run trust-pillar traceability payload —
   // c2c-trace.json + IR symbol map + per-file Java region classification.
   getTraceability(runId: string): Promise<UpstreamResponse | undefined>;
@@ -343,6 +357,9 @@ export function createOrchestratorClient(
         return undefined;
       },
       async getWorkflow() {
+        return undefined;
+      },
+      async upsertIntentionalDivergenceDecision() {
         return undefined;
       },
       async getTraceability() {
@@ -575,6 +592,31 @@ export function createOrchestratorClient(
     },
     async getWorkflow(runId: string) {
       return getRunScopedArtifact(runId, "workflow");
+    },
+    async upsertIntentionalDivergenceDecision(
+      runId: string,
+      payload: {
+        reasonCode: string;
+        rationaleSummary: string;
+        behaviorChange: string;
+        reviewer: string;
+        evidenceRefs: string[];
+        affectedOutputs: string[];
+        invalidationTriggers: string[];
+        expiresAt?: string;
+        requester?: string;
+      },
+    ) {
+      const safe = encodeURIComponent(runId);
+      return http.request(
+        `${baseUrl}/v0/runs/${safe}/intentional-divergence/decision/request`,
+        {
+          method: "POST",
+          headers: controlHeaders,
+          body: payload,
+          timeoutMs,
+        },
+      );
     },
     async getTraceability(runId: string) {
       return getRunScopedArtifact(runId, "traceability");

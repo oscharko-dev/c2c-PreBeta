@@ -44,6 +44,7 @@ from orchestrator_service.run_contract import (
     MODEL_INVOCATION_BUDGET_MIN,
     ModelInvocationBudget,
     ModelInvocationBudgetExhaustedError,
+    IntentionalDivergenceDecision,
     RepairBudget,
     RepairBudgetExhaustedError,
     REPAIR_BUDGET_MAX,
@@ -433,6 +434,8 @@ class W02RunContractShapeTests(unittest.TestCase):
             "failureCode",
             "failureMessage",
             "repairAttempts",
+            "intentionalDivergenceDecision",
+            "intentionalDivergenceDecisionRef",
             "createdAt",
             "updatedAt",
         ):
@@ -462,6 +465,8 @@ class W02RunContractShapeTests(unittest.TestCase):
         self.assertIsNone(payload["finalClassification"])
         self.assertIsNone(payload["failureCode"])
         self.assertIsNone(payload["parityComparison"])
+        self.assertIsNone(payload["intentionalDivergenceDecision"])
+        self.assertIsNone(payload["intentionalDivergenceDecisionRef"])
         self.assertIsNone(payload["resolvedTrustCase"])
 
     def test_set_parity_comparison_records_runner_projection(self):
@@ -503,6 +508,83 @@ class W02RunContractShapeTests(unittest.TestCase):
         self.assertEqual(
             payload["parityComparison"]["comparisonResultRef"]["uri"],
             "urn:comparison",
+        )
+
+    def test_record_intentional_divergence_decision_projects_record_and_ref(self):
+        contract = self._build()
+        comparison_result_ref = {
+            "uri": "urn:comparison",
+            "sha256": "3" * 64,
+            "byteSize": 256,
+        }
+        contract.set_parity_comparison(
+            {
+                "status": "failed",
+                "matched": False,
+                "comparisonPolicyVersion": "trust-5-deterministic-v1",
+                "comparisonResultRef": comparison_result_ref,
+                "sourceNormalizedRef": {
+                    "uri": "urn:source",
+                    "sha256": "1" * 64,
+                    "byteSize": 16,
+                },
+                "targetNormalizedRef": {
+                    "uri": "urn:target",
+                    "sha256": "2" * 64,
+                    "byteSize": 16,
+                },
+            }
+        )
+        decision = IntentionalDivergenceDecision(
+            decision_id="decision-1",
+            run_id="run-42",
+            workflow_id="w0-migration-v0",
+            comparison_result_ref=comparison_result_ref,
+            reviewer={
+                "reviewerId": "reviewer-1",
+                "displayName": "Reviewer One",
+                "role": "approver",
+            },
+            rationale={
+                "summary": "Business policy requires the mismatch.",
+                "technicalBasis": "The output intentionally diverges.",
+                "businessImpact": "The target output is expected to differ.",
+            },
+            linked_evidence_refs=(
+                {
+                    "uri": "urn:evidence",
+                    "sha256": "4" * 64,
+                    "byteSize": 12,
+                },
+            ),
+            affected_outputs=("java_output", "normalized_output"),
+            invalidation_triggers=(
+                "comparison_result_changed",
+                "expires_at_reached",
+            ),
+            decided_at="2025-05-21T12:00:00Z",
+        )
+        contract.record_intentional_divergence_decision(
+            decision,
+            {
+                "uri": "urn:decision",
+                "sha256": "5" * 64,
+                "byteSize": 64,
+            },
+        )
+
+        payload = contract.to_dict()
+        self.assertEqual(
+            payload["intentionalDivergenceDecision"]["decisionId"],
+            "decision-1",
+        )
+        self.assertEqual(
+            payload["intentionalDivergenceDecision"]["comparisonResultRef"]["uri"],
+            "urn:comparison",
+        )
+        self.assertEqual(
+            payload["intentionalDivergenceDecisionRef"]["uri"],
+            "urn:decision",
         )
 
     def test_finalize_requires_failure_code_for_non_success(self):

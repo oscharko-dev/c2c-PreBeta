@@ -62,6 +62,9 @@ import {
   JavaRegionClassification,
   JavaRegionClassificationMap,
   TrustSummaryView,
+  IntentionalDivergenceDecisionRequest,
+  IntentionalDivergenceDecisionResponse,
+  IntentionalDivergenceDecisionRecord,
   TrustCasePreferenceResponse,
   TrustCaseSummary,
   TrustCasesResponse,
@@ -1129,6 +1132,9 @@ function isTrustSummaryPayload(
     isTrustRepairStatus(payload.repairStatus) &&
     isTrustCoverageStatus(payload.coverageStatus) &&
     isTrustDivergenceDisposition(payload.divergenceDisposition) &&
+    (payload.intentionalDivergenceDecisionRef === undefined ||
+      payload.intentionalDivergenceDecisionRef === null ||
+      isOutputRef(payload.intentionalDivergenceDecisionRef)) &&
     Array.isArray(payload.warningCodes) &&
     payload.warningCodes.every(isTrustWarningCode) &&
     isTrustSummaryTrustCasePayload(payload.trustCase) &&
@@ -1144,6 +1150,54 @@ function isTrustSummaryPayload(
     (payload.repairVerifiedAt === undefined ||
       payload.repairVerifiedAt === null ||
       isString(payload.repairVerifiedAt))
+  );
+}
+
+function isIntentionalDivergenceDecisionRecordPayload(
+  payload: unknown,
+): payload is IntentionalDivergenceDecisionRecord {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return (
+    isString(payload.decisionId) &&
+    isOutputRef(payload.decisionRef) &&
+    isString(payload.runId) &&
+    isString(payload.programId) &&
+    isString(payload.reviewer) &&
+    isString(payload.rationale) &&
+    isStringArray(payload.linkedEvidenceRefs) &&
+    isStringArray(payload.affectedOutputs) &&
+    typeof payload.supersedesPreviousDecision === "boolean" &&
+    (payload.invalidationNote === undefined ||
+      payload.invalidationNote === null ||
+      isString(payload.invalidationNote)) &&
+    (payload.expiresAt === undefined ||
+      payload.expiresAt === null ||
+      isString(payload.expiresAt)) &&
+    (payload.invalidatedAt === undefined ||
+      payload.invalidatedAt === null ||
+      isString(payload.invalidatedAt)) &&
+    isString(payload.createdAt) &&
+    isString(payload.updatedAt)
+  );
+}
+
+function isIntentionalDivergenceDecisionResponsePayload(
+  payload: unknown,
+): payload is IntentionalDivergenceDecisionResponse {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return (
+    isString(payload.runId) &&
+    isString(payload.programId) &&
+    (payload.status === "created" || payload.status === "updated") &&
+    isIntentionalDivergenceDecisionRecordPayload(payload.decision) &&
+    (payload.trustSummary === null ||
+      isTrustSummaryPayload(payload.trustSummary))
   );
 }
 
@@ -2150,6 +2204,18 @@ function parseParityEvidenceExportResponse(
   return { ok: true, data: payload };
 }
 
+function parseIntentionalDivergenceDecisionResponse(
+  payload: unknown,
+): ApiResult<IntentionalDivergenceDecisionResponse> {
+  if (!isIntentionalDivergenceDecisionResponsePayload(payload)) {
+    return createFailure(
+      "Contract error: intentional divergence decision payload has missing or invalid fields.",
+      { kind: "contract", body: payload },
+    );
+  }
+  return { ok: true, data: payload };
+}
+
 function parseRunEventsView(payload: unknown): ApiResult<RunEventsView> {
   if (!isRunEventsViewPayload(payload)) {
     return createFailure(
@@ -2485,6 +2551,22 @@ export const apiClient = {
       parseParityEvidenceExportResponse,
       {
         method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
+    ),
+  upsertIntentionalDivergenceDecision: (
+    runId: string,
+    request: IntentionalDivergenceDecisionRequest,
+  ) =>
+    fetchJson(
+      `/api/v0/runs/${encodeURIComponent(runId)}/intentional-divergence-decision`,
+      parseIntentionalDivergenceDecisionResponse,
+      {
+        method: "PUT",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",

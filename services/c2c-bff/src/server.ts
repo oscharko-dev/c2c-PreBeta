@@ -1196,6 +1196,308 @@ function sanitizeManualRepairResponseBody(raw: unknown): unknown {
   return sanitized;
 }
 
+function extractCachedTrustSummary(raw: unknown): ReturnType<
+  typeof extractTrustSummary
+> {
+  const direct = extractTrustSummary(raw);
+  if (direct) return direct;
+  const record = asRecord(raw);
+  if (!record) return null;
+  return extractTrustSummary(record.decision);
+}
+
+function sanitizeIntentionalDivergenceDecision(
+  raw: unknown,
+): Record<string, unknown> | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const sanitized: Record<string, unknown> = { ...record };
+  if (record.decisionRecordRef !== undefined) {
+    sanitized.decisionRecordRef = normalizeOutputRef(
+      record.decisionRecordRef,
+    );
+  }
+  if (Array.isArray(record.evidenceRefs)) {
+    sanitized.evidenceRefs = record.evidenceRefs.filter(
+      (entry): entry is string => typeof entry === "string",
+    );
+  }
+  const nestedTrustSummary = extractCachedTrustSummary(record);
+  if (nestedTrustSummary) {
+    sanitized.trustSummary = nestedTrustSummary;
+  }
+  return sanitized;
+}
+
+function intentionalDecisionReviewerLabel(raw: unknown): string | null {
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return raw.trim();
+  }
+  const record = asRecord(raw);
+  if (!record) return null;
+  const displayName = asString(record.displayName);
+  if (displayName) return displayName;
+  const reviewerId = asString(record.reviewerId) ?? asString(record.id);
+  return reviewerId ?? null;
+}
+
+function intentionalDecisionStringRefs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const refs: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry === "string" && entry.trim().length > 0) {
+      refs.push(entry.trim());
+      continue;
+    }
+    const record = asRecord(entry);
+    if (!record) {
+      continue;
+    }
+    const uri = asString(record.uri);
+    if (uri) {
+      refs.push(uri);
+      continue;
+    }
+    const sha256 = asString(record.sha256);
+    if (sha256) {
+      refs.push(sha256);
+    }
+  }
+  return refs;
+}
+
+function sanitizeIntentionalDivergenceResponseBody(
+  raw: unknown,
+  options: {
+    fallbackRunId: string;
+    fallbackProgramId: string;
+    status: "created" | "updated";
+  },
+): unknown {
+  const record = asRecord(raw);
+  if (!record) return raw;
+  const sanitized: Record<string, unknown> = { ...record };
+  const trustSummary = extractCachedTrustSummary(record);
+  if (trustSummary) {
+    sanitized.trustSummary = trustSummary;
+  }
+  if (record.decisionRecordRef !== undefined) {
+    sanitized.decisionRecordRef = normalizeOutputRef(record.decisionRecordRef);
+  }
+  if (record.decision !== undefined) {
+    const decision = sanitizeIntentionalDivergenceDecision(record.decision);
+    if (decision) {
+      sanitized.decision = decision;
+      if (
+        sanitized.decisionRecordRef === undefined &&
+        decision.decisionRecordRef !== undefined
+      ) {
+        sanitized.decisionRecordRef = decision.decisionRecordRef;
+      }
+    }
+  }
+  const trustSummaryComparison = asRecord(trustSummary?.comparisonResult);
+  const summaryDecision = asRecord(trustSummary?.intentionalDivergenceDecision);
+  const decision = asRecord(sanitized.decision);
+  const decisionRef =
+    normalizeOutputRef(sanitized.decisionRef) ??
+    normalizeOutputRef(summaryDecision?.decisionRef) ??
+    normalizeOutputRef(sanitized.decisionRecordRef) ??
+    normalizeOutputRef(decision?.decisionRecordRef);
+  const rationale =
+    asString(asRecord(summaryDecision?.rationale)?.summary) ??
+    asString(asRecord(decision?.rationale)?.summary) ??
+    asString(summaryDecision?.rationaleSummary) ??
+    asString(decision?.rationaleSummary) ??
+    "";
+  const invalidationNote =
+    asString(asRecord(summaryDecision?.rationale)?.behaviorChange) ??
+    asString(asRecord(decision?.rationale)?.behaviorChange) ??
+    asString(summaryDecision?.behaviorChange) ??
+    asString(decision?.behaviorChange) ??
+    null;
+  const linkedEvidenceRefs =
+    intentionalDecisionStringRefs(summaryDecision?.linkedEvidenceRefs).length > 0
+      ? intentionalDecisionStringRefs(summaryDecision?.linkedEvidenceRefs)
+      : intentionalDecisionStringRefs(
+          decision?.linkedEvidenceRefs ?? decision?.evidenceRefs,
+        );
+  const affectedOutputsRaw =
+    Array.isArray(summaryDecision?.affectedOutputs) &&
+    summaryDecision.affectedOutputs.every((entry) => typeof entry === "string")
+      ? summaryDecision.affectedOutputs
+      : Array.isArray(decision?.affectedOutputs) &&
+          decision.affectedOutputs.every((entry) => typeof entry === "string")
+        ? decision.affectedOutputs
+        : [];
+  const supersedesPreviousDecision =
+    decision?.supersedesDecisionRef !== undefined ||
+    summaryDecision?.supersedesDecisionRef !== undefined;
+  sanitized.runId =
+    asString(sanitized.runId) ??
+    asString(decision?.runId) ??
+    options.fallbackRunId;
+  sanitized.programId =
+    asString(sanitized.programId) ??
+    asString(decision?.programId) ??
+    options.fallbackProgramId;
+  sanitized.status =
+    sanitized.status === "created" || sanitized.status === "updated"
+      ? sanitized.status
+      : options.status;
+  sanitized.decision = {
+    decisionId:
+      asString(summaryDecision?.decisionId) ??
+      asString(decision?.decisionId) ??
+      `decision-${sanitized.runId}`,
+    decisionRef,
+    runId: sanitized.runId,
+    programId: sanitized.programId,
+    reviewer:
+      intentionalDecisionReviewerLabel(summaryDecision?.reviewer) ??
+      intentionalDecisionReviewerLabel(decision?.reviewer) ??
+      "",
+    rationale,
+    linkedEvidenceRefs,
+    affectedOutputs: affectedOutputsRaw,
+    supersedesPreviousDecision,
+    invalidationNote,
+    expiresAt:
+      asString(summaryDecision?.expiresAt) ?? asString(decision?.expiresAt) ?? null,
+    invalidatedAt:
+      sanitized.trustSummary &&
+      asString(trustSummaryComparison?.decisionStatus) &&
+      asString(trustSummaryComparison?.decisionStatus) !== "active"
+        ? asString(summaryDecision?.updatedAt) ??
+          asString(decision?.updatedAt) ??
+          asString(summaryDecision?.decidedAt) ??
+          asString(decision?.recordedAt) ??
+          null
+        : null,
+    createdAt:
+      asString(summaryDecision?.decidedAt) ??
+      asString(decision?.recordedAt) ??
+      asString(summaryDecision?.updatedAt) ??
+      asString(decision?.updatedAt) ??
+      new Date(0).toISOString(),
+    updatedAt:
+      asString(summaryDecision?.updatedAt) ??
+      asString(decision?.updatedAt) ??
+      asString(summaryDecision?.decidedAt) ??
+      asString(decision?.recordedAt) ??
+      new Date(0).toISOString(),
+  };
+  if (decisionRef) {
+    sanitized.decisionRecordRef = decisionRef;
+  }
+  return sanitized;
+}
+
+const INTENTIONAL_DIVERGENCE_REASON_CODE =
+  "accepted_functional_change";
+const INTENTIONAL_DIVERGENCE_DEFAULT_INVALIDATION_TRIGGERS = [
+  "comparison_result_changed",
+  "affected_outputs_changed",
+  "linked_evidence_changed",
+] as const;
+
+function normalizeIntentionalDivergenceAffectedOutputs(
+  raw: unknown,
+): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const allowed = new Set([
+    "java_output",
+    "normalized_output",
+    "stderr",
+    "exit_code",
+    "evidence_summary",
+  ]);
+  const normalized = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+    const value = entry.trim();
+    if (!value) {
+      continue;
+    }
+    if (allowed.has(value)) {
+      normalized.add(value);
+      continue;
+    }
+    const lower = value.toLowerCase();
+    if (lower.includes("normalized")) {
+      normalized.add("normalized_output");
+    } else if (lower.includes("stderr")) {
+      normalized.add("stderr");
+    } else if (lower.includes("exit")) {
+      normalized.add("exit_code");
+    } else if (lower.includes("evidence")) {
+      normalized.add("evidence_summary");
+    } else {
+      normalized.add("java_output");
+    }
+  }
+  return Array.from(normalized);
+}
+
+function mapIntentionalDivergenceRequestBody(
+  raw: Record<string, unknown>,
+): {
+  rationale: string;
+  reviewer: string;
+  linkedEvidenceRefs: string[];
+  affectedOutputs: string[];
+  supersedesPreviousDecision: boolean;
+  invalidationNote?: string;
+  expiresAt?: string;
+} | null {
+  const allowedFields = new Set([
+    "decisionId",
+    "rationale",
+    "reviewer",
+    "linkedEvidenceRefs",
+    "affectedOutputs",
+    "supersedesPreviousDecision",
+    "invalidationNote",
+    "expiresAt",
+  ]);
+  const extraFields = Object.keys(raw).filter((field) => !allowedFields.has(field));
+  if (extraFields.length > 0) {
+    return null;
+  }
+  const rationale = asString(raw.rationale)?.trim() ?? "";
+  const reviewer = asString(raw.reviewer)?.trim() ?? "";
+  const linkedEvidenceRefs = Array.isArray(raw.linkedEvidenceRefs)
+    ? raw.linkedEvidenceRefs.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const affectedOutputs = Array.isArray(raw.affectedOutputs)
+    ? raw.affectedOutputs.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const supersedesPreviousDecision =
+    typeof raw.supersedesPreviousDecision === "boolean"
+      ? raw.supersedesPreviousDecision
+      : false;
+  const invalidationNote = asString(raw.invalidationNote)?.trim();
+  const expiresAt =
+    raw.expiresAt === null || raw.expiresAt === undefined
+      ? undefined
+      : asString(raw.expiresAt);
+  return {
+    rationale,
+    reviewer,
+    linkedEvidenceRefs,
+    affectedOutputs,
+    supersedesPreviousDecision,
+    ...(invalidationNote ? { invalidationNote } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  };
+}
+
 async function liveGeneratedView(
   stored: StoredRun,
   orchestrator: OrchestratorClient,
@@ -2223,6 +2525,9 @@ function applyWorkflowSnapshotToStore(
     manualEditsCarriedOver: snapshot.manualEditsCarriedOver,
     manualDriftRegionCount: snapshot.manualDriftRegionCount,
   };
+  if (snapshot.trustSummary) {
+    patch.trustSummary = snapshot.trustSummary;
+  }
   if (snapshot.trustCase) {
     patch.trustCaseId = snapshot.trustCase.trustCaseId;
     patch.trustCaseVersion = snapshot.trustCase.version;
@@ -2260,7 +2565,10 @@ async function fetchWorkflowSnapshot(
   if (!liveRunId || !orchestrator.enabled) {
     return {
       stored,
-      snapshot: { ...EMPTY_WORKFLOW_SNAPSHOT },
+      snapshot: {
+        ...EMPTY_WORKFLOW_SNAPSHOT,
+        trustSummary: stored.trustSummary ?? null,
+      },
       source: "unavailable",
     };
   }
@@ -2276,6 +2584,9 @@ async function fetchWorkflowSnapshot(
     const envelope = asRecord(upstream.body) ?? {};
     const contract = asRecord(envelope.contract);
     const snapshot = snapshotFromContract(contract);
+    if (!snapshot.trustSummary && stored.trustSummary) {
+      snapshot.trustSummary = stored.trustSummary;
+    }
     const reportedSource = asString(envelope.source);
     const source: "live" | "cached" | "unavailable" =
       reportedSource === "cached"
@@ -2294,7 +2605,10 @@ async function fetchWorkflowSnapshot(
   } catch {
     return {
       stored,
-      snapshot: { ...EMPTY_WORKFLOW_SNAPSHOT },
+      snapshot: {
+        ...EMPTY_WORKFLOW_SNAPSHOT,
+        trustSummary: stored.trustSummary ?? null,
+      },
       source: "unavailable",
     };
   }
@@ -5367,7 +5681,11 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             const upstream = await orchestrator.getRun(current.liveRunId);
             if (upstream && upstream.status >= 200 && upstream.status < 300) {
               current = applyLiveRunPayload(current, runStore, upstream.body);
-              trustSummary = extractTrustSummary(upstream.body);
+              trustSummary = extractCachedTrustSummary(upstream.body);
+              if (trustSummary) {
+                current =
+                  runStore.update(current.runId, { trustSummary }) ?? current;
+              }
             }
           } catch {
             // keep last-known state; UI shows updatedAt
@@ -5383,9 +5701,138 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           current = workflowResult.stored;
           if (workflowResult.snapshot.trustSummary) {
             trustSummary = workflowResult.snapshot.trustSummary;
+          } else if (current.trustSummary) {
+            trustSummary = current.trustSummary;
           }
         }
         jsonResponse(res, 200, runSummary(current, trustSummary));
+        return;
+      }
+
+      const divergenceMatch =
+        /^\/api\/v0\/runs\/([^\/]+)\/intentional-divergence-decision$/.exec(
+          pathname,
+        );
+      if (divergenceMatch && method === "PUT") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
+        const runId = decodeURIComponent(divergenceMatch[1] ?? "");
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        const storedTrustSummary = asRecord(stored.trustSummary);
+        const storedComparisonResult = asRecord(
+          storedTrustSummary?.comparisonResult,
+        );
+        const existingDecisionRef =
+          normalizeOutputRef(storedTrustSummary?.intentionalDivergenceDecisionRef) ??
+          normalizeOutputRef(storedComparisonResult?.decisionRecordRef) ??
+          null;
+        const upsertIntentionalDivergenceDecision =
+          orchestrator.upsertIntentionalDivergenceDecision;
+        if (!orchestrator.enabled || !upsertIntentionalDivergenceDecision) {
+          jsonResponse(res, 503, {
+            error:
+              "intentional divergence decision unavailable: orchestrator is not configured",
+          });
+          return;
+        }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          badRequest(res, err instanceof Error ? err.message : "invalid body");
+          return;
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          badRequest(res, "request body must be a JSON object");
+          return;
+        }
+        const record = mapIntentionalDivergenceRequestBody(
+          body as Record<string, unknown>,
+        );
+        if (!record) {
+          badRequest(
+            res,
+            "unsupported intentional divergence field(s): request must match the Studio decision contract",
+          );
+          return;
+        }
+        if (
+          !record.rationale ||
+          !record.reviewer ||
+          (record.linkedEvidenceRefs.length === 0 &&
+            record.affectedOutputs.length === 0)
+        ) {
+          badRequest(
+            res,
+            "rationale, reviewer, and at least one linkedEvidenceRef or affectedOutput are required",
+          );
+          return;
+        }
+        const mappedAffectedOutputs = normalizeIntentionalDivergenceAffectedOutputs(
+          record.affectedOutputs,
+        );
+        const invalidationTriggers = [
+          ...INTENTIONAL_DIVERGENCE_DEFAULT_INVALIDATION_TRIGGERS,
+          ...(record.supersedesPreviousDecision ? ["expires_at_reached"] : []),
+        ];
+        const upstream = await upsertIntentionalDivergenceDecision(runId, {
+          reasonCode: INTENTIONAL_DIVERGENCE_REASON_CODE,
+          rationaleSummary: record.rationale,
+          behaviorChange: record.invalidationNote ?? record.rationale,
+          reviewer: record.reviewer,
+          evidenceRefs: record.linkedEvidenceRefs,
+          affectedOutputs:
+            mappedAffectedOutputs.length > 0
+              ? mappedAffectedOutputs
+              : ["java_output"],
+          invalidationTriggers,
+          ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
+          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+        });
+        if (!upstream) {
+          jsonResponse(res, 503, {
+            error: "intentional divergence decision unavailable: no orchestrator response",
+          });
+          return;
+        }
+        if (upstream.status >= 200 && upstream.status < 300) {
+          const trustSummary = extractCachedTrustSummary(upstream.body);
+          if (trustSummary) {
+            runStore.update(runId, { trustSummary });
+          }
+        }
+        jsonResponse(
+          res,
+          upstream.status || 502,
+          sanitizeIntentionalDivergenceResponseBody(upstream.body, {
+            fallbackRunId: runId,
+            fallbackProgramId: stored.programId,
+            status: existingDecisionRef ? "updated" : "created",
+          }),
+        );
         return;
       }
 
@@ -5418,7 +5865,22 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           snapshot,
           source,
         } = await fetchWorkflowSnapshot(stored, orchestrator, runStore);
-        jsonResponse(res, 200, workflowEnvelope(refreshed, snapshot, source));
+        const effectiveSnapshot =
+          snapshot.trustSummary || refreshed.trustSummary || stored.trustSummary
+            ? {
+                ...snapshot,
+                trustSummary:
+                  snapshot.trustSummary ??
+                  refreshed.trustSummary ??
+                  stored.trustSummary ??
+                  null,
+              }
+            : snapshot;
+        jsonResponse(
+          res,
+          200,
+          workflowEnvelope(refreshed, effectiveSnapshot, source),
+        );
         return;
       }
 

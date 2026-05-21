@@ -275,6 +275,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/intentional-divergence/decision/request:
+    post:
+      summary: Document an intentional divergence decision for a parity mismatch
+      description: >
+        Records a governed reviewer approval for a run whose deterministic
+        parity comparison failed. The decision is run-scoped, persisted as a
+        decision artifact, and projected into the run contract and run summary
+        only when it still matches the current comparison result for that run.
+      operationId: documentIntentionalDivergence
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntentionalDivergenceDecisionRequest" }
+      responses:
+        "200":
+          description: Intentional divergence decision envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntentionalDivergenceDecisionResponse" }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Run not found or parity mismatch validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /v0/runs/{runId}/manual-compile-repair/diagnose/request:
     post:
       summary: Diagnose a manual Java repair candidate
@@ -478,7 +513,7 @@ components:
           type: array
           items:
             type: string
-      additionalProperties: false
+      additionalProperties: true
     RunStartResponse:
       type: object
       required: [run, status, message]
@@ -890,6 +925,11 @@ components:
             - type: object
               additionalProperties: true
             - type: 'null'
+        trustSummary:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
         finalClassification:
           oneOf:
             - type: string
@@ -921,6 +961,14 @@ components:
         assistDecision:
           oneOf:
             - $ref: "#/components/schemas/W03AssistDecision"
+            - type: 'null'
+        intentionalDivergenceDecision:
+          oneOf:
+            - $ref: "#/components/schemas/IntentionalDivergenceDecision"
+            - type: 'null'
+        intentionalDivergenceDecisionRef:
+          oneOf:
+            - $ref: "#/components/schemas/ArtifactMetadata"
             - type: 'null'
         failureMessage:
           oneOf:
@@ -993,6 +1041,15 @@ components:
         diffRef:
           type: object
           additionalProperties: true
+        decisionRecordRef:
+          type: object
+          additionalProperties: true
+        documentedDecisionRef:
+          type: object
+          additionalProperties: true
+        decisionStatus:
+          type: string
+          enum: [active, expired, stale, invalid, legacy, none]
         mismatchClassification:
           type: string
           enum:
@@ -1079,3 +1136,190 @@ components:
           oneOf:
             - type: string
             - type: 'null'
+    IntentionalDivergenceDecisionRequest:
+      type: object
+      required:
+        - reasonCode
+        - reviewer
+        - rationale
+        - linkedEvidenceRefs
+        - affectedOutputs
+        - invalidationTriggers
+      additionalProperties: false
+      properties:
+        reasonCode:
+          type: string
+          enum:
+            - business_rule_alignment
+            - legacy_defect_correction
+            - target_platform_constraint
+            - accepted_functional_change
+        reviewer:
+          type: object
+          required: [reviewerId, displayName, role]
+          additionalProperties: false
+          properties:
+            reviewerId: { type: string, minLength: 1 }
+            displayName: { type: string, minLength: 1 }
+            role: { type: string, minLength: 1 }
+        rationale:
+          type: object
+          required: [summary, technicalBasis, businessImpact]
+          additionalProperties: false
+          properties:
+            summary: { type: string, minLength: 1 }
+            technicalBasis: { type: string, minLength: 1 }
+            businessImpact: { type: string, minLength: 1 }
+            followUp: { type: string, minLength: 1 }
+        linkedEvidenceRefs:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [uri, sha256, byteSize]
+            additionalProperties: true
+            properties:
+              uri: { type: string }
+              sha256:
+                type: string
+                pattern: "^[0-9a-fA-F]{64}$"
+              byteSize:
+                type: integer
+                minimum: 0
+        affectedOutputs:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - java_output
+              - normalized_output
+              - stderr
+              - exit_code
+              - evidence_summary
+        invalidationTriggers:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - comparison_result_changed
+              - affected_outputs_changed
+              - linked_evidence_changed
+              - expires_at_reached
+        expiresAt:
+          type: string
+          format: date-time
+    IntentionalDivergenceDecision:
+      type: object
+      required:
+        - schemaVersion
+        - decisionType
+        - decisionId
+        - runId
+        - workflowId
+        - comparisonResultRef
+        - reviewer
+        - rationale
+        - linkedEvidenceRefs
+        - affectedOutputs
+        - invalidationTriggers
+        - decidedAt
+      additionalProperties: false
+      properties:
+        schemaVersion: { type: string, const: v0 }
+        decisionType: { type: string, const: intentional_divergence }
+        decisionId: { type: string, minLength: 1 }
+        runId: { type: string, minLength: 1 }
+        workflowId: { type: string, minLength: 1 }
+        comparisonResultRef:
+          type: object
+          required: [uri, sha256, byteSize]
+          additionalProperties: true
+          properties:
+            uri: { type: string }
+            sha256:
+              type: string
+              pattern: "^[0-9a-fA-F]{64}$"
+            byteSize:
+              type: integer
+              minimum: 0
+        reviewer:
+          type: object
+          required: [reviewerId, displayName, role]
+          additionalProperties: false
+          properties:
+            reviewerId: { type: string, minLength: 1 }
+            displayName: { type: string, minLength: 1 }
+            role: { type: string, minLength: 1 }
+        rationale:
+          type: object
+          required: [summary, technicalBasis, businessImpact]
+          additionalProperties: false
+          properties:
+            summary: { type: string, minLength: 1 }
+            technicalBasis: { type: string, minLength: 1 }
+            businessImpact: { type: string, minLength: 1 }
+            followUp: { type: string, minLength: 1 }
+        linkedEvidenceRefs:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [uri, sha256, byteSize]
+            additionalProperties: true
+            properties:
+              uri: { type: string }
+              sha256:
+                type: string
+                pattern: "^[0-9a-fA-F]{64}$"
+              byteSize:
+                type: integer
+                minimum: 0
+        affectedOutputs:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - java_output
+              - normalized_output
+              - stderr
+              - exit_code
+              - evidence_summary
+        invalidationTriggers:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - comparison_result_changed
+              - affected_outputs_changed
+              - linked_evidence_changed
+              - expires_at_reached
+        decidedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    IntentionalDivergenceDecisionResponse:
+      type: object
+      required: [runId, decision, decisionRef, trustSummary]
+      additionalProperties: false
+      properties:
+        runId: { type: string }
+        decision:
+          $ref: "#/components/schemas/IntentionalDivergenceDecision"
+        decisionRef:
+          $ref: "#/components/schemas/ArtifactMetadata"
+        trustSummary:
+          type: object
+          additionalProperties: true

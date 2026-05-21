@@ -45,6 +45,8 @@ import {
   ManualCompileRepairRejectResponse,
   ParityEvidenceExportRequest,
   ParityEvidenceExportResponse,
+  IntentionalDivergenceDecisionRequest,
+  IntentionalDivergenceDecisionResponse,
 } from "../types/api";
 import { deriveSourceHash } from "../lib/sourceAnalysis";
 import {
@@ -202,6 +204,17 @@ export interface TransformationRunContextValue {
   exportParityEvidenceScaffold: (
     request?: ParityEvidenceExportRequest,
   ) => Promise<ApiResult<ParityEvidenceExportResponse>>;
+  intentionalDivergenceDecision:
+    | IntentionalDivergenceDecisionResponse
+    | null;
+  intentionalDivergenceDecisionStatus:
+    | "idle"
+    | "saving"
+    | "error";
+  intentionalDivergenceDecisionError: string | null;
+  submitIntentionalDivergenceDecision: (
+    request: IntentionalDivergenceDecisionRequest,
+  ) => Promise<ApiResult<IntentionalDivergenceDecisionResponse>>;
   setState: React.Dispatch<React.SetStateAction<TransformationRunState>>;
   // ----- Studio-IDE-3 Java buffer model --------------------------------
   javaBuffers: Record<string, JavaBufferEntry>;
@@ -365,6 +378,16 @@ export function TransformationRunProvider({
     useState<VerifyResponse | null>(null);
   const [manualCompileRepair, setManualCompileRepair] =
     useState<ManualCompileRepairSession | null>(null);
+  const [intentionalDivergenceDecision, setIntentionalDivergenceDecision] =
+    useState<IntentionalDivergenceDecisionResponse | null>(null);
+  const [
+    intentionalDivergenceDecisionStatus,
+    setIntentionalDivergenceDecisionStatus,
+  ] = useState<"idle" | "saving" | "error">("idle");
+  const [
+    intentionalDivergenceDecisionError,
+    setIntentionalDivergenceDecisionError,
+  ] = useState<string | null>(null);
   // Studio-IDE-7 (#252): per-program / per-file diff history. Held as
   // React state (not refs) so consumers re-render when a new snapshot
   // shifts the previous entry — the Compare Runs button needs to flip
@@ -566,6 +589,9 @@ export function TransformationRunProvider({
       workflow: null,
       previousRun: snapshotHistoricalRun(prev),
     }));
+    setIntentionalDivergenceDecision(null);
+    setIntentionalDivergenceDecisionStatus("idle");
+    setIntentionalDivergenceDecisionError(null);
 
     const result = await apiClient.transform(request);
 
@@ -678,6 +704,9 @@ export function TransformationRunProvider({
       workflow: null,
       previousRun: snapshotHistoricalRun(prev),
     }));
+    setIntentionalDivergenceDecision(null);
+    setIntentionalDivergenceDecisionStatus("idle");
+    setIntentionalDivergenceDecisionError(null);
 
     const result = await apiClient.generate(request);
 
@@ -828,6 +857,73 @@ export function TransformationRunProvider({
             }
           : prev.evidence,
       }));
+      return result;
+    },
+    [],
+  );
+
+  const submitIntentionalDivergenceDecision = useCallback(
+    async (
+      request: IntentionalDivergenceDecisionRequest,
+    ): Promise<ApiResult<IntentionalDivergenceDecisionResponse>> => {
+      const runId = currentRunIdRef.current;
+      if (!runId) {
+        return {
+          ok: false,
+          message: "No completed run is available for a divergence decision.",
+        };
+      }
+
+      setIntentionalDivergenceDecisionStatus("saving");
+      setIntentionalDivergenceDecisionError(null);
+
+      const result = await apiClient.upsertIntentionalDivergenceDecision(
+        runId,
+        request,
+      );
+      if (currentRunIdRef.current !== runId) {
+        setIntentionalDivergenceDecisionStatus("error");
+        setIntentionalDivergenceDecisionError(
+          "The active run changed before the divergence decision completed.",
+        );
+        return {
+          ok: false,
+          message: "The active run changed before the divergence decision completed.",
+        };
+      }
+
+      if (!result.ok) {
+        setIntentionalDivergenceDecisionStatus("error");
+        setIntentionalDivergenceDecisionError(result.message);
+        return result;
+      }
+
+      setIntentionalDivergenceDecision(result.data);
+      setIntentionalDivergenceDecisionStatus("idle");
+      setIntentionalDivergenceDecisionError(null);
+      setState((prev) => {
+        if (prev.runId !== runId) {
+          return prev;
+        }
+
+        const trustSummary = result.data.trustSummary ?? prev.summary?.trustSummary ?? null;
+        return {
+          ...prev,
+          summary: prev.summary
+            ? {
+                ...prev.summary,
+                trustSummary,
+              }
+            : prev.summary,
+          workflow: prev.workflow
+            ? {
+                ...prev.workflow,
+                trustSummary,
+              }
+            : prev.workflow,
+        };
+      });
+
       return result;
     },
     [],
@@ -1678,6 +1774,10 @@ export function TransformationRunProvider({
         startGenerate,
         startVerify,
         exportParityEvidenceScaffold,
+        intentionalDivergenceDecision,
+        intentionalDivergenceDecisionStatus,
+        intentionalDivergenceDecisionError,
+        submitIntentionalDivergenceDecision,
         setState,
         javaBuffers,
         javaConflict,

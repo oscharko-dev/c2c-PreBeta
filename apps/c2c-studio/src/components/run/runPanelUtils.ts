@@ -5,6 +5,7 @@ import {
   RunProgressStep,
   RunProgressView,
   RunWorkflowView,
+  TrustSummaryView,
 } from '@/types/api';
 import type { ManualDriftSummary } from '@/stores/transformationRun';
 import { TransformationRunState } from '@/types/run';
@@ -165,12 +166,22 @@ function getComparisonPolicyLabel(buildTest: BuildTestView): string | null {
 
 export function describeBuildTestResult(
   buildTest: BuildTestView | null,
+  intentionalDivergence = false,
 ): BuildTestResultPresentation {
   if (!buildTest) {
     return {
       label: 'Waiting for build/test results',
       tone: 'pending',
       detail: 'The equivalence check has not completed yet.',
+    };
+  }
+
+  if (intentionalDivergence) {
+    return {
+      label: 'Intentionally diverged',
+      tone: 'warning',
+      detail:
+        'The outputs were governed as intentionally not equivalent. Review the documented rationale and evidence.',
     };
   }
 
@@ -587,6 +598,16 @@ export function buildArtifactAlignment(state: TransformationRunState): ArtifactA
     expectedSha: aligned ? distinctShas[0] : null,
     distinctShas,
   };
+}
+
+export function isIntentionalDivergenceTrustSummary(
+  trust: TrustSummaryView | null | undefined,
+): boolean {
+  return Boolean(
+    trust &&
+      (trust.trustState === 'intentional_divergence' ||
+        trust.divergenceDisposition === 'intentional'),
+  );
 }
 
 export function describeManualDriftSummary(summary: ManualDriftSummary | null): string | null {
