@@ -2053,6 +2053,11 @@ export const apiClient = {
       `/api/v0/runs/${encodeURIComponent(runId)}/generated/files/${encodeGeneratedFilePath(filePath)}`,
       parseGeneratedFileContent,
     ),
+  getRunArtifactFile: (runId: string, filePath: string) =>
+    fetchJson(
+      `/api/v0/runs/${encodeURIComponent(runId)}/artifacts/files/${encodeGeneratedFilePath(filePath)}`,
+      parseGeneratedFileContent,
+    ),
   getBuildTest: (runId: string) =>
     fetchJson(
       `/api/v0/runs/${encodeURIComponent(runId)}/build-test`,

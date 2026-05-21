@@ -257,6 +257,27 @@ class OrchestratorService:
                         status, payload = service._generated_file_content(run_id, decoded)
                         self._write_json(status, payload)
                         return
+                    if (
+                        len(parts) >= 5
+                        and parts[0] == "v0"
+                        and parts[1] == "runs"
+                        and parts[3] == "artifacts"
+                        and parts[4] == "files"
+                    ):
+                        run_id = parts[2]
+                        if len(parts) == 5:
+                            self._write_json(
+                                404,
+                                {"error": "artifact file path is required"},
+                            )
+                            return
+                        encoded_segments = parts[5:]
+                        decoded = "/".join(
+                            urllib.parse.unquote(segment) for segment in encoded_segments
+                        )
+                        status, payload = service._artifact_file_content(run_id, decoded)
+                        self._write_json(status, payload)
+                        return
                     self._write_json(404, {"error": "not found"})
                 except Exception as exc:
                     if isinstance(exc, UpstreamServiceError):
@@ -683,6 +704,33 @@ class OrchestratorService:
             "runId": run_id,
             "path": safe,
             "absolutePath": absolute,
+            "content": content_text,
+            "sha256": meta.get("sha256"),
+            "byteSize": meta.get("byteSize"),
+            "mimeType": meta.get("mimeType"),
+            "uri": meta.get("uri"),
+            "kind": meta.get("kind"),
+        }
+
+    def _artifact_file_content(self, run_id: str, raw_path: str) -> tuple[int, JsonObject]:
+        if not self.artifact_store.has_run(run_id):
+            return 404, {"error": "run not found", "runId": run_id}
+        safe = self._safe_generated_relpath(raw_path)
+        if safe is None:
+            return 400, {"error": "invalid artifact path", "path": raw_path}
+        meta = self.artifact_store.find_metadata(run_id, safe)
+        content_bytes = self.artifact_store.read_bytes(run_id, safe)
+        if content_bytes is None or meta is None:
+            return 404, {"error": "artifact not found", "path": safe}
+        mime_type = str(meta.get("mimeType") or "")
+        is_text = mime_type.startswith("text/") or mime_type in {MIME_JAVA, MIME_PLAIN, "application/json", "application/xml"}
+        try:
+            content_text = content_bytes.decode("utf-8") if is_text else content_bytes.decode("utf-8", errors="replace")
+        except UnicodeDecodeError:
+            content_text = content_bytes.decode("utf-8", errors="replace")
+        return 200, {
+            "runId": run_id,
+            "path": safe,
             "content": content_text,
             "sha256": meta.get("sha256"),
             "byteSize": meta.get("byteSize"),

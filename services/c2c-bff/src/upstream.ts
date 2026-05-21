@@ -225,6 +225,11 @@ export interface OrchestratorClient {
     filePath: string,
     maxResponseBytes?: number,
   ): Promise<UpstreamResponse | undefined>;
+  getArtifactFile?(
+    runId: string,
+    filePath: string,
+    maxResponseBytes?: number,
+  ): Promise<UpstreamResponse | undefined>;
   getBuildTest(runId: string): Promise<UpstreamResponse | undefined>;
   getEvidence(runId: string): Promise<UpstreamResponse | undefined>;
   getEvents(runId: string): Promise<UpstreamResponse | undefined>;
@@ -354,6 +359,12 @@ export function createOrchestratorClient(
       timeoutMs,
     });
   };
+  const encodePathSegments = (filePath: string): string =>
+    filePath
+      .split("/")
+      .filter((segment) => segment.length > 0)
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
   return {
     enabled: true,
     async startRun({
@@ -476,11 +487,7 @@ export function createOrchestratorClient(
       maxResponseBytes?: number,
     ) {
       const safeRun = encodeURIComponent(runId);
-      const encodedPath = filePath
-        .split("/")
-        .filter((segment) => segment.length > 0)
-        .map((segment) => encodeURIComponent(segment))
-        .join("/");
+      const encodedPath = encodePathSegments(filePath);
       // Issue #172 follow-up: the artifact-content path is the only response
       // that can carry arbitrarily large user-controlled bytes (a generated
       // Java file). The streaming cap stops a malicious orchestrator from
@@ -491,6 +498,25 @@ export function createOrchestratorClient(
         maxResponseBytes === undefined ? undefined : maxResponseBytes + 4096;
       return http.request(
         `${baseUrl}/v0/runs/${safeRun}/generated/files/${encodedPath}`,
+        {
+          method: "GET",
+          headers: controlHeaders,
+          timeoutMs,
+          maxResponseBytes: responseCap,
+        },
+      );
+    },
+    async getArtifactFile(
+      runId: string,
+      filePath: string,
+      maxResponseBytes?: number,
+    ) {
+      const safeRun = encodeURIComponent(runId);
+      const encodedPath = encodePathSegments(filePath);
+      const responseCap =
+        maxResponseBytes === undefined ? undefined : maxResponseBytes + 4096;
+      return http.request(
+        `${baseUrl}/v0/runs/${safeRun}/artifacts/files/${encodedPath}`,
         {
           method: "GET",
           headers: controlHeaders,

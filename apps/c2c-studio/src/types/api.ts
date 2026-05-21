@@ -473,6 +473,8 @@ export interface GeneratedFileContent {
   orchestratorRunId?: string;
 }
 
+export type RunArtifactFileContent = GeneratedFileContent;
+
 // Issue #172: W0.2 workflow contract product-level view.
 export type W02ActiveAgent =
   | "transformation_agent"
