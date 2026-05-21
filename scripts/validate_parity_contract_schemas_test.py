@@ -243,6 +243,7 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
                 "runtime_failure",
                 "unsupported_input",
                 "policy",
+                "intentional",
                 "unknown",
             ],
         )
