@@ -1305,7 +1305,7 @@ class W0WorkflowRunner:
         workflow_id: str,
         java_files: Mapping[str, str],
         *,
-        entry_class: str | None,
+        entry_class: str,
         entry_file_path: str,
     ) -> JsonObject:
         manifest_files: list[JsonObject] = []
@@ -1961,7 +1961,7 @@ class W0WorkflowRunner:
         workflow_id: str,
         java_files: Mapping[str, str],
         *,
-        entry_class: str | None,
+        entry_class: str,
         entry_file_path: str,
     ) -> JsonObject:
         manifest_files: list[JsonObject] = []
@@ -2004,7 +2004,7 @@ class W0WorkflowRunner:
         workflow_id: str,
         java_files: Mapping[str, str],
         *,
-        entry_class: str | None,
+        entry_class: str,
         entry_file_path: str,
     ) -> JsonObject:
         manifest_files: list[JsonObject] = []
@@ -2139,7 +2139,7 @@ class W0WorkflowRunner:
         run_id: str,
         requester: str,
         java_files: Mapping[str, str],
-        entry_class: str | None,
+        entry_class: str,
         entry_file_path: str,
         manual_overlay_regions: Sequence[Mapping[str, JsonValue]] = (),
     ) -> JsonObject:
