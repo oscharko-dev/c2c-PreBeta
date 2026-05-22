@@ -1125,6 +1125,150 @@ class WorkflowArtifactPersistenceTests(unittest.TestCase):
                 requester="studio",
             )
 
+    def test_parity_export_blocks_intentionally_diverged_evidence(self):
+        gateway = StubGateway(
+            W0WorkflowRunnerTests._base_capabilities(),
+            W0WorkflowRunnerTests._base_responses(),
+        )
+        runner, store, _root = self._runner_with_store(gateway)
+        context = W0RunContext(
+            run_id="run-export-4",
+            workflow_id="w0-migration-v0",
+            requester="orchestrator",
+            evidence_refs=[],
+            execution_mode="parity",
+            trust_case_id="HELLOW02-DEFAULT",
+            source_reference_fixture_id="HELLOW02",
+            source_reference_mode="reference-fixture",
+        )
+        runner.run(
+            context=context,
+            input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+        )
+        contract = store.read_json("run-export-4", "w02-run-contract.json")
+        assert contract is not None
+        trust_summary = contract.get("trustSummary")
+        assert isinstance(trust_summary, dict)
+        trust_summary["divergenceDisposition"] = "intentional"
+        store.write_json(
+            "run-export-4",
+            "w0-migration-v0",
+            "w02-run-contract.json",
+            contract,
+            kind="w02-run-contract",
+        )
+
+        with self.assertRaisesRegex(
+            OrchestratorError,
+            "intentionally diverged evidence cannot be exported",
+        ):
+            runner.export_parity_regression_test(
+                run_id="run-export-4",
+                requester="studio",
+            )
+
+    def test_parity_export_blocks_failed_trust_states(self):
+        for index, failed_state in enumerate(
+            (
+                "build_failed",
+                "runtime_failed",
+                "parity_failed",
+                "intentional_divergence",
+            )
+        ):
+            run_id = f"run-export-failed-{index}"
+            gateway = StubGateway(
+                W0WorkflowRunnerTests._base_capabilities(),
+                W0WorkflowRunnerTests._base_responses(),
+            )
+            runner, store, _root = self._runner_with_store(gateway)
+            context = W0RunContext(
+                run_id=run_id,
+                workflow_id="w0-migration-v0",
+                requester="orchestrator",
+                evidence_refs=[],
+                execution_mode="parity",
+                trust_case_id="HELLOW02-DEFAULT",
+                source_reference_fixture_id="HELLOW02",
+                source_reference_mode="reference-fixture",
+            )
+            runner.run(
+                context=context,
+                input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+            )
+            contract = store.read_json(run_id, "w02-run-contract.json")
+            assert contract is not None
+            trust_summary = contract.get("trustSummary")
+            assert isinstance(trust_summary, dict)
+            trust_summary["trustState"] = failed_state
+            store.write_json(
+                run_id,
+                "w0-migration-v0",
+                "w02-run-contract.json",
+                contract,
+                kind="w02-run-contract",
+            )
+
+            with self.assertRaisesRegex(
+                OrchestratorError,
+                "only successful parity evidence is eligible",
+            ):
+                runner.export_parity_regression_test(
+                    run_id=run_id,
+                    requester="studio",
+                )
+
+    def test_parity_export_qualifies_stale_evidence(self):
+        for index, stale_trust_state in enumerate(("parity_passed", "blocked")):
+            run_id = f"run-export-stale-{index}"
+            responses = W0WorkflowRunnerTests._base_responses()
+            responses["java.build-test"]["expectedOutput"] = "NORMALIZED-OUTPUT"
+            gateway = StubGateway(
+                W0WorkflowRunnerTests._base_capabilities(),
+                responses,
+            )
+            runner, store, _root = self._runner_with_store(gateway)
+            context = W0RunContext(
+                run_id=run_id,
+                workflow_id="w0-migration-v0",
+                requester="orchestrator",
+                evidence_refs=[],
+                execution_mode="parity",
+                trust_case_id="HELLOW02-DEFAULT",
+                source_reference_fixture_id="HELLOW02",
+                source_reference_mode="reference-fixture",
+            )
+            runner.run(
+                context=context,
+                input_ref={"uri": "urn:source/main.cob", "source": "IDENTIFICATION DIVISION."},
+            )
+            contract = store.read_json(run_id, "w02-run-contract.json")
+            assert contract is not None
+            trust_summary = contract.get("trustSummary")
+            assert isinstance(trust_summary, dict)
+            trust_summary["trustState"] = stale_trust_state
+            evidence = trust_summary.get("evidence")
+            assert isinstance(evidence, dict)
+            evidence["status"] = "stale"
+            store.write_json(
+                run_id,
+                "w0-migration-v0",
+                "w02-run-contract.json",
+                contract,
+                kind="w02-run-contract",
+            )
+
+            export = runner.export_parity_regression_test(
+                run_id=run_id,
+                requester="studio",
+            )
+
+            self.assertEqual(export["status"], "created")
+            self.assertEqual(
+                export["export"]["qualification"],
+                "stale_evidence",
+            )
+
     def test_failed_run_persists_partial_artifacts_and_failure_summary(self):
         responses = W0WorkflowRunnerTests._base_responses()
         gateway = StubGateway(W0WorkflowRunnerTests._base_capabilities(), responses)

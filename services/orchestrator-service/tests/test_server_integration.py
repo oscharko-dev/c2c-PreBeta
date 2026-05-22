@@ -2552,9 +2552,12 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(export_status, 200)
             self.assertEqual(export_body["status"], "created")
+            # Issue #367 audit (D-1): this run derives a blocked trust state
+            # over stale evidence; the export must surface the stale-evidence
+            # qualification rather than overstating its authority as "clean".
             self.assertEqual(
                 export_body["export"]["qualification"],
-                "clean",
+                "stale_evidence",
             )
             self.assertIn(
                 "CASE01ParityRegressionTest.java",

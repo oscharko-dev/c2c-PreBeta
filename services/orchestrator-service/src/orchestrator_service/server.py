@@ -549,6 +549,8 @@ class OrchestratorService:
         payload: Mapping[str, Any],
     ) -> JsonObject:
         export_name = str(payload.get("exportName") or "").strip() or None
+        if export_name is not None and len(export_name) > 200:
+            raise ValueError("exportName must be at most 200 characters")
         requester = str(payload.get("requester") or self.config.service_name).strip()
         return self.runner.export_parity_regression_test(
             run_id=run_id,
