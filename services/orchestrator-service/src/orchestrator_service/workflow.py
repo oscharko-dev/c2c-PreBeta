@@ -3344,6 +3344,7 @@ class W0WorkflowRunner:
             oracle_diff_ref = self._artifact_ref_payload(parity_comparison.get("diffRef"))
         return compile_error_ref, runtime_error_ref, oracle_diff_ref
 
+    @staticmethod
     def _manual_diagnosis_failure_class(
         failure_code: str | None,
         *,
@@ -3460,100 +3461,6 @@ class W0WorkflowRunner:
         build_payload: Mapping[str, JsonValue],
     ) -> bool:
         return bool(build_payload)
-
-    @staticmethod
-    def _manual_diagnosis_requested_failure_code(
-        build_test_context: Mapping[str, JsonValue] | None,
-    ) -> str | None:
-        if not isinstance(build_test_context, Mapping):
-            return None
-        status = (_text(build_test_context.get("status")) or "").lower()
-        classification = (_text(build_test_context.get("classification")) or "").lower()
-        compile_status = (_text(build_test_context.get("compileStatus")) or "").lower()
-        execution_status = (_text(build_test_context.get("executionStatus")) or "").lower()
-        comparison = _first_non_empty_mapping(build_test_context.get("comparison"))
-        comparison_status = (_text(comparison.get("status")) or "").lower()
-        if (
-            status == "output-divergence"
-            or "mismatch" in classification
-            or comparison_status == "failed"
-        ):
-            return FAILURE_ORACLE_MISMATCH
-        if (
-            status == "run-failed"
-            or classification == "run-error"
-            or execution_status == "failed"
-        ):
-            return FAILURE_JAVA_RUNTIME_FAILED
-        if (
-            status == "compile-failed"
-            or classification == "compile-error"
-            or compile_status == "failed"
-        ):
-            return FAILURE_JAVA_COMPILE_FAILED
-        return None
-
-    @staticmethod
-    def _manual_diagnosis_build_payload_from_context(
-        build_test_context: Mapping[str, JsonValue],
-        *,
-        failure_code: str | None,
-    ) -> JsonObject:
-        payload: JsonObject = {}
-        for key in (
-            "status",
-            "classification",
-            "compileStatus",
-            "executionStatus",
-            "comparisonPolicy",
-            "expectedOutput",
-        ):
-            value = build_test_context.get(key)
-            if value not in (None, ""):
-                payload[key] = value
-        output_ref = _first_non_empty_mapping(build_test_context.get("outputRef"))
-        if output_ref:
-            payload["executionResultRef"] = dict(output_ref)
-        comparison = _first_non_empty_mapping(build_test_context.get("comparison"))
-        parity_projection: JsonObject = {}
-        if comparison:
-            for key in (
-                "status",
-                "matched",
-                "comparisonPolicyVersion",
-                "mismatchClassification",
-                "comparisonPolicyRef",
-                "comparisonResultRef",
-                "diffRef",
-                "expectedRef",
-                "actualRef",
-            ):
-                value = comparison.get(key)
-                if value not in (None, ""):
-                    parity_projection[key] = value
-        expected_output_ref = _first_non_empty_mapping(build_test_context.get("expectedOutputRef"))
-        if expected_output_ref and "expectedRef" not in parity_projection:
-            parity_projection["expectedRef"] = dict(expected_output_ref)
-        actual_output_ref = _first_non_empty_mapping(build_test_context.get("actualOutputRef"))
-        if actual_output_ref and "actualRef" not in parity_projection:
-            parity_projection["actualRef"] = dict(actual_output_ref)
-        if output_ref and "executionResultRef" not in parity_projection:
-            parity_projection["executionResultRef"] = dict(output_ref)
-        comparison_result_ref = _first_non_empty_mapping(
-            comparison.get("comparisonResultRef") if comparison else None
-        )
-        if comparison_result_ref:
-            payload["comparisonResultRef"] = dict(comparison_result_ref)
-        if parity_projection:
-            payload["parityComparison"] = parity_projection
-        summary = {
-            FAILURE_JAVA_RUNTIME_FAILED: "runtime exception",
-            FAILURE_ORACLE_MISMATCH: "parity mismatch",
-            FAILURE_JAVA_COMPILE_FAILED: "compile failure",
-        }.get(failure_code or "", "deterministic verification failure")
-        payload.setdefault("summary", summary)
-        payload.setdefault("status", "failed")
-        return payload
 
     def _manual_diagnosis_parity_projection(
         self,

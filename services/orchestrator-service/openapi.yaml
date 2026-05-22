@@ -310,16 +310,50 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/manual-compile-repair/preview/request:
+    post:
+      summary: Create a repair preview for a manual Java candidate
+      description: >
+        Accepts the developer's edited Java files, validates them against the
+        persisted generated-project baseline, and produces a redacted preview
+        envelope containing the failure category, diagnostic excerpt, and
+        evidence refs. The `previewId` in the response is required by the
+        subsequent `diagnose/request` call.
+      operationId: manualCompileRepairPreview
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualRepairPreviewRequest" }
+      responses:
+        "200":
+          description: Repair preview envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualRepairPreviewResponse" }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Run not found or preview contract violation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /v0/runs/{runId}/manual-compile-repair/diagnose/request:
     post:
       summary: Diagnose a manual Java repair candidate
       description: >
-        Extends the existing manual compile-repair lane into a generalized
-        manual diagnosis/repair path for compile failures, runtime
-        exceptions, and parity mismatches after manual Java edits. The
-        orchestrator still uses the Model Gateway for productive calls and
-        returns a diagnosis envelope that may or may not include a repair
-        proposal.
+        Runs the repair agent against the preview identified by `previewId` and
+        returns a diagnosis envelope that may include a repair proposal. The
+        preview must have been created by a prior `preview/request` call for the
+        same run.
       operationId: manualCompileRepairDiagnose
       parameters:
         - in: path
@@ -374,6 +408,41 @@ paths:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "409":
           description: Run not found or approval contract violation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/manual-compile-repair/accept/request:
+    post:
+      summary: Accept an approved sandbox-applied repair proposal
+      description: >
+        Promotes a sandbox-applied proposal to the `approved` / `applied` state
+        after the developer has reviewed the sandbox build/test result.
+        Verifies the `patchSha256` against the persisted proposal before
+        writing the approval artifact.
+      operationId: manualCompileRepairAccept
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualRepairAcceptRequest" }
+      responses:
+        "200":
+          description: Accepted repair envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualRepairAcceptResponse" }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Run not found or acceptance contract violation
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -526,18 +595,16 @@ components:
         message:
           type: string
           example: orchestrator run started
-    ManualRepairDiagnoseRequest:
+    ManualRepairPreviewRequest:
       type: object
-      required: [runId, javaFiles]
+      required: [javaFiles]
       additionalProperties: false
       properties:
-        runId:
-          type: string
         requester:
           type: string
-        entryClass:
-          type: string
         entryFilePath:
+          type: string
+        entryClass:
           type: string
         javaFiles:
           type: array
@@ -558,34 +625,50 @@ components:
               items:
                 type: object
                 additionalProperties: true
-        buildTestContext:
+    ManualRepairPreviewResponse:
+      type: object
+      required: [schemaVersion, previewId, runId]
+      additionalProperties: true
+      properties:
+        schemaVersion:
+          type: string
+        previewId:
+          type: string
+        runId:
+          type: string
+        workflowId:
+          type: string
+        failureCategory:
+          type: string
+        includedFiles:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        diagnostics:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        constraints:
           type: object
-          additionalProperties: false
-          properties:
-            status:
-              type: string
-            classification:
-              type: string
-            compileStatus:
-              type: string
-            executionStatus:
-              type: string
-            comparisonPolicy:
-              type: string
-            expectedOutput:
-              type: string
-            outputRef:
-              type: object
-              additionalProperties: true
-            expectedOutputRef:
-              type: object
-              additionalProperties: true
-            actualOutputRef:
-              type: object
-              additionalProperties: true
-            comparison:
-              type: object
-              additionalProperties: true
+          additionalProperties: true
+        entryClass:
+          type: string
+        entryFilePath:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ManualRepairDiagnoseRequest:
+      type: object
+      required: [previewId]
+      additionalProperties: false
+      properties:
+        previewId:
+          type: string
+        requester:
+          type: string
     ManualRepairDiagnoseResponse:
       type: object
       required: [schemaVersion, runId, diagnosis, candidateProject, buildTest]
@@ -611,37 +694,16 @@ components:
           additionalProperties: true
     ManualRepairApplyRequest:
       type: object
-      required: [runId, javaFiles, proposal, candidateProject]
+      required: [previewId, proposalId, patchSha256]
       additionalProperties: false
       properties:
-        runId:
+        previewId:
+          type: string
+        proposalId:
+          type: string
+        patchSha256:
           type: string
         requester:
-          type: string
-        entryClass:
-          type: string
-        entryFilePath:
-          type: string
-        javaFiles:
-          type: array
-          minItems: 1
-          items:
-            type: object
-            required: [path, content]
-            properties:
-              path:
-                type: string
-              content:
-                type: string
-        proposal:
-          type: object
-          additionalProperties: true
-        candidateProject:
-          type: object
-          additionalProperties: true
-        expectedOutput:
-          type: string
-        oracleInput:
           type: string
     ManualRepairApplyResponse:
       type: object
@@ -661,18 +723,44 @@ components:
         buildTest:
           type: object
           additionalProperties: true
-    ManualRepairRejectRequest:
+    ManualRepairAcceptRequest:
       type: object
-      required: [runId, proposal]
+      required: [proposalId, patchSha256]
       additionalProperties: false
       properties:
-        runId:
+        proposalId:
+          type: string
+        patchSha256:
           type: string
         requester:
+          type: string
+    ManualRepairAcceptResponse:
+      type: object
+      required: [schemaVersion, runId, proposal, candidateProject, buildTest]
+      additionalProperties: true
+      properties:
+        schemaVersion:
+          type: string
+        runId:
           type: string
         proposal:
           type: object
           additionalProperties: true
+        candidateProject:
+          type: object
+          additionalProperties: true
+        buildTest:
+          type: object
+          additionalProperties: true
+    ManualRepairRejectRequest:
+      type: object
+      required: [proposalId]
+      additionalProperties: false
+      properties:
+        proposalId:
+          type: string
+        requester:
+          type: string
     ManualRepairRejectResponse:
       type: object
       required: [schemaVersion, runId, proposal]
