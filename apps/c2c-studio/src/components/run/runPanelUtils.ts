@@ -677,8 +677,10 @@ export function describeManualDriftSummary(
     summary.regionCount === 0
       ? `${summary.fileCount} ${fileLabel}`
       : `${summary.fileCount} ${fileLabel} and ${summary.regionCount} ${regionLabel}`;
+  const carryVerb =
+    summary.regionCount === 0 && summary.fileCount === 1 ? "carries" : "carry";
 
-  return `Current Java diverges from ${runLabel}. ${provenanceClause} carry manual edit provenance, so build/test and evidence are stale until you rerun.`;
+  return `Current Java diverges from ${runLabel}. ${provenanceClause} ${carryVerb} manual edit provenance, so build/test and evidence are stale until you rerun.`;
 }
 
 export function describeClassification(

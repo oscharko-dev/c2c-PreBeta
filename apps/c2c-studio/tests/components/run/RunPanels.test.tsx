@@ -2057,6 +2057,20 @@ describe("Run Panels", () => {
         expect(result).toContain("1 file");
         expect(result).not.toContain("0 region");
         expect(result).not.toContain("regions");
+        // Singular file with no regions → subject-verb agreement requires "carries"
+        expect(result).toContain("1 file carries");
+      });
+
+      it("uses carry for regionCount:0 and fileCount > 1 (plural files, no regions)", () => {
+        const result = describeManualDriftSummary({
+          hasManualEdits: true,
+          fileCount: 2,
+          regionCount: 0,
+          baselineRunIds: ["run-x"],
+        });
+        expect(result).not.toBeNull();
+        expect(result).toContain("2 files carry");
+        expect(result).not.toContain("carries");
       });
 
       it("includes region clause when regionCount is non-zero (#359 finding-3 non-regression)", () => {
@@ -2069,6 +2083,9 @@ describe("Run Panels", () => {
         expect(result).not.toBeNull();
         expect(result).toContain("1 file");
         expect(result).toContain("2 regions");
+        // Compound subject (file and regions) → always "carry"
+        expect(result).toContain("carry");
+        expect(result).not.toContain("carries");
       });
     });
   });
