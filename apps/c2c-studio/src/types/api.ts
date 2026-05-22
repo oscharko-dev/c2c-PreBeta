@@ -276,8 +276,7 @@ export interface IntentionalDivergenceDecisionResponse {
 }
 
 export interface TransformResponse
-  extends W02RunContractFields,
-    TrustCaseIdentityFields {
+  extends W02RunContractFields, TrustCaseIdentityFields {
   runId: string;
   orchestratorRunId: string;
   programId: string;
@@ -301,7 +300,8 @@ export interface TransformResponse
 // ``javaRegionClassification`` null-fallback per ADR 0006 Decision 4:
 // when absent, the generated-Java buffer renders without trust-pillar
 // decoration. Studio MUST NOT infer regions from filename or content.
-export interface RunSummary extends W02RunContractFields, TrustCaseIdentityFields {
+export interface RunSummary
+  extends W02RunContractFields, TrustCaseIdentityFields {
   schemaVersion?: string;
   runId: string;
   programId: string;
@@ -587,10 +587,7 @@ export interface OutputChangeExplanationResponse {
   programId: string;
   currentTrustCaseId: string | null;
   previousTrustCaseId: string | null;
-  determination:
-    | "single_change"
-    | "multiple_changes"
-    | "not_determinable";
+  determination: "single_change" | "multiple_changes" | "not_determinable";
   primaryCategory: OutputChangeCategory | null;
   summary: string;
   categories: OutputChangeCategoryEntry[];

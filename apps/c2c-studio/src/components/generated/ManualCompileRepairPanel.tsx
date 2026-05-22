@@ -44,7 +44,9 @@ export function ManualCompileRepairPanel({
       return [];
     }
     const proposalFiles = session.proposal?.files ?? [];
-    const proposalByPath = new Map(proposalFiles.map((file) => [file.path, file]));
+    const proposalByPath = new Map(
+      proposalFiles.map((file) => [file.path, file]),
+    );
     const entries = Object.entries(session.candidateProject.files)
       .map(([filePath, candidateContent]) => {
         const currentContent = javaBuffers[filePath]?.content ?? "";
@@ -126,9 +128,9 @@ export function ManualCompileRepairPanel({
           </h2>
           <p className="truncate text-xs text-text-dim">
             Ask Coding Agent for a reviewable repair proposal after compile
-            failures, runtime exceptions, or parity mismatches, then review
-            the preview, validate the sandbox rerun, and accept only the
-            reviewed patch.
+            failures, runtime exceptions, or parity mismatches, then review the
+            preview, validate the sandbox rerun, and accept only the reviewed
+            patch.
           </p>
         </div>
         <button
@@ -153,7 +155,9 @@ export function ManualCompileRepairPanel({
           </div>
         ) : session?.status === "error" ? (
           <div className="rounded border border-error/20 bg-error/10 p-4 text-sm text-text">
-            <p className="font-medium text-error">Governed repair unavailable.</p>
+            <p className="font-medium text-error">
+              Governed repair unavailable.
+            </p>
             <p className="mt-1 text-text-dim">{session.error}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -205,7 +209,10 @@ export function ManualCompileRepairPanel({
                 </p>
                 <ul className="space-y-1 text-sm text-text">
                   <li>Only files in the reviewed preview can be proposed.</li>
-                  <li>Secrets, unrelated artifacts, and out-of-scope paths stay excluded.</li>
+                  <li>
+                    Secrets, unrelated artifacts, and out-of-scope paths stay
+                    excluded.
+                  </li>
                   <li>Any accepted patch must first pass the sandbox rerun.</li>
                 </ul>
               </div>
@@ -274,9 +281,9 @@ export function ManualCompileRepairPanel({
                       ? "Sandbox rerun ready"
                       : session.status === "accepting"
                         ? "Accepting"
-                    : session.status === "rejecting"
-                      ? "Rejecting"
-                      : "Diagnosis ready"}
+                        : session.status === "rejecting"
+                          ? "Rejecting"
+                          : "Diagnosis ready"}
                 </Badge>
                 {session.diagnosis.failureClass ? (
                   <Badge variant="error" icon={true}>
@@ -295,7 +302,10 @@ export function ManualCompileRepairPanel({
                 ) : null}
               </div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <MetaRow label="Run ID" value={session.runId ?? "Unavailable"} />
+                <MetaRow
+                  label="Run ID"
+                  value={session.runId ?? "Unavailable"}
+                />
                 <MetaRow
                   label="Entry file"
                   value={session.entryFilePath ?? "Unavailable"}
@@ -323,7 +333,8 @@ export function ManualCompileRepairPanel({
                 </p>
                 {session.diagnosis.likelyRootCause &&
                 session.diagnosis.summary &&
-                session.diagnosis.likelyRootCause !== session.diagnosis.summary ? (
+                session.diagnosis.likelyRootCause !==
+                  session.diagnosis.summary ? (
                   <p className="text-sm text-text-dim">
                     {session.diagnosis.likelyRootCause}
                   </p>
@@ -366,7 +377,8 @@ export function ManualCompileRepairPanel({
                   Candidate diff
                 </p>
                 <span className="text-xs text-text-dim">
-                  {changedFiles.length} file{changedFiles.length === 1 ? "" : "s"}
+                  {changedFiles.length} file
+                  {changedFiles.length === 1 ? "" : "s"}
                 </span>
               </div>
               {changedFiles.length > 0 ? (
@@ -483,16 +495,22 @@ export function ManualCompileRepairPanel({
               <button
                 type="button"
                 onClick={handleAccept}
-                disabled={busy || !session?.proposal || !session?.candidateProject}
+                disabled={
+                  busy || !session?.proposal || !session?.candidateProject
+                }
                 className="rounded border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {session?.status === "accepting" ? "Accepting..." : "Accept patch"}
+                {session?.status === "accepting"
+                  ? "Accepting..."
+                  : "Accept patch"}
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleApply}
-                disabled={busy || !session?.proposal || !session?.candidateProject}
+                disabled={
+                  busy || !session?.proposal || !session?.candidateProject
+                }
                 className="rounded border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {session?.status === "applying"
@@ -518,7 +536,9 @@ function DiagnosticCard({
         <span className="rounded border border-line px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-dim">
           {diagnostic.severity}
         </span>
-        <span className="font-mono text-[11px] text-text-dim">{diagnostic.code}</span>
+        <span className="font-mono text-[11px] text-text-dim">
+          {diagnostic.code}
+        </span>
       </div>
       <p className="mt-2 text-sm text-text">{diagnostic.message}</p>
       {diagnostic.filePath ? (

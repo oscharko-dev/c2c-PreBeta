@@ -219,9 +219,7 @@ describe("redactRegion — tenant additions", () => {
     expect(result.redactedText).toContain(
       "[REDACTED:tenant:customer-secret-code]",
     );
-    expect(result.matchedPatternIds).toContain(
-      "tenant:customer-secret-code",
-    );
+    expect(result.matchedPatternIds).toContain("tenant:customer-secret-code");
   });
 
   it("treats tenant additions as literals, not browser-supplied regexes", () => {

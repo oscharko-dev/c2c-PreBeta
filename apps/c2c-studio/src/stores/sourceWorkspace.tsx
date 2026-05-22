@@ -478,7 +478,8 @@ export function SourceWorkspaceProvider({ children }: { children: ReactNode }) {
       ...(selectedTrustCaseId
         ? { trustCaseId: selectedTrustCaseId }
         : {
-            expectedOutput: expectedOutput.length > 0 ? expectedOutput : undefined,
+            expectedOutput:
+              expectedOutput.length > 0 ? expectedOutput : undefined,
             oracleInput: oracleInput.length > 0 ? oracleInput : undefined,
           }),
     } as const;

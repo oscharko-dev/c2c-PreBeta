@@ -49,10 +49,7 @@ import {
   useJavaEditorActions,
   useRegisterCompileCheckHandler,
 } from "@/stores/javaEditorActions";
-import type {
-  Diagnostic,
-  JavaOriginRegion,
-} from "@/types/api";
+import type { Diagnostic, JavaOriginRegion } from "@/types/api";
 import { useOriginOverlayApi, useOverlay } from "@/lib/editor/originOverlay";
 import { useLineageCoverageApi } from "@/stores/lineageCoverage";
 import {
@@ -893,7 +890,10 @@ export function GeneratedJavaEditorPane() {
         requested?.filePath === filePath && requested.content === content;
       const alreadyCompleted =
         completed?.filePath === filePath && completed.content === content;
-      if (alreadyRequested && (lintTimerRef.current !== null || alreadyCompleted)) {
+      if (
+        alreadyRequested &&
+        (lintTimerRef.current !== null || alreadyCompleted)
+      ) {
         return;
       }
 
@@ -1135,45 +1135,48 @@ export function GeneratedJavaEditorPane() {
 
   // Studio-IDE-14 (#256): the Cmd/Ctrl+Shift+F handler. Reused by the
   // format-on-save path on Cmd/Ctrl+S.
-  const performFormat = useCallback(async (
-    trigger: "shortcut" | "on_save",
-  ): Promise<{
-    filePath: string;
-    content: string;
-  } | null> => {
-    const editor = editorInstanceRef.current;
-    if (!editor || formatInFlightRef.current) return null;
-    const model = editor.getModel();
-    if (!model) return null;
-    const filePath = selectedFilePathRef.current;
-    if (!filePath) return null;
-    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return null;
-    flushPendingEditRef.current();
-    const content = model.getValue();
-    formatInFlightRef.current = true;
-    try {
-      const result = await formatJava(
-        { content, filePath },
-        { telemetryTrigger: trigger },
-      );
-      if (!result.ok) {
-        setFormatNotice({
-          tone: result.code === "format_parse_error" ? "warning" : "error",
-          message:
-            result.code === "format_parse_error"
-              ? `Could not format: ${result.message}`
-              : `Formatter unavailable — buffer unchanged. ${result.message}`,
-        });
-        return { filePath, content };
+  const performFormat = useCallback(
+    async (
+      trigger: "shortcut" | "on_save",
+    ): Promise<{
+      filePath: string;
+      content: string;
+    } | null> => {
+      const editor = editorInstanceRef.current;
+      if (!editor || formatInFlightRef.current) return null;
+      const model = editor.getModel();
+      if (!model) return null;
+      const filePath = selectedFilePathRef.current;
+      if (!filePath) return null;
+      if (!isEditableLanguage(detectLanguageFromPath(filePath))) return null;
+      flushPendingEditRef.current();
+      const content = model.getValue();
+      formatInFlightRef.current = true;
+      try {
+        const result = await formatJava(
+          { content, filePath },
+          { telemetryTrigger: trigger },
+        );
+        if (!result.ok) {
+          setFormatNotice({
+            tone: result.code === "format_parse_error" ? "warning" : "error",
+            message:
+              result.code === "format_parse_error"
+                ? `Could not format: ${result.message}`
+                : `Formatter unavailable — buffer unchanged. ${result.message}`,
+          });
+          return { filePath, content };
+        }
+        if (!applyFormattedContent(filePath, result.formattedContent, model)) {
+          return null;
+        }
+        return { filePath, content: result.formattedContent };
+      } finally {
+        formatInFlightRef.current = false;
       }
-      if (!applyFormattedContent(filePath, result.formattedContent, model)) {
-        return null;
-      }
-      return { filePath, content: result.formattedContent };
-    } finally {
-      formatInFlightRef.current = false;
-    }
-  }, [applyFormattedContent]);
+    },
+    [applyFormattedContent],
+  );
 
   const performFormatRef = useRef(performFormat);
   performFormatRef.current = performFormat;
@@ -1249,7 +1252,9 @@ export function GeneratedJavaEditorPane() {
       generatedFilePaths.length > 0
         ? generatedFilePaths.flatMap((path) => {
             const entry = javaBuffers[path];
-            return entry ? ([[path, entry]] as Array<[string, typeof entry]>) : [];
+            return entry
+              ? ([[path, entry]] as Array<[string, typeof entry]>)
+              : [];
           })
         : Object.entries(javaBuffers);
     return entries;
@@ -1261,8 +1266,7 @@ export function GeneratedJavaEditorPane() {
     state.buildTest?.classification === "run-error" ||
     state.buildTest?.status === "compile-failed" ||
     state.buildTest?.status === "run-failed";
-  const hasManualEditContext =
-    flags.manualEditsPresent || hasManualJavaDrift;
+  const hasManualEditContext = flags.manualEditsPresent || hasManualJavaDrift;
   const hasRuntimeOrParityFailure =
     productState.state === "build-failed" ||
     productState.state === "equivalence-mismatch";
@@ -1329,31 +1333,34 @@ export function GeneratedJavaEditorPane() {
     state.runId,
   ]);
 
-  const saveCurrentJavaDraft = useCallback(async (
-    requestedFilePath?: string,
-    contentOverride?: string,
-  ): Promise<void> => {
-    const filePath = requestedFilePath ?? selectedFilePathRef.current;
-    if (!filePath) return;
-    if (!isEditableLanguage(detectLanguageFromPath(filePath))) return;
+  const saveCurrentJavaDraft = useCallback(
+    async (
+      requestedFilePath?: string,
+      contentOverride?: string,
+    ): Promise<void> => {
+      const filePath = requestedFilePath ?? selectedFilePathRef.current;
+      if (!filePath) return;
+      if (!isEditableLanguage(detectLanguageFromPath(filePath))) return;
 
-    const editor = editorInstanceRef.current;
-    const modelValue =
-      contentOverride ??
-      (filePath === selectedFilePathRef.current
-        ? editor?.getModel()?.getValue()
-        : undefined);
-    const pending = pendingEditRef.current;
-    const content =
-      modelValue ??
-      (pending?.filePath === filePath ? pending.content : undefined);
+      const editor = editorInstanceRef.current;
+      const modelValue =
+        contentOverride ??
+        (filePath === selectedFilePathRef.current
+          ? editor?.getModel()?.getValue()
+          : undefined);
+      const pending = pendingEditRef.current;
+      const content =
+        modelValue ??
+        (pending?.filePath === filePath ? pending.content : undefined);
 
-    flushPendingEditRef.current();
-    await saveJavaDraftRef.current(
-      filePath,
-      content === undefined ? undefined : { content },
-    );
-  }, []);
+      flushPendingEditRef.current();
+      await saveJavaDraftRef.current(
+        filePath,
+        content === undefined ? undefined : { content },
+      );
+    },
+    [],
+  );
 
   const saveCurrentJavaDraftRef = useRef(saveCurrentJavaDraft);
   saveCurrentJavaDraftRef.current = saveCurrentJavaDraft;
@@ -1970,12 +1977,11 @@ export function GeneratedJavaEditorPane() {
           {selectedFileHasManualDrift && selectedBaselineRunId
             ? `Current Java differs from Generator Baseline run ${selectedBaselineRunId.slice(0, 8)}`
             : `Current Java differs from the Generator Baseline in ${driftSummary.fileCount} ${driftSummary.fileCount === 1 ? "file" : "files"}`}
-          {selectedFileHasManualDrift &&
-          selectedBaselineSha &&
-          currentBufferSha
+          {selectedFileHasManualDrift && selectedBaselineSha && currentBufferSha
             ? ` (baseline ${selectedBaselineSha.slice(0, SHA_CHIP_LENGTH)} -> current ${currentBufferSha.slice(0, SHA_CHIP_LENGTH)}).`
             : "."}{" "}
-          Parity results and evidence remain anchored to the last verified generated artifact until you rerun Verify.
+          Parity results and evidence remain anchored to the last verified
+          generated artifact until you rerun Verify.
         </div>
       ) : null}
 
@@ -2018,7 +2024,9 @@ export function GeneratedJavaEditorPane() {
                   : "Ask Coding Agent"}
               </button>
               <p className="text-xs text-text-dim">
-                The diagnosis runs through the governed repair workflow and returns a reviewable patch proposal for compile, runtime, or parity failures.
+                The diagnosis runs through the governed repair workflow and
+                returns a reviewable patch proposal for compile, runtime, or
+                parity failures.
               </p>
             </div>
           ) : null}
@@ -2193,9 +2201,7 @@ export function GeneratedJavaEditorPane() {
               ? javaBufferEntry.generatorBaselineContent
               : null
           }
-          currentContent={
-            javaBufferEntry?.content ?? displayedContent ?? ""
-          }
+          currentContent={javaBufferEntry?.content ?? displayedContent ?? ""}
           manualOverlay={manualDriftOverlay}
           initialFocusLine={manualDriftFocusLine}
           onClose={() => {

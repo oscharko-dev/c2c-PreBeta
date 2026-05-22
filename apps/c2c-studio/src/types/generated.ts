@@ -1,18 +1,18 @@
-import { GeneratedFileRef, GeneratedTraceability } from './api';
+import { GeneratedFileRef, GeneratedTraceability } from "./api";
 
-export type GeneratedArtifactState = 
-  | 'idle'
-  | 'pending'
-  | 'unsupported'
-  | 'incomplete'
-  | 'generated'
-  | 'failed-verification'
-  | 'verified';
+export type GeneratedArtifactState =
+  | "idle"
+  | "pending"
+  | "unsupported"
+  | "incomplete"
+  | "generated"
+  | "failed-verification"
+  | "verified";
 
 export interface FileTreeNode {
   name: string;
   path: string;
-  type: 'file' | 'directory';
+  type: "file" | "directory";
   children: FileTreeNode[];
   ref?: GeneratedFileRef;
 }

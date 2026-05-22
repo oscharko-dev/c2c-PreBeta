@@ -148,7 +148,9 @@ function findJavaFilePath(
 ): string | null {
   const keys = [...parsed.javaRegionClassification.keys()];
   if (keys.length === 0) return null;
-  const candidates = keys.filter((key) => pathSuffixMatches(frame.javaFile, key));
+  const candidates = keys.filter((key) =>
+    pathSuffixMatches(frame.javaFile, key),
+  );
   if (candidates.length === 0) return null;
   const expectedSuffix = expectedJavaPathSuffix(frame);
   const packageCandidates = candidates.filter((key) =>

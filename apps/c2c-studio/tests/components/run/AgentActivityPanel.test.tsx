@@ -297,9 +297,7 @@ describe("AgentActivityPanel", () => {
     expect(row.textContent).toContain(
       "has not yet evaluated the assist-decision gate",
     );
-    expect(
-      screen.queryByTestId("agent-activity-assist-mode-badge"),
-    ).toBeNull();
+    expect(screen.queryByTestId("agent-activity-assist-mode-badge")).toBeNull();
   });
 
   it("renders the deterministic-only badge when assist is not required", () => {
@@ -335,21 +333,17 @@ describe("AgentActivityPanel", () => {
     expect(
       screen.getByTestId("agent-activity-assist-mode-badge").textContent,
     ).toContain("Deterministic-only run");
-    expect(
-      screen.getByTestId("agent-activity-assist-reason").textContent,
-    ).toBe("AI assist disabled");
+    expect(screen.getByTestId("agent-activity-assist-reason").textContent).toBe(
+      "AI assist disabled",
+    );
     expect(
       screen.getByTestId("agent-activity-assist-decided-at").textContent,
     ).toBe("2026-05-17T12:00:00Z");
     // No agent-role chip when assist was not required.
-    expect(
-      screen.queryByTestId("agent-activity-assist-agent-role"),
-    ).toBeNull();
+    expect(screen.queryByTestId("agent-activity-assist-agent-role")).toBeNull();
     // The deterministic-only badge must never imply success on its own —
     // the success row only appears when finalClassification is success.
-    expect(
-      screen.getByTestId("agent-activity-final-success"),
-    ).toBeDefined();
+    expect(screen.getByTestId("agent-activity-final-success")).toBeDefined();
   });
 
   it("renders the AI-assisted badge with reason, agent role, and rationale", () => {
@@ -396,17 +390,15 @@ describe("AgentActivityPanel", () => {
     expect(
       screen.getByTestId("agent-activity-assist-agent-role").textContent,
     ).toContain("Transformation Agent");
-    expect(
-      screen.getByTestId("agent-activity-assist-reason").textContent,
-    ).toBe("Semantic IR bounded ambiguity");
+    expect(screen.getByTestId("agent-activity-assist-reason").textContent).toBe(
+      "Semantic IR bounded ambiguity",
+    );
     expect(
       screen.getByTestId("agent-activity-assist-rationale").textContent,
     ).toContain("Bounded ambiguity in OCCURS-resolution.");
     // Even on an AI-assisted run the verified-success affordance must
     // remain absent until the deterministic gates publish success.
-    expect(
-      screen.queryByTestId("agent-activity-final-success"),
-    ).toBeNull();
+    expect(screen.queryByTestId("agent-activity-final-success")).toBeNull();
   });
 
   it("renders the assist-budget-exhausted reason as AI assist did not activate", () => {
@@ -438,8 +430,8 @@ describe("AgentActivityPanel", () => {
     );
     const row = screen.getByTestId("agent-activity-assist-decision");
     expect(row.getAttribute("data-assist-mode")).toBe("deterministic-only");
-    expect(
-      screen.getByTestId("agent-activity-assist-reason").textContent,
-    ).toBe("Assist budget exhausted");
+    expect(screen.getByTestId("agent-activity-assist-reason").textContent).toBe(
+      "Assist budget exhausted",
+    );
   });
 });

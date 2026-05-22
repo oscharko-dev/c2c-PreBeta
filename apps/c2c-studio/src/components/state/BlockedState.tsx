@@ -1,5 +1,5 @@
-import React from 'react';
-import { Panel } from '../ui/Panel';
+import React from "react";
+import { Panel } from "../ui/Panel";
 
 interface BlockedStateProps {
   reason: string;

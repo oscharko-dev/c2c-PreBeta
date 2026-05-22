@@ -78,7 +78,9 @@ function SortHeader({
       className={`flex items-center gap-1 text-left text-[10px] font-semibold uppercase tracking-wider ${active ? "text-text" : "text-text-faint"} hover:text-text`}
     >
       <span>{label}</span>
-      {active ? <span aria-hidden="true">{direction === "asc" ? "▲" : "▼"}</span> : null}
+      {active ? (
+        <span aria-hidden="true">{direction === "asc" ? "▲" : "▼"}</span>
+      ) : null}
     </button>
   );
 }
@@ -170,10 +172,12 @@ export function ProblemsPanel({
           aria-label="Diagnostic counts"
         >
           <li>
-            <span className="font-mono text-error">{summary.errorCount}</span> errors
+            <span className="font-mono text-error">{summary.errorCount}</span>{" "}
+            errors
           </li>
           <li>
-            <span className="font-mono text-warn">{summary.warningCount}</span> warnings
+            <span className="font-mono text-warn">{summary.warningCount}</span>{" "}
+            warnings
           </li>
           <li>
             <span className="font-mono">{summary.infoCount}</span> info
@@ -214,7 +218,16 @@ export function ProblemsPanel({
           </colgroup>
           <thead>
             <tr className="border-b border-line-2 text-text-faint">
-              <th className="py-1 pr-3" aria-sort={sortOrder.key === "severity" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
+              <th
+                className="py-1 pr-3"
+                aria-sort={
+                  sortOrder.key === "severity"
+                    ? sortOrder.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+              >
                 <SortHeader
                   label="Severity"
                   active={sortOrder.key === "severity"}
@@ -222,7 +235,16 @@ export function ProblemsPanel({
                   onToggle={() => onToggleSort("severity")}
                 />
               </th>
-              <th className="py-1 pr-3" aria-sort={sortOrder.key === "filePath" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
+              <th
+                className="py-1 pr-3"
+                aria-sort={
+                  sortOrder.key === "filePath"
+                    ? sortOrder.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+              >
                 <SortHeader
                   label="File"
                   active={sortOrder.key === "filePath"}
@@ -230,7 +252,16 @@ export function ProblemsPanel({
                   onToggle={() => onToggleSort("filePath")}
                 />
               </th>
-              <th className="py-1 pr-3" aria-sort={sortOrder.key === "line" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
+              <th
+                className="py-1 pr-3"
+                aria-sort={
+                  sortOrder.key === "line"
+                    ? sortOrder.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+              >
                 <SortHeader
                   label="Line"
                   active={sortOrder.key === "line"}
@@ -238,7 +269,16 @@ export function ProblemsPanel({
                   onToggle={() => onToggleSort("line")}
                 />
               </th>
-              <th className="py-1 pr-3" aria-sort={sortOrder.key === "code" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
+              <th
+                className="py-1 pr-3"
+                aria-sort={
+                  sortOrder.key === "code"
+                    ? sortOrder.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+              >
                 <SortHeader
                   label="Code"
                   active={sortOrder.key === "code"}
@@ -246,7 +286,16 @@ export function ProblemsPanel({
                   onToggle={() => onToggleSort("code")}
                 />
               </th>
-              <th className="py-1 pr-3" aria-sort={sortOrder.key === "scope" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
+              <th
+                className="py-1 pr-3"
+                aria-sort={
+                  sortOrder.key === "scope"
+                    ? sortOrder.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+              >
                 <SortHeader
                   label="Source"
                   active={sortOrder.key === "scope"}
@@ -254,7 +303,16 @@ export function ProblemsPanel({
                   onToggle={() => onToggleSort("scope")}
                 />
               </th>
-              <th className="py-1 pr-3" aria-sort={sortOrder.key === "message" ? (sortOrder.direction === "asc" ? "ascending" : "descending") : "none"}>
+              <th
+                className="py-1 pr-3"
+                aria-sort={
+                  sortOrder.key === "message"
+                    ? sortOrder.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+              >
                 <SortHeader
                   label="Message"
                   active={sortOrder.key === "message"}
@@ -278,7 +336,8 @@ export function ProblemsPanel({
               const index = virtualWindow.start + visibleIndex;
               const { diagnostic, scope } = entry;
               const sourceLabel =
-                diagnostic.sourceKind ?? (scope === "build-test" ? "build" : "run");
+                diagnostic.sourceKind ??
+                (scope === "build-test" ? "build" : "run");
               const fileLabel = diagnostic.filePath ?? "—";
               const lineLabel = diagnostic.line ?? "—";
               const codeLabel = diagnostic.code || "—";

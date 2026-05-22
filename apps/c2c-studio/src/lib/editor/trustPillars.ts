@@ -132,7 +132,9 @@ export const TRUST_PILLAR_VISUALS: Readonly<
   },
 });
 
-export function pillarFor(region: JavaRegionClassification): TrustPillarKey | null {
+export function pillarFor(
+  region: JavaRegionClassification,
+): TrustPillarKey | null {
   switch (region.originClass) {
     case "deterministic":
       return region.verificationOutcome === "oracle_passed"

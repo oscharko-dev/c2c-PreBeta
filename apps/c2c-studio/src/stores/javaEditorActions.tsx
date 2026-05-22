@@ -75,16 +75,19 @@ export function JavaEditorActionsProvider({
     [],
   );
 
-  const triggerCompileCheck = useCallback((trigger: CompileCheckTrigger) => {
-    const handler = handlerRef.current;
-    if (!canCompileCheck) return;
-    if (!handler) return;
-    // The handler returns a Promise (or void); we don't await it here
-    // because callers are fire-and-forget. The handler itself is
-    // responsible for flipping `compileCheckPending` via
-    // `setCompileCheckPending`.
-    void handler(trigger);
-  }, [canCompileCheck]);
+  const triggerCompileCheck = useCallback(
+    (trigger: CompileCheckTrigger) => {
+      const handler = handlerRef.current;
+      if (!canCompileCheck) return;
+      if (!handler) return;
+      // The handler returns a Promise (or void); we don't await it here
+      // because callers are fire-and-forget. The handler itself is
+      // responsible for flipping `compileCheckPending` via
+      // `setCompileCheckPending`.
+      void handler(trigger);
+    },
+    [canCompileCheck],
+  );
 
   const value = useMemo<JavaEditorActionsContextValue>(
     () => ({
@@ -146,7 +149,9 @@ export function useRegisterCompileCheckHandler(
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
   useEffect(() => {
-    return registerCompileCheckHandler((trigger) => handlerRef.current(trigger));
+    return registerCompileCheckHandler((trigger) =>
+      handlerRef.current(trigger),
+    );
   }, [registerCompileCheckHandler]);
   useEffect(() => {
     setCompileCheckAvailable(available);

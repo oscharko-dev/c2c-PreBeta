@@ -344,11 +344,14 @@ test.describe("Studio-IDE-8 stack-trace navigation (#253)", () => {
     // --- UI flow ----------------------------------------------------------
 
     await expectReadyWorkbench(page);
-    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
+    await enterCobolSource(
+      page,
+      `       IDENTIFICATION DIVISION.
        PROGRAM-ID. PROG1.
        PROCEDURE DIVISION.
            DISPLAY 'HELLO'.
-           STOP RUN.`);
+           STOP RUN.`,
+    );
     await topBarStartButton(page).click();
 
     // Build & Test tab carries the failure note that the StackTraceView

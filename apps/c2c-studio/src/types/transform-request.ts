@@ -2,7 +2,7 @@ export interface TransformRequest {
   sourceText: string;
   programId?: string;
   sourceName?: string;
-  targetLanguage?: 'java';
+  targetLanguage?: "java";
   trustCaseId?: string;
   expectedOutput?: string;
   oracleInput?: string;

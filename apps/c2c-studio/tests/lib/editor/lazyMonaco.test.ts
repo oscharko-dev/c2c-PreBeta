@@ -20,20 +20,14 @@ vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
   },
   Uri: { parse: (s: string) => ({ toString: () => s }) },
 }));
-vi.mock(
-  "monaco-editor/esm/vs/basic-languages/java/java.contribution",
-  () => {
-    contributionLoads.java += 1;
-    return {};
-  },
-);
-vi.mock(
-  "monaco-editor/esm/vs/basic-languages/xml/xml.contribution",
-  () => {
-    contributionLoads.xml += 1;
-    return {};
-  },
-);
+vi.mock("monaco-editor/esm/vs/basic-languages/java/java.contribution", () => {
+  contributionLoads.java += 1;
+  return {};
+});
+vi.mock("monaco-editor/esm/vs/basic-languages/xml/xml.contribution", () => {
+  contributionLoads.xml += 1;
+  return {};
+});
 vi.mock(
   "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution",
   () => {

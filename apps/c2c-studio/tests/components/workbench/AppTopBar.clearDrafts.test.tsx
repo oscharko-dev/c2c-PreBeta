@@ -171,7 +171,9 @@ describe("AppTopBar clear-local-drafts", () => {
     fireEvent.click(
       screen.getByRole("menuitem", { name: /clear local drafts/i }),
     );
-    expect(await screen.findByText(/tenant tenant-a \/ user user-1/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/tenant tenant-a \/ user user-1/i),
+    ).toBeInTheDocument();
     expect(await screen.findByText(/3 local drafts/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clear drafts" }));
 
@@ -219,10 +221,10 @@ describe("AppTopBar clear-local-drafts", () => {
       screen.getByRole("menuitem", { name: /clear local drafts/i }),
     );
 
+    expect(await screen.findByText(/session unavailable/i)).toBeInTheDocument();
     expect(
-      await screen.findByText(/session unavailable/i),
+      screen.getByText(/current signed-in workspace/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/current signed-in workspace/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear drafts" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Clear drafts" }));
     await waitFor(() => {

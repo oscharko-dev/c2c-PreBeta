@@ -1,1 +1,1 @@
-export type { EvidenceView } from './api';
+export type { EvidenceView } from "./api";

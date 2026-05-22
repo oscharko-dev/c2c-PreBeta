@@ -489,7 +489,8 @@ describe("apiClient", () => {
           runId: "run-1",
           programId: "P1",
           status: "created",
-          message: "Java parity regression scaffold exported as a run artifact.",
+          message:
+            "Java parity regression scaffold exported as a run artifact.",
           export: {
             exportId: "hello-regression",
             qualification: "clean",
@@ -526,15 +527,12 @@ describe("apiClient", () => {
       exportName: "hello-regression",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/v0/runs/run-1/evidence/export",
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exportName: "hello-regression" }),
-      },
-    );
+    expect(fetch).toHaveBeenCalledWith("/api/v0/runs/run-1/evidence/export", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exportName: "hello-regression" }),
+    });
     expect(result).toEqual({
       ok: true,
       data: {

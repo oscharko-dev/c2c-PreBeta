@@ -1,4 +1,10 @@
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CobolEditorPane } from "@/components/source/CobolEditorPane";
 import { SecondaryStripe } from "@/components/workbench/SecondaryStripe";
@@ -1048,9 +1054,12 @@ describe("COBOL source input", () => {
     fireEvent.click(screen.getByText("Start Typing"));
     const sourceText =
       "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. NOCAT.\n";
-    fireEvent.change(screen.getByRole("textbox", { name: /COBOL source editor/i }), {
-      target: { value: sourceText },
-    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: /COBOL source editor/i }),
+      {
+        target: { value: sourceText },
+      },
+    );
 
     const generateAndVerify = await screen.findByTestId(
       "topbar-generate-and-verify-button",
@@ -1129,9 +1138,12 @@ describe("COBOL source input", () => {
     fireEvent.click(screen.getByText("Start Typing"));
     const sourceText =
       "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. NOCAT.\n";
-    fireEvent.change(screen.getByRole("textbox", { name: /COBOL source editor/i }), {
-      target: { value: sourceText },
-    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: /COBOL source editor/i }),
+      {
+        target: { value: sourceText },
+      },
+    );
 
     const generateAndVerify = await screen.findByTestId(
       "topbar-generate-and-verify-button",

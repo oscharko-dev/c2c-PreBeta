@@ -168,8 +168,7 @@ function buildParsedTrace(envelope: TraceabilityEnvelope): ParsedTrace {
   }
   return {
     runId: envelope.runId,
-    programId:
-      typeof envelope.programId === "string" ? envelope.programId : "",
+    programId: typeof envelope.programId === "string" ? envelope.programId : "",
     trace: isRecord(envelope.trace) ? envelope.trace : null,
     irSymbolMap,
     javaRegionClassification,

@@ -10,7 +10,10 @@
 
 import type { Diagnostic } from "@/types/api";
 import type { TransformationRunState } from "@/types/run";
-import { DEFAULT_MARKER_LIMIT, sourceKindToOwner } from "@/lib/editor/diagnosticMarkers";
+import {
+  DEFAULT_MARKER_LIMIT,
+  sourceKindToOwner,
+} from "@/lib/editor/diagnosticMarkers";
 
 // "scope" describes the upstream step the diagnostic flowed from, used
 // for the panel's secondary chip and for grouping when sorted by source.
@@ -66,14 +69,20 @@ export function collectDiagnostics(
   return out;
 }
 
-function compareStrings(left: string | undefined, right: string | undefined): number {
+function compareStrings(
+  left: string | undefined,
+  right: string | undefined,
+): number {
   if (left === undefined && right === undefined) return 0;
   if (left === undefined) return 1;
   if (right === undefined) return -1;
   return left.localeCompare(right);
 }
 
-function compareNumbers(left: number | undefined, right: number | undefined): number {
+function compareNumbers(
+  left: number | undefined,
+  right: number | undefined,
+): number {
   if (left === undefined && right === undefined) return 0;
   if (left === undefined) return 1;
   if (right === undefined) return -1;
@@ -108,7 +117,9 @@ export function compareEntries(
         direction
       );
     case "code":
-      return compareStrings(left.diagnostic.code, right.diagnostic.code) * direction;
+      return (
+        compareStrings(left.diagnostic.code, right.diagnostic.code) * direction
+      );
     case "scope":
       return compareStrings(left.scope, right.scope) * direction;
   }

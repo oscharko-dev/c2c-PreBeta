@@ -1,5 +1,5 @@
-import React from 'react';
-import { cn } from '@/lib/utils';
+import React from "react";
+import { cn } from "@/lib/utils";
 
 interface SplitPaneProps extends React.HTMLAttributes<HTMLDivElement> {
   left: React.ReactNode;
@@ -9,13 +9,23 @@ interface SplitPaneProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 export const SplitPane = React.forwardRef<HTMLDivElement, SplitPaneProps>(
-  ({ className, left, right, leftLabel = 'Left pane', rightLabel = 'Right pane', ...props }, ref) => {
+  (
+    {
+      className,
+      left,
+      right,
+      leftLabel = "Left pane",
+      rightLabel = "Right pane",
+      ...props
+    },
+    ref,
+  ) => {
     return (
       <div
         ref={ref}
         className={cn(
-          'grid min-h-0 gap-px overflow-hidden rounded-md border border-line bg-line lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]',
-          className
+          "grid min-h-0 gap-px overflow-hidden rounded-md border border-line bg-line lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]",
+          className,
         )}
         {...props}
       >
@@ -27,7 +37,7 @@ export const SplitPane = React.forwardRef<HTMLDivElement, SplitPaneProps>(
         </section>
       </div>
     );
-  }
+  },
 );
 
-SplitPane.displayName = 'SplitPane';
+SplitPane.displayName = "SplitPane";

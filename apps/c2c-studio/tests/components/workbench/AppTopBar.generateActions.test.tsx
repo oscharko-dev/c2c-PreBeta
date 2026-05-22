@@ -96,7 +96,9 @@ function renderTopBar() {
   return render(
     <AppTopBar
       apiState={
-        apiState as unknown as React.ComponentProps<typeof AppTopBar>["apiState"]
+        apiState as unknown as React.ComponentProps<
+          typeof AppTopBar
+        >["apiState"]
       }
     />,
   );
@@ -154,9 +156,9 @@ describe("AppTopBar generator actions", () => {
     fireEvent.click(screen.getByTestId("topbar-regenerate-button"));
 
     expect(submitGenerateMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("topbar-regenerate-confirm-dialog")).toHaveTextContent(
-      "Re-run the generator with manual edits present?",
-    );
+    expect(
+      screen.getByTestId("topbar-regenerate-confirm-dialog"),
+    ).toHaveTextContent("Re-run the generator with manual edits present?");
 
     fireEvent.click(screen.getByTestId("topbar-regenerate-confirm-proceed"));
 
@@ -195,10 +197,7 @@ describe("AppTopBar generator actions", () => {
       generated: { entryClass: "com.example.Main" },
       generatedFiles: {
         entryFilePath: "src/Main.java",
-        files: [
-          { path: "src/Main.java" },
-          { path: "src/Helper.java" },
-        ],
+        files: [{ path: "src/Main.java" }, { path: "src/Helper.java" }],
       },
     };
     expectedOutputMock = "DONE\n";

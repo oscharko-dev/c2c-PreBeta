@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export async function copyToClipboard(value: string): Promise<boolean> {
   if (
-    typeof navigator === 'undefined' ||
-    typeof navigator.clipboard === 'undefined' ||
-    typeof navigator.clipboard.writeText !== 'function'
+    typeof navigator === "undefined" ||
+    typeof navigator.clipboard === "undefined" ||
+    typeof navigator.clipboard.writeText !== "function"
   ) {
     return false;
   }

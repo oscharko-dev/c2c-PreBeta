@@ -127,7 +127,10 @@ describe("sessionBootstrap", () => {
     expect(calls).toHaveLength(1);
 
     firstHandle.resolve?.(
-      new Response("nope", { status: 500, headers: { "content-type": "text/plain" } }),
+      new Response("nope", {
+        status: 500,
+        headers: { "content-type": "text/plain" },
+      }),
     );
     await expect(first).rejects.toThrow(SessionBootstrapError);
   });
@@ -208,7 +211,10 @@ describe("sessionBootstrap", () => {
         userId: "user-1",
         draftKeyWrappingSecret: freshSecret(),
         studioRedactionPatternAdditions: [
-          { id: "tenant:customer-secret-code", literal: "CUSTOMER-SECRET-CODE" },
+          {
+            id: "tenant:customer-secret-code",
+            literal: "CUSTOMER-SECRET-CODE",
+          },
         ],
       },
     });

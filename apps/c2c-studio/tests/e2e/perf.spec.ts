@@ -69,10 +69,10 @@ async function loadCobolAndAwaitMount(
       const visibleRanges = editor.getVisibleRanges();
       return Boolean(
         model &&
-          hasRenderedViewport &&
-          visibleRanges.some(
-            (range) => range.endLineNumber >= range.startLineNumber,
-          ),
+        hasRenderedViewport &&
+        visibleRanges.some(
+          (range) => range.endLineNumber >= range.startLineNumber,
+        ),
       );
     },
     null,
@@ -249,9 +249,7 @@ test.describe("@perf editor mount + search", () => {
     expect(
       Math.abs((probe?.after.scrollTop ?? 0) - (probe?.before.scrollTop ?? 0)),
     ).toBeLessThanOrEqual(500);
-    console.log(
-      `[perf] 10k controlled edit: ${probe?.elapsed.toFixed(0)} ms`,
-    );
+    console.log(`[perf] 10k controlled edit: ${probe?.elapsed.toFixed(0)} ms`);
   });
 
   test("scroll p95 frametime stays under 16.7 ms on a 10k-line buffer", async ({

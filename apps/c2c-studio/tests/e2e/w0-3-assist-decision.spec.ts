@@ -153,8 +153,7 @@ function runLinks(runId: string) {
 }
 
 async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
-  const { run, finalClassification, buildTestStatus, evidenceStatus } =
-    fixture;
+  const { run, finalClassification, buildTestStatus, evidenceStatus } = fixture;
   const { runId, programId } = run;
   const links = runLinks(runId);
   const isSuccess = finalClassification === "success";
@@ -247,32 +246,29 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
     });
   });
 
-  await page.route(
-    /\/api\/v0\/transform(?:\?.*)?$/,
-    async (route) => {
-      if (route.request().method() === "OPTIONS") {
-        await route.fulfill({ status: 204, headers: MOCK_CORS_HEADERS });
-        return;
-      }
-      await route.fulfill({
-        status: 201,
-        contentType: "application/json",
-        headers: MOCK_CORS_HEADERS,
-        body: JSON.stringify({
-          runId,
-          orchestratorRunId: runId,
-          programId,
-          ...trustCaseIdentity(programId),
-          status: "starting",
-          mode: "live",
-          productMode: "live",
-          createdAt: "2026-05-17T00:00:00Z",
-          updatedAt: "2026-05-17T00:00:00Z",
-          links,
-        }),
-      });
-    },
-  );
+  await page.route(/\/api\/v0\/transform(?:\?.*)?$/, async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: MOCK_CORS_HEADERS });
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      headers: MOCK_CORS_HEADERS,
+      body: JSON.stringify({
+        runId,
+        orchestratorRunId: runId,
+        programId,
+        ...trustCaseIdentity(programId),
+        status: "starting",
+        mode: "live",
+        productMode: "live",
+        createdAt: "2026-05-17T00:00:00Z",
+        updatedAt: "2026-05-17T00:00:00Z",
+        links,
+      }),
+    });
+  });
 
   await page.route("**/api/v0/session/bootstrap*", async (route) => {
     await route.fulfill({
@@ -282,8 +278,7 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
       body: JSON.stringify({
         tenantId: "issue-362-fixture-tenant",
         userId: "issue-362-fixture-user",
-        draftKeyWrappingSecret:
-          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        draftKeyWrappingSecret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
         telemetrySalt: "issue-362-telemetry-salt",
         studioRedactionPatternAdditions: [],
       }),
@@ -369,51 +364,48 @@ async function mockBffScenario(page: Page, fixture: ScenarioFixture) {
     });
   });
 
-  await page.route(
-    `**/api/v0/runs/${runId}/generated/files`,
-    async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        headers: MOCK_CORS_HEADERS,
-        body: JSON.stringify(
-          isSuccess
-            ? {
-                runId,
-                programId,
-                mode: "live",
-                productMode: "live",
-                status: "complete",
-                files: [
-                  {
-                    path: entryFilePath,
-                    sha256: generatedSha,
-                    byteSize: javaSource.length,
-                    mimeType: "text/x-java-source",
-                  },
-                ],
-                fileCount: 1,
-                entryFilePath,
-                artifactRef: {
+  await page.route(`**/api/v0/runs/${runId}/generated/files`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: MOCK_CORS_HEADERS,
+      body: JSON.stringify(
+        isSuccess
+          ? {
+              runId,
+              programId,
+              mode: "live",
+              productMode: "live",
+              status: "complete",
+              files: [
+                {
+                  path: entryFilePath,
                   sha256: generatedSha,
                   byteSize: javaSource.length,
+                  mimeType: "text/x-java-source",
                 },
-              }
-            : {
-                runId,
-                programId,
-                mode: "live",
-                productMode: "live",
-                status: "incomplete",
-                files: [],
-                fileCount: 0,
-                artifactRef: null,
-                missingArtifacts: ["generatedJava"],
+              ],
+              fileCount: 1,
+              entryFilePath,
+              artifactRef: {
+                sha256: generatedSha,
+                byteSize: javaSource.length,
               },
-        ),
-      });
-    },
-  );
+            }
+          : {
+              runId,
+              programId,
+              mode: "live",
+              productMode: "live",
+              status: "incomplete",
+              files: [],
+              fileCount: 0,
+              artifactRef: null,
+              missingArtifacts: ["generatedJava"],
+            },
+      ),
+    });
+  });
 
   await page.route(
     `**/api/v0/runs/${runId}/generated/files/${entryFilePath}`,

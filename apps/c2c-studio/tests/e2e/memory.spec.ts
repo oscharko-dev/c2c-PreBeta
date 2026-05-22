@@ -165,12 +165,12 @@ async function loadCobolAndAwaitMount(
       const visibleRanges = editor.getVisibleRanges();
       return Boolean(
         model &&
-          model.uri.toString().includes(String(expectedSourceName)) &&
-          model.getLineCount() >= 1_000 &&
-          hasRenderedViewport &&
-          visibleRanges.some(
-            (range) => range.endLineNumber >= range.startLineNumber,
-          ),
+        model.uri.toString().includes(String(expectedSourceName)) &&
+        model.getLineCount() >= 1_000 &&
+        hasRenderedViewport &&
+        visibleRanges.some(
+          (range) => range.endLineNumber >= range.startLineNumber,
+        ),
       );
     },
     sourceName,
@@ -178,9 +178,7 @@ async function loadCobolAndAwaitMount(
   );
 }
 
-async function clearEditorsAndAwaitTeardown(
-  page: Page,
-): Promise<void> {
+async function clearEditorsAndAwaitTeardown(page: Page): Promise<void> {
   await page.evaluate(() => {
     window.dispatchEvent(new Event("c2c-perf:clear-editors"));
   });
@@ -227,10 +225,7 @@ test.describe("@memory recycle pressure", () => {
       console.warn(
         "[memory] no Chromium heap sampler is available in this context; the model-count SLA remains enforced by the companion test.",
       );
-      test.skip(
-        true,
-        "No Chromium heap sampler is available in this context",
-      );
+      test.skip(true, "No Chromium heap sampler is available in this context");
       return;
     }
 

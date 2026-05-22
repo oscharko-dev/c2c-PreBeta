@@ -72,9 +72,7 @@ test.describe("@visual structural baselines", () => {
   test("clear local drafts dialog frame", async ({ page }) => {
     await readyWorkbench(page);
     await page.getByLabel("More workbench actions").click();
-    await page
-      .getByRole("menuitem", { name: "Clear local drafts" })
-      .click();
+    await page.getByRole("menuitem", { name: "Clear local drafts" }).click();
     const dialog = page.getByRole("dialog", { name: "Clear local drafts?" });
     await expect(dialog).toBeVisible();
     await expect(

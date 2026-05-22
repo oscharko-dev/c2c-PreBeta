@@ -1,11 +1,13 @@
-import React from 'react';
-import { Panel } from '../ui/Panel';
+import React from "react";
+import { Panel } from "../ui/Panel";
 
 interface MissingArtifactsPanelProps {
   artifacts: string[];
 }
 
-export function MissingArtifactsPanel({ artifacts }: MissingArtifactsPanelProps) {
+export function MissingArtifactsPanel({
+  artifacts,
+}: MissingArtifactsPanelProps) {
   if (!artifacts || artifacts.length === 0) return null;
 
   return (

@@ -491,10 +491,7 @@ async function deriveSelectorHmacKey(
   return keyPromise;
 }
 
-function encodeLengthPrefixedFields(
-  domain: string,
-  fields: string[],
-): Bytes {
+function encodeLengthPrefixedFields(domain: string, fields: string[]): Bytes {
   const encoder = new TextEncoder();
   const encodedFields = [domain, ...fields].map((field) =>
     encoder.encode(field),
@@ -656,7 +653,9 @@ async function decryptPayload(
 function publishDraftPersistenceEvent(event: DraftPersistenceEvent): void {
   const eventTarget =
     typeof window !== "undefined" ? window : (undefined as Window | undefined);
-  eventTarget?.dispatchEvent(new CustomEvent(DRAFT_EVENT_NAME, { detail: event }));
+  eventTarget?.dispatchEvent(
+    new CustomEvent(DRAFT_EVENT_NAME, { detail: event }),
+  );
 
   if (typeof BroadcastChannel !== "undefined") {
     try {

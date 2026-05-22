@@ -1,5 +1,5 @@
-import React from 'react';
-import { cn } from '@/lib/utils';
+import React from "react";
+import { cn } from "@/lib/utils";
 
 export interface TabsProps extends React.HTMLAttributes<HTMLDivElement> {
   value: string;
@@ -17,11 +17,16 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
         return;
       }
 
-      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + delta + tabs.length) % tabs.length;
+      const nextIndex =
+        currentIndex === -1
+          ? 0
+          : (currentIndex + delta + tabs.length) % tabs.length;
       const nextValue = tabs[nextIndex].value;
       onValueChange(nextValue);
       queueMicrotask(() => {
-        const nextTab = document.getElementById(idBase ? `${idBase}-tab-${nextValue}` : nextValue);
+        const nextTab = document.getElementById(
+          idBase ? `${idBase}-tab-${nextValue}` : nextValue,
+        );
         nextTab?.focus();
       });
     };
@@ -32,7 +37,7 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
         role="tablist"
         className={cn(
           "flex items-center space-x-1 bg-bg-2 p-1 rounded-md border border-line",
-          className
+          className,
         )}
         {...props}
       >
@@ -47,32 +52,36 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
             tabIndex={value === tab.value ? 0 : -1}
             onClick={() => onValueChange(tab.value)}
             onKeyDown={(event) => {
-              if (event.key === 'ArrowRight') {
+              if (event.key === "ArrowRight") {
                 event.preventDefault();
                 move(1);
               }
 
-              if (event.key === 'ArrowLeft') {
+              if (event.key === "ArrowLeft") {
                 event.preventDefault();
                 move(-1);
               }
 
-              if (event.key === 'Home') {
+              if (event.key === "Home") {
                 event.preventDefault();
                 const nextValue = tabs[0].value;
                 onValueChange(nextValue);
                 queueMicrotask(() => {
-                  const nextTab = document.getElementById(idBase ? `${idBase}-tab-${nextValue}` : nextValue);
+                  const nextTab = document.getElementById(
+                    idBase ? `${idBase}-tab-${nextValue}` : nextValue,
+                  );
                   nextTab?.focus();
                 });
               }
 
-              if (event.key === 'End') {
+              if (event.key === "End") {
                 event.preventDefault();
                 const nextValue = tabs[tabs.length - 1].value;
                 onValueChange(nextValue);
                 queueMicrotask(() => {
-                  const nextTab = document.getElementById(idBase ? `${idBase}-tab-${nextValue}` : nextValue);
+                  const nextTab = document.getElementById(
+                    idBase ? `${idBase}-tab-${nextValue}` : nextValue,
+                  );
                   nextTab?.focus();
                 });
               }
@@ -80,9 +89,10 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
             className={cn(
               "min-h-6 px-3 py-1 rounded text-sm font-medium transition-colors outline-none focus-visible:ring-1 focus-visible:ring-accent",
               {
-                'bg-bg-0 text-text shadow-sm': value === tab.value,
-                'text-text-dim hover:text-text hover:bg-bg-3': value !== tab.value,
-              }
+                "bg-bg-0 text-text shadow-sm": value === tab.value,
+                "text-text-dim hover:text-text hover:bg-bg-3":
+                  value !== tab.value,
+              },
             )}
           >
             {tab.label}
@@ -90,7 +100,7 @@ export const Tabs = React.forwardRef<HTMLDivElement, TabsProps>(
         ))}
       </div>
     );
-  }
+  },
 );
 
-Tabs.displayName = 'Tabs';
+Tabs.displayName = "Tabs";

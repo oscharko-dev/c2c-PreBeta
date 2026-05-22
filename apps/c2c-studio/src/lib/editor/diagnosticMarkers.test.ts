@@ -17,9 +17,9 @@ const monacoStub = {
 } as unknown as Parameters<typeof diagnosticsToMarkers>[1]["monaco"];
 
 // Stub Monaco text model exposing only what the marker builder reads.
-function makeModel(lineLengths: number[]): Parameters<
-  typeof diagnosticsToMarkers
->[1]["model"] {
+function makeModel(
+  lineLengths: number[],
+): Parameters<typeof diagnosticsToMarkers>[1]["model"] {
   return {
     getLineCount() {
       return lineLengths.length;
@@ -49,7 +49,12 @@ describe("diagnosticsToMarkers", () => {
   it("maps severity to Monaco's MarkerSeverity enum", () => {
     const diagnostics: Diagnostic[] = [
       makeDiagnostic({ severity: "error", line: 1, code: "E1", message: "e" }),
-      makeDiagnostic({ severity: "warning", line: 2, code: "W1", message: "w" }),
+      makeDiagnostic({
+        severity: "warning",
+        line: 2,
+        code: "W1",
+        message: "w",
+      }),
       makeDiagnostic({ severity: "info", line: 3, code: "I1", message: "i" }),
       makeDiagnostic({ severity: "hint", line: 4, code: "H1", message: "h" }),
     ];
@@ -271,9 +276,9 @@ describe("sourceKindToOwner", () => {
 
   it("falls back to c2c-unknown for undefined or unknown sourceKind", () => {
     expect(sourceKindToOwner(undefined)).toBe("c2c-unknown");
-    expect(
-      sourceKindToOwner("something-new" as Diagnostic["sourceKind"]),
-    ).toBe("c2c-unknown");
+    expect(sourceKindToOwner("something-new" as Diagnostic["sourceKind"])).toBe(
+      "c2c-unknown",
+    );
   });
 });
 
@@ -318,7 +323,6 @@ describe("diagnosticsToMarkers — multi-line ranges (review #244)", () => {
     expect(markers[0]?.endColumn).toBe(8);
   });
 });
-
 
 describe("diagnosticsToMarkers — filePath rule (review #244)", () => {
   it("drops diagnostics without filePath (ADR 0006 Decision 4)", () => {

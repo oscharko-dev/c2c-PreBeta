@@ -26,9 +26,7 @@ const languageContributionLoaders: Record<
     import("monaco-editor/esm/vs/basic-languages/java/java.contribution"),
   json: () => import("monaco-editor/esm/vs/language/json/monaco.contribution"),
   markdown: () =>
-    import(
-      "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution"
-    ),
+    import("monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution"),
   xml: () =>
     import("monaco-editor/esm/vs/basic-languages/xml/xml.contribution"),
 };

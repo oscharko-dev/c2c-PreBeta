@@ -54,9 +54,7 @@ describe("CobolDataDictionary", () => {
   it("lists data items from the production source workspace path", () => {
     sourceWorkspaceState.sourceText = FIXTURE;
     render(<CobolDataDictionary />);
-    expect(screen.getAllByTestId("cobol-data-dictionary-item")).toHaveLength(
-      7,
-    );
+    expect(screen.getAllByTestId("cobol-data-dictionary-item")).toHaveLength(7);
     expect(screen.getAllByText(/WS-TOTAL/).length).toBeGreaterThan(0);
   });
 
@@ -76,9 +74,9 @@ describe("CobolDataDictionary", () => {
     const { container } = render(
       <CobolDataDictionary sourceTextOverride={FIXTURE} />,
     );
-    expect(screen.getAllByText(/java\.math\.BigDecimal/).length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByText(/java\.math\.BigDecimal/).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText(/W0 assumption/)).toBeInTheDocument();
     expect(container.querySelector("strong code")).not.toBeNull();
     expect(container).not.toHaveTextContent(/\*\*/);

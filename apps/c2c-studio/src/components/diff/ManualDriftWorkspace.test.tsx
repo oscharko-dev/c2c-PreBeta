@@ -13,7 +13,10 @@ type DiffEditorMockProps = {
   originalModelUri?: string;
   ariaLabel?: string;
   className?: string;
-  onMount?: (args: { editor: typeof fakeDiffEditor; monaco: typeof fakeMonaco }) => void;
+  onMount?: (args: {
+    editor: typeof fakeDiffEditor;
+    monaco: typeof fakeMonaco;
+  }) => void;
 };
 
 interface CapturedDiffMount {
@@ -261,16 +264,16 @@ describe("ManualDriftWorkspace", () => {
     }>;
 
     expect(modifiedDecorations).toHaveLength(2);
-    expect(
-      modifiedDecorations[0]?.options.linesDecorationsClassName,
-    ).toContain("manual-modified");
-    expect(
-      modifiedDecorations[1]?.options.linesDecorationsClassName,
-    ).toContain("manual-edit");
+    expect(modifiedDecorations[0]?.options.linesDecorationsClassName).toContain(
+      "manual-modified",
+    );
+    expect(modifiedDecorations[1]?.options.linesDecorationsClassName).toContain(
+      "manual-edit",
+    );
     expect(originalDecorations).toHaveLength(1);
-    expect(
-      originalDecorations[0]?.options.linesDecorationsClassName,
-    ).toContain("manual-modified");
+    expect(originalDecorations[0]?.options.linesDecorationsClassName).toContain(
+      "manual-modified",
+    );
     expect(modifiedEditor.revealLineInCenter).toHaveBeenCalledWith(4);
     expect(modifiedEditor.setPosition).toHaveBeenCalledWith({
       lineNumber: 4,

@@ -195,7 +195,8 @@ describe("buildTrustPillarDecorations", () => {
         {
           schemaVersion: "v1",
           lineRange: { startLine: 1, endLine: 3 },
-          originClass: "future_origin" as JavaRegionClassification["originClass"],
+          originClass:
+            "future_origin" as JavaRegionClassification["originClass"],
           verificationOutcome: "oracle_passed",
           mappingClass: "direct",
         },

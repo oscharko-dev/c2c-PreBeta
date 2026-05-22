@@ -1,13 +1,15 @@
-import { useEffect, useRef } from 'react';
-import { apiClient } from '../lib/apiClient';
-import { TransformationRunState } from '../types/run';
+import { useEffect, useRef } from "react";
+import { apiClient } from "../lib/apiClient";
+import { TransformationRunState } from "../types/run";
 
-type SetTransformationRunState = React.Dispatch<React.SetStateAction<TransformationRunState>>;
+type SetTransformationRunState = React.Dispatch<
+  React.SetStateAction<TransformationRunState>
+>;
 
 async function hydrateRunObservability(
   runId: string,
   setState: SetTransformationRunState,
-  isActive?: () => boolean
+  isActive?: () => boolean,
 ) {
   // Issue #173: workflow contract is polled alongside progress/events so the
   // Studio always reflects the orchestrator-side agentic state (activeAgent,
@@ -22,7 +24,7 @@ async function hydrateRunObservability(
 
   if (isActive && !isActive()) return;
 
-  setState(prev => {
+  setState((prev) => {
     if (prev.runId !== runId) return prev;
 
     return {
@@ -38,24 +40,25 @@ async function hydrateRunObservability(
 export async function hydrateRunArtifacts(
   runId: string,
   setState: SetTransformationRunState,
-  terminalStatus?: 'completed' | 'failed',
-  isActive?: () => boolean
+  terminalStatus?: "completed" | "failed",
+  isActive?: () => boolean,
 ) {
-  const [gen, genFiles, bt, ev, progress, evts, arts, exp, workflow] = await Promise.all([
-    apiClient.getGenerated(runId),
-    apiClient.getGeneratedFiles(runId),
-    apiClient.getBuildTest(runId),
-    apiClient.getEvidence(runId),
-    apiClient.getRunProgress(runId),
-    apiClient.getRunEvents(runId),
-    apiClient.getRunArtifacts(runId),
-    apiClient.getRunExperience(runId),
-    apiClient.getRunWorkflow(runId)
-  ]);
+  const [gen, genFiles, bt, ev, progress, evts, arts, exp, workflow] =
+    await Promise.all([
+      apiClient.getGenerated(runId),
+      apiClient.getGeneratedFiles(runId),
+      apiClient.getBuildTest(runId),
+      apiClient.getEvidence(runId),
+      apiClient.getRunProgress(runId),
+      apiClient.getRunEvents(runId),
+      apiClient.getRunArtifacts(runId),
+      apiClient.getRunExperience(runId),
+      apiClient.getRunWorkflow(runId),
+    ]);
 
   if (isActive && !isActive()) return;
 
-  setState(prev => {
+  setState((prev) => {
     if (prev.runId !== runId) return prev; // stale
 
     const newState = {
@@ -79,12 +82,12 @@ export async function hydrateRunArtifacts(
     // equivalence-mismatch / evidence-incomplete) is derived from the BFF
     // finalClassification + artifact contents in `deriveProductState`; the
     // polling layer never invents a "verification-blocked" sub-state.
-    if (terminalStatus === 'failed' || prev.summary?.status === 'failed') {
-      newState.phase = 'failed';
+    if (terminalStatus === "failed" || prev.summary?.status === "failed") {
+      newState.phase = "failed";
     } else if (!gen.ok || !genFiles.ok || !bt.ok || !ev.ok) {
-      newState.phase = 'incomplete';
+      newState.phase = "incomplete";
     } else {
-      newState.phase = 'completed';
+      newState.phase = "completed";
     }
 
     return newState;
@@ -93,7 +96,7 @@ export async function hydrateRunArtifacts(
 
 export function useRunPolling(
   state: TransformationRunState,
-  setState: SetTransformationRunState
+  setState: SetTransformationRunState,
 ) {
   const runId = state.runId;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -102,11 +105,11 @@ export function useRunPolling(
     if (!runId) return;
 
     if (
-      state.phase === 'completed' ||
-      state.phase === 'failed' ||
-      state.phase === 'incomplete' ||
-      state.phase === 'unavailable' ||
-      state.phase === 'idle'
+      state.phase === "completed" ||
+      state.phase === "failed" ||
+      state.phase === "incomplete" ||
+      state.phase === "unavailable" ||
+      state.phase === "idle"
     ) {
       return;
     }
@@ -122,24 +125,37 @@ export function useRunPolling(
       if (!result.ok) {
         errorCount++;
         if (result.status === 503) {
-          setState(prev => prev.runId === runId ? { ...prev, phase: 'unavailable', error: 'Backend unavailable' } : prev);
+          setState((prev) =>
+            prev.runId === runId
+              ? { ...prev, phase: "unavailable", error: "Backend unavailable" }
+              : prev,
+          );
           return;
         }
         if (errorCount > MAX_ERRORS) {
-          setState(prev => prev.runId === runId ? { ...prev, phase: 'failed', error: result.message } : prev);
+          setState((prev) =>
+            prev.runId === runId
+              ? { ...prev, phase: "failed", error: result.message }
+              : prev,
+          );
           return;
         }
       } else {
         errorCount = 0;
         const summary = result.data;
-        
-        setState(prev => {
+
+        setState((prev) => {
           if (prev.runId !== runId) return prev; // stale
           return { ...prev, summary };
         });
 
-        if (summary.status === 'completed' || summary.status === 'failed') {
-          await hydrateRunArtifacts(runId, setState, summary.status, () => active);
+        if (summary.status === "completed" || summary.status === "failed") {
+          await hydrateRunArtifacts(
+            runId,
+            setState,
+            summary.status,
+            () => active,
+          );
           return; // done polling
         }
 
@@ -161,25 +177,35 @@ export function useRunPolling(
 }
 
 export function useGlobalObservabilityPolling(
-  setState: SetTransformationRunState
+  setState: SetTransformationRunState,
 ) {
   useEffect(() => {
     let active = true;
     const fetchGlobals = async () => {
       const [mgHealth, hReady] = await Promise.all([
         apiClient.getModelGatewayHealth(),
-        apiClient.getHarnessReady()
+        apiClient.getHarnessReady(),
       ]);
       if (!active) return;
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
-        modelGatewayHealth: mgHealth?.ok ? mgHealth.data : { status: 'unavailable', error: mgHealth?.message ?? 'Model Gateway unavailable' },
-        harnessReady: hReady?.ok ? hReady.data : { status: 'unavailable', error: hReady?.message ?? 'Harness unavailable' },
+        modelGatewayHealth: mgHealth?.ok
+          ? mgHealth.data
+          : {
+              status: "unavailable",
+              error: mgHealth?.message ?? "Model Gateway unavailable",
+            },
+        harnessReady: hReady?.ok
+          ? hReady.data
+          : {
+              status: "unavailable",
+              error: hReady?.message ?? "Harness unavailable",
+            },
       }));
     };
-    
+
     fetchGlobals();
-    
+
     // Refresh every 30 seconds
     const interval = setInterval(fetchGlobals, 30000);
     return () => {

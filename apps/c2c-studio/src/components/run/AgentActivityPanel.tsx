@@ -138,8 +138,8 @@ function AssistDecisionRow({
           Assist gate
         </div>
         <p className="mt-1 text-text-dim">
-          The orchestrator has not yet evaluated the assist-decision gate
-          for this run.
+          The orchestrator has not yet evaluated the assist-decision gate for
+          this run.
         </p>
       </div>
     );
@@ -148,8 +148,7 @@ function AssistDecisionRow({
   const outcomeLabel = ASSIST_DECISION_OUTCOME_LABELS[assistDecision.outcome];
   const outcomeDescription =
     ASSIST_DECISION_OUTCOME_DESCRIPTIONS[assistDecision.outcome];
-  const reasonLabel =
-    ASSIST_DECISION_REASON_LABELS[assistDecision.reasonCode];
+  const reasonLabel = ASSIST_DECISION_REASON_LABELS[assistDecision.reasonCode];
   const reasonDescription =
     ASSIST_DECISION_REASON_DESCRIPTIONS[assistDecision.reasonCode];
   const isAssistRequired = assistDecision.outcome === "assist_required";
@@ -161,9 +160,7 @@ function AssistDecisionRow({
     <div
       className="rounded border border-line-2 bg-bg-2 p-3"
       data-testid="agent-activity-assist-decision"
-      data-assist-mode={
-        isAssistRequired ? "ai-assisted" : "deterministic-only"
-      }
+      data-assist-mode={isAssistRequired ? "ai-assisted" : "deterministic-only"}
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-text-dim">
@@ -180,7 +177,11 @@ function AssistDecisionRow({
             className="rounded bg-bg-3 px-1.5 py-0.5 font-mono text-[10px] text-text-dim"
             data-testid="agent-activity-assist-agent-role"
           >
-            {ASSIST_DECISION_AGENT_ROLE_LABELS[assistDecision.selectedAgentRole]}
+            {
+              ASSIST_DECISION_AGENT_ROLE_LABELS[
+                assistDecision.selectedAgentRole
+              ]
+            }
           </span>
         ) : null}
       </div>

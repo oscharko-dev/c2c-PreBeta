@@ -594,11 +594,14 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
+    await enterCobolSource(
+      page,
+      `       IDENTIFICATION DIVISION.
        PROGRAM-ID. UNSUPPORTED01.
        PROCEDURE DIVISION.
            COPY TESTLIB REPLACING ==X== BY ==Y==.
-           STOP RUN.`);
+           STOP RUN.`,
+    );
 
     await topBarStartButton(page).click();
 
@@ -869,11 +872,14 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
+    await enterCobolSource(
+      page,
+      `       IDENTIFICATION DIVISION.
        PROGRAM-ID. EVIDENCE01.
        PROCEDURE DIVISION.
            DISPLAY 'EVIDENCE'.
-           STOP RUN.`);
+           STOP RUN.`,
+    );
 
     await topBarStartButton(page).click();
 
@@ -1187,11 +1193,14 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
+    await enterCobolSource(
+      page,
+      `       IDENTIFICATION DIVISION.
        PROGRAM-ID. MISMATCH01.
        PROCEDURE DIVISION.
            DISPLAY 'MISMATCH'.
-           STOP RUN.`);
+           STOP RUN.`,
+    );
 
     await topBarStartButton(page).click();
 
@@ -1487,11 +1496,14 @@ test.describe("c2c Studio browser acceptance", () => {
     });
 
     await expectReadyWorkbench(page);
-    await enterCobolSource(page, `       IDENTIFICATION DIVISION.
+    await enterCobolSource(
+      page,
+      `       IDENTIFICATION DIVISION.
        PROGRAM-ID. AGENT01.
        PROCEDURE DIVISION.
            DISPLAY 'AGENT'.
-           STOP RUN.`);
+           STOP RUN.`,
+    );
 
     await topBarStartButton(page).click();
 

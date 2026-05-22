@@ -343,10 +343,7 @@ export const COBOL_MONARCH_LANGUAGE: MonacoNs.languages.IMonarchLanguage = {
       // for implied decimal) fall back to number/delimiter tokenization
       // downstream — visually correct, not unified, but never breaks the
       // rest of the line.
-      [
-        /[X9AVSPZBN0-9$+\-,/()*]+/,
-        { token: "type.picture", next: "@pop" },
-      ],
+      [/[X9AVSPZBN0-9$+\-,/()*]+/, { token: "type.picture", next: "@pop" }],
       // Anything else pops back to @root and is re-tokenized there.
       [/./, { token: "@rematch", next: "@pop" }],
     ],

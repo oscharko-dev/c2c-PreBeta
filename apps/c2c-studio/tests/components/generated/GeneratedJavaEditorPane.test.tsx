@@ -57,7 +57,10 @@ type EditorMockProps = {
   value: string;
   original?: string;
   onChange?: (next: string) => void;
-  onMount?: (args: { editor: FakeEditor | FakeDiffEditor; monaco: typeof fakeMonaco }) => void;
+  onMount?: (args: {
+    editor: FakeEditor | FakeDiffEditor;
+    monaco: typeof fakeMonaco;
+  }) => void;
   ariaLabel?: string;
   language: string;
   mode: string;
@@ -74,10 +77,7 @@ type FakeEditor = {
     run: (editor: FakeEditor) => unknown;
   }) => { dispose: () => void };
   getModel: () => FakeModel;
-  executeEdits: (
-    source: string,
-    edits: Array<{ text: string }>,
-  ) => boolean;
+  executeEdits: (source: string, edits: Array<{ text: string }>) => boolean;
   getPosition: () => { lineNumber: number; column: number };
   getSelection: () => { isEmpty: () => boolean } | null;
   onDidFocusEditorText: (callback: () => void) => { dispose: () => void };
@@ -479,11 +479,7 @@ function renderPaneWithActionsAndSelector(path: string) {
   );
 }
 
-function NavigateDiagnosticButton({
-  diagnostic,
-}: {
-  diagnostic: Diagnostic;
-}) {
+function NavigateDiagnosticButton({ diagnostic }: { diagnostic: Diagnostic }) {
   const { navigateToDiagnostic } = useMarkerNavigation();
   return (
     <button type="button" onClick={() => navigateToDiagnostic(diagnostic)}>
@@ -929,7 +925,9 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     );
     expect(saveCommand).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: /select src\/app\.java/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /select src\/app\.java/i }),
+    );
 
     const editor = (await screen.findByTestId(
       "code-editor-mock",
@@ -1028,7 +1026,9 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       { telemetryTrigger: "shortcut" },
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /select src\/other\.java/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /select src\/other\.java/i }),
+    );
     await waitFor(() => {
       expect(screen.getByTestId("code-editor-mock")).toHaveDisplayValue(
         "public class Other {}",
@@ -1065,7 +1065,9 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /select src\/app\.java/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /select src\/app\.java/i }),
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("compile-check-state").textContent).toBe(
@@ -1172,7 +1174,9 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
           mode: "live",
           productMode: "live",
           status:
-            failureCode === "oracle_mismatch" ? "output-divergence" : "run-failed",
+            failureCode === "oracle_mismatch"
+              ? "output-divergence"
+              : "run-failed",
           classification:
             failureCode === "oracle_mismatch"
               ? "true-golden-master-mismatch"
@@ -1279,7 +1283,9 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
 
       renderPane();
 
-      const button = await screen.findByTestId("java-manual-compile-repair-button");
+      const button = await screen.findByTestId(
+        "java-manual-compile-repair-button",
+      );
       expect(button).toBeDefined();
       expect(
         screen.getByTestId("java-manual-compile-repair-inline-button"),
@@ -1303,12 +1309,10 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
             ],
           }),
         );
-        expect(startManualCompileRepairDiagnoseSpy).toHaveBeenCalledWith(
-          {
-            runId: "run-123",
-            previewId: "preview-123",
-          },
-        );
+        expect(startManualCompileRepairDiagnoseSpy).toHaveBeenCalledWith({
+          runId: "run-123",
+          previewId: "preview-123",
+        });
       });
     },
   );
@@ -1448,13 +1452,13 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
 
     const badge = await screen.findByTestId("java-run-mode-badge");
     expect(badge).toHaveAttribute("data-run-mode", "stale");
-    expect(
-      screen.getByTestId("manual-drift-stale-banner"),
-    ).toHaveTextContent(
+    expect(screen.getByTestId("manual-drift-stale-banner")).toHaveTextContent(
       "Current Java differs from Generator Baseline run run-123",
     );
     expect(screen.getByTestId("java-status-chips")).toBeInTheDocument();
-    expect(screen.getByTestId("java-status-chip-manual-edits")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("java-status-chip-manual-edits"),
+    ).toBeInTheDocument();
   });
 
   it("renders a short SHA-256 chip from the selected file ref", async () => {
@@ -1647,7 +1651,10 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     };
     mockTransformationState.mockReturnValue(
       completedRunWith(
-        ["src/main/java/com/example/Initial.java", "src/main/java/com/example/Foo.java"],
+        [
+          "src/main/java/com/example/Initial.java",
+          "src/main/java/com/example/Foo.java",
+        ],
         "src/main/java/com/example/Initial.java",
       ),
     );
@@ -1670,9 +1677,9 @@ describe("GeneratedJavaEditorPane (Studio-IDE-4 #245)", () => {
     );
 
     await waitFor(() => {
-      expect(fakeEditor.revealLineInCenterIfOutsideViewport).toHaveBeenCalledWith(
-        13,
-      );
+      expect(
+        fakeEditor.revealLineInCenterIfOutsideViewport,
+      ).toHaveBeenCalledWith(13);
       expect(fakeEditor.setPosition).toHaveBeenCalledWith({
         lineNumber: 13,
         column: 5,

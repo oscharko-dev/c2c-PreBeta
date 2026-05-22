@@ -1,8 +1,8 @@
 import {
   RunExperienceView,
   ModelGatewayHealth,
-  HarnessReady
-} from './observability';
+  HarnessReady,
+} from "./observability";
 import {
   RunSummary,
   GeneratedView,
@@ -12,17 +12,17 @@ import {
   RunEventsView,
   RunProgressView,
   RunArtifactsView,
-  RunWorkflowView
-} from './api';
+  RunWorkflowView,
+} from "./api";
 
 export type RunPhase =
-  | 'idle'
-  | 'starting'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'unavailable'
-  | 'incomplete';
+  | "idle"
+  | "starting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "unavailable"
+  | "incomplete";
 
 export interface TransformationRunState {
   phase: RunPhase;
