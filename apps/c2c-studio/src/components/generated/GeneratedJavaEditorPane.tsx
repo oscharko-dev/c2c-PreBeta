@@ -1263,9 +1263,7 @@ export function GeneratedJavaEditorPane() {
   const hasCompileOrTestFailure =
     compileCheckDiagnostics.some((d) => d.severity === "error") ||
     state.buildTest?.classification === "compile-error" ||
-    state.buildTest?.classification === "run-error" ||
-    state.buildTest?.status === "compile-failed" ||
-    state.buildTest?.status === "run-failed";
+    state.buildTest?.status === "compile-failed";
   const hasManualEditContext = flags.manualEditsPresent || hasManualJavaDrift;
   const hasRuntimeOrParityFailure =
     productState.state === "build-failed" ||

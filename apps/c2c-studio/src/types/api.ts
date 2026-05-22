@@ -1080,7 +1080,6 @@ export interface ManualCompileRepairDiagnosis {
   recommendedNextAction?: string;
   evidenceRefs?: WorkflowArtifactRef[];
   createdAt?: string;
-  [key: string]: unknown;
 }
 
 export interface ManualCompileRepairProposal {
@@ -1106,7 +1105,6 @@ export interface ManualCompileRepairProposal {
   };
   approvedAt?: string;
   appliedAt?: string;
-  [key: string]: unknown;
 }
 
 export interface ManualCompileRepairCandidateProject {

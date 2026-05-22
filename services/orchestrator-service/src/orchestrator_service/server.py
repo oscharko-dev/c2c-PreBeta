@@ -350,7 +350,9 @@ class OrchestratorService:
                 except ValueError as exc:
                     self._write_json(400, {"error": str(exc)})
                 except OrchestratorError as exc:
-                    self._write_json(409, {"error": str(exc)})
+                    _msg = str(exc)
+                    _code = 404 if "not found" in _msg else 409
+                    self._write_json(_code, {"error": _msg})
                 except Exception as exc:
                     service.logger.error("POST handling failed", exc_info=exc)
                     self._write_json(500, {"error": "internal server error"})
@@ -472,7 +474,7 @@ class OrchestratorService:
             entry_file_path = next(iter(sorted(java_files)))
         if entry_file_path not in java_files:
             raise ValueError("entryFilePath must reference one of the provided javaFiles")
-        entry_class = str(payload.get("entryClass") or "").strip()
+        entry_class = str(payload.get("entryClass") or "").strip() or None
         manual_overlay_regions = _extract_manual_overlay_regions(payload.get("manualOverlay"))
         requester = str(payload.get("requester") or self.config.service_name).strip()
         return self.runner.manual_compile_repair_preview(

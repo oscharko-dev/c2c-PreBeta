@@ -5125,6 +5125,15 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
+        if (
+          Array.isArray(record.javaFiles) &&
+          record.javaFiles.length > JAVA_EXECUTION_MAX_FILES
+        ) {
+          jsonResponse(res, 413, {
+            error: `javaFiles must contain at most ${JAVA_EXECUTION_MAX_FILES} files`,
+          });
+          return;
+        }
         const manualOverlayEnvelope = Array.isArray(record.manualEditOverlays)
           ? {
               schemaVersion: "v0",

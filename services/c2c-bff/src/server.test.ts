@@ -8536,6 +8536,124 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
 });
 
 // ---------------------------------------------------------------------------
+// Studio-IDE-XX (#360): manual-compile-repair edge-case coverage
+// ---------------------------------------------------------------------------
+
+test("POST /api/v0/manual-compile-repair/diagnose returns 400 when runId is missing", async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
+      auth.post({ previewId: "preview-1" }),
+    );
+    assert.equal(response.status, 400);
+    assert.ok((response.body as { error: string }).error.includes("runId"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/manual-compile-repair/reject returns 200 with valid stub", async () => {
+  const rejectResponse = {
+    schemaVersion: "v0",
+    runId: "run-1",
+    proposal: {
+      proposalId: "proposal-1",
+      runId: "run-1",
+      files: [],
+      applicationState: "rejected",
+      approvalState: "rejected",
+    },
+  };
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: rejectResponse },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/reject`,
+      auth.post({ runId: "run-1", proposalId: "proposal-1" }),
+    );
+    assert.equal(response.status, 200);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/manual-compile-repair/preview returns 413 when javaFiles exceeds 512 entries", async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const javaFiles = Array.from({ length: 513 }, (_, i) => ({
+      path: `src/main/java/com/c2c/generated/File${i}.java`,
+      content: `class File${i} {}`,
+    }));
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/preview`,
+      auth.post({
+        runId: "run-1",
+        entryFilePath: "src/main/java/com/c2c/generated/File0.java",
+        javaFiles,
+      }),
+    );
+    assert.equal(response.status, 413);
+    assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Studio-IDE-13 (#255): POST /api/v0/verify
 // ---------------------------------------------------------------------------
 
