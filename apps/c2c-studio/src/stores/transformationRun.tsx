@@ -1039,9 +1039,8 @@ export function TransformationRunProvider({
         status: "ready",
         runId: result.data.runId,
         preview: prev?.preview ?? null,
-        entryFilePath:
-          prev?.entryFilePath ?? result.data.candidateProject.entryFilePath,
-        entryClass: prev?.entryClass ?? result.data.candidateProject.entryClass,
+        entryFilePath: result.data.candidateProject.entryFilePath ?? null,
+        entryClass: result.data.candidateProject.entryClass ?? null,
         diagnosis: result.data.diagnosis,
         proposal: result.data.proposal,
         candidateProject: result.data.candidateProject,

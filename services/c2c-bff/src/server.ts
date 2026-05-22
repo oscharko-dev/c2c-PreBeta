@@ -201,7 +201,7 @@ const STATIC_MIME: Record<string, string> = {
 };
 
 const FORMAT_JAVA_JSON_ENVELOPE_BYTES = 8192;
-const JAVA_EXECUTION_MAX_FILES = 512;
+export const JAVA_EXECUTION_MAX_FILES = 512;
 const TRUST_CASE_PREFERENCE_MAX_BODY_BYTES = 2048;
 const FORBIDDEN_TRUST_CASE_TRANSFORM_FIELDS = [
   "sourceReferenceFixtureId",
@@ -5123,6 +5123,15 @@ export function createApp(deps: ServerDeps): http.RequestListener {
             res,
             `unsupported manual compile repair preview field(s): ${extraFields.join(", ")}`,
           );
+          return;
+        }
+        if (
+          Array.isArray(record.javaFiles) &&
+          record.javaFiles.length > JAVA_EXECUTION_MAX_FILES
+        ) {
+          jsonResponse(res, 413, {
+            error: `javaFiles must contain at most ${JAVA_EXECUTION_MAX_FILES} files`,
+          });
           return;
         }
         const manualOverlayEnvelope = Array.isArray(record.manualEditOverlays)

@@ -836,6 +836,21 @@ def _as_reference_payload(ref: DataReference) -> Mapping[str, JsonValue]:
     }
 
 
+def _as_artifact_metadata_reference_payload(meta: ArtifactMetadata) -> Mapping[str, JsonValue]:
+    # ArtifactMetadata uses camelCase fields; DataReference uses snake_case.
+    # The two are not interchangeable: _as_reference_payload reads snake_case
+    # and must not be passed an ArtifactMetadata.
+    return {
+        "uri": meta.uri,
+        "sha256": meta.sha256,
+        "byteSize": meta.byteSize,
+        "mimeType": meta.mimeType,
+        "kind": meta.kind,
+        "path": meta.path,
+        "name": meta.name,
+    }
+
+
 def _reference_payload_from_metadata(raw: Mapping[str, JsonValue] | None) -> JsonObject | None:
     if not isinstance(raw, Mapping):
         return None
@@ -1325,7 +1340,7 @@ class W0WorkflowRunner:
             },
             kind=MANUAL_COMPILE_REPAIR_SNAPSHOT_KIND,
         )
-        return _as_reference_payload(meta)
+        return _as_artifact_metadata_reference_payload(meta)
 
     def _load_manual_compile_project(
         self,
@@ -1981,7 +1996,7 @@ class W0WorkflowRunner:
             },
             kind=MANUAL_COMPILE_REPAIR_PROJECT_MANIFEST_KIND,
         )
-        return _as_reference_payload(meta)
+        return _as_artifact_metadata_reference_payload(meta)
 
     def _persist_manual_compile_sandbox_candidate(
         self,
@@ -2024,7 +2039,7 @@ class W0WorkflowRunner:
             },
             kind=MANUAL_COMPILE_REPAIR_SANDBOX_PROJECT_MANIFEST_KIND,
         )
-        return _as_reference_payload(meta)
+        return _as_artifact_metadata_reference_payload(meta)
 
     @staticmethod
     def _derive_expected_output_from_build_payload(
@@ -2077,7 +2092,7 @@ class W0WorkflowRunner:
             kind=MANUAL_COMPILE_REPAIR_BASELINE_DIFF_KIND,
             mime_type=MIME_PLAIN,
         )
-        return _as_reference_payload(meta)
+        return _as_artifact_metadata_reference_payload(meta)
 
     def _manual_compile_repair_preview_path(self) -> str:
         return f"{MANUAL_COMPILE_REPAIR_DIR}/context-preview.json"
@@ -2531,7 +2546,7 @@ class W0WorkflowRunner:
             proposal_evidence_refs: list[JsonObject] = [
                 dict(current_head_ref),
                 dict(candidate_ref),
-                _as_reference_payload(diagnosis_meta),
+                _as_artifact_metadata_reference_payload(diagnosis_meta),
             ]
             proposal_payload = {
                 "schemaVersion": "v0",
@@ -2754,7 +2769,7 @@ class W0WorkflowRunner:
             "approvalState": "pending",
             "sandboxAppliedAt": _iso_now(),
             "sandboxCandidateRef": sandbox_candidate_ref,
-            "sandboxBuildTestResultRef": _as_reference_payload(sandbox_build_meta),
+            "sandboxBuildTestResultRef": _as_artifact_metadata_reference_payload(sandbox_build_meta),
         }
         self.artifact_store.write_json(
             run_id,

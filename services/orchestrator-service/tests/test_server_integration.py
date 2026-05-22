@@ -433,29 +433,6 @@ def _stub_manual_compile_repair_artifact_refs(runner, *, run_id: str) -> None:
     runner._persist_manual_compile_baseline_diff = lambda *_args, **_kwargs: None
 
 
-def _stub_manual_compile_repair_failure_code() -> None:
-    orchestrator_workflow.FAILURE_JAVA_COMPILE_FAILED = "java_compile_failed"
-
-
-def _stub_manual_compile_repair_reference_payloads() -> None:
-    def _reference_payload(ref):
-        if ref is None:
-            return None
-        if isinstance(ref, dict):
-            return dict(ref)
-        return {
-            "uri": getattr(ref, "uri", ""),
-            "sha256": getattr(ref, "sha256", ""),
-            "byteSize": getattr(ref, "byteSize", getattr(ref, "byte_size", 0)),
-            "mimeType": getattr(ref, "mimeType", None),
-            "kind": getattr(ref, "kind", None),
-            "path": getattr(ref, "path", None),
-            "name": getattr(ref, "name", None),
-        }
-
-    orchestrator_workflow._as_reference_payload = _reference_payload
-
-
 def _post_json(host: str, port: int, path: str, payload: dict, headers: dict) -> tuple[int, dict]:
     connection = HTTPConnection(host, port, timeout=3)
     try:
@@ -915,8 +892,6 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 kind=KIND_BUILD_TEST_RESULT,
             )
             _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-1")
-            _stub_manual_compile_repair_failure_code()
-            _stub_manual_compile_repair_reference_payloads()
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 
@@ -1109,8 +1084,6 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 ),
             )
             _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-2")
-            _stub_manual_compile_repair_failure_code()
-            _stub_manual_compile_repair_reference_payloads()
             current_java_source = (
                 "package com.c2c.generated;\n"
                 "public class CASE01 {\n"
@@ -1338,8 +1311,6 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 kind=KIND_BUILD_TEST_RESULT,
             )
             _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-3")
-            _stub_manual_compile_repair_failure_code()
-            _stub_manual_compile_repair_reference_payloads()
             runner._persist_manual_compile_baseline_diff = lambda *_args, **_kwargs: {
                 "uri": "urn:build/manual-edit-diff",
                 "sha256": "d" * 64,
@@ -1568,8 +1539,6 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 kind=KIND_BUILD_TEST_RESULT,
             )
             _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-4")
-            _stub_manual_compile_repair_failure_code()
-            _stub_manual_compile_repair_reference_payloads()
             orchestrator_port = orchestrator_server.server_port
             threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
 

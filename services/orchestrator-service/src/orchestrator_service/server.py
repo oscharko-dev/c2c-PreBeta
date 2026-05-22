@@ -350,7 +350,9 @@ class OrchestratorService:
                 except ValueError as exc:
                     self._write_json(400, {"error": str(exc)})
                 except OrchestratorError as exc:
-                    self._write_json(409, {"error": str(exc)})
+                    _msg = str(exc)
+                    _code = 404 if _msg == "run not found" else 409
+                    self._write_json(_code, {"error": _msg})
                 except Exception as exc:
                     service.logger.error("POST handling failed", exc_info=exc)
                     self._write_json(500, {"error": "internal server error"})

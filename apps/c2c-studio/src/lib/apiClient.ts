@@ -2547,14 +2547,8 @@ export const apiClient = {
     ),
   previewManualCompileRepair: (request: ManualCompileRepairPreviewRequest) =>
     apiClient.manualCompileRepairPreview(request),
-  diagnoseManualCompileRepair: (request: ManualCompileRepairDiagnoseRequest) =>
-    apiClient.manualCompileRepairDiagnose(request),
-  applyManualCompileRepair: (request: ManualCompileRepairApplyRequest) =>
-    apiClient.manualCompileRepairApply(request),
   acceptManualCompileRepair: (request: ManualCompileRepairAcceptRequest) =>
     apiClient.manualCompileRepairAccept(request),
-  rejectManualCompileRepair: (request: ManualCompileRepairRejectRequest) =>
-    apiClient.manualCompileRepairReject(request),
   getRun: (runId: string) =>
     fetchJson(`/api/v0/runs/${encodeURIComponent(runId)}`, parseRunSummary),
   getGenerated: (runId: string) =>
