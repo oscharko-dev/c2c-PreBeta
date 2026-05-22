@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { apiClient } from '../lib/apiClient';
-import { ApiErrorKind, HealthResponse, ModeResponse } from '../types/api';
+import { useEffect, useState } from "react";
+import { apiClient } from "../lib/apiClient";
+import { ApiErrorKind, HealthResponse, ModeResponse } from "../types/api";
 
-type StudioErrorKind = ApiErrorKind | 'backend';
+type StudioErrorKind = ApiErrorKind | "backend";
 
 export interface StudioApiState {
   health: HealthResponse | null;
@@ -39,7 +39,7 @@ export function useC2cApi(): StudioApiState {
           mode: null,
           loading: false,
           error: healthResult.message,
-          errorKind: healthResult.details?.kind ?? 'backend',
+          errorKind: healthResult.details?.kind ?? "backend",
         });
         return;
       }
@@ -56,7 +56,7 @@ export function useC2cApi(): StudioApiState {
           mode: null,
           loading: false,
           error: modeResult.message,
-          errorKind: modeResult.details?.kind ?? 'backend',
+          errorKind: modeResult.details?.kind ?? "backend",
         });
         return;
       }

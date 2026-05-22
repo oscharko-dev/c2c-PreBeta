@@ -532,8 +532,9 @@ describe("transformation run state machine", () => {
     vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(
       makeExperienceResult(runId, "P-A"),
     );
-    vi.mocked(apiClient.getRunExperience).mockImplementation((currentRunId: string) =>
-      Promise.resolve(makeExperienceResult(currentRunId, "P-A")),
+    vi.mocked(apiClient.getRunExperience).mockImplementation(
+      (currentRunId: string) =>
+        Promise.resolve(makeExperienceResult(currentRunId, "P-A")),
     );
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() =>
       Promise.resolve(okResult<ModelGatewayHealth>({ status: "ok" })),
@@ -619,8 +620,9 @@ describe("transformation run state machine", () => {
     vi.mocked(apiClient.getRunExperience).mockResolvedValueOnce(
       makeExperienceResult(runId, "P-A"),
     );
-    vi.mocked(apiClient.getRunExperience).mockImplementation((currentRunId: string) =>
-      Promise.resolve(makeExperienceResult(currentRunId, "P-A")),
+    vi.mocked(apiClient.getRunExperience).mockImplementation(
+      (currentRunId: string) =>
+        Promise.resolve(makeExperienceResult(currentRunId, "P-A")),
     );
     vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() =>
       Promise.resolve(okResult<ModelGatewayHealth>({ status: "ok" })),
@@ -628,7 +630,9 @@ describe("transformation run state machine", () => {
     vi.mocked(apiClient.getHarnessReady).mockImplementation(() =>
       Promise.resolve(okResult<HarnessReady>({ status: "ok" })),
     );
-    vi.mocked(apiClient.upsertIntentionalDivergenceDecision).mockResolvedValueOnce(
+    vi.mocked(
+      apiClient.upsertIntentionalDivergenceDecision,
+    ).mockResolvedValueOnce(
       okResult({
         runId,
         programId: "P-A",
@@ -700,9 +704,7 @@ describe("transformation run state machine", () => {
     await waitFor(() =>
       expect(screen.getByTestId("phase")).toHaveTextContent("completed"),
     );
-    expect(screen.getByTestId("trust-summary-state")).toHaveTextContent(
-      "none",
-    );
+    expect(screen.getByTestId("trust-summary-state")).toHaveTextContent("none");
 
     await act(async () => {
       fireEvent.click(screen.getByText("mark-divergent"));
@@ -868,8 +870,12 @@ describe("transformation run state machine", () => {
     const secondFixtures = makeArtifactFixtures(secondRunId, "P-B", secondSha);
 
     vi.mocked(apiClient.transform)
-      .mockResolvedValueOnce(makeTerminalResponse(firstRunId, "P-A", "completed"))
-      .mockResolvedValueOnce(makeTerminalResponse(secondRunId, "P-B", "completed"));
+      .mockResolvedValueOnce(
+        makeTerminalResponse(firstRunId, "P-A", "completed"),
+      )
+      .mockResolvedValueOnce(
+        makeTerminalResponse(secondRunId, "P-B", "completed"),
+      );
     vi.mocked(apiClient.getGenerated)
       .mockResolvedValueOnce(firstFixtures.generated)
       .mockResolvedValueOnce(secondFixtures.generated);
@@ -919,8 +925,12 @@ describe("transformation run state machine", () => {
     expect(screen.getByTestId("generated-sha")).toHaveTextContent(secondSha);
     expect(screen.getByTestId("evidence-sha")).toHaveTextContent(secondSha);
     expect(screen.getByTestId("previous-run-id")).toHaveTextContent(firstRunId);
-    expect(screen.getByTestId("previous-generated-sha")).toHaveTextContent(firstSha);
-    expect(screen.getByTestId("previous-evidence-sha")).toHaveTextContent(firstSha);
+    expect(screen.getByTestId("previous-generated-sha")).toHaveTextContent(
+      firstSha,
+    );
+    expect(screen.getByTestId("previous-evidence-sha")).toHaveTextContent(
+      firstSha,
+    );
   });
 
   it("keeps the previous run snapshot accessible when the latest rerun fails", async () => {
@@ -950,8 +960,12 @@ describe("transformation run state machine", () => {
     };
 
     vi.mocked(apiClient.transform)
-      .mockResolvedValueOnce(makeTerminalResponse(firstRunId, "P-A", "completed"))
-      .mockResolvedValueOnce(makeTerminalResponse(failedRunId, "P-B", "failed"));
+      .mockResolvedValueOnce(
+        makeTerminalResponse(firstRunId, "P-A", "completed"),
+      )
+      .mockResolvedValueOnce(
+        makeTerminalResponse(failedRunId, "P-B", "failed"),
+      );
     vi.mocked(apiClient.getGenerated)
       .mockResolvedValueOnce(firstFixtures.generated)
       .mockResolvedValueOnce(failedGenerated);
@@ -1012,8 +1026,12 @@ describe("transformation run state machine", () => {
     expect(screen.getByTestId("generated-sha")).toHaveTextContent("none");
     expect(screen.getByTestId("evidence-sha")).toHaveTextContent("none");
     expect(screen.getByTestId("previous-run-id")).toHaveTextContent(firstRunId);
-    expect(screen.getByTestId("previous-generated-sha")).toHaveTextContent(firstSha);
-    expect(screen.getByTestId("previous-evidence-sha")).toHaveTextContent(firstSha);
+    expect(screen.getByTestId("previous-generated-sha")).toHaveTextContent(
+      firstSha,
+    );
+    expect(screen.getByTestId("previous-evidence-sha")).toHaveTextContent(
+      firstSha,
+    );
   });
 
   it("marks a polling run unavailable on backend 503 responses", async () => {

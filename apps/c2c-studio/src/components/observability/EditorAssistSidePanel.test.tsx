@@ -393,9 +393,9 @@ describe("EditorAssistSidePanel — preview redaction + a11y", () => {
     // regardless of the open state, which is good enough for assertion.
     expect(preview).toHaveTextContent("field-name-class:customer-name");
     expect(preview).toHaveTextContent("ssn-us");
-    expect(screen.getByTestId("editor-assist-redacted-preview")).toHaveTextContent(
-      SAMPLE_REQUEST.redactedBytes,
-    );
+    expect(
+      screen.getByTestId("editor-assist-redacted-preview"),
+    ).toHaveTextContent(SAMPLE_REQUEST.redactedBytes);
   });
 
   it("renders 'No patterns matched' when the metadata is empty", () => {

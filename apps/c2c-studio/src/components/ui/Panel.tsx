@@ -1,5 +1,5 @@
-import React from 'react';
-import { cn } from '@/lib/utils';
+import React from "react";
+import { cn } from "@/lib/utils";
 
 export interface PanelProps extends React.HTMLAttributes<HTMLDivElement> {
   header?: React.ReactNode;
@@ -14,7 +14,7 @@ export const Panel = React.forwardRef<HTMLDivElement, PanelProps>(
         ref={ref}
         className={cn(
           "flex flex-col bg-bg-1 border border-line rounded-md overflow-hidden",
-          className
+          className,
         )}
         {...props}
       >
@@ -23,7 +23,7 @@ export const Panel = React.forwardRef<HTMLDivElement, PanelProps>(
             {header}
           </div>
         )}
-        <div className={cn('flex-1 overflow-auto bg-bg-0 p-3', bodyClassName)}>
+        <div className={cn("flex-1 overflow-auto bg-bg-0 p-3", bodyClassName)}>
           {children}
         </div>
         {footer && (
@@ -33,7 +33,7 @@ export const Panel = React.forwardRef<HTMLDivElement, PanelProps>(
         )}
       </div>
     );
-  }
+  },
 );
 
-Panel.displayName = 'Panel';
+Panel.displayName = "Panel";

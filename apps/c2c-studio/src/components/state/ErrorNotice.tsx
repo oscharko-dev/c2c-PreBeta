@@ -1,6 +1,6 @@
-import React from 'react';
-import { W02UiErrorCode } from '../../types/api';
-import { W02_ERROR_DESCRIPTIONS, W02_ERROR_LABELS } from '../run/agentActivity';
+import React from "react";
+import { W02UiErrorCode } from "../../types/api";
+import { W02_ERROR_DESCRIPTIONS, W02_ERROR_LABELS } from "../run/agentActivity";
 
 interface ErrorNoticeProps {
   message?: string;
@@ -19,11 +19,15 @@ export function ErrorNotice({ message, failureCode }: ErrorNoticeProps) {
         data-testid="error-notice"
       >
         <div className="font-semibold">{W02_ERROR_LABELS[failureCode]}</div>
-        <p className="mt-1 text-xs opacity-90">{W02_ERROR_DESCRIPTIONS[failureCode]}</p>
+        <p className="mt-1 text-xs opacity-90">
+          {W02_ERROR_DESCRIPTIONS[failureCode]}
+        </p>
         {message && message !== W02_ERROR_DESCRIPTIONS[failureCode] ? (
           <p className="mt-1 font-mono text-[11px] opacity-80">{message}</p>
         ) : null}
-        <p className="mt-1 font-mono text-[10px] opacity-60">code: {failureCode}</p>
+        <p className="mt-1 font-mono text-[10px] opacity-60">
+          code: {failureCode}
+        </p>
       </div>
     );
   }
@@ -34,7 +38,7 @@ export function ErrorNotice({ message, failureCode }: ErrorNoticeProps) {
       role="alert"
       data-testid="error-notice"
     >
-      {message ?? 'An error occurred.'}
+      {message ?? "An error occurred."}
     </div>
   );
 }

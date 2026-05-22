@@ -489,7 +489,8 @@ describe("apiClient", () => {
           runId: "run-1",
           programId: "P1",
           status: "created",
-          message: "Java parity regression scaffold exported as a run artifact.",
+          message:
+            "Java parity regression scaffold exported as a run artifact.",
           export: {
             exportId: "hello-regression",
             qualification: "clean",
@@ -526,15 +527,12 @@ describe("apiClient", () => {
       exportName: "hello-regression",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/v0/runs/run-1/evidence/export",
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exportName: "hello-regression" }),
-      },
-    );
+    expect(fetch).toHaveBeenCalledWith("/api/v0/runs/run-1/evidence/export", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exportName: "hello-regression" }),
+    });
     expect(result).toEqual({
       ok: true,
       data: {
@@ -1230,6 +1228,15 @@ describe("apiClient", () => {
       "Generated file path must be a relative, normalized path.",
     );
     expect(() => apiClient.getGeneratedFile("run-1", "../App.java")).toThrow(
+      "Generated file path must be a relative, normalized path.",
+    );
+    // Backslash guard: a path containing a backslash must be rejected regardless
+    // of whether other segments look valid. Removing `filePath.includes("\\") ||`
+    // from encodeGeneratedFilePath would allow these through and break this test.
+    expect(() => apiClient.getGeneratedFile("run-1", "src\\App.java")).toThrow(
+      "Generated file path must be a relative, normalized path.",
+    );
+    expect(() => apiClient.getGeneratedFile("run-1", "foo\\..\\bar")).toThrow(
       "Generated file path must be a relative, normalized path.",
     );
 

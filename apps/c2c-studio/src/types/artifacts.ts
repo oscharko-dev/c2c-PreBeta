@@ -1,1 +1,1 @@
-export type { RunArtifactsView, RunArtifactMetadata } from './api';
+export type { RunArtifactsView, RunArtifactMetadata } from "./api";

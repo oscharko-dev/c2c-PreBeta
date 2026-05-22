@@ -123,7 +123,8 @@ describe("OutputChangeExplanationPanel", () => {
             status: "available",
             label: "AI-assisted explanation",
             groundingLabel: "Grounded in deterministic evidence",
-            explanation: "The repaired Java candidate changed the observed output.",
+            explanation:
+              "The repaired Java candidate changed the observed output.",
             modelInvocationRef: "inv-1",
             ledgerRef: "urn:ledger:1",
           },

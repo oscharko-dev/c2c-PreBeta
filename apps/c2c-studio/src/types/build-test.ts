@@ -1,1 +1,1 @@
-export type { BuildTestView } from './api';
+export type { BuildTestView } from "./api";

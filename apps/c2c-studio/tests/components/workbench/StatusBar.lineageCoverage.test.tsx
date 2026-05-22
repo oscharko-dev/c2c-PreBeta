@@ -43,7 +43,11 @@ function Harness({
   return null;
 }
 
-function RunStateHarness({ state }: { state: Partial<TransformationRunState> }) {
+function RunStateHarness({
+  state,
+}: {
+  state: Partial<TransformationRunState>;
+}) {
   const { setState } = useTransformationRun();
   React.useEffect(() => {
     setState((previous) => ({ ...previous, ...state }));

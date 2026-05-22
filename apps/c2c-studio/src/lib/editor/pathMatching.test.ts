@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  pathBasename,
-  pathSegments,
-  pathSuffixMatches,
-} from "./pathMatching";
+import { pathBasename, pathSegments, pathSuffixMatches } from "./pathMatching";
 
 describe("pathMatching", () => {
   it("splits mixed separators into path segments", () => {

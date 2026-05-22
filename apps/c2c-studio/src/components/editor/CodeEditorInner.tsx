@@ -37,8 +37,7 @@ interface MonacoHarnessWindow {
   };
 }
 
-const EDITOR_HARNESS_ENABLED =
-  process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1";
+const EDITOR_HARNESS_ENABLED = process.env.NEXT_PUBLIC_C2C_PERF_HARNESS === "1";
 
 export default function CodeEditorInner(props: CodeEditorProps) {
   const [monaco, setMonaco] = useState<Monaco | null>(null);
@@ -630,8 +629,7 @@ function DiffEditorView({
             const currentModel = modifiedEditor.getModel();
             const currentModifiedUri = currentModel?.uri.toString() ?? null;
             const currentOriginalUri =
-              diffEditor.getOriginalEditor().getModel()?.uri.toString() ??
-              null;
+              diffEditor.getOriginalEditor().getModel()?.uri.toString() ?? null;
             const previousUris = activeDiffModelUrisRef.current;
             if (
               previousUris.modified &&

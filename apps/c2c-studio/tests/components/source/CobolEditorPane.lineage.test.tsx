@@ -282,9 +282,7 @@ describe("CobolEditorPane Alt+C lineage dispatch (Studio-IDE-6 #248)", () => {
     renderPane();
     await screen.findByTestId("code-editor-mock");
     await waitFor(() =>
-      expect(screen.getByTestId("java-buffer-ready").textContent).toBe(
-        "ready",
-      ),
+      expect(screen.getByTestId("java-buffer-ready").textContent).toBe("ready"),
     );
 
     const action = altCAction();

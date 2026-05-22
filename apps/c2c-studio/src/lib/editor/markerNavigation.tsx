@@ -81,7 +81,11 @@ interface MarkerNavigationContextValue {
 const MarkerNavigationContext =
   createContext<MarkerNavigationContextValue | null>(null);
 
-export function MarkerNavigationProvider({ children }: { children: ReactNode }) {
+export function MarkerNavigationProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const registrations = useRef<Map<string, EditorRegistration>>(new Map());
   const activeIdRef = useRef<string | null>(null);
   const [target, setTarget] = useState<NavigationTarget | null>(null);

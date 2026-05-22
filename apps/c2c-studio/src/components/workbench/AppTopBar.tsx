@@ -128,7 +128,9 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
       generatedFilePaths.length > 0
         ? generatedFilePaths.flatMap((path) => {
             const entry = javaBuffers[path];
-            return entry ? ([[path, entry]] as Array<[string, typeof entry]>) : [];
+            return entry
+              ? ([[path, entry]] as Array<[string, typeof entry]>)
+              : [];
           })
         : Object.entries(javaBuffers);
     if (entries.length === 0) return;
@@ -185,8 +187,8 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     "";
   const trustCaseEvidenceMismatch = Boolean(
     selectedTrustCase &&
-      evidenceTrustCaseDigest &&
-      evidenceTrustCaseDigest !== selectedTrustCase.configurationDigest,
+    evidenceTrustCaseDigest &&
+    evidenceTrustCaseDigest !== selectedTrustCase.configurationDigest,
   );
   const trustCaseNotice = trustCaseEvidenceMismatch
     ? `Existing evidence was produced from ${evidenceTrustCaseId || "another trust case"} or an older catalog version; rerun to use ${selectedTrustCase?.trustCaseId}.`
@@ -304,11 +306,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
     } finally {
       setTrustCaseSavePending(false);
     }
-  }, [
-    saveSelectedTrustCasePreference,
-    showFeedback,
-    trustCaseSavePending,
-  ]);
+  }, [saveSelectedTrustCasePreference, showFeedback, trustCaseSavePending]);
 
   return (
     <header
@@ -332,10 +330,7 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex min-w-[18rem] max-w-[30rem] items-center gap-1 rounded border border-line-2 bg-bg-2 px-2 py-1">
           <Settings className="h-3.5 w-3.5 text-text-faint" />
-          <label
-            className="sr-only"
-            htmlFor="topbar-trust-case-select"
-          >
+          <label className="sr-only" htmlFor="topbar-trust-case-select">
             Trust case
           </label>
           <select
@@ -582,7 +577,9 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
   );
 }
 
-function bucketDraftCount(count: number): "zero" | "lt_10" | "lt_100" | "ge_100" {
+function bucketDraftCount(
+  count: number,
+): "zero" | "lt_10" | "lt_100" | "ge_100" {
   if (count === 0) return "zero";
   if (count < 10) return "lt_10";
   if (count < 100) return "lt_100";
@@ -696,10 +693,10 @@ function ClearDraftsConfirmDialog({
     error && scope === null
       ? "Unavailable without an active session"
       : draftCount === null
-      ? mode === "origin"
-        ? "Unavailable without an active session"
-        : "Checking local drafts…"
-      : `${draftCount} local draft${draftCount === 1 ? "" : "s"}`;
+        ? mode === "origin"
+          ? "Unavailable without an active session"
+          : "Checking local drafts…"
+        : `${draftCount} local draft${draftCount === 1 ? "" : "s"}`;
   const canConfirm =
     !loading && !pending && scope !== null && mode === "scoped";
 

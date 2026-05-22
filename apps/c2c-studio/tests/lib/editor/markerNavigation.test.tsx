@@ -109,9 +109,13 @@ describe("MarkerNavigationProvider", () => {
     expect((stub as unknown as { revealCalls: number[] }).revealCalls).toEqual([
       12,
     ]);
-    expect((stub as unknown as { setPositionCalls: Array<{ lineNumber: number; column: number }> }).setPositionCalls).toEqual([
-      { lineNumber: 12, column: 4 },
-    ]);
+    expect(
+      (
+        stub as unknown as {
+          setPositionCalls: Array<{ lineNumber: number; column: number }>;
+        }
+      ).setPositionCalls,
+    ).toEqual([{ lineNumber: 12, column: 4 }]);
   });
 
   it("triggers Monaco's marker.next / marker.prev actions via cycleMarker", () => {

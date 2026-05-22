@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState } from "react";
 
-import { BuildTestView } from '../../types/build-test';
-import { CodeSurface } from '../ui/CodeSurface';
-import { copyToClipboard, useCopyFeedback } from '../ui/copyFeedback';
-import { StatusChip } from '../ui/StatusChip';
-import { Tabs } from '../ui/Tabs';
-import type { BuildTestMetadataItem } from './runPanelUtils';
+import { BuildTestView } from "../../types/build-test";
+import { CodeSurface } from "../ui/CodeSurface";
+import { copyToClipboard, useCopyFeedback } from "../ui/copyFeedback";
+import { StatusChip } from "../ui/StatusChip";
+import { Tabs } from "../ui/Tabs";
+import type { BuildTestMetadataItem } from "./runPanelUtils";
 import {
   buildOutputDiff,
   describeBuildTestMode,
@@ -17,9 +17,9 @@ import {
   getBuildTestMetadataItems,
   getBuildTestReferenceSummary,
   splitOutputLines,
-} from './runPanelUtils';
+} from "./runPanelUtils";
 
-type OutputTab = 'split' | 'diff';
+type OutputTab = "split" | "diff";
 
 export function EquivalencePanel({
   buildTest,
@@ -29,22 +29,34 @@ export function EquivalencePanel({
 }: {
   buildTest: BuildTestView | null;
   isPending: boolean;
-  view?: OutputTab | 'outputs';
+  view?: OutputTab | "outputs";
   intentionalDivergence?: boolean;
 }) {
   const tabIdBase = useId();
-  const [activeTab, setActiveTab] = useState<OutputTab>('split');
+  const [activeTab, setActiveTab] = useState<OutputTab>("split");
   const result = useMemo(
     () => describeBuildTestResult(buildTest, intentionalDivergence),
     [buildTest, intentionalDivergence],
   );
   const isControlled = view !== undefined;
   const resolvedTab: OutputTab =
-    view === 'diff'
-      ? 'diff'
-      : view === 'outputs'
-        ? 'split'
-        : activeTab;
+    view === "diff" ? "diff" : view === "outputs" ? "split" : activeTab;
+
+  const expectedOutput = buildTest?.expectedOutput;
+  const actualOutput = buildTest?.actualOutput;
+  const hasOutputs = expectedOutput !== undefined || actualOutput !== undefined;
+  const expectedLines = useMemo(
+    () => splitOutputLines(expectedOutput),
+    [expectedOutput],
+  );
+  const actualLines = useMemo(
+    () => splitOutputLines(actualOutput),
+    [actualOutput],
+  );
+  const diffLines = useMemo(
+    () => buildOutputDiff(expectedOutput, actualOutput),
+    [expectedOutput, actualOutput],
+  );
 
   if (isPending || !buildTest) {
     return (
@@ -54,18 +66,13 @@ export function EquivalencePanel({
     );
   }
 
-  const expectedOutputDefined = buildTest.expectedOutput !== undefined;
-  const actualOutputDefined = buildTest.actualOutput !== undefined;
-  const hasOutputs = expectedOutputDefined || actualOutputDefined;
-  const expectedLines = splitOutputLines(buildTest.expectedOutput);
-  const actualLines = splitOutputLines(buildTest.actualOutput);
-  const diffLines = buildOutputDiff(buildTest.expectedOutput, buildTest.actualOutput);
   const metadataItems = getBuildTestMetadataItems(buildTest);
   const artifactRefs = getBuildTestArtifactRefs(buildTest);
 
   if (isControlled) {
     return (
       <div className="h-full min-h-0">
+        <h4 className="sr-only">Expected vs actual output</h4>
         {renderOutputBody({
           activeTab: resolvedTab,
           showTabs: false,
@@ -128,8 +135,14 @@ export function EquivalencePanel({
         </div>
 
         <div className="mt-4 grid gap-3 text-xs text-text-dim sm:grid-cols-2">
-          <MetaPair label="Execution mode" value={describeBuildTestMode(buildTest)} />
-          <MetaPair label="Product mode" value={describeBuildTestProductMode(buildTest)} />
+          <MetaPair
+            label="Execution mode"
+            value={describeBuildTestMode(buildTest)}
+          />
+          <MetaPair
+            label="Product mode"
+            value={describeBuildTestProductMode(buildTest)}
+          />
         </div>
       </section>
 
@@ -197,8 +210,8 @@ function renderOutputBody({
               value={activeTab}
               onValueChange={(value) => setActiveTab(value as OutputTab)}
               tabs={[
-                { value: 'split', label: 'Split view' },
-                { value: 'diff', label: 'Diff view' },
+                { value: "split", label: "Split view" },
+                { value: "diff", label: "Diff view" },
               ]}
             />
           </div>
@@ -206,7 +219,7 @@ function renderOutputBody({
       ) : null}
 
       <div className="min-h-0 flex-1 p-4">
-        {activeTab === 'split' ? (
+        {activeTab === "split" ? (
           hasOutputs ? (
             <div className="grid min-h-0 gap-4 xl:grid-cols-2">
               <div className="flex min-h-0 flex-col">
@@ -218,7 +231,7 @@ function renderOutputBody({
                 <CodeSurface
                   className="min-h-0 flex-1 rounded border border-line-2"
                   label="Expected output"
-                  copyValue={buildTest.expectedOutput ?? ''}
+                  copyValue={buildTest.expectedOutput ?? ""}
                   copyLabel="Copy expected"
                   emptyMessage="No expected output captured."
                   lines={expectedLines.map((line) => ({ content: line }))}
@@ -233,7 +246,7 @@ function renderOutputBody({
                 <CodeSurface
                   className="min-h-0 flex-1 rounded border border-line-2"
                   label="Actual output"
-                  copyValue={buildTest.actualOutput ?? ''}
+                  copyValue={buildTest.actualOutput ?? ""}
                   copyLabel="Copy actual"
                   emptyMessage="No actual output captured."
                   lines={actualLines.map((line) => ({ content: line }))}
@@ -260,11 +273,11 @@ function renderOutputBody({
                 />
               ),
               tone:
-                line.kind === 'added'
-                  ? 'success'
-                  : line.kind === 'removed'
-                    ? 'error'
-                    : 'neutral',
+                line.kind === "added"
+                  ? "success"
+                  : line.kind === "removed"
+                    ? "error"
+                    : "neutral",
             }))}
           />
         ) : (
@@ -277,13 +290,7 @@ function renderOutputBody({
   );
 }
 
-function MetaPair({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function MetaPair({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded border border-line bg-bg-0 px-3 py-2">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">
@@ -296,11 +303,7 @@ function MetaPair({
   );
 }
 
-function MetadataCard({
-  item,
-}: {
-  item: BuildTestMetadataItem;
-}) {
+function MetadataCard({ item }: { item: BuildTestMetadataItem }) {
   return (
     <div className="rounded border border-line bg-bg-0 px-3 py-2">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">
@@ -328,7 +331,7 @@ function SurfaceHeading({
 }: {
   title: string;
   subtitle: string;
-  refSummary?: BuildTestView['expectedOutputRef'];
+  refSummary?: BuildTestView["expectedOutputRef"];
 }) {
   return (
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -352,7 +355,7 @@ function ArtifactRefPill({
   refValue,
 }: {
   label: string;
-  refValue: BuildTestView['expectedOutputRef'];
+  refValue: BuildTestView["expectedOutputRef"];
 }) {
   if (!refValue) {
     return null;
@@ -379,32 +382,36 @@ function DiffLineRow({
   expectedLineNumber,
   actualLineNumber,
 }: {
-  kind: 'equal' | 'added' | 'removed';
+  kind: "equal" | "added" | "removed";
   content: string;
   expectedLineNumber?: number;
   actualLineNumber?: number;
 }) {
-  const marker = kind === 'added' ? '+' : kind === 'removed' ? '-' : ' ';
+  const marker = kind === "added" ? "+" : kind === "removed" ? "-" : " ";
+  const statusText =
+    kind === "added" ? "Added" : kind === "removed" ? "Removed" : "Unchanged";
   const toneClass =
-    kind === 'added'
-      ? 'border-success/30 bg-success/10 text-success'
-      : kind === 'removed'
-        ? 'border-error/30 bg-error/10 text-error'
-        : 'border-transparent text-text';
+    kind === "added"
+      ? "border-success/30 bg-success/10 text-success"
+      : kind === "removed"
+        ? "border-error/30 bg-error/10 text-error"
+        : "border-transparent text-text";
 
   return (
     <div className="flex min-w-0 items-start gap-2 whitespace-pre">
+      <span className="sr-only">{statusText}: </span>
       <span className="w-14 shrink-0 text-right text-text-faint">
-        {expectedLineNumber ?? actualLineNumber ?? ''}
+        {expectedLineNumber ?? actualLineNumber ?? ""}
       </span>
       <span
+        aria-hidden="true"
         className={`inline-flex w-4 shrink-0 justify-center rounded border ${toneClass}`}
       >
         {marker}
       </span>
-      <span className="min-w-0 flex-1 break-words">{content || ' '}</span>
+      <span className="min-w-0 flex-1 break-words">{content || " "}</span>
       <span className="w-14 shrink-0 text-right text-text-faint">
-        {actualLineNumber ?? expectedLineNumber ?? ''}
+        {actualLineNumber ?? expectedLineNumber ?? ""}
       </span>
     </div>
   );
@@ -432,10 +439,10 @@ function CopyButton({
           showCopied();
         });
       }}
-      aria-label={label}
-      className={`inline-flex items-center rounded border border-line bg-bg-0 px-2 py-1 font-mono text-[10px] text-text-dim transition-colors hover:border-accent hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${compact ? 'min-h-6' : 'min-h-7'}`}
+      aria-label={copied ? `${label} (copied)` : label}
+      className={`inline-flex items-center rounded border border-line bg-bg-0 px-2 py-1 font-mono text-[10px] text-text-dim transition-colors hover:border-accent hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${compact ? "min-h-6" : "min-h-7"}`}
     >
-      {copied ? 'Copied' : 'Copy'}
+      {copied ? "Copied" : "Copy"}
     </button>
   );
 }

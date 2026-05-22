@@ -18,7 +18,9 @@ export function RunArtifactsPanel({
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const artifactIdBase = useId();
-  const hasMissingArtifacts = Boolean(missingArtifacts && missingArtifacts.length > 0);
+  const hasMissingArtifacts = Boolean(
+    missingArtifacts && missingArtifacts.length > 0,
+  );
 
   useEffect(() => {
     if (!artifacts || artifacts.length === 0) {
@@ -34,7 +36,9 @@ export function RunArtifactsPanel({
       <div className="p-4 space-y-3 text-sm">
         {errorMessage ? (
           <div className="rounded border border-line-2 bg-bg-1 p-3">
-            <p className="text-xs font-medium text-error">Artifacts fetch failed</p>
+            <p className="text-xs font-medium text-error">
+              Artifacts fetch failed
+            </p>
             <p className="mt-1 text-xs text-text-dim">{errorMessage}</p>
           </div>
         ) : null}
@@ -92,7 +96,9 @@ export function RunArtifactsPanel({
       <div className="flex-1 overflow-hidden p-4">
         {errorMessage ? (
           <div className="mb-4 rounded border border-line-2 bg-bg-1 p-3">
-            <p className="text-xs font-medium text-error">Artifacts fetch failed</p>
+            <p className="text-xs font-medium text-error">
+              Artifacts fetch failed
+            </p>
             <p className="mt-1 text-xs text-text-dim">{errorMessage}</p>
           </div>
         ) : null}
@@ -170,7 +176,10 @@ export function RunArtifactsPanel({
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <ArtifactValueRow label="SHA256" value={selectedArtifact.sha256} />
+              <ArtifactValueRow
+                label="SHA256"
+                value={selectedArtifact.sha256}
+              />
               <ArtifactValueRow label="Path" value={selectedArtifact.path} />
               <ArtifactValueRow label="Name" value={selectedArtifact.name} />
               <ArtifactValueRow label="Kind" value={selectedArtifact.kind} />
@@ -268,7 +277,9 @@ function MissingArtifactRecords({
   className?: string;
 }) {
   return (
-    <div className={`rounded border border-line-2 bg-bg-1 p-3 ${className ?? ""}`.trim()}>
+    <div
+      className={`rounded border border-line-2 bg-bg-1 p-3 ${className ?? ""}`.trim()}
+    >
       <p className="text-xs font-medium text-warn">Missing artifact records</p>
       <ul className="mt-2 list-disc space-y-1 pl-4 text-xs font-mono text-text">
         {artifacts.map((artifact) => (

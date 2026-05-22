@@ -204,13 +204,8 @@ export interface TransformationRunContextValue {
   exportParityEvidenceScaffold: (
     request?: ParityEvidenceExportRequest,
   ) => Promise<ApiResult<ParityEvidenceExportResponse>>;
-  intentionalDivergenceDecision:
-    | IntentionalDivergenceDecisionResponse
-    | null;
-  intentionalDivergenceDecisionStatus:
-    | "idle"
-    | "saving"
-    | "error";
+  intentionalDivergenceDecision: IntentionalDivergenceDecisionResponse | null;
+  intentionalDivergenceDecisionStatus: "idle" | "saving" | "error";
   intentionalDivergenceDecisionError: string | null;
   submitIntentionalDivergenceDecision: (
     request: IntentionalDivergenceDecisionRequest,
@@ -275,9 +270,15 @@ export interface TransformationRunContextValue {
   startManualCompileRepairDiagnose: (
     request: ManualCompileRepairDiagnoseRequest,
   ) => Promise<ApiResult<ManualCompileRepairDiagnoseResponse>>;
-  applyManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairApplyResponse>>;
-  acceptManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairAcceptResponse>>;
-  rejectManualCompileRepair: () => Promise<ApiResult<ManualCompileRepairRejectResponse>>;
+  applyManualCompileRepair: () => Promise<
+    ApiResult<ManualCompileRepairApplyResponse>
+  >;
+  acceptManualCompileRepair: () => Promise<
+    ApiResult<ManualCompileRepairAcceptResponse>
+  >;
+  rejectManualCompileRepair: () => Promise<
+    ApiResult<ManualCompileRepairRejectResponse>
+  >;
   clearManualCompileRepair: () => void;
   // ----- Studio-IDE-7 (#252) synchronized-diff history ------------------
   // In-memory, session-scoped accumulator. Keyed by ``sourceKey`` (the
@@ -342,8 +343,9 @@ export function TransformationRunProvider({
   const activeTransformRequestRef = useRef(0);
   const activeManualCompileRepairRequestRef = useRef(0);
   const currentRunIdRef = useRef<string | null>(null);
-  const pendingGenerateTelemetryRef =
-    useRef<PendingGenerateTelemetry | null>(null);
+  const pendingGenerateTelemetryRef = useRef<PendingGenerateTelemetry | null>(
+    null,
+  );
   const [state, setState] = useState<TransformationRunState>({
     phase: "idle",
     runId: null,
@@ -458,10 +460,12 @@ export function TransformationRunProvider({
       runId: string,
     ) => {
       const hashedFiles = await Promise.all(
-        Object.entries(candidateProject.files).map(async ([filePath, content]) => {
-          const hash = await deriveSourceHash(content);
-          return { filePath, content, hash };
-        }),
+        Object.entries(candidateProject.files).map(
+          async ([filePath, content]) => {
+            const hash = await deriveSourceHash(content);
+            return { filePath, content, hash };
+          },
+        ),
       );
       if (!isMountedRef.current) {
         return;
@@ -838,7 +842,10 @@ export function TransformationRunProvider({
           message: "No completed run is available for export.",
         };
       }
-      const result = await apiClient.exportParityEvidenceScaffold(runId, request);
+      const result = await apiClient.exportParityEvidenceScaffold(
+        runId,
+        request,
+      );
       if (currentRunIdRef.current !== runId) {
         return {
           ok: false,
@@ -888,7 +895,8 @@ export function TransformationRunProvider({
         );
         return {
           ok: false,
-          message: "The active run changed before the divergence decision completed.",
+          message:
+            "The active run changed before the divergence decision completed.",
         };
       }
 
@@ -906,7 +914,8 @@ export function TransformationRunProvider({
           return prev;
         }
 
-        const trustSummary = result.data.trustSummary ?? prev.summary?.trustSummary ?? null;
+        const trustSummary =
+          result.data.trustSummary ?? prev.summary?.trustSummary ?? null;
         return {
           ...prev,
           summary: prev.summary
@@ -1109,7 +1118,10 @@ export function TransformationRunProvider({
       !session.candidateProject ||
       !session.runId
     ) {
-      return { ok: false, message: "Sandboxed repair is not ready for acceptance." };
+      return {
+        ok: false,
+        message: "Sandboxed repair is not ready for acceptance.",
+      };
     }
     setManualCompileRepair((prev) =>
       prev
@@ -1580,9 +1592,7 @@ export function TransformationRunProvider({
           generatorBaselineHash:
             loaded.payload.generatorBaselineHash ?? backendHash,
           generatorBaselineRunId:
-            loaded.payload.generatorBaselineRunId ??
-            state.runId ??
-            "unknown",
+            loaded.payload.generatorBaselineRunId ?? state.runId ?? "unknown",
           manualEditOverlay: loaded.payload.manualEditOverlay ?? null,
         });
         return;
@@ -1601,9 +1611,11 @@ export function TransformationRunProvider({
             lastRunInputHash:
               loaded.payload.lastRunInputHash ?? existing.lastRunInputHash,
             lastRunInputContent:
-              loaded.payload.lastRunInputContent ?? existing.lastRunInputContent,
+              loaded.payload.lastRunInputContent ??
+              existing.lastRunInputContent,
             manualEditOverlay: loaded.payload.manualEditOverlay ?? null,
-            isDirty: loaded.payload.content !== existing.generatorBaselineContent,
+            isDirty:
+              loaded.payload.content !== existing.generatorBaselineContent,
             lastSavedAt: loaded.savedAt,
           },
         };

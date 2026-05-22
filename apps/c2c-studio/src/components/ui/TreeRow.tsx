@@ -1,12 +1,12 @@
-import React from 'react';
-import { cn } from '@/lib/utils';
-import { ChevronRight, ChevronDown, File, Folder } from 'lucide-react';
-import { StatusChip } from './StatusChip';
-import { StatusVariant } from '@/types/design';
+import React from "react";
+import { cn } from "@/lib/utils";
+import { ChevronRight, ChevronDown, File, Folder } from "lucide-react";
+import { StatusChip } from "./StatusChip";
+import { StatusVariant } from "@/types/design";
 
 export interface TreeRowProps extends React.HTMLAttributes<HTMLDivElement> {
   label: string;
-  type?: 'file' | 'folder';
+  type?: "file" | "folder";
   depth?: number;
   isOpen?: boolean;
   onToggle?: () => void;
@@ -22,10 +22,10 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
     {
       className,
       label,
-      type = 'file',
+      type = "file",
       depth = 0,
       isOpen,
-      onToggle, 
+      onToggle,
       onActivate,
       statusVariant,
       active,
@@ -35,10 +35,14 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
       onKeyDown,
       ...props
     },
-    ref
+    ref,
   ) => {
-    const isFolder = type === 'folder';
-    const isInteractive = !disabled && (isFolder || typeof onActivate === 'function' || typeof onClick === 'function');
+    const isFolder = type === "folder";
+    const isInteractive =
+      !disabled &&
+      (isFolder ||
+        typeof onActivate === "function" ||
+        typeof onClick === "function");
 
     return (
       <div
@@ -51,12 +55,12 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
         className={cn(
           "group flex items-center h-7 px-2 transition-colors text-sm outline-none focus-visible:ring-1 focus-visible:ring-accent",
           {
-            'bg-bg-active text-text hover:bg-bg-active-strong': active,
-            'text-text-dim hover:bg-bg-2 hover:text-text': !active,
-            'cursor-pointer': isInteractive,
-            'cursor-not-allowed opacity-60': disabled,
+            "bg-bg-active text-text hover:bg-bg-active-strong": active,
+            "text-text-dim hover:bg-bg-2 hover:text-text": !active,
+            "cursor-pointer": isInteractive,
+            "cursor-not-allowed opacity-60": disabled,
           },
-          className
+          className,
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={(event) => {
@@ -75,7 +79,7 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
             return;
           }
 
-          if (isInteractive && (event.key === 'Enter' || event.key === ' ')) {
+          if (isInteractive && (event.key === "Enter" || event.key === " ")) {
             event.preventDefault();
             if (isFolder) {
               onToggle?.();
@@ -89,10 +93,14 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
       >
         <div className="w-4 h-4 flex items-center justify-center shrink-0 mr-1 opacity-80 group-hover:opacity-100">
           {isFolder ? (
-            isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />
+            isOpen ? (
+              <ChevronDown className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5" />
+            )
           ) : null}
         </div>
-        
+
         <div className="w-4 h-4 flex items-center justify-center shrink-0 mr-1.5 opacity-80 group-hover:opacity-100">
           {isFolder ? (
             <Folder className="w-3.5 h-3.5" />
@@ -100,16 +108,21 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
             <File className="w-3.5 h-3.5" />
           )}
         </div>
-        
+
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="truncate" title={label}>{label}</span>
+          <span className="truncate" title={label}>
+            {label}
+          </span>
           {description ? (
-            <span className="truncate text-xs text-text-dim" title={description}>
+            <span
+              className="truncate text-xs text-text-dim"
+              title={description}
+            >
               {description}
             </span>
           ) : null}
         </span>
-        
+
         {statusVariant && (
           <div className="ml-2 shrink-0">
             <StatusChip variant={statusVariant} />
@@ -117,7 +130,7 @@ export const TreeRow = React.forwardRef<HTMLDivElement, TreeRowProps>(
         )}
       </div>
     );
-  }
+  },
 );
 
-TreeRow.displayName = 'TreeRow';
+TreeRow.displayName = "TreeRow";

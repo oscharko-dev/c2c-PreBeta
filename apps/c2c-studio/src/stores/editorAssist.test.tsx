@@ -36,7 +36,10 @@ function makeRequest(filePath: string): EditorAssistRequest {
   };
 }
 
-function successResult(filePath: string, remaining: number): EditorAssistResult {
+function successResult(
+  filePath: string,
+  remaining: number,
+): EditorAssistResult {
   return {
     ok: true,
     data: {
@@ -67,7 +70,9 @@ function Probe() {
   return (
     <div>
       <div data-testid="open">{String(assist.panelOpen)}</div>
-      <div data-testid="request">{assist.request?.region.filePath ?? "none"}</div>
+      <div data-testid="request">
+        {assist.request?.region.filePath ?? "none"}
+      </div>
       <div data-testid="result">
         {assist.result?.ok ? assist.result.data.explanation : "none"}
       </div>

@@ -1,18 +1,21 @@
-import React from 'react';
-import { cn } from '@/lib/utils';
-import { LucideIcon } from 'lucide-react';
+import React from "react";
+import { cn } from "@/lib/utils";
+import { LucideIcon } from "lucide-react";
 
-type NativeButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label'>;
+type NativeButtonProps = Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "aria-label"
+>;
 
 export interface IconButtonProps extends NativeButtonProps {
-  'aria-label': string;
+  "aria-label": string;
   icon: LucideIcon;
   active?: boolean;
-  variant?: 'default' | 'primary' | 'danger';
+  variant?: "default" | "primary" | "danger";
 }
 
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
-  ({ className, icon: Icon, active, variant = 'default', ...props }, ref) => {
+  ({ className, icon: Icon, active, variant = "default", ...props }, ref) => {
     return (
       <button
         ref={ref}
@@ -20,19 +23,22 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
         className={cn(
           "w-6 h-6 flex items-center justify-center rounded transition-colors shrink-0 outline-none focus-visible:ring-1 focus-visible:ring-accent",
           {
-            'text-text-dim hover:text-text hover:bg-bg-3': variant === 'default' && !active,
-            'text-text bg-bg-3': variant === 'default' && active,
-            'text-success border border-success/40 bg-bg-2 hover:bg-success-soft': variant === 'primary',
-            'text-error border border-error/40 bg-bg-2 hover:bg-error-soft': variant === 'danger',
+            "text-text-dim hover:text-text hover:bg-bg-3":
+              variant === "default" && !active,
+            "text-text bg-bg-3": variant === "default" && active,
+            "text-success border border-success/40 bg-bg-2 hover:bg-success-soft":
+              variant === "primary",
+            "text-error border border-error/40 bg-bg-2 hover:bg-error-soft":
+              variant === "danger",
           },
-          className
+          className,
         )}
         {...props}
       >
         <Icon className="w-4 h-4" />
       </button>
     );
-  }
+  },
 );
 
-IconButton.displayName = 'IconButton';
+IconButton.displayName = "IconButton";

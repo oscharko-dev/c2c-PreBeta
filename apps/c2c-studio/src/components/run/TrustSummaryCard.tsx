@@ -65,9 +65,9 @@ export function TrustSummaryCard({
   const currentDecision = intentionalDivergenceDecision?.decision ?? null;
   const decisionFormVisible = Boolean(
     summary?.runId &&
-      (intentionalDivergence ||
-        currentDecision ||
-        buildTest?.classification?.startsWith("divergence")),
+    (intentionalDivergence ||
+      currentDecision ||
+      buildTest?.classification?.startsWith("divergence")),
   );
   const decisionBusy = intentionalDivergenceDecisionStatus === "saving";
   const decisionError =
@@ -142,7 +142,8 @@ export function TrustSummaryCard({
             Read-only trust case snapshot
           </h3>
           <p className="mt-1 text-sm text-text-dim">
-            Backend-supplied trust case, build/test, repair, and evidence metadata.
+            Backend-supplied trust case, build/test, repair, and evidence
+            metadata.
           </p>
         </div>
       </div>
@@ -199,15 +200,27 @@ export function TrustSummaryCard({
               />
               <SummaryField
                 label="Environment profile"
-                value={summary?.trustCaseEnvironmentProfileId ?? selectedTrustCase?.environmentProfileId ?? "Unavailable"}
+                value={
+                  summary?.trustCaseEnvironmentProfileId ??
+                  selectedTrustCase?.environmentProfileId ??
+                  "Unavailable"
+                }
               />
               <SummaryField
                 label="Comparison policy version"
-                value={summary?.trustCaseComparisonPolicyVersion ?? selectedTrustCase?.comparisonPolicyVersion ?? "Unavailable"}
+                value={
+                  summary?.trustCaseComparisonPolicyVersion ??
+                  selectedTrustCase?.comparisonPolicyVersion ??
+                  "Unavailable"
+                }
               />
               <SummaryField
                 label="Program ID"
-                value={summary?.programId ?? selectedTrustCase?.programId ?? "Unavailable"}
+                value={
+                  summary?.programId ??
+                  selectedTrustCase?.programId ??
+                  "Unavailable"
+                }
               />
             </div>
           </SummarySection>
@@ -216,7 +229,11 @@ export function TrustSummaryCard({
             <div className="grid gap-3 md:grid-cols-2">
               <SummaryField
                 label="COBOL result"
-                value={trust?.cobolResult.status ?? buildTest?.status ?? "Unavailable"}
+                value={
+                  trust?.cobolResult.status ??
+                  buildTest?.status ??
+                  "Unavailable"
+                }
                 secondary={
                   trust?.cobolResult.normalizedOutputRef
                     ? `Normalized ref ${shortRef(trust.cobolResult.normalizedOutputRef)}`
@@ -300,7 +317,10 @@ export function TrustSummaryCard({
                     label="Expiration"
                     value={decisionDraft.expiresAt}
                     onChange={(value) =>
-                      setDecisionDraft((prev) => ({ ...prev, expiresAt: value }))
+                      setDecisionDraft((prev) => ({
+                        ...prev,
+                        expiresAt: value,
+                      }))
                     }
                     placeholder="2026-05-21T12:00"
                     type="datetime-local"
@@ -363,7 +383,8 @@ export function TrustSummaryCard({
                     className="mt-0.5 h-4 w-4 rounded border-line bg-bg-0 text-accent focus:ring-accent"
                   />
                   <span>
-                    Supersedes the previous decision and invalidates any prior approval.
+                    Supersedes the previous decision and invalidates any prior
+                    approval.
                   </span>
                 </label>
                 <div className="flex flex-wrap items-center gap-3">
@@ -432,16 +453,22 @@ export function TrustSummaryCard({
               />
               <SummaryField
                 label="Evidence status"
-                value={trust?.evidence.status ?? evidence?.status ?? "Unavailable"}
+                value={
+                  trust?.evidence.status ?? evidence?.status ?? "Unavailable"
+                }
                 secondary={
-                  evidence?.note ?? "Read-only evidence payload from the backend."
+                  evidence?.note ??
+                  "Read-only evidence payload from the backend."
                 }
               />
             </div>
 
             <div className="mt-4 space-y-3">
               <ReferenceGroup title="Build/test refs" entries={buildTestRefs} />
-              <ReferenceGroup title="Comparison refs" entries={comparisonRefs} />
+              <ReferenceGroup
+                title="Comparison refs"
+                entries={comparisonRefs}
+              />
               <ReferenceGroup title="Evidence refs" entries={evidenceRefs} />
             </div>
           </SummarySection>
@@ -450,10 +477,12 @@ export function TrustSummaryCard({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-text">
-                  Export a reviewable Java regression scaffold from the current parity evidence.
+                  Export a reviewable Java regression scaffold from the current
+                  parity evidence.
                 </p>
                 <p className="mt-1 text-xs text-text-dim">
-                  The export is run-scoped and remains reviewable until a developer promotes it into repository CI.
+                  The export is run-scoped and remains reviewable until a
+                  developer promotes it into repository CI.
                 </p>
               </div>
               <button
@@ -462,8 +491,7 @@ export function TrustSummaryCard({
                   void onExportParityEvidenceScaffold();
                 }}
                 disabled={
-                  !evidence ||
-                  parityEvidenceExport.status === "exporting"
+                  !evidence || parityEvidenceExport.status === "exporting"
                 }
                 className="rounded border border-line-2 bg-bg-0 px-3 py-2 text-xs font-medium text-text transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -529,7 +557,8 @@ export function TrustSummaryCard({
                     },
                     {
                       label: "Project manifest",
-                      ref: parityEvidenceExport.response.export.projectManifestRef,
+                      ref: parityEvidenceExport.response.export
+                        .projectManifestRef,
                     },
                     {
                       label: "Export manifest",
@@ -537,7 +566,8 @@ export function TrustSummaryCard({
                     },
                     {
                       label: "Expected output",
-                      ref: parityEvidenceExport.response.export.expectedOutputRef,
+                      ref: parityEvidenceExport.response.export
+                        .expectedOutputRef,
                     },
                   ]}
                 />
@@ -714,8 +744,14 @@ function collectComparisonRefs(
       label: "Intentional divergence decision",
       ref: trust?.intentionalDivergenceDecisionRef,
     },
-    { label: "Comparison policy", ref: buildTest?.comparison?.comparisonPolicyRef },
-    { label: "Comparison result", ref: buildTest?.comparison?.comparisonResultRef },
+    {
+      label: "Comparison policy",
+      ref: buildTest?.comparison?.comparisonPolicyRef,
+    },
+    {
+      label: "Comparison result",
+      ref: buildTest?.comparison?.comparisonResultRef,
+    },
     { label: "Diff", ref: buildTest?.comparison?.diffRef },
     { label: "Expected", ref: buildTest?.comparison?.expectedRef },
     { label: "Actual", ref: buildTest?.comparison?.actualRef },
@@ -871,9 +907,14 @@ function validateDecisionDraft(draft: DecisionDraft): string[] {
     draft.supersedesPreviousDecision &&
     draft.invalidationNote.trim().length === 0
   ) {
-    errors.push("An invalidation note is required when superseding a prior decision.");
+    errors.push(
+      "An invalidation note is required when superseding a prior decision.",
+    );
   }
-  if (draft.expiresAt.trim().length > 0 && Number.isNaN(Date.parse(draft.expiresAt))) {
+  if (
+    draft.expiresAt.trim().length > 0 &&
+    Number.isNaN(Date.parse(draft.expiresAt))
+  ) {
     errors.push("Expiration must be a valid date-time value.");
   }
   return errors;

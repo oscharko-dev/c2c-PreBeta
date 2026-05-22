@@ -273,8 +273,10 @@ function isOutputChangeExplanationResponsePayload(
     isString(payload.currentRunId) &&
     isString(payload.previousRunId) &&
     isString(payload.programId) &&
-    (payload.currentTrustCaseId === null || isString(payload.currentTrustCaseId)) &&
-    (payload.previousTrustCaseId === null || isString(payload.previousTrustCaseId)) &&
+    (payload.currentTrustCaseId === null ||
+      isString(payload.currentTrustCaseId)) &&
+    (payload.previousTrustCaseId === null ||
+      isString(payload.previousTrustCaseId)) &&
     isString(payload.determination) &&
     (payload.primaryCategory === null || isString(payload.primaryCategory)) &&
     isString(payload.summary) &&
@@ -374,8 +376,10 @@ function normalizeDiagnostic(payload: Diagnostic): Diagnostic {
   if (typeof payload.endLine === "number") out.endLine = payload.endLine;
   if (typeof payload.endColumn === "number") out.endColumn = payload.endColumn;
   if (typeof payload.filePath === "string") out.filePath = payload.filePath;
-  if (typeof payload.sourceKind === "string") out.sourceKind = payload.sourceKind;
-  if (typeof payload.originStep === "string") out.originStep = payload.originStep;
+  if (typeof payload.sourceKind === "string")
+    out.sourceKind = payload.sourceKind;
+  if (typeof payload.originStep === "string")
+    out.originStep = payload.originStep;
   if (payload.artifactRef === null || isOutputRef(payload.artifactRef)) {
     out.artifactRef = payload.artifactRef;
   }
@@ -1146,9 +1150,7 @@ function isTrustSummaryEvidencePayload(
   );
 }
 
-function isTrustSummaryPayload(
-  payload: unknown,
-): payload is TrustSummaryView {
+function isTrustSummaryPayload(payload: unknown): payload is TrustSummaryView {
   return (
     isRecord(payload) &&
     (payload.schemaVersion === undefined || isString(payload.schemaVersion)) &&
@@ -2035,15 +2037,22 @@ function parseManualCompileRepairAcceptResponse(
   };
 }
 
-function parseTrustCasesResponse(payload: unknown): ApiResult<TrustCasesResponse> {
+function parseTrustCasesResponse(
+  payload: unknown,
+): ApiResult<TrustCasesResponse> {
   if (
     !isRecord(payload) ||
     payload.schemaVersion !== "v0" ||
     !isString(payload.catalogVersion) ||
     !isString(payload.catalogHash) ||
     !(payload.programId === null || isString(payload.programId)) ||
-    !(payload.defaultTrustCaseId === null || isString(payload.defaultTrustCaseId)) ||
-    !(payload.savedTrustCaseId === null || isString(payload.savedTrustCaseId)) ||
+    !(
+      payload.defaultTrustCaseId === null ||
+      isString(payload.defaultTrustCaseId)
+    ) ||
+    !(
+      payload.savedTrustCaseId === null || isString(payload.savedTrustCaseId)
+    ) ||
     !Array.isArray(payload.trustCases) ||
     !payload.trustCases.every(isTrustCaseSummary)
   ) {
@@ -2211,8 +2220,7 @@ function isParityEvidenceExportResponsePayload(
     (exportPayload.expectedOutputRef === undefined ||
       exportPayload.expectedOutputRef === null ||
       isOutputRef(exportPayload.expectedOutputRef)) &&
-    (exportPayload.createdAt === undefined ||
-      isString(exportPayload.createdAt))
+    (exportPayload.createdAt === undefined || isString(exportPayload.createdAt))
   );
 }
 
@@ -2309,6 +2317,7 @@ function encodeGeneratedFilePath(filePath: string): string {
   if (
     filePath.length === 0 ||
     filePath.startsWith("/") ||
+    filePath.includes("\\") ||
     segments.some(
       (segment) => segment.length === 0 || segment === "." || segment === "..",
     )

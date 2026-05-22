@@ -410,11 +410,7 @@ describe("editorPersistence", () => {
 
     await __resetEditorPersistenceForTests();
     const pOther = persistenceFor(scopeAOtherUser);
-    await pOther.saveDraft(
-      scopeAOtherUser,
-      cobolKey,
-      cobolPayload("user two"),
-    );
+    await pOther.saveDraft(scopeAOtherUser, cobolKey, cobolPayload("user two"));
 
     const otherLoaded = await pOther.loadDraft(scopeAOtherUser, cobolKey);
     expect(otherLoaded?.payload.content).toBe("user two");
@@ -639,9 +635,9 @@ describe("editorPersistence", () => {
         const store = tx.objectStore("drafts");
         const cursorReq = store.openCursor();
         cursorReq.onsuccess = () => {
-            const cursor = cursorReq.result;
-            if (cursor) {
-              const record = cursor.value as { recordSchemaVersion: string };
+          const cursor = cursorReq.result;
+          if (cursor) {
+            const record = cursor.value as { recordSchemaVersion: string };
             record.recordSchemaVersion = "v2";
             cursor.update(record);
             cursor.continue();
@@ -760,7 +756,9 @@ describe("editorPersistence", () => {
     };
     try {
       const p = persistenceFor(scopeA);
-      await expect(p.saveDraft(scopeA, cobolKey, cobolPayload())).rejects.toEqual(
+      await expect(
+        p.saveDraft(scopeA, cobolKey, cobolPayload()),
+      ).rejects.toEqual(
         expect.objectContaining({
           name: "EditorPersistenceError",
           kind: "QuotaExceeded",

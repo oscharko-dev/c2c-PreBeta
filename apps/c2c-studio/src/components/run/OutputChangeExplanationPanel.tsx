@@ -28,7 +28,8 @@ export function OutputChangeExplanationPanel({
       setState({
         loading: false,
         data: null,
-        error: "A previous completed run is required before output changes can be explained.",
+        error:
+          "A previous completed run is required before output changes can be explained.",
       });
       return;
     }
@@ -153,14 +154,18 @@ export function OutputChangeExplanationPanel({
               >
                 <div className="flex items-center gap-2">
                   <StatusChip variant={entry.changed ? "warning" : "neutral"} />
-                  <h4 className="text-sm font-medium text-text">{entry.title}</h4>
+                  <h4 className="text-sm font-medium text-text">
+                    {entry.title}
+                  </h4>
                 </div>
                 <p className="mt-2 text-xs text-text-dim">{entry.detail}</p>
                 {entry.evidenceLinks.length > 0 ? (
                   <div className="mt-3 space-y-2">
                     {entry.evidenceLinks.map((link) => (
                       <div key={link.label} className="text-xs text-text-dim">
-                        <div className="font-medium text-text">{link.label}</div>
+                        <div className="font-medium text-text">
+                          {link.label}
+                        </div>
                         <div className="font-mono">
                           {link.currentRef?.sha256
                             ? `Current: ${link.currentRef.sha256.slice(0, 12)}`

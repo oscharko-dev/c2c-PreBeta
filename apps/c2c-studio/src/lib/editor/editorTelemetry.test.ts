@@ -227,7 +227,10 @@ describe("editorTelemetry", () => {
     expect(calls).toHaveLength(1);
 
     for (let i = 0; i < EDITOR_TELEMETRY_MAX_BATCH_SIZE; i += 1) {
-      emit({ eventType: "hover.expanded", payload: { constructKind: "usage" } });
+      emit({
+        eventType: "hover.expanded",
+        payload: { constructKind: "usage" },
+      });
     }
     expect(pendingEventCountForTests()).toBe(EDITOR_TELEMETRY_MAX_BATCH_SIZE);
 
@@ -243,8 +246,9 @@ describe("editorTelemetry", () => {
       events: Array<{ eventType: string }>;
     };
     expect(body.events).toHaveLength(EDITOR_TELEMETRY_MAX_BATCH_SIZE);
-    expect(body.events.every((event) => event.eventType === "hover.expanded"))
-      .toBe(true);
+    expect(
+      body.events.every((event) => event.eventType === "hover.expanded"),
+    ).toBe(true);
   });
 
   it("multiple emits collapse into one batch on flush", async () => {

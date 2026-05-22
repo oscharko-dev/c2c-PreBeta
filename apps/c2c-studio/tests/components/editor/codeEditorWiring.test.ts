@@ -193,8 +193,12 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
     expect(innerSource).toMatch(/actionDisposablesRef/);
     expect(innerSource).toMatch(/function applyActions/);
     expect(innerSource).toMatch(/editor\.addAction\(action\)/);
-    expect(innerSource).toMatch(/modifiedEditor,\s*actions,\s*actionDisposablesRef/);
-    expect(innerSource).toMatch(/disposeActionDisposables\(actionDisposablesRef\)/);
+    expect(innerSource).toMatch(
+      /modifiedEditor,\s*actions,\s*actionDisposablesRef/,
+    );
+    expect(innerSource).toMatch(
+      /disposeActionDisposables\(actionDisposablesRef\)/,
+    );
   });
 });
 

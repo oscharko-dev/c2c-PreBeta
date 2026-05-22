@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, ReactNode } from "react";
 
 interface WorkbenchState {
   activeActivityTab: string;
@@ -16,11 +16,11 @@ interface WorkbenchState {
 const WorkbenchContext = createContext<WorkbenchState | null>(null);
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
-  const [activeActivityTab, setActiveActivityTab] = useState('explorer');
+  const [activeActivityTab, setActiveActivityTab] = useState("explorer");
   const [isSecondaryStripeOpen, setSecondaryStripeOpen] = useState(true);
   const [isTargetInspectorOpen, setTargetInspectorOpen] = useState(true);
   const [isBottomPanelOpen, setBottomPanelOpen] = useState(true);
-  const [activeBottomTab, setActiveBottomTab] = useState('run');
+  const [activeBottomTab, setActiveBottomTab] = useState("run");
 
   return (
     <WorkbenchContext.Provider
@@ -45,7 +45,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 export function useWorkbench() {
   const context = useContext(WorkbenchContext);
   if (!context) {
-    throw new Error('useWorkbench must be used within a WorkbenchProvider');
+    throw new Error("useWorkbench must be used within a WorkbenchProvider");
   }
   return context;
 }

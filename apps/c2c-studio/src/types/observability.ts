@@ -1,8 +1,8 @@
 export interface RunExperienceView {
   runId: string;
   programId: string;
-  mode: 'live' | 'diagnostic-fixture';
-  productMode: 'live' | 'unavailable';
+  mode: "live" | "diagnostic-fixture";
+  productMode: "live" | "unavailable";
   summary?: string;
   observationPolicy?: string;
   learningSignals?: LearningSignal[];
@@ -13,14 +13,14 @@ export interface RunExperienceView {
 export interface LearningSignal {
   key: string;
   label: string;
-  status: 'observed' | 'absent';
+  status: "observed" | "absent";
   summary?: string;
   count: number;
   evidenceRefs?: string[];
 }
 
 export interface ModelGatewayHealth {
-  status: 'ok' | 'unavailable';
+  status: "ok" | "unavailable";
   providerMode?: string;
   activeModelCount?: number;
   dataPolicy?: string;
@@ -52,7 +52,7 @@ export interface ModelGatewayModels {
 }
 
 export interface HarnessReady {
-  status: 'ok' | 'unavailable';
+  status: "ok" | "unavailable";
   summary?: string;
   error?: string;
 }

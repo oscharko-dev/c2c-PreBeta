@@ -28,7 +28,12 @@ import type {
   ParityEvidenceExportResponse,
 } from "../../types/api";
 
-type InspectorTab = "overview" | "artifacts" | "outputs" | "diagnostics" | "viewer";
+type InspectorTab =
+  | "overview"
+  | "artifacts"
+  | "outputs"
+  | "diagnostics"
+  | "viewer";
 type ComparisonView = "outputs" | "diff";
 
 export function BuildTestPanel({
@@ -48,7 +53,8 @@ export function BuildTestPanel({
   } = useTransformationRun();
   const { statusFlags, selectedTrustCase } = useSourceWorkspace();
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview");
-  const [comparisonView, setComparisonView] = useState<ComparisonView>("outputs");
+  const [comparisonView, setComparisonView] =
+    useState<ComparisonView>("outputs");
   const [parityEvidenceExport, setParityEvidenceExport] = useState<{
     status: "idle" | "exporting" | "success" | "error";
     response: ParityEvidenceExportResponse | null;
@@ -65,15 +71,17 @@ export function BuildTestPanel({
 
   const showingHistoricalBuildTest = Boolean(
     state.previousRun?.buildTest &&
-      !state.buildTest &&
-      (state.phase === "starting" ||
-        state.phase === "running" ||
-        state.phase === "failed" ||
-        state.phase === "unavailable"),
+    !state.buildTest &&
+    (state.phase === "starting" ||
+      state.phase === "running" ||
+      state.phase === "failed" ||
+      state.phase === "unavailable"),
   );
   const bt =
     state.buildTest ??
-    (showingHistoricalBuildTest ? state.previousRun?.buildTest ?? null : null);
+    (showingHistoricalBuildTest
+      ? (state.previousRun?.buildTest ?? null)
+      : null);
   const displayedSummary =
     showingHistoricalBuildTest && state.previousRun
       ? state.previousRun.summary
@@ -85,19 +93,19 @@ export function BuildTestPanel({
   );
   const trustCaseEvidenceMismatch = Boolean(
     selectedTrustCase &&
-      displayedSummary?.trustCaseConfigurationDigest &&
-      displayedSummary.trustCaseConfigurationDigest !==
-        selectedTrustCase.configurationDigest,
+    displayedSummary?.trustCaseConfigurationDigest &&
+    displayedSummary.trustCaseConfigurationDigest !==
+      selectedTrustCase.configurationDigest,
   );
   const isPending =
-    !bt &&
-    (state.phase === "running" || state.phase === "starting");
+    !bt && (state.phase === "running" || state.phase === "starting");
   const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
   const timelineStages = buildTimelineStages(state);
   const artifactCandidates = getEvidenceArtifactCandidates(state);
   const defaultStageId =
-    timelineStages.find((stage) => stage.status === "error" || stage.status === "warning")
-      ?.id ??
+    timelineStages.find(
+      (stage) => stage.status === "error" || stage.status === "warning",
+    )?.id ??
     timelineStages.find((stage) => stage.status === "pending")?.id ??
     "parity-comparison";
   const timelineStageIds = timelineStages.map((stage) => stage.id).join("|");
@@ -118,7 +126,9 @@ export function BuildTestPanel({
   const stageArtifacts = artifactCandidates.filter(
     (artifact) => artifact.stageId === selectedStage.id,
   );
-  const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(null);
+  const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(
+    null,
+  );
   const selectedArtifact = (() => {
     const inStage =
       stageArtifacts.find((artifact) => artifact.key === selectedArtifactKey) ??
@@ -149,18 +159,22 @@ export function BuildTestPanel({
     data: null,
   });
 
+  const artifactPath = selectedArtifact?.path;
+  const artifactFetchKind = selectedArtifact?.fetchKind;
+  const runId = state.runId;
+
   useEffect(() => {
     let cancelled = false;
     async function loadArtifact() {
-      if (!state.runId || !selectedArtifact) {
+      if (!runId || !artifactPath || !artifactFetchKind) {
         setArtifactState({ loading: false, error: null, data: null });
         return;
       }
       setArtifactState((prev) => ({ ...prev, loading: true, error: null }));
       const response =
-        selectedArtifact.fetchKind === "generated"
-          ? await apiClient.getGeneratedFile(state.runId, selectedArtifact.path)
-          : await apiClient.getRunArtifactFile(state.runId, selectedArtifact.path);
+        artifactFetchKind === "generated"
+          ? await apiClient.getGeneratedFile(runId, artifactPath)
+          : await apiClient.getRunArtifactFile(runId, artifactPath);
       if (cancelled) {
         return;
       }
@@ -178,7 +192,7 @@ export function BuildTestPanel({
     return () => {
       cancelled = true;
     };
-  }, [selectedArtifact, state.runId]);
+  }, [artifactFetchKind, artifactPath, runId]);
 
   useEffect(() => {
     setParityEvidenceExport({
@@ -282,27 +296,27 @@ export function BuildTestPanel({
         />
       ) : null}
       <div className="border-b border-line-2 p-4">
-      {trustCaseEvidenceMismatch ? (
-        <Banner tone="warning">
-          Existing parity results were produced from{" "}
-          {displayedSummary?.trustCaseId || "another trust case"} or a
-          different catalog version. Rerun to use{" "}
-          {selectedTrustCase?.trustCaseId ?? "the selected trust case"}.
-        </Banner>
-      ) : null}
-      {intentionalDivergence ? (
-        <Banner tone="warning">
-          This run was intentionally documented as not equivalent. Review the
-          governed divergence decision and evidence instead of treating the
-          output as a parity failure.
-        </Banner>
-      ) : null}
-      {statusFlags.pendingReRun ||
+        {trustCaseEvidenceMismatch ? (
+          <Banner tone="warning">
+            Existing parity results were produced from{" "}
+            {displayedSummary?.trustCaseId || "another trust case"} or a
+            different catalog version. Rerun to use{" "}
+            {selectedTrustCase?.trustCaseId ?? "the selected trust case"}.
+          </Banner>
+        ) : null}
+        {intentionalDivergence ? (
+          <Banner tone="warning">
+            This run was intentionally documented as not equivalent. Review the
+            governed divergence decision and evidence instead of treating the
+            output as a parity failure.
+          </Banner>
+        ) : null}
+        {statusFlags.pendingReRun ||
         showingHistoricalBuildTest ||
         manualDriftMessage ? (
-        <Banner tone="warning">
-          {showingHistoricalBuildTest
-            ? state.phase === "failed"
+          <Banner tone="warning">
+            {showingHistoricalBuildTest
+              ? state.phase === "failed"
                 ? intentionalDivergence
                   ? "Latest rerun failed. Showing the previous intentionally diverged parity results as stale so the last completed decision remains accessible."
                   : "Latest rerun failed. Showing the previous parity results as stale so the last completed comparison remains accessible."
@@ -314,15 +328,17 @@ export function BuildTestPanel({
                 : intentionalDivergence
                   ? "COBOL source changed after the last completed intentionally diverged run. These parity results are stale until you rerun."
                   : "COBOL source changed after the last completed parity run. These parity results are stale until you rerun."}
-        </Banner>
-      ) : null}
+          </Banner>
+        ) : null}
         <div className="mt-4 flex items-start gap-3 rounded border border-line-2 bg-bg-1 p-4">
           <StatusChip variant={result.tone} />
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-text-dim">
               Parity Status
             </p>
-            <p className="mt-1 text-base font-medium text-text">{result.label}</p>
+            <p className="mt-1 text-base font-medium text-text">
+              {result.label}
+            </p>
             <p className="mt-1 text-sm text-text-dim">{result.detail}</p>
             {state.workflow?.failureMessage ? (
               <p className="mt-3 text-xs text-text-dim">
@@ -387,15 +403,22 @@ export function BuildTestPanel({
                     <StatusChip variant={stage.status} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="font-medium text-text">{stage.label}</span>
+                        <span className="font-medium text-text">
+                          {stage.label}
+                        </span>
                         <span className="text-[11px] uppercase tracking-wide text-text-dim">
                           {stage.durationText}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-text-dim">{stage.detail}</p>
+                      <p className="mt-1 text-xs text-text-dim">
+                        {stage.detail}
+                      </p>
                       <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-text-dim">
                         <span>{stage.actor}</span>
-                        <span>{stage.evidenceCount} evidence item{stage.evidenceCount === 1 ? "" : "s"}</span>
+                        <span>
+                          {stage.evidenceCount} evidence item
+                          {stage.evidenceCount === 1 ? "" : "s"}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -414,7 +437,9 @@ export function BuildTestPanel({
                 <h3 className="mt-1 text-base font-medium text-text">
                   {selectedStage.label}
                 </h3>
-                <p className="mt-1 text-sm text-text-dim">{selectedStage.detail}</p>
+                <p className="mt-1 text-sm text-text-dim">
+                  {selectedStage.detail}
+                </p>
               </div>
               <div className="rounded border border-line-2 bg-bg-1 px-3 py-2 text-right text-xs">
                 <div className="text-text-dim">Next recovery action</div>
@@ -423,42 +448,55 @@ export function BuildTestPanel({
                 </div>
               </div>
             </div>
-            <Tabs
-              value={inspectorTab}
-              onValueChange={(value) => setInspectorTab(value as InspectorTab)}
-              tabs={[
-                { value: "overview", label: "Overview" },
-                { value: "artifacts", label: "Artifacts" },
-                { value: "outputs", label: "Outputs" },
-                { value: "diagnostics", label: "Diagnostics" },
-                { value: "viewer", label: "Viewer" },
-              ]}
-              idBase="build-test-inspector"
-              className="mt-4 w-auto"
-            />
           </div>
+          {/* Inspector tablist lives inside the timeline tabpanel so its own
+              tabpanel below is not the sole direct child of a tabpanel. */}
           <section
             id={stagePanelId}
             role="tabpanel"
             aria-labelledby={selectedStageTabId}
-            className="min-h-0 flex-1 overflow-y-auto p-4"
+            className="flex min-h-0 flex-1 flex-col overflow-y-auto"
           >
+            <div className="border-b border-line-2 px-4 pt-3">
+              <Tabs
+                value={inspectorTab}
+                onValueChange={(value) =>
+                  setInspectorTab(value as InspectorTab)
+                }
+                tabs={[
+                  { value: "overview", label: "Overview" },
+                  { value: "artifacts", label: "Artifacts" },
+                  { value: "outputs", label: "Outputs" },
+                  { value: "diagnostics", label: "Diagnostics" },
+                  { value: "viewer", label: "Viewer" },
+                ]}
+                idBase="build-test-inspector"
+                className="w-auto"
+              />
+            </div>
             <div
               id={inspectorPanelId}
               role="tabpanel"
               aria-labelledby={`build-test-inspector-tab-${inspectorTab}`}
+              className="min-h-0 flex-1 p-4"
             >
               {inspectorTab === "overview" ? (
                 <OverviewPanel
                   selectedStage={selectedStage}
                   stageArtifacts={stageArtifacts}
-                  workflowFailureMessage={state.workflow?.failureMessage ?? null}
+                  workflowFailureMessage={
+                    state.workflow?.failureMessage ?? null
+                  }
                   buildTestNote={bt?.note ?? null}
                 />
               ) : null}
               {inspectorTab === "artifacts" ? (
                 <ArtifactsPanel
-                  artifacts={stageArtifacts.length > 0 ? stageArtifacts : artifactCandidates}
+                  artifacts={
+                    stageArtifacts.length > 0
+                      ? stageArtifacts
+                      : artifactCandidates
+                  }
                   selectedArtifactKey={selectedArtifact?.key ?? null}
                   onSelectArtifact={(artifact) => {
                     setSelectedArtifactKey(artifact.key);
@@ -472,7 +510,8 @@ export function BuildTestPanel({
                     <div>
                       <p className="font-medium text-text">Parity Outputs</p>
                       <p className="mt-1 text-xs text-text-dim">
-                        Review raw outputs and the parity diff without leaving the workbench.
+                        Review raw outputs and the parity diff without leaving
+                        the workbench.
                       </p>
                     </div>
                     <Tabs
@@ -524,20 +563,16 @@ export function BuildTestPanel({
   );
 }
 
-function collectDiagnostics(state: ReturnType<typeof useTransformationRun>["state"]): Diagnostic[] {
+function collectDiagnostics(
+  state: ReturnType<typeof useTransformationRun>["state"],
+): Diagnostic[] {
   return [
     ...(state.generated?.diagnostics ?? []),
     ...(state.buildTest?.diagnostics ?? []),
   ];
 }
 
-function Banner({
-  children,
-  tone,
-}: {
-  children: ReactNode;
-  tone: "warning";
-}) {
+function Banner({ children, tone }: { children: ReactNode; tone: "warning" }) {
   return (
     <div
       className={cn(
@@ -576,10 +611,7 @@ function OverviewPanel({
         <dl className="mt-4 grid gap-3 text-xs md:grid-cols-2">
           <MetaItem label="Actor" value={selectedStage.actor} />
           <MetaItem label="Duration" value={selectedStage.durationText} />
-          <MetaItem
-            label="Evidence items"
-            value={`${stageArtifacts.length}`}
-          />
+          <MetaItem label="Evidence items" value={`${stageArtifacts.length}`} />
           <MetaItem
             label="Recovery action"
             value={selectedStage.actionLabel ?? "Review the available evidence"}
@@ -681,7 +713,10 @@ function DiagnosticsPanel({
           <p className="font-medium text-text">Repair diagnostics</p>
           <ul className="mt-3 space-y-2 text-xs text-text-dim">
             {workflow.repairAttempts.map((attempt) => (
-              <li key={attempt.attemptNumber} className="rounded border border-line bg-bg-0 p-3">
+              <li
+                key={attempt.attemptNumber}
+                className="rounded border border-line bg-bg-0 p-3"
+              >
                 Attempt {attempt.attemptNumber}: {attempt.repairDecision}
                 {attempt.failureCategory ? ` · ${attempt.failureCategory}` : ""}
                 {attempt.rationale ? ` · ${attempt.rationale}` : ""}
@@ -707,7 +742,10 @@ function DiagnosticsPanel({
             </thead>
             <tbody>
               {diagnostics.map((diagnostic, index) => (
-                <tr key={`${diagnostic.code}-${index}`} className="border-b border-line-2 last:border-b-0">
+                <tr
+                  key={`${diagnostic.code}-${index}`}
+                  className="border-b border-line-2 last:border-b-0"
+                >
                   <td className="px-3 py-2">{diagnostic.severity}</td>
                   <td className="px-3 py-2 font-mono">{diagnostic.code}</td>
                   <td className="px-3 py-2 text-text-dim">

@@ -41,15 +41,16 @@ function jumpToHunk(
   const currentLine = modified.getPosition()?.lineNumber ?? 0;
   const target =
     direction === "next"
-      ? changes.find((change) => change.modifiedStartLineNumber > currentLine) ??
-        changes[0]
-      : [...changes]
+      ? (changes.find(
+          (change) => change.modifiedStartLineNumber > currentLine,
+        ) ?? changes[0])
+      : ([...changes]
           .reverse()
           .find(
             (change) =>
-              (change.modifiedEndLineNumber ||
-                change.modifiedStartLineNumber) < currentLine,
-          ) ?? changes[changes.length - 1];
+              (change.modifiedEndLineNumber || change.modifiedStartLineNumber) <
+              currentLine,
+          ) ?? changes[changes.length - 1]);
   if (!target) return;
   const line = Math.max(1, target.modifiedStartLineNumber);
   modified.revealLineInCenter(line);
@@ -63,7 +64,10 @@ function clampManualRegionToOriginal(
 ): JavaRegionClassification | null {
   if (lineCount <= 0) return null;
   if (region.originClass !== "manual_modified") return null;
-  const startLine = Math.max(1, Math.min(lineCount, region.lineRange.startLine));
+  const startLine = Math.max(
+    1,
+    Math.min(lineCount, region.lineRange.startLine),
+  );
   const endLine = Math.max(
     startLine,
     Math.min(lineCount, region.lineRange.endLine),
@@ -147,11 +151,10 @@ export function ManualDriftWorkspace({
   );
 }
 
-interface ManualDriftWorkspaceBodyProps
-  extends Omit<
-    ManualDriftWorkspaceProps,
-    "baselineRunId" | "baselineContent" | "initialFocusLine"
-  > {
+interface ManualDriftWorkspaceBodyProps extends Omit<
+  ManualDriftWorkspaceProps,
+  "baselineRunId" | "baselineContent" | "initialFocusLine"
+> {
   baselineRunId: string;
   baselineContent: string;
   initialFocusLine: number | null;
@@ -168,8 +171,9 @@ function ManualDriftWorkspaceBody({
   onClose,
 }: ManualDriftWorkspaceBodyProps) {
   const language = useMemo(() => detectLanguageFromPath(filePath), [filePath]);
-  const diffEditorRef =
-    useRef<MonacoNs.editor.IStandaloneDiffEditor | null>(null);
+  const diffEditorRef = useRef<MonacoNs.editor.IStandaloneDiffEditor | null>(
+    null,
+  );
   const monacoRef = useRef<DiffEditorMountArgs["monaco"] | null>(null);
   const originalDecorationsRef =
     useRef<MonacoNs.editor.IEditorDecorationsCollection | null>(null);
