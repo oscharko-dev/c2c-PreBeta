@@ -1223,6 +1223,109 @@ describe("Run Panels", () => {
         ),
       ).toBeDefined();
     });
+
+    it("renders neutral cancelled stages with cancellation detail and recovery action (#364)", () => {
+      // Arrange: a run whose workflow has finalClassification "cancelled".
+      // No build/test data so every timeline stage starts as pending and is
+      // then converted to neutral by the cancellation pass in buildTimelineStages.
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "completed",
+          buildTest: null,
+          workflow: {
+            runId: "run-cancelled",
+            programId: "PROG-1",
+            mode: "live",
+            productMode: "live",
+            source: "live",
+            state: "cancelled",
+            activeStep: null,
+            activeAgent: null,
+            trustCase: null,
+            agentAttemptCount: 0,
+            repairBudget: null,
+            assistBudget: null,
+            modelInvocationBudget: null,
+            repairAttempts: [],
+            assistDecision: null,
+            trustSummary: null,
+            finalClassification: "cancelled",
+            failureCode: null,
+            failureMessage: null,
+            generatedJavaRef: null,
+            buildTestResultRef: null,
+            evidencePackRef: null,
+          },
+        },
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      // The cancellation detail text must appear in the rendered timeline.
+      // getAllByText tolerates it appearing in both the stage list and the
+      // detail panel (matching the pattern used by other multi-occurrence assertions
+      // in this file, e.g. the compile-failure test at line ~417).
+      expect(
+        screen.getAllByText(
+          "The run was cancelled before this stage completed.",
+        ).length,
+      ).toBeGreaterThan(0);
+
+      // The recovery action label must also be visible.
+      expect(
+        screen.getAllByText("Rerun the parity workflow").length,
+      ).toBeGreaterThan(0);
+    });
+
+    it("does NOT render the cancellation detail when finalClassification is not cancelled (mutation control, #364)", () => {
+      // Control: identical fixture with finalClassification "failed" must not
+      // render the cancelled-specific strings. This test catches a mutation of
+      // the "cancelled" literal in buildTimelineStages.
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "completed",
+          buildTest: null,
+          workflow: {
+            runId: "run-failed",
+            programId: "PROG-1",
+            mode: "live",
+            productMode: "live",
+            source: "live",
+            state: "failed",
+            activeStep: null,
+            activeAgent: null,
+            trustCase: null,
+            agentAttemptCount: 0,
+            repairBudget: null,
+            assistBudget: null,
+            modelInvocationBudget: null,
+            repairAttempts: [],
+            assistDecision: null,
+            trustSummary: null,
+            finalClassification: "failed",
+            failureCode: "oracle_mismatch",
+            failureMessage: null,
+            generatedJavaRef: null,
+            buildTestResultRef: null,
+            evidencePackRef: null,
+          },
+        },
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      expect(
+        screen.queryByText(
+          "The run was cancelled before this stage completed.",
+        ),
+      ).toBeNull();
+    });
   });
 
   describe("EquivalencePanel", () => {

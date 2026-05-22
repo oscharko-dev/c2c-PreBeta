@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import type { BuildTestView } from "@/types/api";
+import type { BuildTestView, RunWorkflowView } from "@/types/api";
 import type { TransformationRunState } from "@/types/run";
 
 import {
@@ -274,5 +274,160 @@ describe("buildTimelineStages", () => {
 
     const parity = stages.find((stage) => stage.id === "parity-comparison");
     expect(parity?.status).toBe("success");
+  });
+
+  describe("cancelled workflow finalClassification", () => {
+    // Minimal valid RunWorkflowView fixture for a cancelled run.
+    // No repair attempts, no active agent — the workflow was cancelled before
+    // any agentic stage could complete.
+    function makeCancelledWorkflow(
+      overrides: Partial<RunWorkflowView> = {},
+    ): RunWorkflowView {
+      return {
+        runId: "run-cancelled",
+        programId: "PROG-1",
+        mode: "live",
+        productMode: "live",
+        source: "live",
+        state: "cancelled",
+        activeStep: null,
+        activeAgent: null,
+        trustCase: null,
+        agentAttemptCount: 0,
+        repairBudget: null,
+        assistBudget: null,
+        modelInvocationBudget: null,
+        repairAttempts: [],
+        assistDecision: null,
+        trustSummary: null,
+        finalClassification: "cancelled",
+        failureCode: null,
+        failureMessage: null,
+        generatedJavaRef: null,
+        buildTestResultRef: null,
+        evidencePackRef: null,
+        ...overrides,
+      };
+    }
+
+    it("converts every pending stage to neutral with the cancellation detail and recovery action", () => {
+      // Arrange: a cancelled workflow with no build/test or evidence data.
+      // The verification-repair stage is special: the repair-stage logic at
+      // lines ~1225-1251 sets it to "neutral" directly (via the inner
+      // finalClassification === "cancelled" branch) BEFORE the cancellation
+      // pass runs, so it ends up with a repair-specific detail rather than
+      // the cancellation pass detail. Every other stage stays "pending" until
+      // the cancellation pass converts it.
+      const stages = buildTimelineStages(
+        makeRunState({
+          workflow: makeCancelledWorkflow(),
+        }),
+      );
+
+      // No stage should remain "pending" after the cancellation pass.
+      const pendingAfterCancel = stages.filter(
+        (stage) => stage.status === "pending",
+      );
+      expect(pendingAfterCancel).toHaveLength(0);
+
+      // The stages converted by the cancellation pass (i.e., NOT
+      // verification-repair) must carry the exact cancellation strings.
+      // verification-repair is set to neutral by the inner repair-stage
+      // branch and is excluded here because it is no longer "pending" when
+      // the cancellation pass iterates.
+      const cancelPassStages = stages.filter(
+        (stage) =>
+          stage.status === "neutral" && stage.id !== "verification-repair",
+      );
+      expect(cancelPassStages.length).toBeGreaterThan(0);
+
+      for (const stage of cancelPassStages) {
+        expect(stage.detail).toBe(
+          "The run was cancelled before this stage completed.",
+        );
+        expect(stage.actionLabel).toBe("Rerun the parity workflow");
+      }
+    });
+
+    it("sets the cancelled cancellation detail on every stage that had not already resolved", () => {
+      // Pin the exact strings so a mutation of either literal in the
+      // implementation is caught by this test.
+      const stages = buildTimelineStages(
+        makeRunState({ workflow: makeCancelledWorkflow() }),
+      );
+
+      const transform = stages.find((stage) => stage.id === "transform");
+      expect(transform?.status).toBe("neutral");
+      expect(transform?.detail).toBe(
+        "The run was cancelled before this stage completed.",
+      );
+      expect(transform?.actionLabel).toBe("Rerun the parity workflow");
+
+      const parity = stages.find((stage) => stage.id === "parity-comparison");
+      expect(parity?.status).toBe("neutral");
+      expect(parity?.detail).toBe(
+        "The run was cancelled before this stage completed.",
+      );
+      expect(parity?.actionLabel).toBe("Rerun the parity workflow");
+    });
+
+    it("resolves the verification-repair stage to neutral when cancelled with no repair attempts", () => {
+      // This path is governed by the inner cancelled branch at lines ~1235-1237:
+      // repairAttemptCount === 0 AND finalClassification === "cancelled" AND
+      // activeAgent is not "verification_repair_agent".
+      const stages = buildTimelineStages(
+        makeRunState({
+          workflow: makeCancelledWorkflow({
+            repairAttempts: [],
+            activeAgent: null,
+          }),
+        }),
+      );
+
+      const repair = stages.find((stage) => stage.id === "verification-repair");
+      expect(repair).toBeDefined();
+      expect(repair?.status).toBe("neutral");
+    });
+
+    it("does NOT convert pending stages to neutral when finalClassification is not cancelled (mutation control)", () => {
+      // Control assertion: the exact same run state with finalClassification
+      // set to a non-cancelled value must leave pending stages as "pending".
+      // This test fails if the "cancelled" literal on line ~1273 is mutated
+      // to any other value (e.g. "failed", null, or removed entirely).
+      const stages = buildTimelineStages(
+        makeRunState({
+          workflow: makeCancelledWorkflow({
+            finalClassification: "failed",
+          }),
+        }),
+      );
+
+      // With finalClassification !== "cancelled" and no build/test data to
+      // resolve them, the stages must remain pending.
+      const pendingStages = stages.filter(
+        (stage) => stage.status === "pending",
+      );
+      expect(pendingStages.length).toBeGreaterThan(0);
+
+      // Crucially, none should carry the cancellation strings.
+      for (const stage of stages) {
+        expect(stage.detail).not.toBe(
+          "The run was cancelled before this stage completed.",
+        );
+        expect(stage.actionLabel).not.toBe("Rerun the parity workflow");
+      }
+    });
+
+    it("does NOT convert pending stages to neutral when workflow is null (mutation control)", () => {
+      // Control: no workflow at all — no cancellation pass should run.
+      const stages = buildTimelineStages(makeRunState({ workflow: null }));
+
+      const neutralWithCancelDetail = stages.filter(
+        (stage) =>
+          stage.status === "neutral" &&
+          stage.detail === "The run was cancelled before this stage completed.",
+      );
+      expect(neutralWithCancelDetail).toHaveLength(0);
+    });
   });
 });
