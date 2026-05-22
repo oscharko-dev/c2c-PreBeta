@@ -19,7 +19,7 @@ export async function copyToClipboard(value: string): Promise<boolean> {
   }
 }
 
-export function useCopyFeedback(resetDelayMs = 1500) {
+export function useCopyFeedback(resetDelayMs = 3000) {
   const [copied, setCopied] = useState(false);
   const timeoutRef = useRef<number | null>(null);
 

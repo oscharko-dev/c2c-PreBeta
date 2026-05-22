@@ -2317,6 +2317,7 @@ function encodeGeneratedFilePath(filePath: string): string {
   if (
     filePath.length === 0 ||
     filePath.startsWith("/") ||
+    filePath.includes("\\") ||
     segments.some(
       (segment) => segment.length === 0 || segment === "." || segment === "..",
     )

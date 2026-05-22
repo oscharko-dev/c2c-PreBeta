@@ -42,6 +42,22 @@ export function EquivalencePanel({
   const resolvedTab: OutputTab =
     view === "diff" ? "diff" : view === "outputs" ? "split" : activeTab;
 
+  const expectedOutput = buildTest?.expectedOutput;
+  const actualOutput = buildTest?.actualOutput;
+  const hasOutputs = expectedOutput !== undefined || actualOutput !== undefined;
+  const expectedLines = useMemo(
+    () => splitOutputLines(expectedOutput),
+    [expectedOutput],
+  );
+  const actualLines = useMemo(
+    () => splitOutputLines(actualOutput),
+    [actualOutput],
+  );
+  const diffLines = useMemo(
+    () => buildOutputDiff(expectedOutput, actualOutput),
+    [expectedOutput, actualOutput],
+  );
+
   if (isPending || !buildTest) {
     return (
       <div className="text-sm text-text-dim">
@@ -50,21 +66,13 @@ export function EquivalencePanel({
     );
   }
 
-  const expectedOutputDefined = buildTest.expectedOutput !== undefined;
-  const actualOutputDefined = buildTest.actualOutput !== undefined;
-  const hasOutputs = expectedOutputDefined || actualOutputDefined;
-  const expectedLines = splitOutputLines(buildTest.expectedOutput);
-  const actualLines = splitOutputLines(buildTest.actualOutput);
-  const diffLines = buildOutputDiff(
-    buildTest.expectedOutput,
-    buildTest.actualOutput,
-  );
   const metadataItems = getBuildTestMetadataItems(buildTest);
   const artifactRefs = getBuildTestArtifactRefs(buildTest);
 
   if (isControlled) {
     return (
       <div className="h-full min-h-0">
+        <h4 className="sr-only">Expected vs actual output</h4>
         {renderOutputBody({
           activeTab: resolvedTab,
           showTabs: false,
@@ -380,6 +388,8 @@ function DiffLineRow({
   actualLineNumber?: number;
 }) {
   const marker = kind === "added" ? "+" : kind === "removed" ? "-" : " ";
+  const statusText =
+    kind === "added" ? "Added" : kind === "removed" ? "Removed" : "Unchanged";
   const toneClass =
     kind === "added"
       ? "border-success/30 bg-success/10 text-success"
@@ -389,10 +399,12 @@ function DiffLineRow({
 
   return (
     <div className="flex min-w-0 items-start gap-2 whitespace-pre">
+      <span className="sr-only">{statusText}: </span>
       <span className="w-14 shrink-0 text-right text-text-faint">
         {expectedLineNumber ?? actualLineNumber ?? ""}
       </span>
       <span
+        aria-hidden="true"
         className={`inline-flex w-4 shrink-0 justify-center rounded border ${toneClass}`}
       >
         {marker}
@@ -427,7 +439,7 @@ function CopyButton({
           showCopied();
         });
       }}
-      aria-label={label}
+      aria-label={copied ? `${label} (copied)` : label}
       className={`inline-flex items-center rounded border border-line bg-bg-0 px-2 py-1 font-mono text-[10px] text-text-dim transition-colors hover:border-accent hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${compact ? "min-h-6" : "min-h-7"}`}
     >
       {copied ? "Copied" : "Copy"}

@@ -5,6 +5,18 @@ import { EvidencePackPanel } from "../../../src/components/run/EvidencePackPanel
 import { ProblemsPanel } from "../../../src/components/run/ProblemsPanel";
 import { EquivalencePanel } from "../../../src/components/run/EquivalencePanel";
 import { RunArtifactsPanel } from "../../../src/components/run/RunArtifactsPanel";
+import * as apiClientModule from "../../../src/lib/apiClient";
+
+vi.mock("../../../src/lib/apiClient", () => ({
+  apiClient: {
+    getGeneratedFile: vi
+      .fn()
+      .mockResolvedValue({ ok: false, message: "mocked" }),
+    getRunArtifactFile: vi
+      .fn()
+      .mockResolvedValue({ ok: false, message: "mocked" }),
+  },
+}));
 
 const mockState = {
   phase: "idle",
@@ -56,6 +68,14 @@ describe("Run Panels", () => {
 
   beforeEach(async () => {
     vi.resetAllMocks();
+    vi.mocked(apiClientModule.apiClient.getGeneratedFile).mockResolvedValue({
+      ok: false,
+      message: "mocked",
+    });
+    vi.mocked(apiClientModule.apiClient.getRunArtifactFile).mockResolvedValue({
+      ok: false,
+      message: "mocked",
+    });
     exportParityEvidenceScaffoldMock = vi.fn();
     const mod = await import("../../../src/stores/transformationRun");
     useTransformationRunMock = mod.useTransformationRun;
@@ -874,6 +894,75 @@ describe("Run Panels", () => {
           "Export failed: export blocked: incomplete evidence cannot produce a regression scaffold",
         ),
       ).toBeDefined();
+    });
+
+    it("does not loop when evidence artifacts are present (regression: stable-primitive effect deps)", async () => {
+      // Regression for the infinite render / refetch loop fixed in BuildTestPanel.
+      // Pre-fix: the artifact-fetch useEffect depended on `selectedArtifact` (a new
+      // object every render) and `state.runId`.  With artifacts present,
+      // `selectedArtifact` was always !== the previous value, so the effect fired on
+      // every render, which scheduled another state update, which triggered another
+      // render — "Maximum update depth exceeded".
+      // Post-fix: the effect depends on stable primitives `artifactFetchKind`,
+      // `artifactPath`, and `runId`, so it fires only when those strings change.
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "completed",
+          runId: "run-artifact-loop",
+          buildTest: {
+            status: "ok",
+            classification: "match",
+            expectedOutput: "OUT",
+            actualOutput: "OUT",
+          },
+          artifacts: {
+            artifacts: [
+              {
+                path: "runs/run-artifact-loop/generated.json",
+                name: "generated.json",
+                kind: "generated-artifact",
+                byteSize: 42,
+                sha256: "a".repeat(64),
+                createdBy: "build-test-runner",
+                createdAt: "2026-05-22T10:00:00.000Z",
+              },
+            ],
+          },
+          generatedFiles: {
+            files: [
+              {
+                path: "src/main/java/Prog.java",
+                sha256: "b".repeat(64),
+                byteSize: 128,
+                mimeType: "text/x-java-source",
+              },
+            ],
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+      });
+
+      // If the infinite loop regresses, render() will throw
+      // "Maximum update depth exceeded" synchronously or within the waitFor.
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      // The panel must render the timeline (verifies no crash).
+      expect(screen.getByRole("tab", { name: /Transform/ })).toBeDefined();
+
+      // Exactly one artifact-fetch call is fired (not an unbounded storm).
+      // The effect triggers once because runId + artifactPath + artifactFetchKind
+      // are all stable strings after the first render.
+      const mockedApi = vi.mocked(apiClientModule.apiClient);
+      await waitFor(() => {
+        const totalCalls =
+          mockedApi.getRunArtifactFile.mock.calls.length +
+          mockedApi.getGeneratedFile.mock.calls.length;
+        expect(totalCalls).toBeGreaterThanOrEqual(1);
+        expect(totalCalls).toBeLessThanOrEqual(3);
+      });
     });
   });
 

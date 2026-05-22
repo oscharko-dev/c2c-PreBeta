@@ -159,21 +159,22 @@ export function BuildTestPanel({
     data: null,
   });
 
+  const artifactPath = selectedArtifact?.path;
+  const artifactFetchKind = selectedArtifact?.fetchKind;
+  const runId = state.runId;
+
   useEffect(() => {
     let cancelled = false;
     async function loadArtifact() {
-      if (!state.runId || !selectedArtifact) {
+      if (!runId || !artifactPath || !artifactFetchKind) {
         setArtifactState({ loading: false, error: null, data: null });
         return;
       }
       setArtifactState((prev) => ({ ...prev, loading: true, error: null }));
       const response =
-        selectedArtifact.fetchKind === "generated"
-          ? await apiClient.getGeneratedFile(state.runId, selectedArtifact.path)
-          : await apiClient.getRunArtifactFile(
-              state.runId,
-              selectedArtifact.path,
-            );
+        artifactFetchKind === "generated"
+          ? await apiClient.getGeneratedFile(runId, artifactPath)
+          : await apiClient.getRunArtifactFile(runId, artifactPath);
       if (cancelled) {
         return;
       }
@@ -191,7 +192,7 @@ export function BuildTestPanel({
     return () => {
       cancelled = true;
     };
-  }, [selectedArtifact, state.runId]);
+  }, [artifactFetchKind, artifactPath, runId]);
 
   useEffect(() => {
     setParityEvidenceExport({
@@ -447,30 +448,37 @@ export function BuildTestPanel({
                 </div>
               </div>
             </div>
-            <Tabs
-              value={inspectorTab}
-              onValueChange={(value) => setInspectorTab(value as InspectorTab)}
-              tabs={[
-                { value: "overview", label: "Overview" },
-                { value: "artifacts", label: "Artifacts" },
-                { value: "outputs", label: "Outputs" },
-                { value: "diagnostics", label: "Diagnostics" },
-                { value: "viewer", label: "Viewer" },
-              ]}
-              idBase="build-test-inspector"
-              className="mt-4 w-auto"
-            />
           </div>
+          {/* Inspector tablist lives inside the timeline tabpanel so its own
+              tabpanel below is not the sole direct child of a tabpanel. */}
           <section
             id={stagePanelId}
             role="tabpanel"
             aria-labelledby={selectedStageTabId}
-            className="min-h-0 flex-1 overflow-y-auto p-4"
+            className="flex min-h-0 flex-1 flex-col overflow-y-auto"
           >
+            <div className="border-b border-line-2 px-4 pt-3">
+              <Tabs
+                value={inspectorTab}
+                onValueChange={(value) =>
+                  setInspectorTab(value as InspectorTab)
+                }
+                tabs={[
+                  { value: "overview", label: "Overview" },
+                  { value: "artifacts", label: "Artifacts" },
+                  { value: "outputs", label: "Outputs" },
+                  { value: "diagnostics", label: "Diagnostics" },
+                  { value: "viewer", label: "Viewer" },
+                ]}
+                idBase="build-test-inspector"
+                className="w-auto"
+              />
+            </div>
             <div
               id={inspectorPanelId}
               role="tabpanel"
               aria-labelledby={`build-test-inspector-tab-${inspectorTab}`}
+              className="min-h-0 flex-1 p-4"
             >
               {inspectorTab === "overview" ? (
                 <OverviewPanel

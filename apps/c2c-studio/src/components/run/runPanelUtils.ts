@@ -478,12 +478,22 @@ function buildFallbackDiff(
   return lines;
 }
 
+// Diff-local splitter: an undefined/empty side has zero lines, so the diff
+// never emits a phantom removed/added empty line. splitOutputLines keeps its
+// ['']-for-empty behavior for split-view rendering.
+function splitDiffLines(value?: string): string[] {
+  if (!value) {
+    return [];
+  }
+  return splitOutputLines(value);
+}
+
 export function buildOutputDiff(
   expected?: string,
   actual?: string,
 ): OutputDiffLine[] {
-  const expectedLines = splitOutputLines(expected);
-  const actualLines = splitOutputLines(actual);
+  const expectedLines = splitDiffLines(expected);
+  const actualLines = splitDiffLines(actual);
 
   if (
     expectedLines.length === actualLines.length &&
@@ -520,15 +530,12 @@ export function buildOutputDiff(
     expectedLineNumber: index + 1,
     actualLineNumber: index + 1,
   }));
-  const suffix = expectedLines.slice(expectedEnd + 1).map((line, index) => {
-    const lineNumber = expectedEnd + 2 + index;
-    return {
-      kind: "equal" as const,
-      content: line,
-      expectedLineNumber: lineNumber,
-      actualLineNumber: lineNumber,
-    };
-  });
+  const suffix = expectedLines.slice(expectedEnd + 1).map((line, index) => ({
+    kind: "equal" as const,
+    content: line,
+    expectedLineNumber: expectedEnd + 2 + index,
+    actualLineNumber: actualEnd + 2 + index,
+  }));
 
   const middleExpected = expectedLines.slice(start, expectedEnd + 1);
   const middleActual = actualLines.slice(start, actualEnd + 1);
@@ -1033,6 +1040,9 @@ function timelineActionLabel(
   if (status === "success") {
     return "Review evidence";
   }
+  if (status === "blocked") {
+    return "Resolve the upstream failure to unblock this stage";
+  }
   switch (stageId) {
     case "java-build":
       return "Inspect compile diagnostics";
@@ -1173,16 +1183,14 @@ export function buildTimelineStages(
     }
     const comparisonStage = stageMap.get("parity-comparison");
     if (comparisonStage) {
-      const status = mapBuildTestClassificationToVariant(
-        buildTest.classification,
-      );
+      const status: StatusVariant =
+        buildTest.classification === "compile-error" ||
+        buildTest.classification === "run-error"
+          ? "blocked"
+          : mapBuildTestClassificationToVariant(buildTest.classification);
       stageMap.set("parity-comparison", {
         ...comparisonStage,
-        status:
-          buildTest.classification === "compile-error" ||
-          buildTest.classification === "run-error"
-            ? "blocked"
-            : status,
+        status,
         detail: describeBuildTestResult(buildTest).detail,
         actor: "build-test-runner",
         diagnostic: buildTest.note ?? null,
