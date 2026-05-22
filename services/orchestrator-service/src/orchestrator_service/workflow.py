@@ -296,7 +296,7 @@ def normalise_manual_edit_overlay_region(
             "endLine": end_line,
         },
         "originClass": origin_class,
-        "generatorBaselineRunId": _required_manual_overlay_string(
+        "generatorBaselineRunId": _required_manual_overlay_safe_id(
             raw.get("generatorBaselineRunId"),
             _manual_overlay_field(field_prefix, index, "generatorBaselineRunId"),
         ),

@@ -6,6 +6,7 @@ import { ProblemsPanel } from "../../../src/components/run/ProblemsPanel";
 import { EquivalencePanel } from "../../../src/components/run/EquivalencePanel";
 import { RunArtifactsPanel } from "../../../src/components/run/RunArtifactsPanel";
 import * as apiClientModule from "../../../src/lib/apiClient";
+import { describeManualDriftSummary } from "../../../src/components/run/runPanelUtils";
 
 vi.mock("../../../src/lib/apiClient", () => ({
   apiClient: {
@@ -1548,6 +1549,245 @@ describe("Run Panels", () => {
         screen.queryByText("Evidence Pack Complete"),
       ).not.toBeInTheDocument();
     });
+
+    it("does not bleed current-run workflow.trustSummary into historical-evidence mode (#359 finding-1)", () => {
+      // F1 — historical mode: previousRun.summary has no trustSummary but
+      // state.workflow.trustSummary is intentional-divergence. The intentional-
+      // divergence banner must NOT render because the displayed evidence belongs
+      // to the previous run, not the current (in-flight) run.
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "running",
+          runId: "run-new",
+          evidence: null,
+          workflow: {
+            runId: "run-new",
+            programId: "PROG-1",
+            mode: "live",
+            productMode: "live",
+            source: "live",
+            state: "verifying",
+            activeStep: null,
+            activeAgent: null,
+            trustCase: null,
+            agentAttemptCount: 0,
+            repairBudget: null,
+            assistBudget: null,
+            modelInvocationBudget: null,
+            repairAttempts: [],
+            assistDecision: null,
+            trustSummary: {
+              trustState: "intentional_divergence",
+              divergenceDisposition: "intentional",
+              warningCodes: [],
+            },
+            finalClassification: null,
+            failureCode: null,
+            failureMessage: null,
+            generatedJavaRef: null,
+            buildTestResultRef: null,
+            evidencePackRef: null,
+          },
+          previousRun: {
+            runId: "run-prev",
+            orchestratorRunId: "run-prev-orch",
+            programId: "PROG-1",
+            phase: "completed",
+            summary: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              // Deliberately absent: no trustSummary on the previous run's summary
+            },
+            generated: null,
+            generatedFiles: null,
+            buildTest: null,
+            evidence: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "complete",
+              packId: "pack-prev",
+              manifestHash: "manifest-prev",
+              generatedArtifactRef: null,
+            },
+            events: null,
+            progress: null,
+            artifacts: null,
+            experience: null,
+            workflow: null,
+          },
+        },
+      });
+
+      render(
+        <EvidencePackPanel
+          emptyState={{ title: "Empty", message: "Message" }}
+        />,
+      );
+
+      // The intentional-divergence warning banner must NOT appear — it would
+      // describe the current run's workflow state, not the displayed previous evidence.
+      expect(
+        screen.queryByText(
+          /This evidence pack supports an intentional divergence decision/,
+        ),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders intentional-divergence banner in non-historical mode when trustSummary indicates it (#359 finding-1 non-regression)", () => {
+      // Non-historical case: state.summary.trustSummary is intentional divergence
+      // → the banner must appear.
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "completed",
+          summary: {
+            runId: "run-cur",
+            programId: "PROG-1",
+            trustSummary: {
+              trustState: "intentional_divergence",
+              divergenceDisposition: "intentional",
+              warningCodes: [],
+            },
+          },
+          evidence: {
+            runId: "run-cur",
+            programId: "PROG-1",
+            mode: "live",
+            productMode: "live",
+            status: "complete",
+            packId: "pack-cur",
+            manifestHash: "manifest-cur",
+            generatedArtifactRef: null,
+          },
+        },
+      });
+
+      render(
+        <EvidencePackPanel
+          emptyState={{ title: "Empty", message: "Message" }}
+        />,
+      );
+
+      expect(
+        screen.getByText(
+          /This evidence pack supports an intentional divergence decision/,
+        ),
+      ).toBeDefined();
+    });
+
+    it("suppresses inline Artifact-Lineage manual-drift block in historical-evidence mode (#359 finding-2)", () => {
+      // F2 — historical mode with a truthy manualDriftSummary: the inline
+      // Artifact-Lineage drift block must NOT render because manualDriftMessage
+      // describes the CURRENT Java buffer, not the displayed previous evidence.
+      const driftSummary = () => ({
+        hasManualEdits: true,
+        fileCount: 1,
+        regionCount: 1,
+        baselineRunIds: ["run-prev"],
+      });
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "running",
+          runId: "run-new",
+          evidence: null,
+          previousRun: {
+            runId: "run-prev",
+            orchestratorRunId: "run-prev-orch",
+            programId: "PROG-1",
+            phase: "completed",
+            summary: null,
+            generated: null,
+            generatedFiles: null,
+            buildTest: null,
+            evidence: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "complete",
+              packId: "pack-prev",
+              manifestHash: "manifest-prev",
+              generatedArtifactRef: null,
+            },
+            events: null,
+            progress: null,
+            artifacts: null,
+            experience: null,
+            workflow: null,
+          },
+        },
+        manualDriftSummary: driftSummary,
+      });
+
+      render(
+        <EvidencePackPanel
+          emptyState={{ title: "Empty", message: "Message" }}
+        />,
+      );
+
+      // The Artifact Lineage section must exist but its inline drift block must
+      // not render — the message describes the current (in-flight) Java buffer.
+      expect(screen.getByText("Artifact Lineage")).toBeDefined();
+      // The drift message string must not appear inside the Artifact Lineage card.
+      // In historical mode the top banner shows the historical-evidence message,
+      // not the drift message, so the drift message appears nowhere in the panel.
+      const lineageCard = screen
+        .getByText("Artifact Lineage")
+        .closest(".bg-bg-1");
+      expect(lineageCard).not.toBeNull();
+      const driftMsg =
+        "Current Java diverges from run run-prev. 1 file and 1 region carry manual edit provenance, so build/test and evidence are stale until you rerun.";
+      // The message should not exist inside the lineage card
+      expect(lineageCard?.textContent).not.toContain(driftMsg);
+    });
+
+    it("renders inline Artifact-Lineage manual-drift block in non-historical mode (#359 finding-2 non-regression)", () => {
+      // Non-historical case: manualDriftSummary is truthy → inline block appears.
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "completed",
+          evidence: {
+            runId: "run-cur",
+            programId: "PROG-1",
+            mode: "live",
+            productMode: "live",
+            status: "complete",
+            packId: "pack-cur",
+            manifestHash: "manifest-cur",
+            generatedArtifactRef: null,
+          },
+        },
+        manualDriftSummary: () => ({
+          hasManualEdits: true,
+          fileCount: 2,
+          regionCount: 4,
+          baselineRunIds: ["run-prev"],
+        }),
+      });
+
+      render(
+        <EvidencePackPanel
+          emptyState={{ title: "Empty", message: "Message" }}
+        />,
+      );
+
+      const driftMsg =
+        "Current Java diverges from run run-prev. 2 files and 4 regions carry manual edit provenance, so build/test and evidence are stale until you rerun.";
+      // Assert the drift message appears specifically inside the Artifact Lineage
+      // card — not merely somewhere on the panel. This catches a regression where
+      // the inline block stops rendering even though the top-of-panel banner still
+      // contains the message.
+      const lineageCard = screen
+        .getByText("Artifact Lineage")
+        .closest(".bg-bg-1");
+      expect(lineageCard).not.toBeNull();
+      expect(lineageCard?.textContent).toContain(driftMsg);
+    });
   });
 
   describe("RunArtifactsPanel", () => {
@@ -1799,6 +2039,37 @@ describe("Run Panels", () => {
       );
       expect(screen.getByText("run.completed")).toBeDefined();
       expect(screen.getByText("Transformation finished")).toBeDefined();
+    });
+  });
+
+  describe("runPanelUtils", () => {
+    describe("describeManualDriftSummary", () => {
+      it("omits region clause when regionCount is 0 (#359 finding-3)", () => {
+        // During the async window after a keystroke, manualEditOverlay is not yet
+        // populated, so regionCount is 0. The message must not say "0 regions".
+        const result = describeManualDriftSummary({
+          hasManualEdits: true,
+          fileCount: 1,
+          regionCount: 0,
+          baselineRunIds: ["run-x"],
+        });
+        expect(result).not.toBeNull();
+        expect(result).toContain("1 file");
+        expect(result).not.toContain("0 region");
+        expect(result).not.toContain("regions");
+      });
+
+      it("includes region clause when regionCount is non-zero (#359 finding-3 non-regression)", () => {
+        const result = describeManualDriftSummary({
+          hasManualEdits: true,
+          fileCount: 1,
+          regionCount: 2,
+          baselineRunIds: ["run-x"],
+        });
+        expect(result).not.toBeNull();
+        expect(result).toContain("1 file");
+        expect(result).toContain("2 regions");
+      });
     });
   });
 });
