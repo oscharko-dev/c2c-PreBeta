@@ -1691,15 +1691,51 @@ def build_test_outcome(payload: Mapping[str, JsonValue]) -> tuple[bool, str | No
     status = str(payload.get("status") or "").strip().lower()
     if status in BUILD_TEST_SUCCESS_STATUSES:
         return True, None
+    if status in {
+        "output-divergence",
+        "golden-master-reproduction-failed",
+    }:
+        return False, FAILURE_ORACLE_MISMATCH
+    if status in {
+        "run-failed",
+        "oracle-cobol-run-failed",
+        "oracle-unavailable",
+        "oracle-invalid",
+    }:
+        return False, FAILURE_JAVA_RUNTIME_FAILED
+    if status in {
+        "compile-failed",
+        "missing-golden-master",
+        "skipped",
+        "oracle-cobol-compile-failed",
+    }:
+        return False, FAILURE_JAVA_COMPILE_FAILED
     reason = str(payload.get("reason") or payload.get("failureReason") or "").strip().lower()
     failure_code = BUILD_TEST_FAILURE_REASONS.get(reason)
     if failure_code is None:
+        comparison_result = payload.get("comparisonResult")
+        if not isinstance(comparison_result, Mapping):
+            comparison_result = {}
+        comparison = payload.get("comparison")
+        if not isinstance(comparison, Mapping):
+            comparison = {}
+        execution_result = payload.get("executionResult")
+        if not isinstance(execution_result, Mapping):
+            execution_result = {}
         # Distinguish compile vs runtime vs oracle when the payload exposes
         # discrete sub-results, otherwise fall back to compile_failed which is
         # the earliest deterministic gate.
         if payload.get("oracleMismatch") or payload.get("oracleResult") == "mismatch":
             failure_code = FAILURE_ORACLE_MISMATCH
+        elif (
+            str(comparison_result.get("status") or "").strip().lower()
+            == "failed"
+            and comparison.get("matched") is False
+        ):
+            failure_code = FAILURE_ORACLE_MISMATCH
         elif payload.get("runtime") == "failed" or payload.get("runtimeStatus") == "failed":
+            failure_code = FAILURE_JAVA_RUNTIME_FAILED
+        elif str(execution_result.get("status") or "").strip().lower() == "failed":
             failure_code = FAILURE_JAVA_RUNTIME_FAILED
         else:
             failure_code = FAILURE_JAVA_COMPILE_FAILED

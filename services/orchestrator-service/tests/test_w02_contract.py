@@ -34,6 +34,7 @@ from orchestrator_service.run_contract import (
     DEFAULT_REPAIR_BUDGET,
     FAILURE_CODES,
     FAILURE_JAVA_COMPILE_FAILED,
+    FAILURE_JAVA_RUNTIME_FAILED,
     FAILURE_JAVA_GENERATION_FAILED,
     FAILURE_ORACLE_MISMATCH,
     FAILURE_PARSE_FAILED,
@@ -1040,6 +1041,34 @@ class BuildTestOutcomeTests(unittest.TestCase):
         success, code = build_test_outcome({"status": "failed"})
         self.assertFalse(success)
         self.assertEqual(code, FAILURE_JAVA_COMPILE_FAILED)
+
+    def test_run_failed_status_maps_to_java_runtime_failed(self):
+        success, code = build_test_outcome(
+            {
+                "status": "run-failed",
+                "classification": "run-error",
+                "executionResult": {
+                    "status": "failed",
+                },
+            }
+        )
+        self.assertFalse(success)
+        self.assertEqual(code, FAILURE_JAVA_RUNTIME_FAILED)
+
+    def test_output_divergence_status_maps_to_oracle_mismatch(self):
+        success, code = build_test_outcome(
+            {
+                "status": "output-divergence",
+                "classification": "divergence-unknown",
+                "comparison": {"matched": False},
+                "comparisonResult": {
+                    "status": "failed",
+                    "mismatchClassification": "content",
+                },
+            }
+        )
+        self.assertFalse(success)
+        self.assertEqual(code, FAILURE_ORACLE_MISMATCH)
 
 
 # ---------------------------------------------------------------------------
