@@ -107,7 +107,7 @@ contract for the first supported repair loop is:
    that were reviewed, and the authenticated identity of the approving
    developer; the approving identity must match the run owner.
 7. Only an approved patch whose payload matches the recorded approval hash,
-   whose reviewed candidate/base revision matches the recorded immutable
+   whose reviewed candidate/base-revision identity matches the recorded immutable
    candidate identity and base-revision digest/ref, and whose approving
    identity matches the run owner may be applied.
 8. Repair application is limited to the generated Java candidate and its
@@ -186,6 +186,9 @@ identity binding:
   runner process, a maximum JVM heap size for the generated-Java process, and
   a bounded stdout/stderr capture, so that a malformed or adversarial
   generated Java program cannot exhaust runner capacity or evidence storage;
+- parity and repair trigger endpoints exposed through the BFF require an
+  authenticated session whose identity binds the run owner; unauthenticated
+  callers must be rejected before any Orchestrator work is dispatched;
 - all run-scoped read, control, and export endpoints exposed through the BFF
   must authorize against the same authenticated tenant/run-owner context
   captured at trigger time and reject before any artifact resolution or

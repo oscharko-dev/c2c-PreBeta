@@ -93,10 +93,10 @@ capture, and completion as recorded progress phases for polling consumers.
 control/read path; it must not become a browser-authored runtime configuration
 surface for the Studio parity launcher.
 
-For Issue #354 consumers must treat the Java runner payload as the
-authoritative comparison artifact lineage for projections. The Orchestrator
-remains the workflow and parity authority; it may persist or relay additive
-projection objects such as workflow-contract `parityComparison` and evidence
+Consumers must treat the Java runner payload as the authoritative comparison
+artifact lineage for projections. The Orchestrator remains the workflow and
+parity authority; it may persist or relay additive projection objects such as
+workflow-contract `parityComparison` and evidence
 `artifacts.parityComparison`, but those surfaces only re-express the runner's
 comparison policy/version, execution/comparison result refs, and diff refs.
 
@@ -114,7 +114,8 @@ The repair loop begins only after deterministic failure detection:
    digest/ref that Studio rendered, and the authenticated identity of the
    approving developer; the approving identity must match the run owner.
 7. Only an approved patch whose payload matches the recorded approval hash,
-   whose reviewed candidate/base revision matches the recorded immutable
+   whose reviewed candidate/base-revision identity matches the recorded
+   immutable
    candidate identity and base-revision digest/ref, and whose approving
    identity matches the run owner may be applied.
 8. Repair application is limited to the generated Java candidate and its
@@ -343,6 +344,9 @@ promoted to a release-gated workflow.
   stdout/stderr capture; together these prevent a malformed or adversarial
   generated Java program from exhausting runner capacity or evidence storage,
   and the concrete cap values are versioned alongside the comparison policy;
+- parity and repair trigger endpoints exposed through the BFF require an
+  authenticated session whose identity binds the run owner; unauthenticated
+  callers must be rejected before any Orchestrator work is dispatched;
 - all run-scoped read, control, and export endpoints exposed through the BFF
   must authorize against the same authenticated tenant/run-owner context
   captured at trigger time and reject before any artifact resolution or
