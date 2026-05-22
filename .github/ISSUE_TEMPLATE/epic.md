@@ -44,7 +44,6 @@ Child issues will be linked after creation.
 
 - [ ] All child issues are closed with acceptance criteria and expected verification updated.
 - [ ] Required GitHub checks are green on implementation PRs.
-- [ ] Expected automated GitHub Copilot/Codex reviews are settled on implementation PRs.
 - [ ] Final closure evidence is recorded in the epic or final child issue.
 - [ ] Known limitations and follow-ups are documented.
 
@@ -66,7 +65,7 @@ This epic is a planning and coordination container. Do not implement the full ep
 - Required planning agents: `architect | explorer | security-reviewer | performance-engineer | docs-editor`.
 - Delivery agents per child issue: selected from `implementor | developer | test-engineer | ui-engineer | a11y-auditor | verifier | pr-reviewer | pr-shepherd`.
 - Write ownership: assigned per child issue only; no parallel write agents may own overlapping files.
-- PR lifecycle owner: `pr-shepherd` waits for GitHub checks and Copilot/Codex reviews, resolves findings, and confirms formal issue completion before merge.
+- PR lifecycle owner: `pr-shepherd` waits for GitHub checks, resolves findings, and confirms formal issue completion before merge.
 
 ## Expected Verification
 
@@ -77,7 +76,7 @@ This epic is a planning and coordination container. Do not implement the full ep
 
 ## Review Settlement and Formal Issue Completion
 
-- [ ] Implementation PRs wait for required GitHub checks and expected automated GitHub Copilot/Codex reviews before merge.
+- [ ] Implementation PRs wait for required GitHub checks before merge.
 - [ ] All actionable review findings are fixed or explicitly dispositioned before merge.
 - [ ] Child issue Acceptance Criteria and Expected Verification checkboxes are updated only when evidence exists.
 - [ ] The epic remains open until all child issues are closed and final closure evidence is recorded.

@@ -439,7 +439,7 @@ describe("DiffWorkspace", () => {
     });
   });
 
-  describe("desync resilience (Copilot review #282)", () => {
+  describe("desync resilience (#282)", () => {
     beforeEach(() => {
       fetchTraceabilityMock.mockResolvedValue(parsedTraceWithLineage);
     });

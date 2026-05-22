@@ -94,7 +94,7 @@ function runVerify(studioRoot: string): {
   }
 }
 
-describe("verify-monaco-lazy regex tightening (#258 Copilot review)", () => {
+describe("verify-monaco-lazy regex tightening (#258)", () => {
   it("does NOT flag a first-load chunk that mentions 'monaco-editor' only as an incidental string", () => {
     // Bare-word mention that the previous substring matcher would have caught.
     const firstLoadContent = `

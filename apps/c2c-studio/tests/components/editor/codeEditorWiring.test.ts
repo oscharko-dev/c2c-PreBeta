@@ -63,7 +63,7 @@ describe("CodeEditorInner — review-flagged wiring invariants (#258)", () => {
   });
 
   it("tracks the diff onDidChangeContent disposable in a ref", () => {
-    // Copilot finding: the listener returned by onDidChangeContent
+    // Review finding: the listener returned by onDidChangeContent
     // returns an IDisposable that must be cleaned up on unmount.
     expect(innerSource).toMatch(/contentChangeDisposableRef/);
     expect(innerSource).toMatch(

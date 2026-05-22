@@ -287,7 +287,7 @@ export interface TransformationRunContextValue {
   // COBOL snapshots are keyed by runId — DiffWorkspace looks up the
   // entries whose runIds match the Java history's previous and current
   // so the panes never desynchronize when failed runs sit between
-  // successes (Copilot review #282).
+  // successes (#282).
   // Session-only persistence: a fresh ``idle`` phase from a new programId
   // or a hard reload clears these, consistent with the issue body.
   javaDiffHistory: Record<string, Record<string, JavaFileHistoryEntry>>;
