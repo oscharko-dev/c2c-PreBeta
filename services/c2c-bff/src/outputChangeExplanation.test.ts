@@ -162,4 +162,3 @@ test("buildOutputChangeExplanation refuses to speculate when evidence is incompl
   assert.equal(result.unavailableReason, "evidence_incomplete");
   assert.equal(result.primaryCategory, null);
 });
-
