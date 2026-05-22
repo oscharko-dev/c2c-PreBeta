@@ -418,17 +418,50 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /api/v0/manual-compile-repair/preview:
+    post:
+      summary: Create a repair preview for a manual Java candidate
+      description: >
+        Accepts the developer's edited Java files, validates the allowed field
+        set, injects the Studio requester identity, and forwards the request to
+        the Orchestrator `preview/request` endpoint. The `previewId` in the
+        response is required by the subsequent `/diagnose` call.
+      operationId: previewManualCompileRepair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualCompileRepairPreviewRequest" }
+      responses:
+        "200":
+          description: repair preview returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualCompileRepairPreviewResponse" }
+        "400":
+          description: validation error or malformed request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: session cookie missing or expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable or not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v0/manual-compile-repair/diagnose:
     post:
       summary: Diagnose a manual repair candidate
       description: >
-        Legacy compatibility route for the Studio manual diagnosis/repair
-        lane. The BFF accepts compile-failure and runtime/parity-failure
-        diagnosis payloads, preserves the Studio single-file and multi-file
-        manual overlay shapes, and forwards backend-shape fields unchanged to
-        the Orchestrator. The response body is also passed through verbatim so
-        the broader diagnosis envelope can surface runtime/parity refs when the
-        backend emits them.
+        Runs the repair agent against the preview identified by `previewId`
+        and returns a diagnosis envelope. The preview must have been created
+        by a prior `/preview` call for the same run. The BFF enforces the
+        two-field request contract and injects the Studio requester identity.
       operationId: diagnoseManualCompileRepair
       requestBody:
         required: true
@@ -476,6 +509,42 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ManualCompileRepairApplyResponse" }
+        "400":
+          description: validation error or malformed request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: session cookie missing or expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: orchestrator unavailable or not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v0/manual-compile-repair/accept:
+    post:
+      summary: Accept a sandbox-applied repair proposal
+      description: >
+        Promotes a sandbox-applied proposal to the approved/applied state after
+        the developer has reviewed the sandbox build result. The BFF enforces
+        the three-field request contract (`runId`, `proposalId`, `patchSha256`)
+        and injects the Studio requester identity.
+      operationId: acceptManualCompileRepair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManualCompileRepairAcceptRequest" }
+      responses:
+        "200":
+          description: acceptance returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualCompileRepairAcceptResponse" }
         "400":
           description: validation error or malformed request body
           content:
@@ -1448,15 +1517,13 @@ components:
               endColumn: { type: integer, minimum: 1 }
       additionalProperties: true
 
-    ManualCompileRepairDiagnoseRequest:
+    ManualCompileRepairPreviewRequest:
       type: object
-      required: [runId, entryFilePath, javaFiles]
+      required: [runId, javaFiles]
       description: >
-        Studio manual diagnosis request for compile, runtime, and parity
-        repair flows. `buildTestContext` carries the bounded verification
-        evidence from the current manual Java snapshot so runtime/parity
-        diagnosis can stay attached to the exact edited files the developer
-        just verified.
+        Studio manual repair preview request. Accepted fields are `runId`,
+        `entryClass`, `entryFilePath`, `javaFiles`, `manualEditOverlay`, and
+        `manualEditOverlays`. Any extra field causes a 400 response.
       properties:
         runId: { type: string }
         entryClass: { type: string }
@@ -1471,69 +1538,51 @@ components:
         manualEditOverlays:
           type: array
           items: { $ref: "#/components/schemas/ManualCompileRepairOverlayInput" }
-        buildTestContext:
-          type: object
-          additionalProperties: false
-          properties:
-            status:
-              type: string
-            classification:
-              type: string
-            compileStatus:
-              type: string
-            executionStatus:
-              type: string
-            comparisonPolicy:
-              type: string
-            expectedOutput:
-              type: string
-            outputRef:
-              oneOf:
-                - $ref: "#/components/schemas/OutputRef"
-                - type: "null"
-            expectedOutputRef:
-              oneOf:
-                - $ref: "#/components/schemas/OutputRef"
-                - type: "null"
-            actualOutputRef:
-              oneOf:
-                - $ref: "#/components/schemas/OutputRef"
-                - type: "null"
-            comparison:
-              type: object
-              additionalProperties: false
-              properties:
-                matched:
-                  type: boolean
-                status:
-                  type: string
-                comparisonPolicyVersion:
-                  type: string
-                mismatchClassification:
-                  type: string
-                diffSummary:
-                  type: string
-                comparisonPolicyRef:
-                  oneOf:
-                    - $ref: "#/components/schemas/OutputRef"
-                    - type: "null"
-                comparisonResultRef:
-                  oneOf:
-                    - $ref: "#/components/schemas/OutputRef"
-                    - type: "null"
-                diffRef:
-                  oneOf:
-                    - $ref: "#/components/schemas/OutputRef"
-                    - type: "null"
-                expectedRef:
-                  oneOf:
-                    - $ref: "#/components/schemas/OutputRef"
-                    - type: "null"
-                actualRef:
-                  oneOf:
-                    - $ref: "#/components/schemas/OutputRef"
-                    - type: "null"
+      additionalProperties: false
+
+    ManualCompileRepairPreviewResponse:
+      type: object
+      required: [schemaVersion, previewId, runId]
       additionalProperties: true
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
+        previewId: { type: string }
+        runId: { type: string }
+        workflowId: { type: string }
+        failureCategory: { type: string }
+        includedFiles:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        diagnostics:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        constraints:
+          type: object
+          additionalProperties: true
+        entryClass: { type: string }
+        entryFilePath: { type: string }
+        createdAt:
+          type: string
+          format: date-time
+
+    ManualCompileRepairDiagnoseRequest:
+      type: object
+      required: [runId, previewId]
+      description: >
+        Studio manual diagnosis request. Accepted fields are `runId` and
+        `previewId` only. The preview must have been created by a prior
+        `/preview` call for the same run. Any extra field causes a 400
+        response.
+      properties:
+        runId: { type: string }
+        previewId: { type: string }
+      additionalProperties: false
 
     ManualCompileRepairDiagnosis:
       type: object
@@ -1696,21 +1745,16 @@ components:
 
     ManualCompileRepairApplyRequest:
       type: object
-      required: [runId, entryFilePath, javaFiles, proposal, candidateProject]
+      required: [runId, previewId, proposalId, patchSha256]
+      description: >
+        Studio repair apply request. Accepted fields are `runId`, `previewId`,
+        `proposalId`, and `patchSha256`. Any extra field causes a 400 response.
       properties:
         runId: { type: string }
-        entryClass: { type: string }
-        entryFilePath: { type: string }
-        javaFiles:
-          type: array
-          items: { $ref: "#/components/schemas/ManualCompileRepairJavaFile" }
-        proposal:
-          $ref: "#/components/schemas/ManualCompileRepairProposal"
-        candidateProject:
-          $ref: "#/components/schemas/ManualCompileRepairCandidateProject"
-        expectedOutput: { type: string }
-        oracleInput: { type: string }
-      additionalProperties: true
+        previewId: { type: string }
+        proposalId: { type: string }
+        patchSha256: { type: string }
+      additionalProperties: false
 
     ManualCompileRepairApplyResponse:
       type: object
@@ -1728,14 +1772,44 @@ components:
           $ref: "#/components/schemas/BuildTestView"
       additionalProperties: true
 
-    ManualCompileRepairRejectRequest:
+    ManualCompileRepairAcceptRequest:
       type: object
-      required: [runId, proposal]
+      required: [runId, proposalId, patchSha256]
+      description: >
+        Studio repair accept request. Accepted fields are `runId`, `proposalId`,
+        and `patchSha256`. Any extra field causes a 400 response.
       properties:
+        runId: { type: string }
+        proposalId: { type: string }
+        patchSha256: { type: string }
+      additionalProperties: false
+
+    ManualCompileRepairAcceptResponse:
+      type: object
+      required: [schemaVersion, runId, proposal, candidateProject, buildTest]
+      additionalProperties: true
+      properties:
+        schemaVersion:
+          type: string
+          enum: [v0]
         runId: { type: string }
         proposal:
           $ref: "#/components/schemas/ManualCompileRepairProposal"
-      additionalProperties: true
+        candidateProject:
+          $ref: "#/components/schemas/ManualCompileRepairCandidateProject"
+        buildTest:
+          $ref: "#/components/schemas/BuildTestView"
+
+    ManualCompileRepairRejectRequest:
+      type: object
+      required: [runId, proposalId]
+      description: >
+        Studio repair reject request. Accepted fields are `runId` and
+        `proposalId`. Any extra field causes a 400 response.
+      properties:
+        runId: { type: string }
+        proposalId: { type: string }
+      additionalProperties: false
 
     ManualCompileRepairRejectResponse:
       type: object
