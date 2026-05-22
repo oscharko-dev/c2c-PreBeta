@@ -2953,9 +2953,12 @@ test("POST /api/v0/runs/:runId/evidence/export proxies the orchestrator export r
       body.export.scaffoldRef.path,
       "exports/java-regression/case01/hello/src/test/java/CASE01ParityRegressionTest.java",
     );
+    // The BFF-local runId and the Orchestrator-assigned liveRunId must differ
+    // so this assertion is meaningful — a regression to BFF-local id would be caught.
+    assert.notEqual(startedBody.runId, "live-run-1");
     assert.deepEqual(calls.exportParityRegression, [
       {
-        runId: startedBody.runId,
+        runId: "live-run-1",
         payload: { exportName: "hello-regression" },
       },
     ]);
