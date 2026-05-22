@@ -942,7 +942,7 @@ public final class BuildTestRunnerService {
                 : safeRuntimeSummary(run));
         map.put("evidenceRefs", evidenceRefs(sourceArtifactRef, inputArtifactRef, generatedArtifactRef,
                 stdoutRef, stderrRef, normalizedOutputRef, logRef));
-        map.put("outputRef", normalizedOutputRef);
+        map.put("outputRef", reference("parity-execution-result", "parity-execution-result", map));
         // Compatibility fields kept while downstream consumers move to the
         // shared execution schema.
         map.put("ran", run.ran());
@@ -1002,7 +1002,7 @@ public final class BuildTestRunnerService {
         map.put("summary", "Generated Java execution was skipped: " + reason + ".");
         map.put("evidenceRefs", evidenceRefs(sourceArtifactRef, inputArtifactRef, generatedArtifactRef,
                 stdoutRef, stderrRef, normalizedOutputRef, logRef));
-        map.put("outputRef", normalizedOutputRef);
+        map.put("outputRef", reference("parity-execution-result", "parity-execution-result", map));
         map.put("ran", false);
         map.put("ok", false);
         map.put("stdout", "");

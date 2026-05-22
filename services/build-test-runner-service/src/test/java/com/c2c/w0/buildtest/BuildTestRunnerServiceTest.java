@@ -70,10 +70,13 @@ class BuildTestRunnerServiceTest {
         assertNotNull(execution.get("stderrRef"));
         assertNotNull(execution.get("normalizedOutputRef"));
         assertNotNull(execution.get("logRef"));
+        assertEquals("parity-execution-result", ((Map<?, ?>) execution.get("outputRef")).get("kind"));
+        assertFalse(execution.get("outputRef").equals(execution.get("normalizedOutputRef")));
         assertFalse(((List<?>) execution.get("evidenceRefs")).isEmpty());
         assertEquals("generated-java", executionResult.get("executionSurface"));
         assertEquals(false, executionResult.containsKey("stdout"));
         assertEquals(false, executionResult.containsKey("ok"));
+        assertEquals("parity-execution-result", ((Map<?, ?>) executionResult.get("outputRef")).get("kind"));
         assertEquals("passed", comparisonResult.get("status"));
         assertEquals(true, comparisonResult.get("matched"));
         assertEquals(DeterministicComparisonPolicy.VERSION, comparisonResult.get("comparisonPolicyVersion"));
@@ -256,6 +259,8 @@ class BuildTestRunnerServiceTest {
         assertEquals("skipped-no-execution", response.get("classification"));
         Map<?, ?> execution = (Map<?, ?>) response.get("execution");
         assertEquals(true, execution.get("skipped"));
+        assertEquals("parity-execution-result", ((Map<?, ?>) execution.get("outputRef")).get("kind"));
+        assertFalse(execution.get("outputRef").equals(execution.get("normalizedOutputRef")));
     }
 
     @Test
