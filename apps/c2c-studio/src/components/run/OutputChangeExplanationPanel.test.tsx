@@ -152,4 +152,33 @@ describe("OutputChangeExplanationPanel", () => {
       });
     });
   });
+
+  it("preserves deterministic analysis when the AI summary request fails", async () => {
+    vi.spyOn(apiClient, "getOutputChangeExplanation")
+      .mockResolvedValueOnce({
+        ok: true,
+        data: explanation(),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        message: "Model gateway request failed.",
+      });
+    const user = userEvent.setup();
+    render(
+      <OutputChangeExplanationPanel
+        currentRunId="run-current"
+        previousRunId="run-previous"
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Explain output change/i }),
+    );
+    await screen.findByRole("button", { name: /Generate AI summary/i });
+    await user.click(
+      screen.getByRole("button", { name: /Generate AI summary/i }),
+    );
+    await screen.findByText(/Model gateway request failed/i);
+    expect(screen.getByTestId("output-change-explanation")).toBeInTheDocument();
+    expect(screen.getByText(/Repair patch changed/i)).toBeInTheDocument();
+  });
 });

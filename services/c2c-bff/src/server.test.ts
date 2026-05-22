@@ -11496,6 +11496,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation returns a deterministic
       evidence: { status: "current" },
     },
   });
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -11505,6 +11506,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation returns a deterministic
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
     modelGateway: availableModelGateway(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -11512,7 +11514,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation returns a deterministic
       `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: auth.headers,
         body: { previousRunId: previous.runId },
       },
     );
@@ -11540,6 +11542,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation returns unavailable whe
       evidence: { status: "current" },
     },
   });
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -11547,6 +11550,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation returns unavailable whe
     orchestrator: outputChangeOrchestrator(),
     evidence: disabledEvidence(),
     experienceLearning: disabledLearning(),
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -11554,7 +11558,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation returns unavailable whe
       `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: auth.headers,
         body: { previousRunId: "missing-run" },
       },
     );
@@ -11607,6 +11611,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation can attach an AI-assist
       evidence: { status: "current" },
     },
   });
+  const auth = createRouteAuth();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
@@ -11629,6 +11634,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation can attach an AI-assist
         };
       },
     },
+    sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
@@ -11636,7 +11642,7 @@ test("POST /api/v0/runs/:runId/output-change-explanation can attach an AI-assist
       `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: auth.headers,
         body: {
           previousRunId: previous.runId,
           includeAiSummary: true,
@@ -11648,6 +11654,131 @@ test("POST /api/v0/runs/:runId/output-change-explanation can attach an AI-assist
     const aiSummary = body.aiSummary as Record<string, unknown>;
     assert.equal(aiSummary.status, "available");
     assert.match(String(aiSummary.explanation), /repaired Java candidate/i);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs/:runId/output-change-explanation rejects unauthenticated requests with 401", async () => {
+  const runStore = createRunStore();
+  const current = runStore.create(FIXED_SAMPLE, "live", "live-current", {
+    status: "completed",
+    executionMode: "parity",
+  });
+  const auth = createRouteAuth();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    runStore,
+    orchestrator: outputChangeOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
+      {
+        method: "POST",
+        body: { previousRunId: "live-prev" },
+      },
+    );
+    assert.equal(response.status, 401);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs/:runId/output-change-explanation strips raw output excerpts from the model-gateway payload", async () => {
+  const runStore = createRunStore();
+  const previous = runStore.create(FIXED_SAMPLE, "live", "live-prev", {
+    status: "completed",
+    executionMode: "parity",
+    trustCaseId: "HELLO01-DEFAULT",
+    trustCaseConfigurationDigest: "same-digest",
+    trustCaseEnvironmentProfileId: "env-v1",
+    trustCaseComparisonPolicyVersion: "deterministic-output-v1",
+    trustSummary: {
+      trustCase: {
+        trustCaseId: "HELLO01-DEFAULT",
+        configurationDigest: "same-digest",
+      },
+      cobolResult: { normalizedOutputRef: { sha256: "a".repeat(64) } },
+      javaResult: { normalizedOutputRef: { sha256: "b".repeat(64) } },
+      comparisonResult: { diffRef: { sha256: "2".repeat(64) } },
+      repair: { repairDecisionRef: { sha256: "6".repeat(64) } },
+      evidence: { status: "current" },
+    },
+  });
+  const current = runStore.create(FIXED_SAMPLE, "live", "live-current", {
+    status: "completed",
+    executionMode: "parity",
+    trustCaseId: "HELLO01-DEFAULT",
+    trustCaseConfigurationDigest: "same-digest",
+    trustCaseEnvironmentProfileId: "env-v1",
+    trustCaseComparisonPolicyVersion: "deterministic-output-v1",
+    trustSummary: {
+      trustCase: {
+        trustCaseId: "HELLO01-DEFAULT",
+        configurationDigest: "same-digest",
+      },
+      cobolResult: { normalizedOutputRef: { sha256: "a".repeat(64) } },
+      javaResult: { normalizedOutputRef: { sha256: "c".repeat(64) } },
+      comparisonResult: { diffRef: { sha256: "3".repeat(64) } },
+      repair: { repairDecisionRef: { sha256: "7".repeat(64) } },
+      evidence: { status: "current" },
+    },
+  });
+  let capturedExcerptCount = -1;
+  const auth = createRouteAuth();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    trustCases: stubTrustCases([FIXED_TRUST_CASE]),
+    runStore,
+    orchestrator: outputChangeOrchestrator(),
+    evidence: disabledEvidence(),
+    experienceLearning: disabledLearning(),
+    modelGateway: {
+      ...availableModelGateway(),
+      async explain(payload: unknown) {
+        const analysis = (
+          payload as {
+            analysis?: { outputDelta?: { excerpt?: unknown[] } };
+          }
+        ).analysis;
+        capturedExcerptCount = analysis?.outputDelta?.excerpt?.length ?? -1;
+        return {
+          status: 200,
+          body: {
+            explanation: "The repaired Java candidate changed the output.",
+            invocationId: "inv-output-change-strip",
+            ledgerRef: "urn:ledger:output-change-strip",
+          },
+        };
+      },
+    },
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${current.runId}/output-change-explanation`,
+      {
+        method: "POST",
+        headers: auth.headers,
+        body: {
+          previousRunId: previous.runId,
+          includeAiSummary: true,
+        },
+      },
+    );
+    assert.equal(response.status, 200);
+    const body = response.body as Record<string, unknown>;
+    const outputDelta = body.outputDelta as { excerpt: unknown[] };
+    assert.ok(outputDelta.excerpt.length > 0);
+    assert.equal(capturedExcerptCount, 0);
   } finally {
     await server.close();
   }

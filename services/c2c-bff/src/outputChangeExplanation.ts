@@ -376,7 +376,7 @@ export function buildOutputChangeExplanation(
       trustCaseId(previousRun.trustSummary),
     );
   }
-  if (!currentRun.actualOutput || !previousRun.actualOutput) {
+  if (currentRun.actualOutput === null || previousRun.actualOutput === null) {
     return buildUnavailableOutputChangeExplanation(
       currentRun,
       previousRun.runId,
@@ -591,7 +591,9 @@ export function buildOutputChangeExplanation(
       ? `The output change is most directly explained by ${changedCategories[0]?.replaceAll("_", " ")}.`
       : determination === "multiple_changes"
         ? "Multiple evidence-backed changes occurred between the selected runs, so the output change cannot be reduced to one deterministic cause."
-        : "The selected runs show an output difference, but the available evidence does not support one deterministic cause.";
+        : outputDelta.changed
+          ? "The selected runs show an output difference, but the available evidence does not support one deterministic cause."
+          : "No output change was detected between the selected runs.";
 
   const evidenceLinks: OutputChangeEvidenceLink[] = [
     {

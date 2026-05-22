@@ -162,3 +162,134 @@ test("buildOutputChangeExplanation refuses to speculate when evidence is incompl
   assert.equal(result.unavailableReason, "evidence_incomplete");
   assert.equal(result.primaryCategory, null);
 });
+
+test("buildOutputChangeExplanation classifies a generated Java refresh", () => {
+  const previous = runArtifacts({ runId: "run-previous" });
+  const current = runArtifacts({
+    generatedArtifactRef: outputRef("9".repeat(64)),
+    actualOutput: "RESULT=NEW\n",
+  });
+
+  const result = buildOutputChangeExplanation(current, previous);
+
+  assert.equal(result.status, "available");
+  assert.equal(result.primaryCategory, "generated_java_refresh");
+  assert.equal(result.determination, "single_change");
+});
+
+test("buildOutputChangeExplanation reports multiple evidence-backed changes", () => {
+  const previous = runArtifacts({ runId: "run-previous" });
+  const current = runArtifacts({
+    sourceHash: "source-hash-v2",
+    actualOutput: "RESULT=NEW\n",
+    trustSummary: {
+      ...previous.trustSummary,
+      repair: { repairDecisionRef: outputRef("6".repeat(64)) },
+    },
+  });
+
+  const result = buildOutputChangeExplanation(current, previous);
+
+  assert.equal(result.status, "available");
+  assert.equal(result.determination, "multiple_changes");
+  assert.equal(result.primaryCategory, null);
+});
+
+test("buildOutputChangeExplanation reports a not-determinable cause when output differs without evidence", () => {
+  const previous = runArtifacts({ runId: "run-previous" });
+  const current = runArtifacts({ actualOutput: "RESULT=NEW\n" });
+
+  const result = buildOutputChangeExplanation(current, previous);
+
+  assert.equal(result.status, "available");
+  assert.equal(result.determination, "not_determinable");
+  assert.equal(result.primaryCategory, null);
+  assert.ok(
+    result.categories.some(
+      (entry) => entry.category === "cause_not_determinable",
+    ),
+  );
+  assert.match(result.summary, /output difference/i);
+});
+
+test("buildOutputChangeExplanation reports no output change when the runs are identical", () => {
+  const previous = runArtifacts({ runId: "run-previous" });
+  const current = runArtifacts({ runId: "run-current" });
+
+  const result = buildOutputChangeExplanation(current, previous);
+
+  assert.equal(result.status, "available");
+  assert.equal(result.determination, "not_determinable");
+  assert.equal(
+    result.summary,
+    "No output change was detected between the selected runs.",
+  );
+});
+
+test("buildOutputChangeExplanation analyzes runs with empty observed output", () => {
+  const previous = runArtifacts({ runId: "run-previous" });
+  const current = runArtifacts({ actualOutput: "" });
+
+  const result = buildOutputChangeExplanation(current, previous);
+
+  assert.equal(result.status, "available");
+  assert.equal(result.unavailableReason, undefined);
+});
+
+test("buildOutputChangeExplanation refuses to speculate across unavailable guard states", () => {
+  const cases: Array<{
+    name: string;
+    current: OutputChangeRunArtifacts;
+    previous: OutputChangeRunArtifacts;
+    expected: string;
+  }> = [
+    {
+      name: "same run compared to itself",
+      current: runArtifacts(),
+      previous: runArtifacts(),
+      expected: "same_run_not_allowed",
+    },
+    {
+      name: "a run that has not completed",
+      current: runArtifacts({ status: "running" }),
+      previous: runArtifacts({ runId: "run-previous" }),
+      expected: "run_not_completed",
+    },
+    {
+      name: "a non-parity run",
+      current: runArtifacts({ executionMode: "standard" }),
+      previous: runArtifacts({ runId: "run-previous" }),
+      expected: "non_parity_run",
+    },
+    {
+      name: "a missing trust summary",
+      current: runArtifacts({ trustSummary: null }),
+      previous: runArtifacts({ runId: "run-previous" }),
+      expected: "missing_trust_summary",
+    },
+    {
+      name: "missing observed output",
+      current: runArtifacts({ actualOutput: null }),
+      previous: runArtifacts({ runId: "run-previous" }),
+      expected: "missing_observed_output",
+    },
+  ];
+
+  for (const scenario of cases) {
+    const result = buildOutputChangeExplanation(
+      scenario.current,
+      scenario.previous,
+    );
+    assert.equal(
+      result.status,
+      "unavailable",
+      `${scenario.name} should be unavailable`,
+    );
+    assert.equal(
+      result.unavailableReason,
+      scenario.expected,
+      `${scenario.name} should report ${scenario.expected}`,
+    );
+    assert.equal(result.primaryCategory, null);
+  }
+});
