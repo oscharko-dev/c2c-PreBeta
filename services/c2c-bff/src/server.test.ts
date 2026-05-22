@@ -8377,20 +8377,30 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
       reject: { status: 200, body: rejectResponse },
     },
   });
+  const runStore = createRunStore();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
-    runStore: createRunStore(),
+    runStore,
     sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    // The BFF-local runId and the Orchestrator-assigned liveRunId must differ
+    // so assertions below are meaningful — a regression to BFF-local id would be caught.
+    assert.notEqual(startedBody.runId, "live-run-1");
     const preview = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/preview`,
       auth.post({
-        runId: "run-1",
+        runId: startedBody.runId,
         entryClass: "CASE01",
         entryFilePath: currentJavaFile.path,
         javaFiles: [currentJavaFile],
@@ -8421,7 +8431,7 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     assert.equal(preview.status, 200);
     assert.equal(calls.manualCompileRepair.preview.length, 1);
     const previewCall = calls.manualCompileRepair.preview[0];
-    assert.equal(previewCall?.runId, "run-1");
+    assert.equal(previewCall?.runId, "live-run-1");
     assert.deepEqual(
       (previewCall?.payload as { manualOverlay: unknown; requester: string })
         .manualOverlay,
@@ -8457,7 +8467,7 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     const diagnose = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
       auth.post({
-        runId: "run-1",
+        runId: startedBody.runId,
         previewId: previewBody.preview.previewId,
       }),
     );
@@ -8481,9 +8491,9 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     assert.equal(diagnoseBody.schemaVersion, "v0");
     assert.equal(calls.manualCompileRepair.diagnose.length, 1);
     const diagnoseCall = calls.manualCompileRepair.diagnose[0];
-    assert.equal(diagnoseCall?.runId, "run-1");
+    assert.equal(diagnoseCall?.runId, "live-run-1");
     assert.deepEqual(diagnoseCall?.payload, {
-      runId: "run-1",
+      runId: startedBody.runId,
       previewId: "preview-1",
       requester: "studio:tenant-a:user-a",
     });
@@ -8506,14 +8516,15 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     const reject = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/reject`,
       auth.post({
-        runId: "run-1",
+        runId: startedBody.runId,
         proposalId: diagnoseBody.proposal.proposalId,
       }),
     );
     assert.equal(reject.status, 200);
     assert.equal(calls.manualCompileRepair.reject.length, 1);
+    assert.equal(calls.manualCompileRepair.reject[0]?.runId, "live-run-1");
     assert.deepEqual(calls.manualCompileRepair.reject[0]?.payload, {
-      runId: "run-1",
+      runId: startedBody.runId,
       proposalId: "proposal-1",
       requester: "studio:tenant-a:user-a",
     });
@@ -8526,7 +8537,7 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     const apply = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/apply`,
       auth.post({
-        runId: "run-1",
+        runId: startedBody.runId,
         previewId: previewBody.preview.previewId,
         proposalId: diagnoseBody.proposal.proposalId,
         patchSha256: "a".repeat(64),
@@ -8534,8 +8545,9 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     );
     assert.equal(apply.status, 200);
     assert.equal(calls.manualCompileRepair.apply.length, 1);
+    assert.equal(calls.manualCompileRepair.apply[0]?.runId, "live-run-1");
     assert.deepEqual(calls.manualCompileRepair.apply[0]?.payload, {
-      runId: "run-1",
+      runId: startedBody.runId,
       previewId: "preview-1",
       proposalId: "proposal-1",
       patchSha256: "a".repeat(64),
@@ -8550,15 +8562,16 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     const accept = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/accept`,
       auth.post({
-        runId: "run-1",
+        runId: startedBody.runId,
         proposalId: diagnoseBody.proposal.proposalId,
         patchSha256: "a".repeat(64),
       }),
     );
     assert.equal(accept.status, 200);
     assert.equal(calls.manualCompileRepair.accept.length, 1);
+    assert.equal(calls.manualCompileRepair.accept[0]?.runId, "live-run-1");
     assert.deepEqual(calls.manualCompileRepair.accept[0]?.payload, {
-      runId: "run-1",
+      runId: startedBody.runId,
       proposalId: "proposal-1",
       patchSha256: "a".repeat(64),
       requester: "studio:tenant-a:user-a",
@@ -8567,7 +8580,7 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
     const invalidDiagnose = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
       auth.post({
-        runId: "run-1",
+        runId: startedBody.runId,
         previewId: "preview-1",
         buildTestContext: { status: "forbidden" },
       }),
@@ -8636,19 +8649,26 @@ test("POST /api/v0/manual-compile-repair/reject returns 200 with valid stub", as
       reject: { status: 200, body: rejectResponse },
     },
   });
+  const runStore = createRunStore();
   const handler = createApp({
     config: baseConfig,
     samples: stubSamples([FIXED_SAMPLE]),
     orchestrator: orch,
     evidence: disabledEvidence(),
-    runStore: createRunStore(),
+    runStore,
     sessionStore: auth.sessionStore,
   });
   const server = await startTestServer(handler);
   try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/reject`,
-      auth.post({ runId: "run-1", proposalId: "proposal-1" }),
+      auth.post({ runId: startedBody.runId, proposalId: "proposal-1" }),
     );
     assert.equal(response.status, 200);
   } finally {
@@ -8657,6 +8677,60 @@ test("POST /api/v0/manual-compile-repair/reject returns 200 with valid stub", as
 });
 
 test(`POST /api/v0/manual-compile-repair/preview returns 413 when javaFiles exceeds ${JAVA_EXECUTION_MAX_FILES} entries`, async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const runStore = createRunStore();
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const javaFiles = Array.from(
+      { length: JAVA_EXECUTION_MAX_FILES + 1 },
+      (_, i) => ({
+        path: `src/main/java/com/c2c/generated/File${i}.java`,
+        content: `class File${i} {}`,
+      }),
+    );
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/preview`,
+      auth.post({
+        runId: startedBody.runId,
+        entryFilePath: "src/main/java/com/c2c/generated/File0.java",
+        javaFiles,
+      }),
+    );
+    assert.equal(response.status, 413);
+    assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #366: manual-compile-repair unknown-runId → 404
+// ---------------------------------------------------------------------------
+
+test("POST /api/v0/manual-compile-repair/preview returns 404 when runId is not in runStore", async () => {
   const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     manualCompileRepair: {
@@ -8677,23 +8751,183 @@ test(`POST /api/v0/manual-compile-repair/preview returns 413 when javaFiles exce
   });
   const server = await startTestServer(handler);
   try {
-    const javaFiles = Array.from(
-      { length: JAVA_EXECUTION_MAX_FILES + 1 },
-      (_, i) => ({
-        path: `src/main/java/com/c2c/generated/File${i}.java`,
-        content: `class File${i} {}`,
-      }),
-    );
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/preview`,
+      auth.post({ runId: "unknown-run", entryClass: "CASE01" }),
+    );
+    assert.equal(response.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/manual-compile-repair/diagnose returns 404 when runId is not in runStore", async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/diagnose`,
+      auth.post({ runId: "unknown-run", previewId: "preview-1" }),
+    );
+    assert.equal(response.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/manual-compile-repair/apply returns 404 when runId is not in runStore", async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/apply`,
       auth.post({
-        runId: "run-1",
-        entryFilePath: "src/main/java/com/c2c/generated/File0.java",
-        javaFiles,
+        runId: "unknown-run",
+        previewId: "preview-1",
+        proposalId: "proposal-1",
+        patchSha256: "a".repeat(64),
       }),
     );
-    assert.equal(response.status, 413);
-    assert.ok((response.body as { error: string }).error.includes("javaFiles"));
+    assert.equal(response.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/manual-compile-repair/accept returns 404 when runId is not in runStore", async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/accept`,
+      auth.post({
+        runId: "unknown-run",
+        proposalId: "proposal-1",
+        patchSha256: "a".repeat(64),
+      }),
+    );
+    assert.equal(response.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/manual-compile-repair/reject returns 404 when runId is not in runStore", async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore: createRunStore(),
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/reject`,
+      auth.post({ runId: "unknown-run", proposalId: "proposal-1" }),
+    );
+    assert.equal(response.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/manual-compile-repair/preview returns 503 when run has no orchestrator liveRunId", async () => {
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    manualCompileRepair: {
+      preview: { status: 200, body: {} },
+      diagnose: { status: 200, body: {} },
+      apply: { status: 200, body: {} },
+      accept: { status: 200, body: {} },
+      reject: { status: 200, body: {} },
+    },
+  });
+  const runStore = createRunStore();
+  // Seed a run with no liveRunId so liveArtifactRunId(stored) returns undefined.
+  const seeded = runStore.create(FIXED_SAMPLE, "live");
+  const handler = createApp({
+    config: baseConfig,
+    samples: stubSamples([FIXED_SAMPLE]),
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const response = await fetchJson(
+      `${server.baseUrl}/api/v0/manual-compile-repair/preview`,
+      auth.post({ runId: seeded.runId, entryClass: "CASE01" }),
+    );
+    assert.equal(response.status, 503);
+    assert.ok(
+      (response.body as { error: string }).error.includes(
+        "orchestrator run is not available",
+      ),
+    );
   } finally {
     await server.close();
   }

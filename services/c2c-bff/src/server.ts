@@ -5108,6 +5108,19 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId) {
+          jsonResponse(res, 503, {
+            error:
+              "manual compile repair unavailable: orchestrator run is not available",
+          });
+          return;
+        }
         const allowedFields = new Set([
           "runId",
           "entryClass",
@@ -5153,7 +5166,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               ),
             }
           : record.manualEditOverlay;
-        const upstream = await previewManualCompileRepair(runId, {
+        const upstream = await previewManualCompileRepair(liveRunId, {
           ...record,
           requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
           manualOverlay: manualOverlayEnvelope,
@@ -5226,6 +5239,19 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId) {
+          jsonResponse(res, 503, {
+            error:
+              "manual compile repair unavailable: orchestrator run is not available",
+          });
+          return;
+        }
         if (!previewId) {
           badRequest(res, "previewId must be a non-empty string");
           return;
@@ -5240,7 +5266,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const upstream = await diagnoseManualCompileRepair(runId, {
+        const upstream = await diagnoseManualCompileRepair(liveRunId, {
           runId,
           previewId,
           requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
@@ -5310,6 +5336,19 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId) {
+          jsonResponse(res, 503, {
+            error:
+              "manual compile repair unavailable: orchestrator run is not available",
+          });
+          return;
+        }
         const previewId =
           typeof record.previewId === "string" ? record.previewId : "";
         const proposalId =
@@ -5336,7 +5375,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const upstream = await applyManualCompileRepair(runId, {
+        const upstream = await applyManualCompileRepair(liveRunId, {
           runId,
           previewId,
           proposalId,
@@ -5405,11 +5444,28 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         }
         const record = body as Record<string, unknown>;
         const runId = typeof record.runId === "string" ? record.runId : "";
+        if (!runId) {
+          badRequest(res, "runId must be a non-empty string");
+          return;
+        }
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId) {
+          jsonResponse(res, 503, {
+            error:
+              "manual compile repair unavailable: orchestrator run is not available",
+          });
+          return;
+        }
         const proposalId =
           typeof record.proposalId === "string" ? record.proposalId : "";
         const patchSha256 =
           typeof record.patchSha256 === "string" ? record.patchSha256 : "";
-        if (!runId || !proposalId || !patchSha256) {
+        if (!proposalId || !patchSha256) {
           badRequest(
             res,
             "runId, proposalId, and patchSha256 must be non-empty strings",
@@ -5427,7 +5483,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const upstream = await acceptManualCompileRepair(runId, {
+        const upstream = await acceptManualCompileRepair(liveRunId, {
           runId,
           proposalId,
           patchSha256,
@@ -5499,6 +5555,19 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(res, "runId must be a non-empty string");
           return;
         }
+        const stored = runStore.get(runId);
+        if (!stored) {
+          notFound(res, `unknown runId ${JSON.stringify(runId)}`);
+          return;
+        }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId) {
+          jsonResponse(res, 503, {
+            error:
+              "manual compile repair unavailable: orchestrator run is not available",
+          });
+          return;
+        }
         const proposalId =
           typeof record.proposalId === "string" ? record.proposalId : "";
         if (!proposalId) {
@@ -5515,7 +5584,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           );
           return;
         }
-        const upstream = await rejectManualCompileRepair(runId, {
+        const upstream = await rejectManualCompileRepair(liveRunId, {
           runId,
           proposalId,
           requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
