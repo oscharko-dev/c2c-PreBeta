@@ -927,7 +927,22 @@ export function deriveComparisonOutputRef(
   field: "expectedRef" | "actualRef",
 ): OutputRef | null {
   const comparison = asRecord(data?.comparison);
-  return comparison ? normalizeOutputRef(comparison[field]) : null;
+  if (comparison) {
+    const legacyRef = normalizeOutputRef(comparison[field]);
+    if (legacyRef) return legacyRef;
+  }
+  const comparisonResult = asRecord(data?.comparisonResult);
+  if (!comparisonResult) return null;
+  if (field === "expectedRef") {
+    return (
+      normalizeOutputRef(comparisonResult.expectedRef) ??
+      normalizeOutputRef(comparisonResult.sourceOutputRef)
+    );
+  }
+  return (
+    normalizeOutputRef(comparisonResult.actualRef) ??
+    normalizeOutputRef(comparisonResult.javaOutputRef)
+  );
 }
 
 export function deriveValidationStatus(

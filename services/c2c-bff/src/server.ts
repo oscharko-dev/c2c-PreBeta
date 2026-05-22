@@ -1809,25 +1809,33 @@ function normalizeParityComparison(
   data: Record<string, unknown> | undefined,
 ): Record<string, unknown> | null {
   const comparisonResult = asRecord(data?.comparisonResult);
-  const comparison = comparisonResult ?? asRecord(data?.comparison);
-  if (!comparison) return null;
+  const comparison = asRecord(data?.comparison);
+  if (!comparisonResult && !comparison) return null;
   const result: Record<string, unknown> = {};
-  const matched = asBoolean(comparison.matched);
+  const matched =
+    asBoolean(comparisonResult?.matched) ?? asBoolean(comparison?.matched);
   if (matched !== undefined) result.matched = matched;
-  const status = asString(comparison.status);
+  const status =
+    asString(comparisonResult?.status) || asString(comparison?.status);
   if (status.length > 0) result.status = status;
-  const comparisonPolicyVersion = asString(comparison.comparisonPolicyVersion);
+  const comparisonPolicyVersion =
+    asString(comparisonResult?.comparisonPolicyVersion) ||
+    asString(comparison?.comparisonPolicyVersion);
   if (comparisonPolicyVersion.length > 0) {
     result.comparisonPolicyVersion = comparisonPolicyVersion.slice(
       0,
       PARITY_IDENTIFIER_MAX_CHARS,
     );
   }
-  const mismatchClassification = asString(comparison.mismatchClassification);
+  const mismatchClassification =
+    asString(comparisonResult?.mismatchClassification) ||
+    asString(comparison?.mismatchClassification);
   if (mismatchClassification.length > 0) {
     result.mismatchClassification = mismatchClassification;
   }
-  const diffSummary = asString(comparison.diffSummary);
+  const diffSummary =
+    asString(comparisonResult?.diffSummary) ||
+    asString(comparison?.diffSummary);
   if (diffSummary.length > 0) {
     result.diffSummary = boundedStudioText(
       diffSummary,
@@ -1846,7 +1854,9 @@ function normalizeParityComparison(
     "javaNormalizedOutputRef",
     "normalizedDiffRef",
   ] as const) {
-    const ref = normalizeOutputRef(comparison[key]);
+    const ref =
+      normalizeOutputRef(comparisonResult?.[key]) ??
+      normalizeOutputRef(comparison?.[key]);
     if (ref) result[key] = ref;
   }
   return Object.keys(result).length > 0 ? result : null;
