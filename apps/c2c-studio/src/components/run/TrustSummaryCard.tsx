@@ -738,7 +738,7 @@ function RefCopyButton({ value, label }: { value: string; label: string }) {
           }
         });
       }}
-      aria-label={label}
+      aria-label={copied ? `${label} (copied)` : label}
       className="shrink-0 rounded border border-line bg-bg-0 px-2 py-1 font-mono text-[10px] text-text-dim transition-colors hover:border-accent hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
     >
       {copied ? "Copied" : "Copy"}

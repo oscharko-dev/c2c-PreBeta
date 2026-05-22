@@ -42,6 +42,7 @@ const mockState = {
 };
 
 const navigateToDiagnosticMock = vi.hoisted(() => vi.fn());
+let clipboardSpy: ReturnType<typeof vi.fn>;
 
 vi.mock("../../../src/stores/transformationRun", () => ({
   useTransformationRun: vi.fn(() => ({ state: mockState })),
@@ -69,6 +70,11 @@ describe("Run Panels", () => {
 
   beforeEach(async () => {
     vi.resetAllMocks();
+    clipboardSpy = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardSpy },
+    });
     vi.mocked(apiClientModule.apiClient.getGeneratedFile).mockResolvedValue({
       ok: false,
       message: "mocked",
@@ -772,6 +778,80 @@ describe("Run Panels", () => {
       expect(
         screen.getByText("At least one affected output is required."),
       ).toBeDefined();
+    });
+
+    it("keeps the trust reference copy button name aligned with the copied state", async () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "completed",
+          summary: {
+            runId: "run-1",
+            programId: "PROG-1",
+            trustSummary: {
+              trustState: "verified",
+              repairStatus: "repair_not_needed",
+              coverageStatus: "full",
+              divergenceDisposition: "none",
+              intentionalDivergenceDecisionRef: null,
+              warningCodes: [],
+              trustCase: {
+                trustCaseId: "TC-ALPHA",
+                version: "v7",
+                catalogVersion: "2026.05",
+                catalogHash: "catalog-hash",
+                configurationDigest: "config-hash",
+              },
+              cobolResult: { status: "completed" },
+              javaResult: { status: "completed" },
+              comparisonResult: {
+                status: "matched",
+                mismatchClassification: null,
+                comparisonResultRef: {
+                  sha256: "c".repeat(64),
+                  byteSize: 64,
+                  kind: "parity-comparison-result",
+                },
+                decisionRecordRef: null,
+              },
+              repair: { status: "repair_not_needed" },
+              evidence: { status: "current" },
+              summaryDerivedAt: "2026-05-21T12:34:56.000Z",
+            },
+          },
+          buildTest: {
+            runId: "run-1",
+            programId: "PROG-1",
+            mode: "live",
+            productMode: "live",
+            status: "ok",
+            classification: "match",
+            generatedArtifactRef: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+        intentionalDivergenceDecision: null,
+        intentionalDivergenceDecisionStatus: "idle",
+        intentionalDivergenceDecisionError: null,
+        submitIntentionalDivergenceDecision: vi.fn(),
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy comparison result hash" }),
+      );
+
+      await waitFor(() => {
+        expect(clipboardSpy).toHaveBeenCalledWith("c".repeat(64));
+        expect(
+          screen.getByRole("button", {
+            name: "Copy comparison result hash (copied)",
+          }),
+        ).toBeDefined();
+      });
     });
 
     it("shows the intentional-divergence rerun banner in historical mode (#368 finding-3)", () => {
