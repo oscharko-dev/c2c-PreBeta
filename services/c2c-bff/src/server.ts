@@ -17,6 +17,7 @@ import {
 } from "./acceptance-fixtures";
 import {
   loadTrustCaseCatalog,
+  TRUST_CASE_ID_PATTERN,
   type TrustCaseCatalog,
   type TrustCaseSummary,
 } from "./trust-cases";
@@ -5764,6 +5765,13 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           badRequest(
             res,
             `trustCaseId exceeds maximum length of ${PARITY_IDENTIFIER_MAX_CHARS} characters`,
+          );
+          return;
+        }
+        if (trustCaseId && !TRUST_CASE_ID_PATTERN.test(trustCaseId)) {
+          badRequest(
+            res,
+            "trustCaseId must match the trust-case identifier pattern",
           );
           return;
         }

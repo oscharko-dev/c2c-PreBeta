@@ -1184,6 +1184,45 @@ describe("Run Panels", () => {
       // evidence (previous run's) is non-null — export targets the active run.
       expect(exportButton).toBeDisabled();
     });
+
+    it("marks parity results produced by another trust case or catalog version", () => {
+      useSourceWorkspaceMock.mockReturnValue({
+        statusFlags: {
+          clean: true,
+          pendingReRun: false,
+        },
+        selectedTrustCase: {
+          trustCaseId: "CURRENT-CASE",
+          configurationDigest: "current-digest",
+        },
+      });
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "completed",
+          summary: {
+            trustCaseId: "OLD-CASE",
+            trustCaseConfigurationDigest: "old-digest",
+          },
+          buildTest: {
+            status: "ok",
+            classification: "match",
+            expectedOutput: "FOO",
+            actualOutput: "FOO",
+          },
+        },
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      expect(
+        screen.getByText(
+          /Existing parity results were produced from\s+OLD-CASE or a\s+different catalog version\. Rerun to use\s+CURRENT-CASE\./,
+        ),
+      ).toBeDefined();
+    });
   });
 
   describe("EquivalencePanel", () => {

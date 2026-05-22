@@ -1547,6 +1547,15 @@ class W0WorkflowRunner:
         generated_at: str,
     ) -> str:
         package_declaration = f"package {package_name};\n\n" if package_name else ""
+        # ``trust_case_id`` is catalog-validated upstream, but it is
+        # interpolated verbatim into a generated ``.java`` Javadoc comment.
+        # Restricting it to the trust-case id alphabet here closes a latent
+        # comment-injection point regardless of how callers source it.
+        safe_trust_case_id = (
+            re.sub(r"[^A-Z0-9-]", "_", trust_case_id.upper())
+            if trust_case_id
+            else "unavailable"
+        )
         return (
             f"{package_declaration}"
             "import static org.junit.jupiter.api.Assertions.assertEquals;\n"
@@ -1559,7 +1568,7 @@ class W0WorkflowRunner:
             "import org.junit.jupiter.api.Test;\n\n"
             "/**\n"
             f" * Exported parity-regression scaffold from run {run_id}.\n"
-            f" * Trust case: {trust_case_id or 'unavailable'}\n"
+            f" * Trust case: {safe_trust_case_id}\n"
             f" * Exported at: {generated_at}\n"
             " */\n"
             f"class {class_name}ParityRegressionTest {{\n"

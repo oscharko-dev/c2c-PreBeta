@@ -266,3 +266,44 @@ test("randomBytes injection makes the secret + sessionId deterministic for tests
   ).toString("base64");
   assert.equal(record.draftKeyWrappingSecret, expectedSecret);
 });
+
+test("setTrustCasePreference accepts a pattern-valid trust-case id", () => {
+  const store = createSessionStore();
+  const created = store.create({ tenantId: "tenant-A", userId: "user-1" });
+  const record = store.setTrustCasePreference(
+    created.sessionId,
+    "HELLOW02",
+    "HELLOW02-PARITY",
+  );
+  assert.ok(record, "a valid id must persist");
+  assert.equal(
+    store.getTrustCasePreference(created.sessionId, "HELLOW02"),
+    "HELLOW02-PARITY",
+  );
+});
+
+test("setTrustCasePreference rejects a pattern-invalid trust-case id", () => {
+  const store = createSessionStore();
+  const created = store.create({ tenantId: "tenant-A", userId: "user-1" });
+  // Lower-case, leading digit, and injection-style characters all fall
+  // outside the trust-case id allow-list and must be rejected at the
+  // write boundary rather than silently persisted.
+  for (const invalid of [
+    "hellow02-parity",
+    "0HELLOW02",
+    "HELLOW02 PARITY",
+    "HELLOW02*/",
+  ]) {
+    assert.throws(
+      () =>
+        store.setTrustCasePreference(created.sessionId, "HELLOW02", invalid),
+      /trustCaseId.*trust-case identifier pattern/,
+      `must reject ${JSON.stringify(invalid)}`,
+    );
+  }
+  assert.equal(
+    store.getTrustCasePreference(created.sessionId, "HELLOW02"),
+    null,
+    "no rejected id may leak into the stored preference",
+  );
+});

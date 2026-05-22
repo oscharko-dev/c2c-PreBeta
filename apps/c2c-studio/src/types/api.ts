@@ -117,6 +117,22 @@ export interface TrustCaseIdentityFields {
   sourceReferenceMode?: string;
 }
 
+// The workflow envelope serializes the BFF ``TrustCaseSnapshot`` shape, whose
+// field names are un-prefixed — distinct from the prefixed
+// ``TrustCaseIdentityFields`` carried on ``RunSummary``. Keeping a dedicated
+// interface stops the two contracts from silently drifting apart.
+export interface TrustCaseWorkflowSnapshot {
+  trustCaseId: string;
+  version: string;
+  catalogVersion: string;
+  catalogHash: string;
+  configurationDigest: string;
+  sourceReferenceFixtureId: string;
+  sourceReferenceMode: string;
+  environmentProfileId: string;
+  comparisonPolicyVersion: string;
+}
+
 export interface TrustCaseSummary {
   trustCaseId: string;
   version: string;
@@ -794,7 +810,7 @@ export interface RunWorkflowView {
   state: string | null;
   activeStep: string | null;
   activeAgent: W02ActiveAgent | null;
-  trustCase: TrustCaseIdentityFields | null;
+  trustCase: TrustCaseWorkflowSnapshot | null;
   agentAttemptCount: number;
   repairBudget: RepairBudget | null;
   // Issue #216 (W0.3-5): per-run assist + Model Gateway budgets surfaced

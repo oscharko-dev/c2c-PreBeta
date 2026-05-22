@@ -40,6 +40,7 @@ function makeWorkflow(
     state: "agent_running",
     activeStep: "generate-java",
     activeAgent: "transformation_agent",
+    trustCase: null,
     agentAttemptCount: 1,
     repairBudget: { limit: 3, used: 0, remaining: 3 },
     assistBudget: { limit: 1, used: 0, remaining: 1 },

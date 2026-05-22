@@ -1710,7 +1710,7 @@ test("starting a parity run forwards curated reference configuration to the orch
         programId: "BRNCH01",
         requester: "studio",
         executionMode: "parity",
-        trustCaseId: "trust-branch-approval",
+        trustCaseId: "TRUST-BRANCH-APPROVAL",
         sourceReferenceFixtureId: "branch-account-guard-v0",
         sourceReferenceMode: "reference-fixture",
       },
@@ -1724,7 +1724,7 @@ test("starting a parity run forwards curated reference configuration to the orch
       sourceReferenceMode: string;
     };
     assert.equal(startedBody.executionMode, "parity");
-    assert.equal(startedBody.trustCaseId, "trust-branch-approval");
+    assert.equal(startedBody.trustCaseId, "TRUST-BRANCH-APPROVAL");
     assert.equal(
       startedBody.sourceReferenceFixtureId,
       "branch-account-guard-v0",
@@ -1735,7 +1735,7 @@ test("starting a parity run forwards curated reference configuration to the orch
       cobolSourcePath: "corpus/synthetic/programs/branch-account-guard.cbl",
       requester: "studio",
       executionMode: "parity",
-      trustCaseId: "trust-branch-approval",
+      trustCaseId: "TRUST-BRANCH-APPROVAL",
       sourceReferenceFixtureId: "branch-account-guard-v0",
       sourceReferenceMode: "reference-fixture",
     });
@@ -1787,6 +1787,45 @@ test("starting a parity run rejects unsupported mode and missing fixture before 
     assert.match(
       (missingFixture.body as { error: string }).error,
       /sourceReferenceFixtureId is required/,
+    );
+    assert.equal(calls.startRun, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs rejects a pattern-invalid trustCaseId before dispatch", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const { client: orch, calls } = stubOrchestrator();
+  const auth = createRouteAuth();
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    // Lower-case characters fall outside the trust-case id allow-list.
+    // The BFF must reject this with 400 rather than forwarding it.
+    const rejected = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: {
+        programId: "BRNCH01",
+        executionMode: "parity",
+        trustCaseId: "trust-branch-approval",
+        sourceReferenceFixtureId: "branch-account-guard-v0",
+        sourceReferenceMode: "reference-fixture",
+      },
+    });
+    assert.equal(rejected.status, 400);
+    assert.match(
+      (rejected.body as { error: string }).error,
+      /trustCaseId must match the trust-case identifier pattern/,
     );
     assert.equal(calls.startRun, 0);
   } finally {

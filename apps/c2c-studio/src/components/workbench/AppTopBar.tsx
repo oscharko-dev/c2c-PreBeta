@@ -546,7 +546,11 @@ export function AppTopBar({ apiState }: AppTopBarProps) {
       {trustCaseNotice ? (
         <div
           role={trustCaseEvidenceMismatch ? "status" : "alert"}
-          aria-live="polite"
+          // ``role="alert"`` already implies ``aria-live="assertive"``;
+          // pairing it with an explicit ``aria-live="polite"`` is a
+          // conflicting contract. Only the mismatch (``role="status"``)
+          // branch sets ``aria-live`` explicitly.
+          aria-live={trustCaseEvidenceMismatch ? "polite" : undefined}
           className="absolute left-4 top-14 z-40 max-w-xl rounded border border-line-2 bg-bg-1 px-3 py-1 text-xs text-text shadow"
         >
           {trustCaseNotice}

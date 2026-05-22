@@ -1213,6 +1213,39 @@ describe("COBOL source input", () => {
     );
   });
 
+  it("blocks transform submission when the trust-case catalog is unavailable", async () => {
+    vi.mocked(apiClient.getTrustCases).mockResolvedValue({
+      ok: false,
+      message: "catalog unavailable",
+      status: 500,
+    });
+
+    renderSourceWorkbench(<CobolEditorPane />);
+
+    fireEvent.click(screen.getByText("Start Typing"));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: /COBOL source editor/i }),
+      {
+        target: {
+          value: "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OWN07.\n",
+        },
+      },
+    );
+
+    const startButton = await screen.findByRole("button", {
+      name: /start transformation/i,
+    });
+    // A failed trust-case catalog load drives ``trustCaseStatus`` to ``error``,
+    // which keeps ``canSubmitTransform`` false.
+    await waitFor(() => expect(startButton).toBeDisabled());
+
+    // Triggering the action anyway must not reach the orchestrator: the
+    // ``trustCaseStatus === "error"`` guard in ``submitTransform`` short-circuits.
+    fireEvent.click(startButton);
+    await Promise.resolve();
+    expect(apiClient.transform).not.toHaveBeenCalled();
+  });
+
   it("keeps a large source buffer addressable through the Monaco-backed editor surface", async () => {
     // Issue #246: gutter virtualization is no longer a React responsibility —
     // Monaco draws and virtualizes the line-number gutter natively. This
