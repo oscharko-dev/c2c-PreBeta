@@ -32,7 +32,8 @@ paths:
         c2c-studio Java editor. The supplied content is formatted with
         google-java-format. The call is stateless and emits no Harness/
         Experience events: formatting is a UI affordance, not a
-        verification outcome.
+        verification outcome. Requires the build-test-runner control-plane
+        bearer token.
       requestBody:
         required: true
         content:
@@ -68,6 +69,8 @@ paths:
     post:
       summary: Compile, run, and compare a generated Java project
       operationId: runVerification
+      description: >
+        Requires the build-test-runner control-plane bearer token.
       requestBody:
         required: true
         content:
@@ -83,6 +86,12 @@ paths:
                 $ref: "#/components/schemas/BuildTestResult"
         "400":
           description: Malformed request payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorised
           content:
             application/json:
               schema:
@@ -108,7 +117,8 @@ paths:
         an approved acceptance fixture and an explicit reference mode. The
         service returns the shared parity execution result contract for either
         `reference-fixture` or `native-cobol`; it does not accept arbitrary
-        commands, file paths, or inline COBOL source.
+        commands, file paths, or inline COBOL source. Requires the
+        build-test-runner control-plane bearer token.
       requestBody:
         required: true
         content:

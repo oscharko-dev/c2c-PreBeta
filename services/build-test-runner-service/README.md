@@ -48,6 +48,10 @@ worker hardening pass is a future-wave concern.
   Returns the shared parity execution result contract described in
   [`schemas/parity-execution-result-v0.json`](../../schemas/parity-execution-result-v0.json).
 
+All `POST` endpoints require `Authorization: Bearer <BUILD_TEST_RUNNER_CONTROL_TOKEN>`.
+The service no longer falls back to loopback-only authorization when the
+control token is unset.
+
 ## Toolchain requirements
 
 The W0 registry contains at least one true Golden Master. Java verification

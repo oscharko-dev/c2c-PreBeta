@@ -28,4 +28,15 @@ class CobolRuntimeExecutorTest {
                 result.length(),
                 "total length must be MAX_OUTPUT_BYTES plus sentinel length");
     }
+
+    @Test
+    void ioErrorReasonIsSanitizedInsteadOfEchoingTempPaths() {
+        CobolRuntimeExecutor.OracleRun run = CobolRuntimeExecutor.OracleRun.ioError(
+                "HELLOW02",
+                "/var/folders/ab/c2c-cobol-oracle-12345/HELLOW02.cbl: permission denied",
+                "cobc 3.1.2",
+                "cobcrun 3.1.2");
+
+        assertEquals("I/O error while preparing or running the oracle", run.reason());
+    }
 }
