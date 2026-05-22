@@ -1251,8 +1251,8 @@ class _ManualDiagnoseContext:
     current_head_ref: JsonObject
     build_payload: JsonObject
     failure_code: str | None
-    entry_class: str | None
-    entry_file_path: str | None
+    entry_class: str
+    entry_file_path: str
     snapshot_files: dict[str, str]
     prompt_files: dict[str, str]
     trimmed_build_payload: JsonObject
@@ -2469,7 +2469,7 @@ class W0WorkflowRunner:
         snapshot_files: dict[str, str],
         entry_class: str | None,
         entry_file_path: str | None,
-    ) -> tuple[str | None, str | None, dict[str, str]]:
+    ) -> tuple[str, str, dict[str, str]]:
         """Resolve entry_class, entry_file_path, and prompt_files from snapshot and preview."""
         if entry_file_path not in snapshot_files:
             entry_file_path = _text(snapshot_manifest.get("entryFilePath"))
@@ -2720,7 +2720,7 @@ class W0WorkflowRunner:
         self,
         run_id: str,
         preview: JsonObject,
-    ) -> tuple[str, JsonObject, JsonObject | None, JsonObject, JsonObject, dict[str, JsonValue], str | None, str | None, str | None, dict[str, str], dict[str, str]]:
+    ) -> tuple[str, JsonObject, JsonObject | None, JsonObject, JsonObject, dict[str, JsonValue], str | None, str, str, dict[str, str], dict[str, str]]:
         """Read and validate all artifacts needed to build _ManualDiagnoseContext."""
         summary = self.artifact_store.read_summary(run_id) or {}
         workflow_id = _text(summary.get("workflowId")) or self.config.workflow_id
