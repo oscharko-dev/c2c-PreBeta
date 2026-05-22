@@ -31,6 +31,7 @@ export function TrustSummaryCard({
   selectedTrustCase,
   manualDriftMessage,
   parityEvidenceExport,
+  exportDisabled = false,
   onExportParityEvidenceScaffold,
 }: {
   summary: RunSummary | null;
@@ -44,6 +45,7 @@ export function TrustSummaryCard({
     response: ParityEvidenceExportResponse | null;
     error: string | null;
   };
+  exportDisabled?: boolean;
   onExportParityEvidenceScaffold: () => Promise<void>;
 }) {
   const trust = summary?.trustSummary ?? null;
@@ -491,7 +493,14 @@ export function TrustSummaryCard({
                   void onExportParityEvidenceScaffold();
                 }}
                 disabled={
-                  !evidence || parityEvidenceExport.status === "exporting"
+                  exportDisabled ||
+                  !evidence ||
+                  parityEvidenceExport.status === "exporting"
+                }
+                title={
+                  exportDisabled
+                    ? "Rerun to export current evidence"
+                    : undefined
                 }
                 className="rounded border border-line-2 bg-bg-0 px-3 py-2 text-xs font-medium text-text transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
               >

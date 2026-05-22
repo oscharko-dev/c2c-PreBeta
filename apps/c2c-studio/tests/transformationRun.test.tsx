@@ -365,6 +365,17 @@ function RunHarness() {
       >
         start-b
       </button>
+      <button
+        onClick={() =>
+          void startTransform({
+            sourceText: "       IDENTIFICATION DIVISION.",
+            programId: "P-C",
+            sourceName: "c.cbl",
+          })
+        }
+      >
+        start-c
+      </button>
       <button onClick={() => void exportParityEvidenceScaffold()}>
         export
       </button>
@@ -1344,5 +1355,116 @@ describe("transformation run state machine", () => {
 
     expect(screen.getByTestId("run-id")).toHaveTextContent("run-b");
     expect(screen.getByTestId("summary-status")).toHaveTextContent("completed");
+  });
+
+  it("keeps the prior artifact-bearing snapshot when a rerun starts during the next run's summary-only hydration window (#358)", async () => {
+    const firstRunId = "run-a-artifact-bearing";
+    const firstSha = "a".repeat(64);
+    const firstFixtures = makeArtifactFixtures(firstRunId, "P-A", firstSha);
+
+    // run-b's artifact hydration is deferred so we can start run-c while
+    // run-b is summary-only (runId + summary set, every artifact view null).
+    const bArtifacts = {
+      generated: deferred<ApiResult<GeneratedView>>(),
+      generatedFiles: deferred<ApiResult<GeneratedFilesIndex>>(),
+      buildTest: deferred<ApiResult<BuildTestView>>(),
+      evidence: deferred<ApiResult<EvidenceView>>(),
+      events: deferred<ApiResult<RunEventsView>>(),
+      artifacts: deferred<ApiResult<RunArtifactsView>>(),
+    };
+
+    vi.mocked(apiClient.transform).mockImplementation(async (request) => {
+      if (request.programId === "P-A") {
+        return makeTerminalResponse(firstRunId, "P-A", "completed");
+      }
+      if (request.programId === "P-B") {
+        return makeTerminalResponse("run-b", "P-B", "completed");
+      }
+      return makeTerminalResponse("run-c", "P-C", "completed");
+    });
+
+    vi.mocked(apiClient.getGenerated).mockImplementation((runId) =>
+      runId === firstRunId
+        ? Promise.resolve(firstFixtures.generated)
+        : bArtifacts.generated.promise,
+    );
+    vi.mocked(apiClient.getGeneratedFiles).mockImplementation((runId) =>
+      runId === firstRunId
+        ? Promise.resolve(firstFixtures.generatedFiles)
+        : bArtifacts.generatedFiles.promise,
+    );
+    vi.mocked(apiClient.getBuildTest).mockImplementation((runId) =>
+      runId === firstRunId
+        ? Promise.resolve(firstFixtures.buildTest)
+        : bArtifacts.buildTest.promise,
+    );
+    vi.mocked(apiClient.getEvidence).mockImplementation((runId) =>
+      runId === firstRunId
+        ? Promise.resolve(firstFixtures.evidence)
+        : bArtifacts.evidence.promise,
+    );
+    vi.mocked(apiClient.getRunEvents).mockImplementation((runId) =>
+      runId === firstRunId
+        ? Promise.resolve(firstFixtures.events)
+        : bArtifacts.events.promise,
+    );
+    vi.mocked(apiClient.getRunArtifacts).mockImplementation((runId) =>
+      runId === firstRunId
+        ? Promise.resolve(firstFixtures.artifacts)
+        : bArtifacts.artifacts.promise,
+    );
+    vi.mocked(apiClient.getRunExperience).mockImplementation((runId: string) =>
+      Promise.resolve(makeExperienceResult(runId, "P-A")),
+    );
+    vi.mocked(apiClient.getModelGatewayHealth).mockImplementation(() =>
+      Promise.resolve(okResult<ModelGatewayHealth>({ status: "ok" })),
+    );
+    vi.mocked(apiClient.getHarnessReady).mockImplementation(() =>
+      Promise.resolve(okResult<HarnessReady>({ status: "ok" })),
+    );
+
+    render(
+      <TransformationRunProvider>
+        <RunHarness />
+      </TransformationRunProvider>,
+    );
+
+    // run-a hydrates fully and becomes the artifact-bearing baseline.
+    fireEvent.click(screen.getByText("start-a"));
+    await waitFor(() =>
+      expect(screen.getByTestId("generated-sha")).toHaveTextContent(firstSha),
+    );
+
+    // run-b starts: snapshots the artifact-bearing run-a into previousRun.
+    fireEvent.click(screen.getByText("start-b"));
+    await waitFor(() =>
+      expect(screen.getByTestId("run-id")).toHaveTextContent("run-b"),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("summary-status")).toHaveTextContent(
+        "completed",
+      ),
+    );
+    expect(screen.getByTestId("previous-run-id")).toHaveTextContent(firstRunId);
+
+    // run-b is now summary-only: runId + summary set, all artifact views null
+    // because bArtifacts is still deferred.
+    expect(screen.getByTestId("generated-sha")).toHaveTextContent("none");
+    expect(screen.getByTestId("evidence-sha")).toHaveTextContent("none");
+
+    // Start run-c inside that window. snapshotHistoricalRun must keep the
+    // artifact-bearing run-a snapshot, not overwrite it with run-b's
+    // useless summary-only state.
+    await act(async () => {
+      fireEvent.click(screen.getByText("start-c"));
+    });
+
+    expect(screen.getByTestId("previous-run-id")).toHaveTextContent(firstRunId);
+    expect(screen.getByTestId("previous-generated-sha")).toHaveTextContent(
+      firstSha,
+    );
+    expect(screen.getByTestId("previous-evidence-sha")).toHaveTextContent(
+      firstSha,
+    );
   });
 });

@@ -86,8 +86,21 @@ export function BuildTestPanel({
     showingHistoricalBuildTest && state.previousRun
       ? state.previousRun.summary
       : state.summary;
+  // #358: in historical mode every run-keyed read must resolve against the
+  // previous run, not the in-flight/failed current run, or the panel mixes
+  // the previous parity verdict with the current run's empty timeline. A
+  // ``HistoricalRunSnapshot`` is a strict subset of ``TransformationRunState``,
+  // so the spread yields a coherent previous-run view.
+  const displayedRunId = showingHistoricalBuildTest
+    ? (state.previousRun?.runId ?? null)
+    : state.runId;
+  const displayedState =
+    showingHistoricalBuildTest && state.previousRun
+      ? { ...state, ...state.previousRun }
+      : state;
+  const displayedWorkflow = displayedState.workflow;
   const displayedTrustSummary =
-    displayedSummary?.trustSummary ?? state.workflow?.trustSummary ?? null;
+    displayedSummary?.trustSummary ?? displayedWorkflow?.trustSummary ?? null;
   const intentionalDivergence = isIntentionalDivergenceTrustSummary(
     displayedTrustSummary,
   );
@@ -100,8 +113,8 @@ export function BuildTestPanel({
   const isPending =
     !bt && (state.phase === "running" || state.phase === "starting");
   const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
-  const timelineStages = buildTimelineStages(state);
-  const artifactCandidates = getEvidenceArtifactCandidates(state);
+  const timelineStages = buildTimelineStages(displayedState);
+  const artifactCandidates = getEvidenceArtifactCandidates(displayedState);
   const defaultStageId =
     timelineStages.find(
       (stage) => stage.status === "error" || stage.status === "warning",
@@ -161,7 +174,7 @@ export function BuildTestPanel({
 
   const artifactPath = selectedArtifact?.path;
   const artifactFetchKind = selectedArtifact?.fetchKind;
-  const runId = state.runId;
+  const runId = displayedRunId;
 
   useEffect(() => {
     let cancelled = false;
@@ -245,7 +258,7 @@ export function BuildTestPanel({
   }
 
   const result = describeBuildTestResult(bt, intentionalDivergence);
-  const diagnostics = collectDiagnostics(state);
+  const diagnostics = collectDiagnostics(displayedState);
   const selectedStageIndex = Math.max(
     0,
     timelineStages.findIndex((stage) => stage.id === selectedStage.id),
@@ -340,9 +353,9 @@ export function BuildTestPanel({
               {result.label}
             </p>
             <p className="mt-1 text-sm text-text-dim">{result.detail}</p>
-            {state.workflow?.failureMessage ? (
+            {displayedWorkflow?.failureMessage ? (
               <p className="mt-3 text-xs text-text-dim">
-                {state.workflow.failureMessage}
+                {displayedWorkflow.failureMessage}
               </p>
             ) : null}
           </div>
@@ -351,11 +364,12 @@ export function BuildTestPanel({
           <TrustSummaryCard
             summary={displayedSummary}
             buildTest={bt}
-            evidence={state.evidence}
-            workflow={state.workflow}
+            evidence={displayedState.evidence}
+            workflow={displayedWorkflow}
             selectedTrustCase={selectedTrustCase}
             manualDriftMessage={manualDriftMessage}
             parityEvidenceExport={parityEvidenceExport}
+            exportDisabled={showingHistoricalBuildTest}
             onExportParityEvidenceScaffold={handleExportParityEvidenceScaffold}
           />
         </div>
@@ -485,7 +499,7 @@ export function BuildTestPanel({
                   selectedStage={selectedStage}
                   stageArtifacts={stageArtifacts}
                   workflowFailureMessage={
-                    state.workflow?.failureMessage ?? null
+                    displayedWorkflow?.failureMessage ?? null
                   }
                   buildTestNote={bt?.note ?? null}
                 />
@@ -544,7 +558,7 @@ export function BuildTestPanel({
               {inspectorTab === "diagnostics" ? (
                 <DiagnosticsPanel
                   diagnostics={diagnostics}
-                  workflow={state.workflow}
+                  workflow={displayedWorkflow}
                 />
               ) : null}
               {inspectorTab === "viewer" ? (
