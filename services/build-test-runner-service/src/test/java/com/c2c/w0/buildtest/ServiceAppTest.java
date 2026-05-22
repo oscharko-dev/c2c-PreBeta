@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ServiceAppTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String TEST_CONTROL_TOKEN = "test-control-token";
 
     @Test
     void httpStatusIsAlwaysTwoHundredForStructuredOutcomes() {
@@ -241,24 +242,53 @@ class ServiceAppTest {
         }
     }
 
+    @Test
+    void formatJavaRouteRejectsRequestsWithoutConfiguredBearerToken() throws Exception {
+        HttpServer server = startFormatJavaServer(null);
+        try {
+            HttpResponse<String> response = postRawJson(
+                    server,
+                    JSON.writeValueAsString(Map.of("content", "class X {}")),
+                    "");
+
+            assertEquals(401, response.statusCode());
+            Map<String, Object> body = readJsonObject(response.body());
+            assertEquals("failed", body.get("status"));
+            assertEquals("unauthorized", body.get("error"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static HttpServer startFormatJavaServer() throws IOException {
+        return startFormatJavaServer(TEST_CONTROL_TOKEN);
+    }
+
+    private static HttpServer startFormatJavaServer(String controlToken) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v0/format-java",
-                exchange -> ServiceApp.handleFormatJava(exchange, new JavaFormatter(), null));
+                exchange -> ServiceApp.handleFormatJava(exchange, new JavaFormatter(), controlToken));
         server.start();
         return server;
     }
 
     private static HttpResponse<String> postJson(HttpServer server, Map<String, Object> body) throws Exception {
-        return postRawJson(server, JSON.writeValueAsString(body));
+        return postRawJson(server, JSON.writeValueAsString(body), TEST_CONTROL_TOKEN);
     }
 
     private static HttpResponse<String> postRawJson(HttpServer server, String body) throws Exception {
+        return postRawJson(server, body, TEST_CONTROL_TOKEN);
+    }
+
+    private static HttpResponse<String> postRawJson(HttpServer server, String body, String bearerToken) throws Exception {
         URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v0/format-java");
-        HttpRequest request = HttpRequest.newBuilder(uri)
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+        if (bearerToken != null && !bearerToken.isBlank()) {
+            builder.header("Authorization", "Bearer " + bearerToken);
+        }
+        HttpRequest request = builder.build();
         return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 

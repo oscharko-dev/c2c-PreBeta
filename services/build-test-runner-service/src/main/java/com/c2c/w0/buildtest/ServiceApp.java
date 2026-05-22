@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Serial;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -271,8 +270,7 @@ public final class ServiceApp {
 
     static boolean isAuthorized(HttpExchange exchange, String controlToken) {
         if (controlToken == null) {
-            InetAddress remote = exchange.getRemoteAddress().getAddress();
-            return remote != null && remote.isLoopbackAddress();
+            return false;
         }
         String header = exchange.getRequestHeaders().getFirst("Authorization");
         return ("Bearer " + controlToken).equals(header);

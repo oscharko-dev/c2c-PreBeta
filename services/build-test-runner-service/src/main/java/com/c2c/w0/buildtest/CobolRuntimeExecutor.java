@@ -32,6 +32,8 @@ final class CobolRuntimeExecutor {
     static final int MAX_OUTPUT_BYTES = 1_048_576;
     static final String OUTPUT_TRUNCATED_SENTINEL =
             "\n[c2c: output truncated at " + MAX_OUTPUT_BYTES + " bytes]\n";
+    private static final String ORACLE_IO_ERROR_REASON =
+            "I/O error while preparing or running the oracle";
     private static final Pattern PROGRAM_ID_PATTERN =
             Pattern.compile("(?im)^\\s*PROGRAM-ID\\s*\\.\\s*([A-Za-z][A-Za-z0-9_-]{0,62})\\s*\\.");
     private static final Pattern MODULE_NAME_PATTERN =
@@ -509,9 +511,7 @@ final class CobolRuntimeExecutor {
             return new OracleRun(true, true, false, false, false,
                     -1, -1, "", "",
                     0,
-                    message == null || message.isBlank()
-                            ? "I/O error while preparing or running the oracle"
-                            : message,
+                    ORACLE_IO_ERROR_REASON,
                     moduleName, cobcVersion, cobcrunVersion);
         }
 
