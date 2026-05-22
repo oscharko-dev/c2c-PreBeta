@@ -46,15 +46,15 @@ final class ParityComparison {
 
         if (!isPassed(source.status()) || !isPassed(target.status())) {
             status = "failed";
-            mismatch = "unknown";
+            mismatch = "runtime_failure";
             diffSummary = "Comparison could not prove parity because at least one execution surface did not finish successfully.";
         } else if (!sameExitCode(source.exitCode(), target.exitCode())) {
             status = "failed";
-            mismatch = "policy";
+            mismatch = "exit_code";
             diffSummary = "Exit codes differ between the reference/source and generated Java executions.";
         } else if (!normalizedSourceStderr.equals(normalizedTargetStderr)) {
             status = "failed";
-            mismatch = "content";
+            mismatch = "stderr";
             diffSummary = "Normalized stderr differs between the reference/source and generated Java executions.";
         } else if (!normalizedSourceStdout.equals(normalizedTargetStdout)) {
             status = "failed";
@@ -135,7 +135,7 @@ final class ParityComparison {
             ExecutionFact source,
             ExecutionFact target,
             String reason) {
-        return blockedOrFailed(runId, workflowId, source, target, "blocked", "unknown", reason);
+        return blockedOrFailed(runId, workflowId, source, target, "blocked", "unsupported_input", reason);
     }
 
     static Map<String, Object> runtimeFailure(
@@ -144,7 +144,7 @@ final class ParityComparison {
             ExecutionFact source,
             ExecutionFact target,
             String reason) {
-        return blockedOrFailed(runId, workflowId, source, target, "failed", "unknown", reason);
+        return blockedOrFailed(runId, workflowId, source, target, "failed", "runtime_failure", reason);
     }
 
     private static Map<String, Object> blockedOrFailed(

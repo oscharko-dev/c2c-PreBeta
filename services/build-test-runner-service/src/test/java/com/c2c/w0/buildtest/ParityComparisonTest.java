@@ -37,7 +37,19 @@ class ParityComparisonTest {
                 fact("passed", 12, "PASS\n", "", "generated-java"));
 
         assertEquals("failed", result.get("status"));
-        assertEquals("policy", result.get("mismatchClassification"));
+        assertEquals("exit_code", result.get("mismatchClassification"));
+    }
+
+    @Test
+    void mismatchedStderrIsClassifiedDeterministically() {
+        Map<String, Object> result = ParityComparison.compare(
+                "run-stderr",
+                "wf-stderr",
+                fact("passed", 0, "PASS\n", "reference-error\n", "reference"),
+                fact("passed", 0, "PASS\n", "java-error\n", "generated-java"));
+
+        assertEquals("failed", result.get("status"));
+        assertEquals("stderr", result.get("mismatchClassification"));
     }
 
     @Test
@@ -49,7 +61,7 @@ class ParityComparisonTest {
                 fact("failed", 1, "", "boom", "generated-java"));
 
         assertEquals("failed", result.get("status"));
-        assertEquals("unknown", result.get("mismatchClassification"));
+        assertEquals("runtime_failure", result.get("mismatchClassification"));
     }
 
     @Test
@@ -62,7 +74,7 @@ class ParityComparisonTest {
                 "missing-golden-master");
 
         assertEquals("blocked", result.get("status"));
-        assertEquals("unknown", result.get("mismatchClassification"));
+        assertEquals("unsupported_input", result.get("mismatchClassification"));
     }
 
     @Test
