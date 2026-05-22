@@ -2631,5 +2631,447 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 orchestrator_server.server_close()
 
 
+    def test_manual_compile_repair_apply_rejects_mismatched_requester(self):
+        """Apply with a different requester than diagnose must be rejected (issue #408)."""
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            prior_failure = {
+                "schemaVersion": "v0",
+                "status": "failed",
+                "reason": "compile_failed",
+                "runId": "manual-run-5",
+                "workflowId": "w0-migration-v0",
+                "summary": "compile failed",
+                "diagnostics": [
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "message": "cannot find symbol",
+                    }
+                ],
+            }
+            state.build_test_responses = []
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-manual-5",
+                    "runId": "manual-run-5",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-5",
+                        "sha256": "f" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fixed the missing semicolon.",
+                        "files": {
+                            "src/main/java/com/c2c/generated/CASE01.java": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"repaired\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "explanation": "Added the missing semicolon.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.92,
+                    },
+                },
+            ]
+            MockHarnessHandler.state = state
+
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {\n"
+                "        System.out.println(\"broken\")\n"
+                "    }\n"
+                "}\n"
+            )
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="manual-run-5",
+                program_id="CASE01",
+                java_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+            )
+            runner.artifact_store.write_json(
+                "manual-run-5",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(prior_failure),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-5")
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            preview_body = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-5",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+
+            # Diagnose as "alice"
+            diagnose_status, diagnose_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-5/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-5",
+                    "previewId": preview_body["previewId"],
+                    "requester": "alice",
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(diagnose_status, 200)
+            proposal = diagnose_body["proposal"]
+            self.assertIsNotNone(proposal)
+
+            # Apply as "bob" — must be rejected
+            apply_status, apply_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-5/manual-compile-repair/apply/request",
+                {
+                    "runId": "manual-run-5",
+                    "previewId": preview_body["previewId"],
+                    "proposalId": proposal["proposalId"],
+                    "patchSha256": proposal["patchSha256"],
+                    "requester": "bob",
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(apply_status, 409)
+            self.assertIn("requester", apply_body["error"])
+            # Sandbox build must not have been triggered
+            self.assertEqual(
+                [capability for capability, _ in state.capability_invocations],
+                ["model-gateway"],
+            )
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_manual_compile_repair_apply_accepts_matching_requester(self):
+        """Apply with the same requester as diagnose must succeed (issue #408)."""
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            prior_failure = {
+                "schemaVersion": "v0",
+                "status": "failed",
+                "reason": "compile_failed",
+                "runId": "manual-run-6",
+                "workflowId": "w0-migration-v0",
+                "summary": "compile failed",
+                "diagnostics": [
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "message": "cannot find symbol",
+                    }
+                ],
+            }
+            sandbox_success = {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": "manual-run-6",
+                "workflowId": "w0-migration-v0",
+                "programId": "CASE01",
+                "outputRef": {"uri": "urn:build-output/manual-run-6"},
+            }
+            state.build_test_responses = [sandbox_success]
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-manual-6",
+                    "runId": "manual-run-6",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-6",
+                        "sha256": "f" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fixed the missing semicolon.",
+                        "files": {
+                            "src/main/java/com/c2c/generated/CASE01.java": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"repaired\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "explanation": "Added the missing semicolon.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.92,
+                    },
+                },
+            ]
+            MockHarnessHandler.state = state
+
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {\n"
+                "        System.out.println(\"broken\")\n"
+                "    }\n"
+                "}\n"
+            )
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="manual-run-6",
+                program_id="CASE01",
+                java_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+            )
+            runner.artifact_store.write_json(
+                "manual-run-6",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(prior_failure),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-6")
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            preview_body = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-6",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+
+            # Diagnose as "alice"
+            diagnose_status, diagnose_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-6/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-6",
+                    "previewId": preview_body["previewId"],
+                    "requester": "alice",
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(diagnose_status, 200)
+            proposal = diagnose_body["proposal"]
+            self.assertIsNotNone(proposal)
+
+            # Apply as "alice" — must succeed
+            apply_status, apply_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-6/manual-compile-repair/apply/request",
+                {
+                    "runId": "manual-run-6",
+                    "previewId": preview_body["previewId"],
+                    "proposalId": proposal["proposalId"],
+                    "patchSha256": proposal["patchSha256"],
+                    "requester": "alice",
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(apply_status, 200)
+            self.assertEqual(apply_body["proposal"]["applicationState"], "sandbox_applied")
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_manual_compile_repair_apply_accepts_legacy_proposal_without_requester(self):
+        """Apply on a proposal with no requester field (legacy) must not be blocked (issue #408)."""
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            prior_failure = {
+                "schemaVersion": "v0",
+                "status": "failed",
+                "reason": "compile_failed",
+                "runId": "manual-run-7",
+                "workflowId": "w0-migration-v0",
+                "summary": "compile failed",
+                "diagnostics": [
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "message": "cannot find symbol",
+                    }
+                ],
+            }
+            sandbox_success = {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": "manual-run-7",
+                "workflowId": "w0-migration-v0",
+                "programId": "CASE01",
+                "outputRef": {"uri": "urn:build-output/manual-run-7"},
+            }
+            state.build_test_responses = [sandbox_success]
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-manual-7",
+                    "runId": "manual-run-7",
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-manual-7",
+                        "sha256": "f" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fixed the missing semicolon.",
+                        "files": {
+                            "src/main/java/com/c2c/generated/CASE01.java": (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"repaired\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        "explanation": "Added the missing semicolon.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.92,
+                    },
+                },
+            ]
+            MockHarnessHandler.state = state
+
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {\n"
+                "        System.out.println(\"broken\")\n"
+                "    }\n"
+                "}\n"
+            )
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="manual-run-7",
+                program_id="CASE01",
+                java_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+            )
+            runner.artifact_store.write_json(
+                "manual-run-7",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(prior_failure),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="manual-run-7")
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            preview_body = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="manual-run-7",
+                entry_file_path="src/main/java/com/c2c/generated/CASE01.java",
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+            diagnose_status, diagnose_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-7/manual-compile-repair/diagnose/request",
+                {
+                    "runId": "manual-run-7",
+                    "previewId": preview_body["previewId"],
+                    "requester": "alice",
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(diagnose_status, 200)
+            proposal = diagnose_body["proposal"]
+            self.assertIsNotNone(proposal)
+
+            # Simulate a legacy proposal by removing the requester field from the persisted artifact
+            proposal_path = f"manual-compile-repair/proposal-{proposal['proposalId']}.json"
+            persisted = runner.artifact_store.read_json("manual-run-7", proposal_path)
+            self.assertIsNotNone(persisted)
+            assert isinstance(persisted, dict)
+            legacy_proposal = {k: v for k, v in persisted.items() if k != "requester"}
+            runner.artifact_store.write_json(
+                "manual-run-7",
+                "w0-migration-v0",
+                proposal_path,
+                legacy_proposal,
+                kind="patch-proposal",
+            )
+
+            # Apply as a different identity — must succeed because no requester field is present
+            apply_status, apply_body = _post_json(
+                host,
+                orchestrator_port,
+                "/v0/runs/manual-run-7/manual-compile-repair/apply/request",
+                {
+                    "runId": "manual-run-7",
+                    "previewId": preview_body["previewId"],
+                    "proposalId": proposal["proposalId"],
+                    "patchSha256": proposal["patchSha256"],
+                    "requester": "bob",
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(apply_status, 200)
+            self.assertEqual(apply_body["proposal"]["applicationState"], "sandbox_applied")
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()

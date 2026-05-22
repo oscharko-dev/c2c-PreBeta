@@ -2555,6 +2555,7 @@ class W0WorkflowRunner:
                 "workflowId": workflow_id,
                 "diagnosisId": diagnosis_id,
                 "proposedBy": "verification-repair",
+                "requester": requester or self.config.service_name,
                 "patchSha256": patch_sha,
                 "summary": repair_result.candidate.explanation if repair_result.candidate else repair_result.rationale,
                 "applicationState": "review_pending",
@@ -2646,6 +2647,13 @@ class W0WorkflowRunner:
             persisted_proposal.get("applicationState")
         ) not in {"review_pending", "sandbox_applied"}:
             raise OrchestratorError("proposal is no longer pending approval")
+        proposal_requester = _text(persisted_proposal.get("requester"))
+        if proposal_requester and proposal_requester != (
+            requester or self.config.service_name
+        ):
+            raise OrchestratorError(
+                "requester does not match the proposal's diagnosis requester"
+            )
         persisted_files = persisted_proposal.get("files")
         if not isinstance(persisted_files, Sequence) or isinstance(
             persisted_files, (str, bytes, bytearray)
