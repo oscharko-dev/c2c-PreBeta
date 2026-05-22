@@ -54,7 +54,7 @@
     },
     "applicationState": {
       "type": "string",
-      "enum": ["draft", "review_pending", "applied", "rejected"]
+      "enum": ["draft", "review_pending", "sandbox_applied", "applied", "rejected"]
     },
     "approvalState": {
       "type": "string",
@@ -95,6 +95,15 @@
     "currentHeadRef": {
       "$ref": "#/$defs/artifactReference"
     },
+    "reviewedContextRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sandboxCandidateRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
+    "sandboxBuildTestResultRef": {
+      "$ref": "#/$defs/artifactReference"
+    },
     "evidenceRefs": {
       "type": "array",
       "items": {
@@ -110,6 +119,10 @@
       "format": "date-time"
     },
     "appliedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sandboxAppliedAt": {
       "type": "string",
       "format": "date-time"
     }

@@ -227,6 +227,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v0/runs/{runId}/evidence/export/request:
+    post:
+      summary: Export a parity regression evidence scaffold for a run
+      description: >
+        Generates a run-scoped parity regression export from the persisted
+        evidence. When `requester` is omitted, the orchestrator uses the
+        requester recorded for the run. If `requester` is supplied, it must
+        exactly match that recorded run requester.
+      operationId: exportParityRegressionEvidence
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ParityEvidenceExportRequest" }
+      responses:
+        "200":
+          description: Parity regression export envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ParityEvidenceExportResponse" }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Run not found, requester mismatch, or export contract violation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /v0/runs/{runId}/events:
     get:
       summary: Retrieve persisted trajectory ledger for a run
@@ -602,6 +637,10 @@ components:
       properties:
         requester:
           type: string
+          description: >
+            Optional actor id. When omitted, the orchestrator uses the
+            requester recorded for the run. If supplied, it must exactly
+            match that recorded run requester.
         entryFilePath:
           type: string
         entryClass:
@@ -669,6 +708,10 @@ components:
           type: string
         requester:
           type: string
+          description: >
+            Optional actor id. When omitted, the orchestrator uses the
+            requester recorded for the run. If supplied, it must exactly
+            match that recorded run requester.
     ManualRepairDiagnoseResponse:
       type: object
       required: [schemaVersion, runId, diagnosis, candidateProject, buildTest]
@@ -705,6 +748,10 @@ components:
           type: string
         requester:
           type: string
+          description: >
+            Optional actor id. When omitted, the orchestrator uses the
+            requester recorded for the run. If supplied, it must exactly
+            match that recorded run requester.
     ManualRepairApplyResponse:
       type: object
       required: [schemaVersion, runId, proposal, candidateProject, buildTest]
@@ -734,6 +781,10 @@ components:
           type: string
         requester:
           type: string
+          description: >
+            Optional actor id. When omitted, the orchestrator uses the
+            requester recorded for the run. If supplied, it must exactly
+            match that recorded run requester.
     ManualRepairAcceptResponse:
       type: object
       required: [schemaVersion, runId, proposal, candidateProject, buildTest]
@@ -761,6 +812,35 @@ components:
           type: string
         requester:
           type: string
+          description: >
+            Optional actor id. When omitted, the orchestrator uses the
+            requester recorded for the run. If supplied, it must exactly
+            match that recorded run requester.
+    ParityEvidenceExportRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        exportName:
+          type: string
+          description: Optional export name for the generated regression scaffold.
+        requester:
+          type: string
+          description: >
+            Optional actor id. When omitted, the orchestrator uses the
+            requester recorded for the run. If supplied, it must exactly
+            match that recorded run requester.
+    ParityEvidenceExportResponse:
+      type: object
+      required: [status, runId, export]
+      additionalProperties: true
+      properties:
+        status:
+          type: string
+        runId:
+          type: string
+        export:
+          type: object
+          additionalProperties: true
     ManualRepairRejectResponse:
       type: object
       required: [schemaVersion, runId, proposal]

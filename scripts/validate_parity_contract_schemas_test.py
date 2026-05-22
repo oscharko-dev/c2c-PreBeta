@@ -303,7 +303,10 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
                 "createdAt",
             },
         )
-        self.assertEqual(patch["properties"]["applicationState"]["enum"], ["draft", "review_pending", "applied", "rejected"])
+        self.assertEqual(
+            patch["properties"]["applicationState"]["enum"],
+            ["draft", "review_pending", "sandbox_applied", "applied", "rejected"],
+        )
         self.assertEqual(patch["properties"]["approvalState"]["enum"], ["pending", "approved", "rejected"])
         self.assertIn("allOf", patch)
         self.assertGreaterEqual(len(patch["allOf"]), 2)
@@ -322,6 +325,10 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
             ["approvedBy", "approvedAt", "approvedPatchSha256"],
         )
         self.assertEqual(patch["properties"]["files"]["items"]["$ref"], "#/$defs/fileChange")
+        _assert_ref_property(self, patch, "reviewedContextRef")
+        _assert_ref_property(self, patch, "sandboxCandidateRef")
+        _assert_ref_property(self, patch, "sandboxBuildTestResultRef")
+        self.assertEqual(patch["properties"]["sandboxAppliedAt"]["format"], "date-time")
 
     def test_parity_run_requires_the_primary_artifact_and_evidence_fields(self) -> None:
         bundle = _load_contract_bundle()
@@ -489,7 +496,10 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
                 "createdAt",
             },
         )
-        self.assertEqual(schema["properties"]["applicationState"]["enum"], ["draft", "review_pending", "approved", "applied", "rejected"])
+        self.assertEqual(
+            schema["properties"]["applicationState"]["enum"],
+            ["draft", "review_pending", "sandbox_applied", "applied", "rejected"],
+        )
         self.assertEqual(schema["properties"]["approvalState"]["enum"], ["pending", "approved", "rejected"])
         self.assertGreaterEqual(len(schema.get("allOf", [])), 2)
         self.assertEqual(schema["allOf"][0]["if"]["properties"]["approvalState"]["const"], "approved")
@@ -503,6 +513,10 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
             ["approvedBy", "approvedAt", "approvedPatchSha256"],
         )
         self.assertEqual(schema["properties"]["files"]["items"]["$ref"], "#/$defs/fileChange")
+        _assert_ref_property(self, schema, "reviewedContextRef")
+        _assert_ref_property(self, schema, "sandboxCandidateRef")
+        _assert_ref_property(self, schema, "sandboxBuildTestResultRef")
+        self.assertEqual(schema["properties"]["sandboxAppliedAt"]["format"], "date-time")
         self.assertEqual(
             schema["$defs"]["fileChange"]["properties"]["path"]["pattern"],
             TRAVERSAL_SAFE_PATH_PATTERN,
@@ -585,9 +599,10 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
     def test_validator_accepts_reference_only_diff_payloads(self) -> None:
         payload = copy.deepcopy(sample_payloads()["patch-proposal-v0"])
         diff_value = payload["files"][0].pop("diff")
+        diff_hash = hashlib.sha256(diff_value.encode("utf-8")).hexdigest()
         payload["files"][0]["diffRef"] = {
             "uri": "urn:patch-diff",
-            "sha256": payload["files"][0]["afterSha256"],
+            "sha256": diff_hash,
             "byteSize": len(diff_value.encode("utf-8")),
             "mimeType": "text/x-diff",
             "kind": "patch-diff",
@@ -613,7 +628,6 @@ class ValidateParityContractSchemasTest(unittest.TestCase):
             ).encode("utf-8")
         ).hexdigest()
         payload["patchSha256"] = canonical
-        payload["developerApproval"]["approvedPatchSha256"] = canonical
         validate_payload("patch-proposal-v0", payload)
 
 

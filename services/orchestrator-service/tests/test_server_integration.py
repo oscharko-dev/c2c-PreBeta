@@ -2564,6 +2564,22 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 export_body["export"]["scaffoldRef"]["path"],
             )
 
+            spoofed_export_status, spoofed_export_body = _post_json(
+                host,
+                orchestrator_port,
+                f"/v0/runs/{run_id}/evidence/export/request",
+                {
+                    "exportName": "hello-regression-spoofed",
+                    "requester": "studio",
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(spoofed_export_status, 409)
+            self.assertEqual(
+                spoofed_export_body["error"],
+                "requester does not match run requester",
+            )
+
             status_code, evidence_after_export = _fetch_json(
                 f"/v0/runs/{run_id}/evidence"
             )
@@ -2891,7 +2907,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertIsNotNone(approval_artifact, "approval artifact must exist on disk after accept")
             self.assertEqual(approval_artifact["proposalId"], proposal_id)
             self.assertEqual(approval_artifact["runId"], run_id)
-            self.assertIn("approvedBy", approval_artifact)
+            self.assertEqual(approval_artifact["approvedBy"], "integration")
             self.assertIn("approvedAt", approval_artifact)
             self.assertEqual(approval_artifact["approvedPatchSha256"], proposal["patchSha256"])
 
@@ -3043,7 +3059,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
             self.assertEqual(rejection_artifact["decision"], "rejected")
             self.assertEqual(rejection_artifact["proposalId"], proposal_id)
             self.assertEqual(rejection_artifact["runId"], run_id)
-            self.assertIn("rejectedBy", rejection_artifact)
+            self.assertEqual(rejection_artifact["rejectedBy"], "integration")
             self.assertIn("rejectedAt", rejection_artifact)
             self.assertEqual(rejection_artifact["patchSha256"], proposal["patchSha256"])
 

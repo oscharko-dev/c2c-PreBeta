@@ -448,6 +448,22 @@ class OrchestratorService:
             files[normalized] = content
         return files
 
+    def _run_bound_requester(self, run_id: str, payload: Mapping[str, Any]) -> str:
+        provided_requester = str(payload.get("requester") or "").strip()
+        recorded_requester = ""
+        index = self.artifact_store.read_index(run_id)
+        if isinstance(index, dict):
+            recorded_requester = str(index.get("requester") or "").strip()
+        if not recorded_requester:
+            summary = self.artifact_store.read_summary(run_id)
+            if isinstance(summary, dict):
+                recorded_requester = str(summary.get("requester") or "").strip()
+        if recorded_requester:
+            if provided_requester and provided_requester != recorded_requester:
+                raise OrchestratorError("requester does not match run requester")
+            return recorded_requester
+        return provided_requester or self.config.service_name
+
     def _manual_compile_repair_diagnose(
         self,
         run_id: str,
@@ -456,7 +472,7 @@ class OrchestratorService:
         preview_id = str(payload.get("previewId") or "").strip()
         if not preview_id:
             raise ValueError("previewId must be a non-empty string")
-        requester = str(payload.get("requester") or self.config.service_name).strip()
+        requester = self._run_bound_requester(run_id, payload)
         return self.runner.manual_compile_repair_diagnose(
             run_id=run_id,
             requester=requester,
@@ -476,7 +492,7 @@ class OrchestratorService:
             raise ValueError("entryFilePath must reference one of the provided javaFiles")
         entry_class = str(payload.get("entryClass") or "").strip()
         manual_overlay_regions = _extract_manual_overlay_regions(payload.get("manualOverlay"))
-        requester = str(payload.get("requester") or self.config.service_name).strip()
+        requester = self._run_bound_requester(run_id, payload)
         return self.runner.manual_compile_repair_preview(
             run_id=run_id,
             requester=requester,
@@ -500,7 +516,7 @@ class OrchestratorService:
             raise ValueError("proposalId must be a non-empty string")
         if not patch_sha256:
             raise ValueError("patchSha256 must be a non-empty string")
-        requester = str(payload.get("requester") or self.config.service_name).strip()
+        requester = self._run_bound_requester(run_id, payload)
         return self.runner.manual_compile_repair_apply(
             run_id=run_id,
             requester=requester,
@@ -520,7 +536,7 @@ class OrchestratorService:
             raise ValueError("proposalId must be a non-empty string")
         if not patch_sha256:
             raise ValueError("patchSha256 must be a non-empty string")
-        requester = str(payload.get("requester") or self.config.service_name).strip()
+        requester = self._run_bound_requester(run_id, payload)
         return self.runner.manual_compile_repair_accept(
             run_id=run_id,
             requester=requester,
@@ -536,7 +552,7 @@ class OrchestratorService:
         proposal_id = str(payload.get("proposalId") or "").strip()
         if not proposal_id:
             raise ValueError("proposalId must be a non-empty string")
-        requester = str(payload.get("requester") or self.config.service_name).strip()
+        requester = self._run_bound_requester(run_id, payload)
         return self.runner.manual_compile_repair_reject(
             run_id=run_id,
             requester=requester,
@@ -551,7 +567,7 @@ class OrchestratorService:
         export_name = str(payload.get("exportName") or "").strip() or None
         if export_name is not None and len(export_name) > 200:
             raise ValueError("exportName must be at most 200 characters")
-        requester = str(payload.get("requester") or self.config.service_name).strip()
+        requester = self._run_bound_requester(run_id, payload)
         return self.runner.export_parity_regression_test(
             run_id=run_id,
             requester=requester,
