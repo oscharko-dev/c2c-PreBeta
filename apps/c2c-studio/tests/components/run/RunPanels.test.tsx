@@ -1058,6 +1058,131 @@ describe("Run Panels", () => {
         screen.getByText("Previous run diagnostic carried over."),
       ).toBeDefined();
     });
+
+    it("does not render the current run's workflow.failureMessage in historical mode (#405 finding-1)", () => {
+      const currentRunFailureMessage =
+        "CURRENT_RUN_WORKFLOW_FAILURE: rerun failed with oracle mismatch";
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "failed",
+          runId: "run-failed",
+          buildTest: null,
+          workflow: {
+            runId: "run-failed",
+            programId: "PROG-1",
+            mode: "live",
+            productMode: "live",
+            source: "live",
+            state: "failed",
+            activeStep: null,
+            activeAgent: null,
+            trustCase: null,
+            agentAttemptCount: 0,
+            repairBudget: null,
+            assistBudget: null,
+            modelInvocationBudget: null,
+            repairAttempts: [],
+            assistDecision: null,
+            finalClassification: "failed",
+            failureCode: "oracle_mismatch",
+            failureMessage: currentRunFailureMessage,
+            generatedJavaRef: null,
+            buildTestResultRef: null,
+            evidencePackRef: null,
+          },
+          previousRun: {
+            runId: "run-prev",
+            orchestratorRunId: "run-prev-orch",
+            programId: "PROG-1",
+            phase: "completed",
+            summary: null,
+            generated: null,
+            generatedFiles: null,
+            buildTest: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "ok",
+              classification: "match",
+            },
+            evidence: null,
+            events: null,
+            progress: null,
+            artifacts: null,
+            experience: null,
+            workflow: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      // The current run's failureMessage must NOT appear anywhere in the panel
+      // when historical mode is active — it belongs to the in-flight/failed run,
+      // not to the previous run whose results are displayed.
+      expect(
+        screen.queryByText(currentRunFailureMessage),
+      ).not.toBeInTheDocument();
+    });
+
+    it("disables the parity-evidence export action in historical mode (#405 finding-2)", () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "failed",
+          runId: "run-failed",
+          buildTest: null,
+          evidence: null,
+          previousRun: {
+            runId: "run-prev",
+            orchestratorRunId: "run-prev-orch",
+            programId: "PROG-1",
+            phase: "completed",
+            summary: null,
+            generated: null,
+            generatedFiles: null,
+            buildTest: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "ok",
+              classification: "match",
+            },
+            evidence: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "complete",
+              generatedArtifactRef: null,
+            },
+            events: null,
+            progress: null,
+            artifacts: null,
+            experience: null,
+            workflow: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      const exportButton = screen.getByRole("button", {
+        name: /Export Java regression scaffold/i,
+      });
+      // The button must be disabled in historical mode even though the displayed
+      // evidence (previous run's) is non-null — export targets the active run.
+      expect(exportButton).toBeDisabled();
+    });
   });
 
   describe("EquivalencePanel", () => {

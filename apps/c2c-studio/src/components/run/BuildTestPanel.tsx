@@ -86,20 +86,6 @@ export function BuildTestPanel({
     showingHistoricalBuildTest && state.previousRun
       ? state.previousRun.summary
       : state.summary;
-  const displayedTrustSummary =
-    displayedSummary?.trustSummary ?? state.workflow?.trustSummary ?? null;
-  const intentionalDivergence = isIntentionalDivergenceTrustSummary(
-    displayedTrustSummary,
-  );
-  const trustCaseEvidenceMismatch = Boolean(
-    selectedTrustCase &&
-    displayedSummary?.trustCaseConfigurationDigest &&
-    displayedSummary.trustCaseConfigurationDigest !==
-      selectedTrustCase.configurationDigest,
-  );
-  const isPending =
-    !bt && (state.phase === "running" || state.phase === "starting");
-  const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
   // #358: in historical mode every run-keyed read must resolve against the
   // previous run, not the in-flight/failed current run, or the panel mixes
   // the previous parity verdict with the current run's empty timeline. A
@@ -112,6 +98,21 @@ export function BuildTestPanel({
     showingHistoricalBuildTest && state.previousRun
       ? { ...state, ...state.previousRun }
       : state;
+  const displayedWorkflow = displayedState.workflow;
+  const displayedTrustSummary =
+    displayedSummary?.trustSummary ?? displayedWorkflow?.trustSummary ?? null;
+  const intentionalDivergence = isIntentionalDivergenceTrustSummary(
+    displayedTrustSummary,
+  );
+  const trustCaseEvidenceMismatch = Boolean(
+    selectedTrustCase &&
+    displayedSummary?.trustCaseConfigurationDigest &&
+    displayedSummary.trustCaseConfigurationDigest !==
+      selectedTrustCase.configurationDigest,
+  );
+  const isPending =
+    !bt && (state.phase === "running" || state.phase === "starting");
+  const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
   const timelineStages = buildTimelineStages(displayedState);
   const artifactCandidates = getEvidenceArtifactCandidates(displayedState);
   const defaultStageId =
@@ -352,9 +353,9 @@ export function BuildTestPanel({
               {result.label}
             </p>
             <p className="mt-1 text-sm text-text-dim">{result.detail}</p>
-            {state.workflow?.failureMessage ? (
+            {displayedWorkflow?.failureMessage ? (
               <p className="mt-3 text-xs text-text-dim">
-                {state.workflow.failureMessage}
+                {displayedWorkflow.failureMessage}
               </p>
             ) : null}
           </div>
@@ -364,10 +365,11 @@ export function BuildTestPanel({
             summary={displayedSummary}
             buildTest={bt}
             evidence={displayedState.evidence}
-            workflow={displayedState.workflow}
+            workflow={displayedWorkflow}
             selectedTrustCase={selectedTrustCase}
             manualDriftMessage={manualDriftMessage}
             parityEvidenceExport={parityEvidenceExport}
+            exportDisabled={showingHistoricalBuildTest}
             onExportParityEvidenceScaffold={handleExportParityEvidenceScaffold}
           />
         </div>
@@ -497,7 +499,7 @@ export function BuildTestPanel({
                   selectedStage={selectedStage}
                   stageArtifacts={stageArtifacts}
                   workflowFailureMessage={
-                    state.workflow?.failureMessage ?? null
+                    displayedWorkflow?.failureMessage ?? null
                   }
                   buildTestNote={bt?.note ?? null}
                 />
@@ -556,7 +558,7 @@ export function BuildTestPanel({
               {inspectorTab === "diagnostics" ? (
                 <DiagnosticsPanel
                   diagnostics={diagnostics}
-                  workflow={state.workflow}
+                  workflow={displayedWorkflow}
                 />
               ) : null}
               {inspectorTab === "viewer" ? (
