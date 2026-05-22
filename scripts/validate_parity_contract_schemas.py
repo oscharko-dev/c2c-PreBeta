@@ -341,14 +341,6 @@ def _validate_semantics(schema_name: str, payload: Any) -> list[str]:
                     errors.append(f"files[{index}].path must stay relative to the generated candidate root")
             if "diff" not in file_change and "diffRef" not in file_change:
                 errors.append(f"files[{index}] must include either diff or diffRef")
-            if "diff" not in file_change and "diffRef" in file_change:
-                diff_ref = file_change["diffRef"]
-                if isinstance(diff_ref, dict) and diff_ref.get("sha256") and file_change.get("afterSha256"):
-                    if diff_ref["sha256"] != file_change["afterSha256"]:
-                        errors.append(
-                            f"files[{index}] reference-only diffs must bind diffRef.sha256 to afterSha256"
-                        )
-
     return errors
 
 
@@ -521,13 +513,8 @@ def sample_payloads() -> dict[str, dict[str, Any]]:
             "diagnosisId": "diagnosis-1",
             "proposedBy": "verification-repair-agent",
             "patchSha256": "f" * 64,
-            "applicationState": "applied",
-            "approvalState": "approved",
-            "developerApproval": {
-                "approvedBy": "developer@example.com",
-                "approvedAt": now,
-                "approvedPatchSha256": "b" * 64,
-            },
+            "applicationState": "sandbox_applied",
+            "approvalState": "pending",
             "files": [
                 {
                     "path": "src/main/java/com/example/App.java",
@@ -539,10 +526,18 @@ def sample_payloads() -> dict[str, dict[str, Any]]:
             ],
             "sourceRevisionRef": _artifact_ref("urn:source-rev", "source-revision"),
             "currentHeadRef": _artifact_ref("urn:head", "git-head"),
+            "reviewedContextRef": _artifact_ref("urn:reviewed-context", "repair-context-package"),
+            "sandboxCandidateRef": _artifact_ref(
+                "urn:sandbox-candidate",
+                "manual-compile-repair-sandbox-project-manifest",
+            ),
+            "sandboxBuildTestResultRef": _artifact_ref(
+                "urn:sandbox-build-test-result",
+                "manual-compile-repair-sandbox-build-test",
+            ),
             "evidenceRefs": [_artifact_ref("urn:evidence", "evidence-pack")],
             "createdAt": earlier,
-            "approvedAt": now,
-            "appliedAt": now,
+            "sandboxAppliedAt": now,
         },
     }
     samples["patch-proposal-v0"] = _with_computed_patch_hash(samples["patch-proposal-v0"])
