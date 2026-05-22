@@ -11936,6 +11936,150 @@ test("build-test projection truncates oversize comparisonPolicyVersion to 128 ch
   }
 });
 
+test("build-test projection merges canonical comparisonResult refs with legacy comparison refs", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const auth = createRouteAuth();
+  const { client: orch } = stubOrchestrator({
+    buildTest: {
+      status: 200,
+      body: {
+        runId: "live-run-1",
+        workflowId: "w0-migration-v0",
+        programId: "BRNCH01",
+        runStatus: "completed",
+        status: "complete",
+        missingArtifacts: [],
+        kind: "build-test-result",
+        data: {
+          status: "output-divergence",
+          classification: "divergence-unknown",
+          build: { compileOk: true, sourceCount: 1, diagnostics: [] },
+          execution: {
+            ran: true,
+            ok: true,
+            exitCode: 0,
+            stdout: "JAVA\n",
+            stderr: "",
+            durationMs: 5,
+          },
+          comparison: {
+            matched: false,
+            expectedRef: {
+              uri: "urn:build-test/expected",
+              sha256: "e".repeat(64),
+              byteSize: 5,
+              kind: "cobol-oracle-stdout",
+            },
+            actualRef: {
+              uri: "urn:build-test/actual",
+              sha256: "a".repeat(64),
+              byteSize: 5,
+              kind: "java-stdout",
+            },
+          },
+          comparisonResult: {
+            status: "failed",
+            matched: false,
+            comparisonPolicyVersion: "deterministic-output-v1",
+            mismatchClassification: "content",
+            diffSummary: "Outputs diverged during parity comparison.",
+            comparisonResultRef: {
+              uri: "urn:build-test/comparison-result",
+              sha256: "b".repeat(64),
+              byteSize: 64,
+              kind: "parity-comparison-result",
+            },
+            diffRef: {
+              uri: "urn:build-test/comparison-diff",
+              sha256: "c".repeat(64),
+              byteSize: 32,
+              kind: "parity-comparison-diff",
+            },
+            sourceOutputRef: {
+              uri: "urn:build-test/source-output",
+              sha256: "d".repeat(64),
+              byteSize: 5,
+              kind: "reference-output",
+            },
+            javaOutputRef: {
+              uri: "urn:build-test/java-output",
+              sha256: "f".repeat(64),
+              byteSize: 5,
+              kind: "java-stdout",
+            },
+          },
+          diagnostics: [],
+          programId: "BRNCH01",
+        },
+        artifactRef: {
+          uri: "file:///run/result.json",
+          sha256: "9".repeat(64),
+          byteSize: 256,
+        },
+      },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const buildTest = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/build-test`,
+      { headers: auth.headers },
+    );
+    assert.equal(buildTest.status, 200);
+    const body = buildTest.body as {
+      expectedOutputRef: { sha256: string; kind: string } | null;
+      actualOutputRef: { sha256: string; kind: string } | null;
+      comparison: {
+        status: string;
+        comparisonPolicyVersion: string;
+        mismatchClassification: string;
+        diffSummary: string;
+        expectedRef?: { sha256: string; kind: string };
+        actualRef?: { sha256: string; kind: string };
+        comparisonResultRef?: { sha256: string; kind: string };
+        diffRef?: { sha256: string; kind: string };
+        sourceOutputRef?: { sha256: string; kind: string };
+        javaOutputRef?: { sha256: string; kind: string };
+      } | null;
+    };
+    assert.equal(body.expectedOutputRef?.sha256, "e".repeat(64));
+    assert.equal(body.actualOutputRef?.sha256, "a".repeat(64));
+    assert.equal(body.comparison?.status, "failed");
+    assert.equal(
+      body.comparison?.comparisonPolicyVersion,
+      "deterministic-output-v1",
+    );
+    assert.equal(body.comparison?.mismatchClassification, "content");
+    assert.equal(
+      body.comparison?.diffSummary,
+      "Outputs diverged during parity comparison.",
+    );
+    assert.equal(body.comparison?.expectedRef?.sha256, "e".repeat(64));
+    assert.equal(body.comparison?.actualRef?.sha256, "a".repeat(64));
+    assert.equal(body.comparison?.comparisonResultRef?.sha256, "b".repeat(64));
+    assert.equal(body.comparison?.diffRef?.sha256, "c".repeat(64));
+    assert.equal(body.comparison?.sourceOutputRef?.sha256, "d".repeat(64));
+    assert.equal(body.comparison?.javaOutputRef?.sha256, "f".repeat(64));
+  } finally {
+    await server.close();
+  }
+});
+
 test("workflow contract with oversize trust-case fields is truncated in the run summary", async () => {
   const runStore = createRunStore();
   const samples = stubSamples([FIXED_SAMPLE]);
