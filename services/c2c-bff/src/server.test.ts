@@ -6048,35 +6048,30 @@ test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator tr
     updatedAt: "2026-05-21T10:05:00Z",
   };
   const { client: baseOrch, calls } = stubOrchestrator();
+  type DivergenceRationale = {
+    summary: string;
+    technicalBasis: string;
+    businessImpact: string;
+  };
+  type DivergencePayload = {
+    reasonCode: string;
+    rationale: DivergenceRationale;
+    reviewer: string;
+    evidenceRefs: string[];
+    affectedOutputs: string[];
+    invalidationTriggers: string[];
+    expiresAt?: string;
+    requester?: string;
+  };
   const decisionRequests: Array<{
     runId: string;
-    payload: {
-      reasonCode: string;
-      rationaleSummary: string;
-      behaviorChange: string;
-      reviewer: string;
-      evidenceRefs: string[];
-      affectedOutputs: string[];
-      invalidationTriggers: string[];
-      expiresAt?: string;
-      requester?: string;
-    };
+    payload: DivergencePayload;
   }> = [];
   const orch: OrchestratorClient = {
     ...baseOrch,
     async upsertIntentionalDivergenceDecision(
       runId: string,
-      payload: {
-        reasonCode: string;
-        rationaleSummary: string;
-        behaviorChange: string;
-        reviewer: string;
-        evidenceRefs: string[];
-        affectedOutputs: string[];
-        invalidationTriggers: string[];
-        expiresAt?: string;
-        requester?: string;
-      },
+      payload: DivergencePayload,
     ) {
       decisionRequests.push({ runId, payload });
       return {
@@ -6096,8 +6091,9 @@ test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator tr
               role: "reviewer",
             },
             rationale: {
-              summary: payload.rationaleSummary,
-              behaviorChange: payload.behaviorChange,
+              summary: payload.rationale.summary,
+              technicalBasis: payload.rationale.technicalBasis,
+              businessImpact: payload.rationale.businessImpact,
             },
             linkedEvidenceRefs: payload.evidenceRefs.map((ref) => ({
               uri: ref,
@@ -6143,8 +6139,13 @@ test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator tr
         headers: studioHeaders,
         body: {
           decisionId: null,
-          rationale: "The divergence is approved by the product owner.",
-          reviewer: "studio reviewer",
+          rationale: {
+            summary: "The divergence is approved by the product owner.",
+            technicalBasis:
+              "Generated Java emits ISO timestamps where COBOL emits packed dates.",
+            businessImpact:
+              "Downstream ledgers ingest ISO timestamps without a converter.",
+          },
           linkedEvidenceRefs: ["urn:evidence/one"],
           affectedOutputs: ["urn:output/one"],
           supersedesPreviousDecision: true,
@@ -6170,10 +6171,15 @@ test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator tr
       decisionRequests[0]?.payload.reasonCode,
       "accepted_functional_change",
     );
-    assert.equal(
-      decisionRequests[0]?.payload.behaviorChange,
-      "The product intentionally diverges from the baseline.",
-    );
+    // Issue #368 finding-4: the structured rationale is forwarded verbatim;
+    // no synthesized ``behaviorChange``/``rationaleSummary`` flat fields.
+    assert.deepEqual(decisionRequests[0]?.payload.rationale, {
+      summary: "The divergence is approved by the product owner.",
+      technicalBasis:
+        "Generated Java emits ISO timestamps where COBOL emits packed dates.",
+      businessImpact:
+        "Downstream ledgers ingest ISO timestamps without a converter.",
+    });
     assert.deepEqual(decisionRequests[0]?.payload.evidenceRefs, [
       "urn:evidence/one",
     ]);
@@ -6187,6 +6193,12 @@ test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator tr
     ]);
     assert.equal(
       decisionRequests[0]?.payload.requester,
+      "studio:tenant-a:user-a",
+    );
+    // Issue #368 finding-5: reviewer is session-derived, identical to the
+    // requester principal — never taken from the request body.
+    assert.equal(
+      decisionRequests[0]?.payload.reviewer,
       "studio:tenant-a:user-a",
     );
 
@@ -6218,6 +6230,179 @@ test("PUT /api/v0/runs/{runId}/intentional-divergence caches the orchestrator tr
   } finally {
     await server.close();
   }
+});
+
+// Issue #368 finding-4/finding-5: the divergence decision contract requires
+// a structured rationale and rejects any client-supplied reviewer identity.
+async function withDivergenceDecisionServer(
+  run: (ctx: {
+    baseUrl: string;
+    runId: string;
+    studioHeaders: Record<string, string>;
+    decisionRequests: Array<Record<string, unknown>>;
+  }) => Promise<void>,
+): Promise<void> {
+  const runStore = createRunStore();
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const auth = createRouteAuth();
+  const studioHeaders = auth.post({}, {}).headers;
+  const { client: baseOrch } = stubOrchestrator();
+  const decisionRequests: Array<Record<string, unknown>> = [];
+  const orch: OrchestratorClient = {
+    ...baseOrch,
+    async upsertIntentionalDivergenceDecision(
+      runId: string,
+      payload: Record<string, unknown>,
+    ) {
+      decisionRequests.push(payload);
+      return {
+        status: 200,
+        body: {
+          runId,
+          decisionRef: {
+            sha256: "3".repeat(64),
+            byteSize: 10,
+            kind: "decision-record",
+          },
+          decision: { decisionId: "decision-1" },
+        },
+      };
+    },
+  };
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: disabledEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      body: { programId: "BRNCH01" },
+      headers: studioHeaders,
+    });
+    const startedBody = started.body as { runId: string };
+    await run({
+      baseUrl: server.baseUrl,
+      runId: startedBody.runId,
+      studioHeaders,
+      decisionRequests,
+    });
+  } finally {
+    await server.close();
+  }
+}
+
+const VALID_DIVERGENCE_RATIONALE = {
+  summary: "The divergence is approved by the product owner.",
+  technicalBasis:
+    "Generated Java emits ISO timestamps where COBOL emits packed dates.",
+  businessImpact:
+    "Downstream ledgers ingest ISO timestamps without a converter.",
+};
+
+test("PUT /api/v0/runs/{runId}/intentional-divergence rejects a missing structured rationale member", async () => {
+  await withDivergenceDecisionServer(
+    async ({ baseUrl, runId, studioHeaders, decisionRequests }) => {
+      for (const omitted of [
+        "summary",
+        "technicalBasis",
+        "businessImpact",
+      ] as const) {
+        const rationale = { ...VALID_DIVERGENCE_RATIONALE };
+        delete (rationale as Record<string, unknown>)[omitted];
+        const response = await fetchJson(
+          `${baseUrl}/api/v0/runs/${runId}/intentional-divergence-decision`,
+          {
+            method: "PUT",
+            headers: studioHeaders,
+            body: {
+              rationale,
+              linkedEvidenceRefs: ["urn:evidence/one"],
+              affectedOutputs: ["java_output"],
+              supersedesPreviousDecision: false,
+            },
+          },
+        );
+        assert.equal(response.status, 400);
+      }
+      assert.equal(decisionRequests.length, 0);
+    },
+  );
+});
+
+test("PUT /api/v0/runs/{runId}/intentional-divergence rejects an empty structured rationale member", async () => {
+  await withDivergenceDecisionServer(
+    async ({ baseUrl, runId, studioHeaders, decisionRequests }) => {
+      const response = await fetchJson(
+        `${baseUrl}/api/v0/runs/${runId}/intentional-divergence-decision`,
+        {
+          method: "PUT",
+          headers: studioHeaders,
+          body: {
+            rationale: { ...VALID_DIVERGENCE_RATIONALE, businessImpact: "   " },
+            linkedEvidenceRefs: ["urn:evidence/one"],
+            affectedOutputs: ["java_output"],
+            supersedesPreviousDecision: false,
+          },
+        },
+      );
+      assert.equal(response.status, 400);
+      assert.equal(decisionRequests.length, 0);
+    },
+  );
+});
+
+test("PUT /api/v0/runs/{runId}/intentional-divergence rejects a client-supplied reviewer field", async () => {
+  await withDivergenceDecisionServer(
+    async ({ baseUrl, runId, studioHeaders, decisionRequests }) => {
+      const response = await fetchJson(
+        `${baseUrl}/api/v0/runs/${runId}/intentional-divergence-decision`,
+        {
+          method: "PUT",
+          headers: studioHeaders,
+          body: {
+            rationale: VALID_DIVERGENCE_RATIONALE,
+            reviewer: "attacker-controlled reviewer",
+            linkedEvidenceRefs: ["urn:evidence/one"],
+            affectedOutputs: ["java_output"],
+            supersedesPreviousDecision: false,
+          },
+        },
+      );
+      assert.equal(response.status, 400);
+      assert.equal(decisionRequests.length, 0);
+    },
+  );
+});
+
+test("PUT /api/v0/runs/{runId}/intentional-divergence derives the reviewer from the session", async () => {
+  await withDivergenceDecisionServer(
+    async ({ baseUrl, runId, studioHeaders, decisionRequests }) => {
+      const response = await fetchJson(
+        `${baseUrl}/api/v0/runs/${runId}/intentional-divergence-decision`,
+        {
+          method: "PUT",
+          headers: studioHeaders,
+          body: {
+            rationale: VALID_DIVERGENCE_RATIONALE,
+            linkedEvidenceRefs: ["urn:evidence/one"],
+            affectedOutputs: ["java_output"],
+            supersedesPreviousDecision: false,
+          },
+        },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(decisionRequests.length, 1);
+      const payload = decisionRequests[0] ?? {};
+      assert.equal(payload.reviewer, "studio:tenant-a:user-a");
+      assert.equal(payload.requester, "studio:tenant-a:user-a");
+      assert.deepEqual(payload.rationale, VALID_DIVERGENCE_RATIONALE);
+    },
+  );
 });
 
 test("GET /api/v0/runs/{runId}/workflow returns an empty W0.2 envelope when the orchestrator is unreachable", async () => {

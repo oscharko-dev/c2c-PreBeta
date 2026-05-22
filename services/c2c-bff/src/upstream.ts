@@ -249,8 +249,11 @@ export interface OrchestratorClient {
     runId: string,
     payload: {
       reasonCode: string;
-      rationaleSummary: string;
-      behaviorChange: string;
+      rationale: {
+        summary: string;
+        technicalBasis: string;
+        businessImpact: string;
+      };
       reviewer: string;
       evidenceRefs: string[];
       affectedOutputs: string[];
@@ -429,7 +432,8 @@ export function createOrchestratorClient(
       if (sourceReferenceFixtureId) {
         payload.sourceReferenceFixtureId = sourceReferenceFixtureId;
       }
-      if (sourceReferenceMode) payload.sourceReferenceMode = sourceReferenceMode;
+      if (sourceReferenceMode)
+        payload.sourceReferenceMode = sourceReferenceMode;
       return http.request(`${baseUrl}/v0/runs`, {
         method: "POST",
         headers: controlHeaders,
@@ -597,8 +601,11 @@ export function createOrchestratorClient(
       runId: string,
       payload: {
         reasonCode: string;
-        rationaleSummary: string;
-        behaviorChange: string;
+        rationale: {
+          summary: string;
+          technicalBasis: string;
+          businessImpact: string;
+        };
         reviewer: string;
         evidenceRefs: string[];
         affectedOutputs: string[];

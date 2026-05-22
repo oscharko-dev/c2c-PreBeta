@@ -205,9 +205,14 @@ describe("apiClient", () => {
   it("upserts an intentional divergence decision and preserves trust-summary refs", async () => {
     const request = {
       decisionId: null,
-      rationale:
-        "The generated Java intentionally diverges to preserve a governed edge case.",
-      reviewer: "banking-reviewer",
+      rationale: {
+        summary:
+          "The generated Java intentionally diverges to preserve a governed edge case.",
+        technicalBasis:
+          "COBOL COMP-3 truncation is preserved instead of Java half-up rounding.",
+        businessImpact:
+          "Settlement totals remain within the approved tolerance for this product.",
+      },
       linkedEvidenceRefs: ["pack-123", "artifact://evidence"],
       affectedOutputs: ["src/main/java/com/demo/LoanProcessor.java"],
       supersedesPreviousDecision: true,
@@ -227,8 +232,8 @@ describe("apiClient", () => {
         },
         runId: "run-42",
         programId: "PROG-42",
-        reviewer: request.reviewer,
-        rationale: request.rationale,
+        reviewer: "studio:tenant-1:user-1",
+        rationale: request.rationale.summary,
         linkedEvidenceRefs: request.linkedEvidenceRefs,
         affectedOutputs: request.affectedOutputs,
         supersedesPreviousDecision: true,

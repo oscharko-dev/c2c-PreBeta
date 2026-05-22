@@ -422,9 +422,13 @@ test("orchestrator client POSTs intentional divergence decisions on the run id",
         "run a/b",
         {
           reasonCode: "accepted_functional_change",
-          rationaleSummary: "The divergence is a governed product decision.",
-          behaviorChange: "The product keeps the intentional divergence.",
-          reviewer: "studio reviewer",
+          rationale: {
+            summary: "The divergence is a governed product decision.",
+            technicalBasis:
+              "Generated Java rounds half-up where COBOL truncates.",
+            businessImpact: "Aligns interest accrual with the updated policy.",
+          },
+          reviewer: "studio:tenant-a:user-a",
           evidenceRefs: ["urn:evidence/1"],
           affectedOutputs: ["java_output"],
           invalidationTriggers: ["comparison_result_changed"],
@@ -439,18 +443,19 @@ test("orchestrator client POSTs intentional divergence decisions on the run id",
       );
       const parsed = JSON.parse(captured[0]?.body ?? "{}");
       assert.equal(parsed.reasonCode, "accepted_functional_change");
-      assert.equal(
-        parsed.rationaleSummary,
-        "The divergence is a governed product decision.",
-      );
-      assert.equal(
-        parsed.behaviorChange,
-        "The product keeps the intentional divergence.",
-      );
-      assert.equal(parsed.reviewer, "studio reviewer");
+      assert.deepEqual(parsed.rationale, {
+        summary: "The divergence is a governed product decision.",
+        technicalBasis: "Generated Java rounds half-up where COBOL truncates.",
+        businessImpact: "Aligns interest accrual with the updated policy.",
+      });
+      assert.equal(parsed.rationaleSummary, undefined);
+      assert.equal(parsed.behaviorChange, undefined);
+      assert.equal(parsed.reviewer, "studio:tenant-a:user-a");
       assert.deepEqual(parsed.evidenceRefs, ["urn:evidence/1"]);
       assert.deepEqual(parsed.affectedOutputs, ["java_output"]);
-      assert.deepEqual(parsed.invalidationTriggers, ["comparison_result_changed"]);
+      assert.deepEqual(parsed.invalidationTriggers, [
+        "comparison_result_changed",
+      ]);
       assert.equal(parsed.requester, "studio:tenant-a:user-a");
     },
   );

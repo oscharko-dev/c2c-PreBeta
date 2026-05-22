@@ -587,6 +587,190 @@ class W02RunContractShapeTests(unittest.TestCase):
             "urn:decision",
         )
 
+    def test_status_for_returns_stale_when_comparison_ref_does_not_match(self):
+        """AC4/AC6 (Issue #368): a live parity_comparison whose
+        comparisonResultRef carries a different sha256 than the decision's
+        stored ref must mark the decision STALE, not ACTIVE.
+
+        Gap 1 coverage: run_contract.py ~line 1145-1148 (_refs_match branch).
+        Mutation-robustness: removing or inverting the _refs_match guard
+        would return ACTIVE instead of STALE, failing this assertion.
+        """
+        from orchestrator_service.run_contract import (
+            INTENTIONAL_DIVERGENCE_STATUS_ACTIVE,
+            INTENTIONAL_DIVERGENCE_STATUS_STALE,
+        )
+
+        stored_ref = {
+            "uri": "urn:comparison/original",
+            "sha256": "a" * 64,
+            "byteSize": 128,
+        }
+        # Decision records sha256 "a"*64.
+        decision = IntentionalDivergenceDecision(
+            decision_id="decision-ref-mismatch",
+            run_id="run-ref-mismatch",
+            workflow_id="w0-migration-v0",
+            comparison_result_ref=stored_ref,
+            reviewer={
+                "reviewerId": "reviewer-1",
+                "displayName": "Reviewer One",
+                "role": "approver",
+            },
+            rationale={
+                "summary": "Intentional divergence rationale.",
+                "technicalBasis": "Known output difference.",
+                "businessImpact": "Accepted divergence.",
+            },
+            linked_evidence_refs=(
+                {"uri": "urn:evidence/1", "sha256": "e" * 64, "byteSize": 8},
+            ),
+            affected_outputs=("java_output",),
+            invalidation_triggers=("comparison_result_changed",),
+            decided_at="2025-05-21T12:00:00Z",
+        )
+
+        # Live comparison carries a DIFFERENT sha256 ("b"*64).
+        mismatched_comparison = {
+            "matched": False,
+            "comparisonResultRef": {
+                "uri": "urn:comparison/updated",
+                "sha256": "b" * 64,
+                "byteSize": 128,
+            },
+        }
+        self.assertEqual(
+            decision.status_for(mismatched_comparison),
+            INTENTIONAL_DIVERGENCE_STATUS_STALE,
+        )
+
+        # Positive contrast: when the ref MATCHES the decision is ACTIVE
+        # (confirming the branch under test, not just any non-active result).
+        matching_comparison = {
+            "matched": False,
+            "comparisonResultRef": stored_ref,
+        }
+        self.assertEqual(
+            decision.status_for(matching_comparison),
+            INTENTIONAL_DIVERGENCE_STATUS_ACTIVE,
+        )
+
+    def test_status_for_returns_stale_when_affected_output_unavailable(self):
+        """AC4/AC6 (Issue #368): when the OUTPUTS_CHANGED invalidation trigger
+        is set and an affected output is no longer available in the trust
+        summary, status_for must return STALE.
+
+        Gap 2 coverage: run_contract.py ~line 1163-1168
+        (_output_is_available branch for OUTPUTS_CHANGED trigger).
+        Mutation-robustness: removing the OUTPUTS_CHANGED guard or inverting
+        the _output_is_available check would return ACTIVE, failing this
+        assertion.
+        """
+        from orchestrator_service.run_contract import (
+            INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_OUTPUTS_CHANGED,
+            INTENTIONAL_DIVERGENCE_STATUS_ACTIVE,
+            INTENTIONAL_DIVERGENCE_STATUS_STALE,
+        )
+
+        shared_ref = {
+            "uri": "urn:comparison/shared",
+            "sha256": "c" * 64,
+            "byteSize": 64,
+        }
+        # Decision has OUTPUTS_CHANGED trigger and java_output as affected.
+        decision = IntentionalDivergenceDecision(
+            decision_id="decision-outputs-changed",
+            run_id="run-outputs-changed",
+            workflow_id="w0-migration-v0",
+            comparison_result_ref=shared_ref,
+            reviewer={
+                "reviewerId": "reviewer-2",
+                "displayName": "Reviewer Two",
+                "role": "approver",
+            },
+            rationale={
+                "summary": "Output change triggers stale.",
+                "technicalBasis": "java_output availability lost.",
+                "businessImpact": "Re-review required.",
+            },
+            linked_evidence_refs=(
+                {"uri": "urn:evidence/2", "sha256": "f" * 64, "byteSize": 8},
+            ),
+            affected_outputs=("java_output",),
+            invalidation_triggers=(INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_OUTPUTS_CHANGED,),
+            decided_at="2025-05-21T12:00:00Z",
+        )
+
+        # parity_comparison ref MATCHES (prevents Gap 1 short-circuit).
+        matching_comparison = {
+            "matched": False,
+            "comparisonResultRef": shared_ref,
+        }
+
+        # trust_summary with javaResult having NEITHER executionResultRef NOR
+        # normalizedOutputRef — _output_is_available("java_output") == False.
+        trust_summary_unavailable = {
+            "javaResult": {},
+        }
+        self.assertEqual(
+            decision.status_for(matching_comparison, trust_summary=trust_summary_unavailable),
+            INTENTIONAL_DIVERGENCE_STATUS_STALE,
+        )
+
+        # Positive contrast A: when java_output IS available the decision is
+        # ACTIVE, confirming the _output_is_available check drives the branch.
+        trust_summary_available = {
+            "javaResult": {
+                "executionResultRef": {
+                    "uri": "urn:java/exec",
+                    "sha256": "d" * 64,
+                    "byteSize": 32,
+                },
+            },
+        }
+        self.assertEqual(
+            decision.status_for(matching_comparison, trust_summary=trust_summary_available),
+            INTENTIONAL_DIVERGENCE_STATUS_ACTIVE,
+        )
+
+        # Positive contrast B: a decision WITHOUT the OUTPUTS_CHANGED trigger
+        # must return ACTIVE even when java_output is unavailable, confirming
+        # that the trigger-membership guard is load-bearing.
+        from orchestrator_service.run_contract import (
+            INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_COMPARISON_CHANGED,
+        )
+
+        decision_no_outputs_trigger = IntentionalDivergenceDecision(
+            decision_id="decision-no-outputs-trigger",
+            run_id="run-no-outputs-trigger",
+            workflow_id="w0-migration-v0",
+            comparison_result_ref=shared_ref,
+            reviewer={
+                "reviewerId": "reviewer-2",
+                "displayName": "Reviewer Two",
+                "role": "approver",
+            },
+            rationale={
+                "summary": "No outputs trigger set.",
+                "technicalBasis": "Only comparison trigger.",
+                "businessImpact": "No output re-check required.",
+            },
+            linked_evidence_refs=(
+                {"uri": "urn:evidence/3", "sha256": "0" * 64, "byteSize": 8},
+            ),
+            affected_outputs=("java_output",),
+            invalidation_triggers=(
+                INTENTIONAL_DIVERGENCE_INVALIDATION_TRIGGER_COMPARISON_CHANGED,
+            ),
+            decided_at="2025-05-21T12:00:00Z",
+        )
+        self.assertEqual(
+            decision_no_outputs_trigger.status_for(
+                matching_comparison, trust_summary=trust_summary_unavailable
+            ),
+            INTENTIONAL_DIVERGENCE_STATUS_ACTIVE,
+        )
+
     def test_finalize_requires_failure_code_for_non_success(self):
         contract = self._build()
         contract.state_machine.advance(STATE_RUN_BLOCKED)
