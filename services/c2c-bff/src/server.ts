@@ -2145,10 +2145,17 @@ async function maybeBuildOutputChangeAiSummary(
     };
   }
   try {
+    // ADR 0005 §4: raw run output must not cross the model-gateway boundary.
+    const sanitizedAnalysis = {
+      ...analysis,
+      outputDelta: analysis.outputDelta
+        ? { ...analysis.outputDelta, excerpt: [] }
+        : null,
+    };
     const upstream = await modelGateway.explain({
       schemaVersion: "v0",
       kind: "output-change-analysis",
-      analysis,
+      analysis: sanitizedAnalysis,
     });
     const body = asRecord(upstream?.body);
     const explanation = asString(body?.explanation).trim();
@@ -6731,6 +6738,17 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       const outputChangeMatch =
         /^\/api\/v0\/runs\/([^\/]+)\/output-change-explanation$/.exec(pathname);
       if (outputChangeMatch && method === "POST") {
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
+          return;
+        }
         let body: unknown;
         try {
           body = await readJsonBody(req, config.transformSourceMaxBytes);
@@ -6750,6 +6768,10 @@ export function createApp(deps: ServerDeps): http.RequestListener {
         const previousRunId = asString(requestBody?.previousRunId).trim();
         if (previousRunId.length === 0) {
           badRequest(res, "previousRunId must be a non-empty string");
+          return;
+        }
+        if (previousRunId.length > 128) {
+          badRequest(res, "previousRunId exceeds maximum length");
           return;
         }
         const previousStored = runStore.get(previousRunId);

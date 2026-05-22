@@ -43,11 +43,11 @@ export function OutputChangeExplanationPanel({
       includeAiSummary,
     });
     if (!result.ok) {
-      setState({
+      setState((previous) => ({
         loading: false,
-        data: null,
+        data: previous.data,
         error: result.message,
-      });
+      }));
       return;
     }
     setState({

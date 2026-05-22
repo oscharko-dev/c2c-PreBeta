@@ -69,10 +69,7 @@ export interface OutputChangeExplanationResult {
   programId: string;
   currentTrustCaseId: string | null;
   previousTrustCaseId: string | null;
-  determination:
-    | "single_change"
-    | "multiple_changes"
-    | "not_determinable";
+  determination: "single_change" | "multiple_changes" | "not_determinable";
   primaryCategory: OutputChangeCategory | null;
   summary: string;
   categories: OutputChangeCategoryEntry[];
@@ -103,9 +100,7 @@ export interface OutputChangeRunArtifacts {
   manualDriftRegionCount: number;
 }
 
-function asRecord(
-  value: unknown,
-): Record<string, unknown> | undefined {
+function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
@@ -116,9 +111,7 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function artifactAt(
-  value: unknown,
-): OutputRef | null {
+function artifactAt(value: unknown): OutputRef | null {
   const record = asRecord(value);
   if (!record) return null;
   const sha256 = asString(record.sha256);
@@ -252,13 +245,17 @@ function buildOutputDelta(
     addedLineCount,
     removedLineCount,
     excerpt: buildExcerpt(previousRun.actualOutput, currentRun.actualOutput),
-    currentNormalizedOutputRef: normalizedRef(currentRun.trustSummary, "javaResult"),
+    currentNormalizedOutputRef: normalizedRef(
+      currentRun.trustSummary,
+      "javaResult",
+    ),
     previousNormalizedOutputRef: normalizedRef(
       previousRun.trustSummary,
       "javaResult",
     ),
     currentComparisonDiffRef:
-      currentRun.comparisonDiffRef ?? comparisonDiffRef(currentRun.trustSummary),
+      currentRun.comparisonDiffRef ??
+      comparisonDiffRef(currentRun.trustSummary),
     previousComparisonDiffRef:
       previousRun.comparisonDiffRef ??
       comparisonDiffRef(previousRun.trustSummary),
@@ -379,7 +376,7 @@ export function buildOutputChangeExplanation(
       trustCaseId(previousRun.trustSummary),
     );
   }
-  if (!currentRun.actualOutput || !previousRun.actualOutput) {
+  if (currentRun.actualOutput === null || previousRun.actualOutput === null) {
     return buildUnavailableOutputChangeExplanation(
       currentRun,
       previousRun.runId,
@@ -388,8 +385,14 @@ export function buildOutputChangeExplanation(
       trustCaseId(previousRun.trustSummary),
     );
   }
-  const currentNormalized = normalizedRef(currentRun.trustSummary, "javaResult");
-  const previousNormalized = normalizedRef(previousRun.trustSummary, "javaResult");
+  const currentNormalized = normalizedRef(
+    currentRun.trustSummary,
+    "javaResult",
+  );
+  const previousNormalized = normalizedRef(
+    previousRun.trustSummary,
+    "javaResult",
+  );
   if (!currentNormalized || !previousNormalized) {
     return buildUnavailableOutputChangeExplanation(
       currentRun,
@@ -427,15 +430,22 @@ export function buildOutputChangeExplanation(
         ? "The generated-run source hash differs between the selected runs."
         : "The generated-run source hash is unchanged across the selected runs.",
       [
-        { label: "Current normalized COBOL output", currentRef: normalizedRef(currentRun.trustSummary, "cobolResult") },
-        { label: "Previous normalized COBOL output", previousRef: normalizedRef(previousRun.trustSummary, "cobolResult") },
+        {
+          label: "Current normalized COBOL output",
+          currentRef: normalizedRef(currentRun.trustSummary, "cobolResult"),
+        },
+        {
+          label: "Previous normalized COBOL output",
+          previousRef: normalizedRef(previousRun.trustSummary, "cobolResult"),
+        },
       ],
     ),
   );
   if (cobolChanged) changedCategories.push("cobol_edit");
 
   const trustCaseChanged =
-    textOrNull(currentRun.trustCaseId) !== textOrNull(previousRun.trustCaseId) ||
+    textOrNull(currentRun.trustCaseId) !==
+      textOrNull(previousRun.trustCaseId) ||
     textOrNull(currentRun.trustCaseConfigurationDigest) !==
       textOrNull(previousRun.trustCaseConfigurationDigest);
   categories.push(
@@ -459,14 +469,12 @@ export function buildOutputChangeExplanation(
 
   const runtimeConfigChanged =
     !trustCaseChanged &&
-    (
-      textOrNull(currentRun.trustCaseEnvironmentProfileId) !==
-        textOrNull(previousRun.trustCaseEnvironmentProfileId) ||
+    (textOrNull(currentRun.trustCaseEnvironmentProfileId) !==
+      textOrNull(previousRun.trustCaseEnvironmentProfileId) ||
       textOrNull(currentRun.sourceReferenceFixtureId) !==
         textOrNull(previousRun.sourceReferenceFixtureId) ||
       textOrNull(currentRun.sourceReferenceMode) !==
-        textOrNull(previousRun.sourceReferenceMode)
-    );
+        textOrNull(previousRun.sourceReferenceMode));
   categories.push(
     categoryEntry(
       "runtime_configuration_change",
@@ -478,7 +486,8 @@ export function buildOutputChangeExplanation(
       [],
     ),
   );
-  if (runtimeConfigChanged) changedCategories.push("runtime_configuration_change");
+  if (runtimeConfigChanged)
+    changedCategories.push("runtime_configuration_change");
 
   const normalizationChanged =
     textOrNull(currentRun.trustCaseComparisonPolicyVersion) !==
@@ -576,13 +585,15 @@ export function buildOutputChangeExplanation(
         ? "multiple_changes"
         : "not_determinable";
   const primaryCategory: OutputChangeCategory | null =
-    changedCategories.length === 1 ? changedCategories[0] ?? null : null;
+    changedCategories.length === 1 ? (changedCategories[0] ?? null) : null;
   const summary =
     determination === "single_change"
       ? `The output change is most directly explained by ${changedCategories[0]?.replaceAll("_", " ")}.`
       : determination === "multiple_changes"
         ? "Multiple evidence-backed changes occurred between the selected runs, so the output change cannot be reduced to one deterministic cause."
-        : "The selected runs show an output difference, but the available evidence does not support one deterministic cause.";
+        : outputDelta.changed
+          ? "The selected runs show an output difference, but the available evidence does not support one deterministic cause."
+          : "No output change was detected between the selected runs.";
 
   const evidenceLinks: OutputChangeEvidenceLink[] = [
     {
