@@ -6563,9 +6563,16 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
+        const liveRunId = liveArtifactRunId(stored);
+        if (!liveRunId || !orchestrator.enabled) {
+          jsonResponse(res, 503, {
+            error: "orchestrator unavailable",
+          });
+          return;
+        }
         try {
           const upstream = await orchestrator.exportParityRegression?.(
-            runId,
+            liveRunId,
             body ?? {},
           );
           if (!upstream) {

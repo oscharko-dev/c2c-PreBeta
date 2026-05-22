@@ -1218,6 +1218,150 @@ class W02ProductiveEvidenceTests(_BaseEvidenceFixture):
         self.assertEqual(summary["comparisonResult"]["status"], "not_available")
         self.assertEqual(summary["repairStatus"], "not_attempted")
 
+    def test_trust_summary_projects_parity_failure_with_unknown_divergence(self) -> None:
+        # No intentional-divergence decision is recorded, so the disposition is
+        # "unknown" rather than "intentional".
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        comparison_result_ref = {
+            "uri": "urn:run/comparison-result-fail",
+            "sha256": "f" * 64,
+            "byteSize": 32,
+        }
+        diff_ref = {
+            "uri": "urn:run/diff-fail",
+            "sha256": "e" * 64,
+            "byteSize": 8,
+        }
+        contract.set_parity_comparison(
+            {
+                "matched": False,
+                "mismatchClassification": "content",
+                "comparisonResultRef": comparison_result_ref,
+                "diffRef": diff_ref,
+            }
+        )
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=None,
+            final_classification=CLASSIFICATION_FAILED,
+            failure_code=None,
+            evidence_materialized=True,
+        )
+
+        self.assertEqual(summary["trustState"], "parity_failed")
+        self.assertEqual(summary["divergenceDisposition"], "unknown")
+        self.assertEqual(summary["comparisonResult"]["status"], "mismatched")
+        self.assertEqual(
+            summary["comparisonResult"]["comparisonResultRef"]["uri"],
+            "urn:run/comparison-result-fail",
+        )
+
+    def test_trust_summary_projects_repair_verified_after_winning_candidate(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        contract.record_repair_attempt(
+            {
+                "attemptNumber": 1,
+                "repairDecision": "propose_candidate",
+                "repairDecisionRef": {
+                    "uri": "urn:run/repair-decision-1",
+                    "sha256": "a" * 64,
+                    "byteSize": 6,
+                },
+                "buildTestResultRef": {
+                    "uri": "urn:run/build-repaired",
+                    "sha256": "b" * 64,
+                    "byteSize": 8,
+                },
+                "javaCandidateRef": {
+                    "uri": "urn:run/java-candidate-1",
+                    "sha256": "c" * 64,
+                    "byteSize": 10,
+                },
+                "createdAt": "2026-05-22T10:00:00Z",
+            }
+        )
+        contract.set_parity_comparison(
+            {
+                "matched": True,
+                "comparisonResultRef": {
+                    "uri": "urn:run/comparison-result-ok",
+                    "sha256": "d" * 64,
+                    "byteSize": 24,
+                },
+                "diffRef": {
+                    "uri": "urn:run/diff-ok",
+                    "sha256": "e" * 64,
+                    "byteSize": 4,
+                },
+            }
+        )
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=None,
+            final_classification=CLASSIFICATION_SUCCESS,
+            failure_code=None,
+            evidence_materialized=True,
+        )
+
+        self.assertEqual(summary["repairStatus"], "repair_verified")
+        self.assertEqual(summary["repair"]["status"], "repair_verified")
+        self.assertEqual(
+            summary["repair"]["repairDecisionRef"]["uri"],
+            "urn:run/repair-decision-1",
+        )
+        self.assertEqual(
+            summary["repair"]["repairedBuildTestResultRef"]["uri"],
+            "urn:run/build-repaired",
+        )
+        self.assertEqual(
+            summary["repair"]["repairedJavaCandidateRef"]["uri"],
+            "urn:run/java-candidate-1",
+        )
+        self.assertEqual(summary["repairVerifiedAt"], "2026-05-22T10:00:00Z")
+
+    def test_trust_summary_projects_repair_failed_after_unverified_candidate(self) -> None:
+        context = self._w0_context(use_transformation_agent=True)
+        contract = self._w02_contract()
+        contract.record_repair_attempt(
+            {
+                "attemptNumber": 1,
+                "repairDecision": "propose_candidate",
+                "repairDecisionRef": {
+                    "uri": "urn:run/repair-decision-1",
+                    "sha256": "a" * 64,
+                    "byteSize": 6,
+                },
+                "buildTestResultRef": {
+                    "uri": "urn:run/build-repaired",
+                    "sha256": "b" * 64,
+                    "byteSize": 8,
+                },
+                "javaCandidateRef": {
+                    "uri": "urn:run/java-candidate-1",
+                    "sha256": "c" * 64,
+                    "byteSize": 10,
+                },
+            }
+        )
+
+        summary = self._trust_summary(
+            context=context,
+            contract=contract,
+            build_test_output=None,
+            final_classification=CLASSIFICATION_FAILED,
+            failure_code=None,
+            evidence_materialized=True,
+        )
+
+        self.assertEqual(summary["repairStatus"], "repair_failed")
+        self.assertEqual(summary["repair"]["status"], "repair_failed")
+
 
 class W03AssistDecisionAndBudgetLineageTests(_BaseEvidenceFixture):
     """Issue #217 (W0.3-6): the W0.2 evidence pack records the Orchestrator-
