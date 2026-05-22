@@ -154,7 +154,7 @@ class BuildTestRunnerServiceTest {
         assertEquals("run-error", response.get("classification"));
         Map<?, ?> comparisonResult = (Map<?, ?>) response.get("comparisonResult");
         assertEquals("failed", comparisonResult.get("status"));
-        assertEquals("unknown", comparisonResult.get("mismatchClassification"));
+        assertEquals("runtime_failure", comparisonResult.get("mismatchClassification"));
         Map<?, ?> execution = (Map<?, ?>) response.get("execution");
         assertEquals("failed", execution.get("status"));
         Map<?, ?> diagnostic = (Map<?, ?>) ((List<?>) execution.get("diagnostics")).get(0);
@@ -239,7 +239,7 @@ class BuildTestRunnerServiceTest {
         assertEquals("missing-golden-master", response.get("classification"));
         Map<?, ?> comparisonResult = (Map<?, ?>) response.get("comparisonResult");
         assertEquals("blocked", comparisonResult.get("status"));
-        assertEquals("unknown", comparisonResult.get("mismatchClassification"));
+        assertEquals("unsupported_input", comparisonResult.get("mismatchClassification"));
     }
 
     @Test
