@@ -255,10 +255,19 @@ export interface TrustSummaryView {
   repairVerifiedAt?: string | null;
 }
 
+// Issue #368 finding-4: the divergence decision carries a structured
+// rationale (summary, technical basis, business impact) instead of a
+// single free-text note. Issue #368 finding-5: ``reviewer`` is omitted
+// from the request — the BFF derives it from the authenticated session.
+export interface IntentionalDivergenceRationale {
+  summary: string;
+  technicalBasis: string;
+  businessImpact: string;
+}
+
 export interface IntentionalDivergenceDecisionRequest {
   decisionId?: string | null;
-  rationale: string;
-  reviewer: string;
+  rationale: IntentionalDivergenceRationale;
   linkedEvidenceRefs: string[];
   affectedOutputs: string[];
   supersedesPreviousDecision: boolean;

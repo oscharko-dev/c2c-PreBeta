@@ -1477,9 +1477,34 @@ function normalizeIntentionalDivergenceAffectedOutputs(raw: unknown): string[] {
   return Array.from(normalized);
 }
 
+// Issue #368 finding-4: the orchestrator's structured-rationale path.
+// Studio collects each member as a distinct labelled field so the
+// decision record carries a real summary, technical basis, and
+// business impact instead of a single free-text note.
+interface IntentionalDivergenceRationale {
+  summary: string;
+  technicalBasis: string;
+  businessImpact: string;
+}
+
+function mapIntentionalDivergenceRationale(
+  raw: unknown,
+): IntentionalDivergenceRationale | null {
+  const record = asRecord(raw);
+  if (!record) {
+    return null;
+  }
+  const summary = asString(record.summary).trim();
+  const technicalBasis = asString(record.technicalBasis).trim();
+  const businessImpact = asString(record.businessImpact).trim();
+  if (!summary || !technicalBasis || !businessImpact) {
+    return null;
+  }
+  return { summary, technicalBasis, businessImpact };
+}
+
 function mapIntentionalDivergenceRequestBody(raw: Record<string, unknown>): {
-  rationale: string;
-  reviewer: string;
+  rationale: IntentionalDivergenceRationale;
   linkedEvidenceRefs: string[];
   affectedOutputs: string[];
   supersedesPreviousDecision: boolean;
@@ -1489,7 +1514,6 @@ function mapIntentionalDivergenceRequestBody(raw: Record<string, unknown>): {
   const allowedFields = new Set([
     "decisionId",
     "rationale",
-    "reviewer",
     "linkedEvidenceRefs",
     "affectedOutputs",
     "supersedesPreviousDecision",
@@ -1502,8 +1526,10 @@ function mapIntentionalDivergenceRequestBody(raw: Record<string, unknown>): {
   if (extraFields.length > 0) {
     return null;
   }
-  const rationale = asString(raw.rationale)?.trim() ?? "";
-  const reviewer = asString(raw.reviewer)?.trim() ?? "";
+  const rationale = mapIntentionalDivergenceRationale(raw.rationale);
+  if (!rationale) {
+    return null;
+  }
   const linkedEvidenceRefs = Array.isArray(raw.linkedEvidenceRefs)
     ? raw.linkedEvidenceRefs.filter(
         (entry): entry is string => typeof entry === "string",
@@ -1525,7 +1551,6 @@ function mapIntentionalDivergenceRequestBody(raw: Record<string, unknown>): {
       : asString(raw.expiresAt);
   return {
     rationale,
-    reviewer,
     linkedEvidenceRefs,
     affectedOutputs,
     supersedesPreviousDecision,
@@ -6115,14 +6140,12 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           return;
         }
         if (
-          !record.rationale ||
-          !record.reviewer ||
           record.linkedEvidenceRefs.length === 0 ||
           record.affectedOutputs.length === 0
         ) {
           badRequest(
             res,
-            "rationale, reviewer, linkedEvidenceRefs, and affectedOutputs are required",
+            "linkedEvidenceRefs and affectedOutputs are required",
           );
           return;
         }
@@ -6132,11 +6155,15 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           ...INTENTIONAL_DIVERGENCE_DEFAULT_INVALIDATION_TRIGGERS,
           ...(record.expiresAt ? ["expires_at_reached"] : []),
         ];
+        // Issue #368 finding-5: reviewer is session-derived, never taken
+        // from the request body — the authenticated user who documents the
+        // divergence is the reviewer of record. External business approvers
+        // remain referenced via linkedEvidenceRefs.
+        const sessionPrincipal = `studio:${authSession.record.tenantId}:${authSession.record.userId}`;
         const upstream = await upsertIntentionalDivergenceDecision(runId, {
           reasonCode: INTENTIONAL_DIVERGENCE_REASON_CODE,
-          rationaleSummary: record.rationale,
-          behaviorChange: record.invalidationNote ?? record.rationale,
-          reviewer: record.reviewer,
+          rationale: record.rationale,
+          reviewer: sessionPrincipal,
           evidenceRefs: record.linkedEvidenceRefs,
           affectedOutputs:
             mappedAffectedOutputs.length > 0
@@ -6144,7 +6171,7 @@ export function createApp(deps: ServerDeps): http.RequestListener {
               : ["java_output"],
           invalidationTriggers,
           ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
-          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+          requester: sessionPrincipal,
         });
         if (!upstream) {
           jsonResponse(res, 503, {

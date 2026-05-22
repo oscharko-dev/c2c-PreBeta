@@ -383,9 +383,14 @@ function RunHarness() {
         onClick={() =>
           void submitIntentionalDivergenceDecision({
             decisionId: null,
-            rationale:
-              "The Java intentionally diverges for a governed business-rule exception.",
-            reviewer: "reviewer-1",
+            rationale: {
+              summary:
+                "The Java intentionally diverges for a governed business-rule exception.",
+              technicalBasis:
+                "COBOL packed-decimal rounding is preserved instead of Java half-up rounding.",
+              businessImpact:
+                "Statement balances stay aligned with the legacy ledger of record.",
+            },
             linkedEvidenceRefs: ["pack-123"],
             affectedOutputs: ["src/main/java/com/demo/LoanProcessor.java"],
             supersedesPreviousDecision: true,
@@ -657,7 +662,7 @@ describe("transformation run state machine", () => {
           },
           runId,
           programId: "P-A",
-          reviewer: "reviewer-1",
+          reviewer: "studio:tenant-a:user-a",
           rationale:
             "The Java intentionally diverges for a governed business-rule exception.",
           linkedEvidenceRefs: ["pack-123"],
@@ -727,7 +732,10 @@ describe("transformation run state machine", () => {
       ).toHaveBeenCalledWith(
         runId,
         expect.objectContaining({
-          reviewer: "reviewer-1",
+          rationale: expect.objectContaining({
+            summary:
+              "The Java intentionally diverges for a governed business-rule exception.",
+          }),
           supersedesPreviousDecision: true,
         }),
       ),

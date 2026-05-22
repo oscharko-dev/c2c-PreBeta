@@ -751,14 +751,132 @@ describe("Run Panels", () => {
 
       expect(submitDecisionMock).not.toHaveBeenCalled();
       expect(
-        screen.getByText("Rationale must be at least 12 characters long."),
+        screen.getByText(
+          "Rationale summary must be at least 12 characters long.",
+        ),
       ).toBeDefined();
-      expect(screen.getByText("Reviewer is required.")).toBeDefined();
+      expect(
+        screen.getByText(
+          "Technical basis must be at least 12 characters long.",
+        ),
+      ).toBeDefined();
+      expect(
+        screen.getByText(
+          "Business impact must be at least 12 characters long.",
+        ),
+      ).toBeDefined();
+      expect(screen.queryByText("Reviewer is required.")).toBeNull();
       expect(
         screen.getByText("At least one linked evidence ref is required."),
       ).toBeDefined();
       expect(
         screen.getByText("At least one affected output is required."),
+      ).toBeDefined();
+    });
+
+    it("shows the intentional-divergence rerun banner in historical mode (#368 finding-3)", () => {
+      const divergedTrustSummary = {
+        trustState: "intentional_divergence",
+        repairStatus: "repair_verified",
+        coverageStatus: "full",
+        divergenceDisposition: "intentional",
+        intentionalDivergenceDecisionRef: {
+          sha256: "z".repeat(64),
+          byteSize: 9,
+          kind: "intentional-divergence-decision",
+        },
+        warningCodes: [],
+        trustCase: {
+          trustCaseId: "TC-ALPHA",
+          version: "v7",
+          catalogVersion: "2026.05",
+          catalogHash: "catalog-hash",
+          configurationDigest: "config-hash",
+        },
+        cobolResult: { status: "completed" },
+        javaResult: { status: "completed" },
+        comparisonResult: {
+          status: "mismatched",
+          mismatchClassification: "intentional-divergence",
+          decisionRecordRef: null,
+        },
+        repair: { status: "repair_verified" },
+        evidence: { status: "current" },
+        summaryDerivedAt: "2026-05-21T12:34:56.000Z",
+      };
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "running",
+          runId: "run-rerun",
+          programId: "PROG-1",
+          buildTest: null,
+          previousRun: {
+            runId: "run-prev",
+            orchestratorRunId: "run-prev-orch",
+            programId: "PROG-1",
+            phase: "completed",
+            summary: {
+              ...mockState.summary,
+              runId: "run-prev",
+              programId: "PROG-1",
+              trustSummary: divergedTrustSummary,
+            },
+            generated: null,
+            generatedFiles: null,
+            buildTest: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "output-divergence",
+              classification: "divergence-unknown",
+            },
+            evidence: null,
+            events: null,
+            progress: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "complete",
+              runStatus: "completed",
+              currentStep: null,
+              failedStep: null,
+              completedSteps: ["compile-test-java"],
+              stepCount: 1,
+              steps: [
+                {
+                  stepId: 1,
+                  name: "compile-test-java",
+                  capabilityId: "build-test-runner",
+                  service: "build-test-runner",
+                  actor: "build-test-runner",
+                  status: "ok",
+                  latencyMs: 42,
+                },
+              ],
+            },
+            artifacts: null,
+            experience: null,
+            workflow: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+        intentionalDivergenceDecision: null,
+        intentionalDivergenceDecisionStatus: "idle",
+        intentionalDivergenceDecisionError: null,
+        submitIntentionalDivergenceDecision: vi.fn(),
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      expect(
+        screen.getByText(
+          "Showing the previous intentionally diverged parity results while the latest rerun is in progress. These results are stale until the rerun completes.",
+        ),
       ).toBeDefined();
     });
 

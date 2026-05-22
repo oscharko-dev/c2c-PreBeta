@@ -115,8 +115,11 @@ export function TrustSummaryCard({
 
     const request: IntentionalDivergenceDecisionRequest = {
       decisionId: currentDecision?.decisionId ?? null,
-      rationale: decisionDraft.rationale.trim(),
-      reviewer: decisionDraft.reviewer.trim(),
+      rationale: {
+        summary: decisionDraft.rationaleSummary.trim(),
+        technicalBasis: decisionDraft.rationaleTechnicalBasis.trim(),
+        businessImpact: decisionDraft.rationaleBusinessImpact.trim(),
+      },
       linkedEvidenceRefs: parseListField(decisionDraft.linkedEvidenceRefs),
       affectedOutputs: parseListField(decisionDraft.affectedOutputs),
       supersedesPreviousDecision:
@@ -306,38 +309,50 @@ export function TrustSummaryCard({
           <SummarySection title="Intentional divergence decision">
             {decisionFormVisible ? (
               <form className="space-y-3" onSubmit={handleDecisionSubmit}>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <LabelField
-                    label="Reviewer"
-                    value={decisionDraft.reviewer}
-                    onChange={(value) =>
-                      setDecisionDraft((prev) => ({ ...prev, reviewer: value }))
-                    }
-                    placeholder="Reviewer name or role"
-                  />
-                  <LabelField
-                    label="Expiration"
-                    value={decisionDraft.expiresAt}
-                    onChange={(value) =>
-                      setDecisionDraft((prev) => ({
-                        ...prev,
-                        expiresAt: value,
-                      }))
-                    }
-                    placeholder="2026-05-21T12:00"
-                    type="datetime-local"
-                  />
-                </div>
-                <TextAreaField
-                  label="Rationale"
-                  value={decisionDraft.rationale}
+                <LabelField
+                  label="Expiration"
+                  value={decisionDraft.expiresAt}
                   onChange={(value) =>
                     setDecisionDraft((prev) => ({
                       ...prev,
-                      rationale: value,
+                      expiresAt: value,
                     }))
                   }
-                  placeholder="Explain why the run is intentionally not equivalent."
+                  placeholder="2026-05-21T12:00"
+                  type="datetime-local"
+                />
+                <TextAreaField
+                  label="Rationale summary"
+                  value={decisionDraft.rationaleSummary}
+                  onChange={(value) =>
+                    setDecisionDraft((prev) => ({
+                      ...prev,
+                      rationaleSummary: value,
+                    }))
+                  }
+                  placeholder="Summarize why the run is intentionally not equivalent."
+                />
+                <TextAreaField
+                  label="Technical basis"
+                  value={decisionDraft.rationaleTechnicalBasis}
+                  onChange={(value) =>
+                    setDecisionDraft((prev) => ({
+                      ...prev,
+                      rationaleTechnicalBasis: value,
+                    }))
+                  }
+                  placeholder="Describe the technical reason the generated Java diverges from COBOL."
+                />
+                <TextAreaField
+                  label="Business impact"
+                  value={decisionDraft.rationaleBusinessImpact}
+                  onChange={(value) =>
+                    setDecisionDraft((prev) => ({
+                      ...prev,
+                      rationaleBusinessImpact: value,
+                    }))
+                  }
+                  placeholder="Describe the business impact of accepting this divergence."
                 />
                 <TextAreaField
                   label="Linked evidence refs"
@@ -428,7 +443,7 @@ export function TrustSummaryCard({
               </form>
             ) : (
               <p className="text-xs text-text-dim">
-                Record the rationale, reviewer, evidence, affected outputs, and
+                Record the structured rationale, evidence, affected outputs, and
                 expiration metadata once the run has been intentionally marked
                 as not equivalent.
               </p>
@@ -841,8 +856,9 @@ function describeDivergenceDisposition(
 }
 
 type DecisionDraft = {
-  rationale: string;
-  reviewer: string;
+  rationaleSummary: string;
+  rationaleTechnicalBasis: string;
+  rationaleBusinessImpact: string;
   linkedEvidenceRefs: string;
   affectedOutputs: string;
   supersedesPreviousDecision: boolean;
@@ -858,9 +874,13 @@ function buildDecisionDraft(
     trust?.evidence.packRef?.sha256 ??
     trust?.comparisonResult.decisionRecordRef?.sha256 ??
     "";
+  // The response record exposes a flat ``rationale`` summary string; the
+  // structured technical-basis and business-impact members are captured
+  // fresh on each edit and are not echoed back by the orchestrator.
   return {
-    rationale: response?.decision.rationale ?? "",
-    reviewer: response?.decision.reviewer ?? "",
+    rationaleSummary: response?.decision.rationale ?? "",
+    rationaleTechnicalBasis: "",
+    rationaleBusinessImpact: "",
     linkedEvidenceRefs:
       response?.decision.linkedEvidenceRefs.join(", ") ?? trustEvidence,
     affectedOutputs: response?.decision.affectedOutputs.join(", ") ?? "",
@@ -898,11 +918,14 @@ function parseListField(value: string): string[] {
 
 function validateDecisionDraft(draft: DecisionDraft): string[] {
   const errors: string[] = [];
-  if (draft.rationale.trim().length < 12) {
-    errors.push("Rationale must be at least 12 characters long.");
+  if (draft.rationaleSummary.trim().length < 12) {
+    errors.push("Rationale summary must be at least 12 characters long.");
   }
-  if (draft.reviewer.trim().length === 0) {
-    errors.push("Reviewer is required.");
+  if (draft.rationaleTechnicalBasis.trim().length < 12) {
+    errors.push("Technical basis must be at least 12 characters long.");
+  }
+  if (draft.rationaleBusinessImpact.trim().length < 12) {
+    errors.push("Business impact must be at least 12 characters long.");
   }
   const linkedEvidenceRefs = parseListField(draft.linkedEvidenceRefs);
   const affectedOutputs = parseListField(draft.affectedOutputs);
