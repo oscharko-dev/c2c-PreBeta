@@ -3091,17 +3091,17 @@ class W0WorkflowRunner:
             "buildTest": dict(build_output.payload),
         }
 
-    def manual_compile_repair_accept(
+    def _load_validated_accept_proposal(
         self,
-        *,
         run_id: str,
-        requester: str,
         proposal_id: str,
         patch_sha256: str,
-    ) -> JsonObject:
-        if not self.artifact_store.has_run(run_id):
-            raise OrchestratorError("run not found")
-        workflow_id = _text((self.artifact_store.read_summary(run_id) or {}).get("workflowId")) or self.config.workflow_id
+    ) -> tuple[str, JsonObject, str]:
+        """Load proposal, derive workflow_id, and validate state and patch hash for acceptance."""
+        workflow_id = (
+            _text((self.artifact_store.read_summary(run_id) or {}).get("workflowId"))
+            or self.config.workflow_id
+        )
         persisted_proposal = self._load_manual_compile_repair_proposal(
             run_id=run_id,
             proposal_id=proposal_id,
@@ -3114,17 +3114,18 @@ class W0WorkflowRunner:
         expected_patch_sha = patch_sha256.strip()
         if expected_patch_sha != _text(persisted_proposal.get("patchSha256")):
             raise OrchestratorError("proposal patch hash does not match persisted proposal state")
-        sandbox_manifest, candidate_files = self._load_manual_compile_project(
-            run_id,
-            manifest_path=f"{MANUAL_COMPILE_REPAIR_DIR}/sandbox-project-manifest.json",
-            file_prefix=f"{MANUAL_COMPILE_REPAIR_DIR}/sandbox",
-        )
-        sandbox_build = self.artifact_store.read_json(
-            run_id,
-            f"{MANUAL_COMPILE_REPAIR_DIR}/sandbox-build-test-result.json",
-        )
-        if not isinstance(sandbox_build, Mapping):
-            raise OrchestratorError("sandbox build/test result is unavailable")
+        return workflow_id, persisted_proposal, expected_patch_sha
+
+    def _persist_manual_compile_acceptance(
+        self,
+        run_id: str,
+        workflow_id: str,
+        proposal_id: str,
+        persisted_proposal: JsonObject,
+        requester: str,
+        expected_patch_sha: str,
+    ) -> JsonObject:
+        """Write the accepted proposal and approval record; return the updated proposal."""
         approved_at = _iso_now()
         updated_proposal: JsonObject = {
             **persisted_proposal,
@@ -3160,40 +3161,17 @@ class W0WorkflowRunner:
             },
             kind=MANUAL_COMPILE_REPAIR_APPROVAL_KIND,
         )
-        return {
-            "schemaVersion": "v0",
-            "runId": run_id,
-            "proposal": updated_proposal,
-            "candidateProject": {
-                "entryClass": _text(sandbox_manifest.get("entryClass")),
-                "entryFilePath": _text(sandbox_manifest.get("entryFilePath")),
-                "files": candidate_files,
-            },
-            "buildTest": dict(sandbox_build),
-        }
+        return updated_proposal
 
-    def manual_compile_repair_reject(
+    def _persist_manual_compile_rejection(
         self,
-        *,
         run_id: str,
+        workflow_id: str,
+        proposal_id: str,
+        persisted_proposal: JsonObject,
         requester: str,
-        proposal: Mapping[str, JsonValue],
     ) -> JsonObject:
-        if not self.artifact_store.has_run(run_id):
-            raise OrchestratorError("run not found")
-        workflow_id = _text((self.artifact_store.read_summary(run_id) or {}).get("workflowId")) or self.config.workflow_id
-        proposal_id = _text(proposal.get("proposalId"))
-        if not proposal_id:
-            raise OrchestratorError("proposal.proposalId must be a non-empty string")
-        persisted_proposal = self._load_manual_compile_repair_proposal(
-            run_id=run_id,
-            proposal_id=proposal_id,
-        )
-        if (
-            _text(persisted_proposal.get("applicationState")) != "review_pending"
-            or _text(persisted_proposal.get("approvalState")) != "pending"
-        ):
-            raise OrchestratorError("proposal is no longer pending approval")
+        """Write the rejected proposal and rejection record; return the updated proposal."""
         rejected_at = _iso_now()
         updated_proposal: JsonObject = {
             **persisted_proposal,
@@ -3220,6 +3198,75 @@ class W0WorkflowRunner:
                 "patchSha256": _text(persisted_proposal.get("patchSha256")),
             },
             kind=MANUAL_COMPILE_REPAIR_APPROVAL_KIND,
+        )
+        return updated_proposal
+
+    def manual_compile_repair_accept(
+        self,
+        *,
+        run_id: str,
+        requester: str,
+        proposal_id: str,
+        patch_sha256: str,
+    ) -> JsonObject:
+        if not self.artifact_store.has_run(run_id):
+            raise OrchestratorError("run not found")
+        workflow_id, persisted_proposal, expected_patch_sha = self._load_validated_accept_proposal(
+            run_id, proposal_id, patch_sha256,
+        )
+        sandbox_manifest, candidate_files = self._load_manual_compile_project(
+            run_id,
+            manifest_path=f"{MANUAL_COMPILE_REPAIR_DIR}/sandbox-project-manifest.json",
+            file_prefix=f"{MANUAL_COMPILE_REPAIR_DIR}/sandbox",
+        )
+        sandbox_build = self.artifact_store.read_json(
+            run_id,
+            f"{MANUAL_COMPILE_REPAIR_DIR}/sandbox-build-test-result.json",
+        )
+        if not isinstance(sandbox_build, Mapping):
+            raise OrchestratorError("sandbox build/test result is unavailable")
+        updated_proposal = self._persist_manual_compile_acceptance(
+            run_id, workflow_id, proposal_id, persisted_proposal, requester, expected_patch_sha,
+        )
+        return {
+            "schemaVersion": "v0",
+            "runId": run_id,
+            "proposal": updated_proposal,
+            "candidateProject": {
+                "entryClass": _text(sandbox_manifest.get("entryClass")),
+                "entryFilePath": _text(sandbox_manifest.get("entryFilePath")),
+                "files": candidate_files,
+            },
+            "buildTest": dict(sandbox_build),
+        }
+
+    def manual_compile_repair_reject(
+        self,
+        *,
+        run_id: str,
+        requester: str,
+        proposal: Mapping[str, JsonValue],
+    ) -> JsonObject:
+        if not self.artifact_store.has_run(run_id):
+            raise OrchestratorError("run not found")
+        workflow_id = (
+            _text((self.artifact_store.read_summary(run_id) or {}).get("workflowId"))
+            or self.config.workflow_id
+        )
+        proposal_id = _text(proposal.get("proposalId"))
+        if not proposal_id:
+            raise OrchestratorError("proposal.proposalId must be a non-empty string")
+        persisted_proposal = self._load_manual_compile_repair_proposal(
+            run_id=run_id,
+            proposal_id=proposal_id,
+        )
+        if (
+            _text(persisted_proposal.get("applicationState")) != "review_pending"
+            or _text(persisted_proposal.get("approvalState")) != "pending"
+        ):
+            raise OrchestratorError("proposal is no longer pending approval")
+        updated_proposal = self._persist_manual_compile_rejection(
+            run_id, workflow_id, proposal_id, persisted_proposal, requester,
         )
         return {
             "schemaVersion": "v0",
