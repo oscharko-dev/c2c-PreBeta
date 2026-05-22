@@ -964,6 +964,100 @@ describe("Run Panels", () => {
         expect(totalCalls).toBeLessThanOrEqual(3);
       });
     });
+
+    it("renders the previous run's timeline and diagnostics in historical mode after a failed rerun (#358)", () => {
+      useTransformationRunMock.mockReturnValue({
+        state: {
+          ...mockState,
+          phase: "failed",
+          runId: "run-failed-rerun",
+          programId: "PROG-1",
+          buildTest: null,
+          previousRun: {
+            runId: "run-prev",
+            orchestratorRunId: "run-prev-orch",
+            programId: "PROG-1",
+            phase: "completed",
+            summary: null,
+            generated: null,
+            generatedFiles: null,
+            buildTest: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "ok",
+              classification: "match",
+              compileStatus: "ok",
+              executionStatus: "ok",
+              diagnostics: [
+                {
+                  severity: "warning",
+                  code: "PREV-DIAG-1",
+                  filePath: "src/main/java/Prog.java",
+                  line: 12,
+                  message: "Previous run diagnostic carried over.",
+                },
+              ],
+            },
+            evidence: null,
+            events: null,
+            progress: {
+              runId: "run-prev",
+              programId: "PROG-1",
+              mode: "live",
+              productMode: "live",
+              status: "complete",
+              runStatus: "completed",
+              currentStep: null,
+              failedStep: null,
+              completedSteps: ["compile-test-java"],
+              stepCount: 1,
+              steps: [
+                {
+                  stepId: 1,
+                  name: "compile-test-java",
+                  capabilityId: "build-test-runner",
+                  service: "build-test-runner",
+                  actor: "build-test-runner",
+                  status: "ok",
+                  latencyMs: 42,
+                },
+              ],
+            },
+            artifacts: null,
+            experience: null,
+            workflow: null,
+          },
+        },
+        exportParityEvidenceScaffold: exportParityEvidenceScaffoldMock,
+      });
+
+      render(
+        <BuildTestPanel emptyState={{ title: "Empty", message: "Message" }} />,
+      );
+
+      // Stale banner is shown for the failed rerun.
+      expect(
+        screen.getByText(
+          "Latest rerun failed. Showing the previous parity results as stale so the last completed comparison remains accessible.",
+        ),
+      ).toBeDefined();
+
+      // Timeline reflects the previous run's build/test data, not the
+      // failed current run's empty (all-pending) timeline.
+      expect(
+        screen.getAllByText("The generated Java project compiled successfully.")
+          .length,
+      ).toBeGreaterThan(0);
+
+      // Diagnostics tab reflects the previous run's diagnostics.
+      fireEvent.click(screen.getByRole("tab", { name: /Diagnostics/ }));
+      expect(screen.getByText("PREV-DIAG-1")).toBeDefined();
+      expect(
+        screen.getByText("Previous run diagnostic carried over."),
+      ).toBeDefined();
+    });
   });
 
   describe("EquivalencePanel", () => {

@@ -306,13 +306,15 @@ const TransformationRunContext =
 function snapshotHistoricalRun(
   state: TransformationRunState,
 ): HistoricalRunSnapshot | null {
+  // #358: a summary-only state is not snapshot-worthy. startTransform sets
+  // summary synchronously but hydrates artifact views in a detached promise;
+  // snapshotting that window would clobber the last artifact-bearing run.
   if (
     !state.runId ||
     (!state.generated &&
       !state.generatedFiles &&
       !state.buildTest &&
-      !state.evidence &&
-      !state.summary)
+      !state.evidence)
   ) {
     return state.previousRun;
   }

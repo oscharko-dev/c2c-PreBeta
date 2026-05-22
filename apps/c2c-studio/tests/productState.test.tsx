@@ -90,6 +90,7 @@ describe("Product State Derivation", () => {
       modelGatewayHealth: null,
       harnessReady: null,
       workflow: null,
+      previousRun: null,
       ...overrides,
     };
   }

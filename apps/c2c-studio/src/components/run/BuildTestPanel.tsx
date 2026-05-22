@@ -100,8 +100,20 @@ export function BuildTestPanel({
   const isPending =
     !bt && (state.phase === "running" || state.phase === "starting");
   const metadataItems = bt ? getBuildTestMetadataItems(bt) : [];
-  const timelineStages = buildTimelineStages(state);
-  const artifactCandidates = getEvidenceArtifactCandidates(state);
+  // #358: in historical mode every run-keyed read must resolve against the
+  // previous run, not the in-flight/failed current run, or the panel mixes
+  // the previous parity verdict with the current run's empty timeline. A
+  // ``HistoricalRunSnapshot`` is a strict subset of ``TransformationRunState``,
+  // so the spread yields a coherent previous-run view.
+  const displayedRunId = showingHistoricalBuildTest
+    ? (state.previousRun?.runId ?? null)
+    : state.runId;
+  const displayedState =
+    showingHistoricalBuildTest && state.previousRun
+      ? { ...state, ...state.previousRun }
+      : state;
+  const timelineStages = buildTimelineStages(displayedState);
+  const artifactCandidates = getEvidenceArtifactCandidates(displayedState);
   const defaultStageId =
     timelineStages.find(
       (stage) => stage.status === "error" || stage.status === "warning",
@@ -161,7 +173,7 @@ export function BuildTestPanel({
 
   const artifactPath = selectedArtifact?.path;
   const artifactFetchKind = selectedArtifact?.fetchKind;
-  const runId = state.runId;
+  const runId = displayedRunId;
 
   useEffect(() => {
     let cancelled = false;
@@ -245,7 +257,7 @@ export function BuildTestPanel({
   }
 
   const result = describeBuildTestResult(bt, intentionalDivergence);
-  const diagnostics = collectDiagnostics(state);
+  const diagnostics = collectDiagnostics(displayedState);
   const selectedStageIndex = Math.max(
     0,
     timelineStages.findIndex((stage) => stage.id === selectedStage.id),
@@ -351,8 +363,8 @@ export function BuildTestPanel({
           <TrustSummaryCard
             summary={displayedSummary}
             buildTest={bt}
-            evidence={state.evidence}
-            workflow={state.workflow}
+            evidence={displayedState.evidence}
+            workflow={displayedState.workflow}
             selectedTrustCase={selectedTrustCase}
             manualDriftMessage={manualDriftMessage}
             parityEvidenceExport={parityEvidenceExport}

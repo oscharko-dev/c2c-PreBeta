@@ -35,6 +35,7 @@ function makeMinimalState(
     modelGatewayHealth: null,
     harnessReady: null,
     workflow: null,
+    previousRun: null,
     ...overrides,
   };
 }
