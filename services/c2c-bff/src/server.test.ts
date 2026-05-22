@@ -9,6 +9,7 @@ import * as os from "node:os";
 import {
   createApp,
   createJsonlEditorAssistLedgerSink,
+  JAVA_EXECUTION_MAX_FILES,
   type EditorAssistLedgerSink,
 } from "./server";
 import { createRunStore } from "./run-store";
@@ -8146,7 +8147,7 @@ test("POST /api/v0/compile-check returns 503 when build-test-runner returns 5xx"
 });
 
 // ---------------------------------------------------------------------------
-// Studio-IDE-XX (#360): POST /api/v0/manual-compile-repair/*
+// #360: POST /api/v0/manual-compile-repair/*
 // Issue #361 extends this same compatibility lane to generalized
 // manual diagnosis/repair payloads, including runtime/parity failures.
 // ---------------------------------------------------------------------------
@@ -8536,7 +8537,7 @@ test("POST /api/v0/manual-compile-repair routes forward the Studio requester and
 });
 
 // ---------------------------------------------------------------------------
-// Studio-IDE-XX (#360): manual-compile-repair edge-case coverage
+// #360: manual-compile-repair edge-case coverage
 // ---------------------------------------------------------------------------
 
 test("POST /api/v0/manual-compile-repair/diagnose returns 400 when runId is missing", async () => {
@@ -8613,7 +8614,7 @@ test("POST /api/v0/manual-compile-repair/reject returns 200 with valid stub", as
   }
 });
 
-test("POST /api/v0/manual-compile-repair/preview returns 413 when javaFiles exceeds 512 entries", async () => {
+test(`POST /api/v0/manual-compile-repair/preview returns 413 when javaFiles exceeds ${JAVA_EXECUTION_MAX_FILES} entries`, async () => {
   const auth = createRouteAuth();
   const { client: orch } = stubOrchestrator({
     manualCompileRepair: {
@@ -8634,10 +8635,13 @@ test("POST /api/v0/manual-compile-repair/preview returns 413 when javaFiles exce
   });
   const server = await startTestServer(handler);
   try {
-    const javaFiles = Array.from({ length: 513 }, (_, i) => ({
-      path: `src/main/java/com/c2c/generated/File${i}.java`,
-      content: `class File${i} {}`,
-    }));
+    const javaFiles = Array.from(
+      { length: JAVA_EXECUTION_MAX_FILES + 1 },
+      (_, i) => ({
+        path: `src/main/java/com/c2c/generated/File${i}.java`,
+        content: `class File${i} {}`,
+      }),
+    );
     const response = await fetchJson(
       `${server.baseUrl}/api/v0/manual-compile-repair/preview`,
       auth.post({

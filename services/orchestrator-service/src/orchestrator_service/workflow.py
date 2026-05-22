@@ -838,8 +838,8 @@ def _as_reference_payload(ref: DataReference) -> Mapping[str, JsonValue]:
 
 def _as_artifact_metadata_reference_payload(meta: ArtifactMetadata) -> Mapping[str, JsonValue]:
     # ArtifactMetadata uses camelCase fields; DataReference uses snake_case.
-    # This helper exists so that new persist functions (PR #384) do not call
-    # _as_reference_payload with the wrong type.
+    # The two are not interchangeable: _as_reference_payload reads snake_case
+    # and must not be passed an ArtifactMetadata.
     return {
         "uri": meta.uri,
         "sha256": meta.sha256,
