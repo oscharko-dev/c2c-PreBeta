@@ -673,8 +673,14 @@ export function describeManualDriftSummary(
         : "the Generator Baseline";
   const fileLabel = summary.fileCount === 1 ? "file" : "files";
   const regionLabel = summary.regionCount === 1 ? "region" : "regions";
+  const provenanceClause =
+    summary.regionCount === 0
+      ? `${summary.fileCount} ${fileLabel}`
+      : `${summary.fileCount} ${fileLabel} and ${summary.regionCount} ${regionLabel}`;
+  const carryVerb =
+    summary.regionCount === 0 && summary.fileCount === 1 ? "carries" : "carry";
 
-  return `Current Java diverges from ${runLabel}. ${summary.fileCount} ${fileLabel} and ${summary.regionCount} ${regionLabel} carry manual edit provenance, so build/test and evidence are stale until you rerun.`;
+  return `Current Java diverges from ${runLabel}. ${provenanceClause} ${carryVerb} manual edit provenance, so build/test and evidence are stale until you rerun.`;
 }
 
 export function describeClassification(

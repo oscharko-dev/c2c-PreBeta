@@ -230,6 +230,27 @@ class ExtractManualOverlayRegionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _extract_manual_overlay_regions(["not an object"])
 
+    def test_generator_baseline_run_id_over_length_rejected(self) -> None:
+        # #359 finding-4: generatorBaselineRunId must be bounded by the safe-id
+        # pattern (^[A-Za-z0-9._-]{1,128}$). A value exceeding 128 characters
+        # must be rejected.
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(
+                [
+                    _manual_region(generatorBaselineRunId="run-" + "a" * 130),
+                ]
+            )
+
+    def test_generator_baseline_run_id_out_of_charset_rejected(self) -> None:
+        # #359 finding-4: a generatorBaselineRunId containing characters outside
+        # the safe-id charset (e.g. '@') must be rejected.
+        with self.assertRaises(ValueError):
+            _extract_manual_overlay_regions(
+                [
+                    _manual_region(generatorBaselineRunId="run@bad"),
+                ]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

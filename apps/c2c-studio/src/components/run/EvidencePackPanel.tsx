@@ -66,8 +66,9 @@ export function EvidencePackPanel({
     showingHistoricalEvidence && state.previousRun
       ? state.previousRun.summary
       : state.summary;
-  const displayedTrustSummary =
-    displayedSummary?.trustSummary ?? state.workflow?.trustSummary ?? null;
+  const displayedTrustSummary = showingHistoricalEvidence
+    ? (displayedSummary?.trustSummary ?? null)
+    : (displayedSummary?.trustSummary ?? state.workflow?.trustSummary ?? null);
   const intentionalDivergence = isIntentionalDivergenceTrustSummary(
     displayedTrustSummary,
   );
@@ -190,7 +191,7 @@ export function EvidencePackPanel({
                   ? "Displayed Java, build/test, and evidence all reference the same generated artifact."
                   : "Artifact references are not aligned across generated Java, build/test, and evidence."}
             </div>
-            {manualDriftMessage ? (
+            {!showingHistoricalEvidence && manualDriftMessage ? (
               <div className="mb-3 rounded border border-orange/20 bg-orange-soft px-3 py-2 text-xs text-orange">
                 {manualDriftMessage}
               </div>
