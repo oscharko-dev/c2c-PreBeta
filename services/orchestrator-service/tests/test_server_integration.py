@@ -2631,5 +2631,437 @@ class OrchestratorIntegrationTests(unittest.TestCase):
                 orchestrator_server.server_close()
 
 
+    # ------------------------------------------------------------------
+    # Gap A — AC#3/AC#7a: repair-context secret redaction is verified
+    # ------------------------------------------------------------------
+    def test_manual_compile_repair_preview_redacts_secrets_and_excludes_out_of_scope_diagnostics(self):
+        """
+        Mutation caught:
+          - Deleting the _bounded_preview_text call (line ~2227) leaves raw secret in preview.diagnostics[].message.
+          - Deleting the out-of-scope exclusion branch (line ~2219) makes excludedDiagnosticCount stay 0.
+          - Setting redactionsApplied=False would break the redactionsApplied assertion.
+        """
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            # Prior build failure with diagnostics that contain secret-bearing messages
+            # and one out-of-scope diagnostic (filePath not in javaFiles, sourceKind not in {build,test,""})
+            prior_failure_with_secrets = {
+                "schemaVersion": "v0",
+                "status": "failed",
+                "reason": "compile_failed",
+                "runId": "secret-redact-run",
+                "workflowId": "w0-migration-v0",
+                "summary": "compile failed",
+                "diagnostics": [
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        # Bearer regex: r"(?i)bearer\s+[A-Za-z0-9._-]+" fully captures the token value
+                        "message": "cannot resolve symbol; Bearer ghp_AbC123XYZ456",
+                    },
+                    {
+                        "filePath": "src/main/java/com/c2c/generated/CASE01.java",
+                        # password= regex: [^'\"\\s]+ captures until whitespace/quote/backslash/letter-s
+                        # Use a value with no letter 's' so the full secret is captured and redacted
+                        "message": "authentication failure: password=T0k3nV4lu3",
+                    },
+                    {
+                        # out-of-scope: filePath not in javaFiles, sourceKind is "deploy" (not build/test/"")
+                        "filePath": "infra/deploy/config.yaml",
+                        "sourceKind": "deploy",
+                        "message": "deployment config parse error",
+                    },
+                ],
+            }
+            MockHarnessHandler.state = state
+
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            java_path = "src/main/java/com/c2c/generated/CASE01.java"
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {}\n"
+                "}\n"
+            )
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id="secret-redact-run",
+                program_id="CASE01",
+                java_path=java_path,
+                java_source=current_java_source,
+            )
+            runner.artifact_store.write_json(
+                "secret-redact-run",
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(prior_failure_with_secrets),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id="secret-redact-run")
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            preview_body = _request_manual_compile_preview(
+                host,
+                orchestrator_port,
+                run_id="secret-redact-run",
+                entry_file_path=java_path,
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+
+            # Only the two in-scope diagnostics are included
+            preview_diagnostics = preview_body["diagnostics"]
+            self.assertEqual(len(preview_diagnostics), 2)
+
+            # Secret values must NOT appear anywhere in the redacted messages
+            all_messages = " ".join(d["message"] for d in preview_diagnostics)
+            self.assertNotIn("ghp_AbC123XYZ456", all_messages)
+            self.assertNotIn("T0k3nV4lu3", all_messages)
+
+            # Redaction marker must be present, proving _bounded_preview_text ran
+            self.assertIn("<redacted>", all_messages)
+
+            # Exclusion summary must reflect one out-of-scope diagnostic
+            exclusion = preview_body["exclusionSummary"]
+            self.assertTrue(exclusion["redactionsApplied"])
+            self.assertEqual(exclusion["excludedDiagnosticCount"], 1)
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    # ------------------------------------------------------------------
+    # Gap B — AC#6/AC#7d: accept and reject audit-evidence artifact persistence
+    # ------------------------------------------------------------------
+    def test_manual_compile_repair_accept_writes_approval_artifact_to_artifact_store(self):
+        """
+        Mutation caught:
+          - Deleting the write_json call for approval-{proposalId}.json (lines ~2856-2870) makes
+            the read_json assertion fail with None (artifact absent).
+          - Changing the kind constant leaves artifact absent when queried by kind.
+          - Omitting any required field (approvedBy, approvedAt, approvedPatchSha256) raises KeyError.
+        """
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            run_id = "accept-artifact-run"
+            java_path = "src/main/java/com/c2c/generated/CASE01.java"
+            repaired_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {\n"
+                "        System.out.println(\"repaired\");\n"
+                "    }\n"
+                "}\n"
+            )
+            prior_failure = {
+                "schemaVersion": "v0",
+                "status": "failed",
+                "reason": "compile_failed",
+                "runId": run_id,
+                "workflowId": "w0-migration-v0",
+                "summary": "compile failed",
+                "diagnostics": [
+                    {"filePath": java_path, "message": "cannot find symbol"},
+                ],
+            }
+            sandbox_success = {
+                "schemaVersion": "v0",
+                "status": "ok",
+                "runId": run_id,
+                "workflowId": "w0-migration-v0",
+                "programId": "CASE01",
+                "outputRef": {"uri": f"urn:build-output/{run_id}"},
+            }
+            state.build_test_responses = [sandbox_success]
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-accept-artifact-1",
+                    "runId": run_id,
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-accept-artifact-1",
+                        "sha256": "f" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Fixed the issue.",
+                        "files": {java_path: repaired_source},
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": java_path,
+                        "explanation": "Fixed.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.95,
+                    },
+                }
+            ]
+            MockHarnessHandler.state = state
+
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {}\n"
+                "}\n"
+            )
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id=run_id,
+                program_id="CASE01",
+                java_path=java_path,
+                java_source=current_java_source,
+            )
+            runner.artifact_store.write_json(
+                run_id,
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(prior_failure),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id=run_id)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            # Drive: preview → diagnose → apply (sandbox) → accept
+            preview_body = _request_manual_compile_preview(
+                host, orchestrator_port,
+                run_id=run_id,
+                entry_file_path=java_path,
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+            _, diagnose_body = _post_json(
+                host, orchestrator_port,
+                f"/v0/runs/{run_id}/manual-compile-repair/diagnose/request",
+                {"runId": run_id, "previewId": preview_body["previewId"]},
+                self.JSON_AUTH_HEADERS,
+            )
+            proposal = diagnose_body["proposal"]
+            self.assertIsNotNone(proposal)
+
+            sandbox_status, _ = _post_json(
+                host, orchestrator_port,
+                f"/v0/runs/{run_id}/manual-compile-repair/apply/request",
+                {
+                    "runId": run_id,
+                    "previewId": preview_body["previewId"],
+                    "proposalId": proposal["proposalId"],
+                    "patchSha256": proposal["patchSha256"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(sandbox_status, 200)
+
+            accept_status, accept_body = _post_json(
+                host, orchestrator_port,
+                f"/v0/runs/{run_id}/manual-compile-repair/accept/request",
+                {
+                    "runId": run_id,
+                    "proposalId": proposal["proposalId"],
+                    "patchSha256": proposal["patchSha256"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(accept_status, 200)
+
+            # Read the approval artifact back from the artifact store directly
+            proposal_id = proposal["proposalId"]
+            approval_artifact = runner.artifact_store.read_json(
+                run_id,
+                f"manual-compile-repair/approval-{proposal_id}.json",
+            )
+
+            self.assertIsNotNone(approval_artifact, "approval artifact must exist on disk after accept")
+            self.assertEqual(approval_artifact["proposalId"], proposal_id)
+            self.assertEqual(approval_artifact["runId"], run_id)
+            self.assertIn("approvedBy", approval_artifact)
+            self.assertIn("approvedAt", approval_artifact)
+            self.assertEqual(approval_artifact["approvedPatchSha256"], proposal["patchSha256"])
+
+            # Verify kind is correct so evidence queries can locate it
+            approval_meta = runner.artifact_store.find_by_kind(run_id, "manual-compile-repair-approval")
+            artifact_paths = [m["path"] for m in approval_meta]
+            self.assertIn(
+                f"manual-compile-repair/approval-{proposal_id}.json",
+                artifact_paths,
+            )
+
+            # HTTP response shape also reflects the approval
+            self.assertEqual(accept_body["proposal"]["approvalState"], "approved")
+            self.assertEqual(accept_body["proposal"]["applicationState"], "applied")
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+    def test_manual_compile_repair_reject_writes_rejection_artifact_to_artifact_store(self):
+        """
+        Mutation caught:
+          - Deleting the write_json call for approval-{proposalId}.json in reject (lines ~2918-2931) makes
+            the read_json assertion fail with None.
+          - Omitting `decision` field leaves the decision != "rejected" assertion failing.
+          - Omitting rejectedBy/rejectedAt/patchSha256 raises KeyError.
+        """
+        mock_server, mock_port, _ = _start_server(MockHarnessHandler)
+        orchestrator_server: HTTPServer | None = None
+        try:
+            host = "127.0.0.1"
+            state = MockHarnessState(host=host, port=mock_port)
+            run_id = "reject-artifact-run"
+            java_path = "src/main/java/com/c2c/generated/CASE01.java"
+            state.model_gateway_responses = [
+                {
+                    "invocationId": "mg-reject-artifact-1",
+                    "runId": run_id,
+                    "modelId": "gpt-oss-120b",
+                    "provider": "foundry-development",
+                    "policyDecision": "policy allow",
+                    "agentRole": "verification-repair",
+                    "promptTemplateVersion": "v0",
+                    "status": "completed",
+                    "ledgerRef": {
+                        "uri": "urn:model-gateway/inv-reject-artifact-1",
+                        "sha256": "e" * 64,
+                        "byteSize": 256,
+                    },
+                    "output": {
+                        "decision": "propose_candidate",
+                        "rationale": "Proposed fix.",
+                        "files": {
+                            java_path: (
+                                "package com.c2c.generated;\n"
+                                "public class CASE01 {\n"
+                                "    public static void main(String[] args) {\n"
+                                "        System.out.println(\"proposed\");\n"
+                                "    }\n"
+                                "}\n"
+                            )
+                        },
+                        "entryClass": "CASE01",
+                        "entryPackage": "com.c2c.generated",
+                        "entryFilePath": java_path,
+                        "explanation": "Proposed.",
+                        "unsupportedConstructs": [],
+                        "confidence": 0.75,
+                    },
+                }
+            ]
+            prior_failure = {
+                "schemaVersion": "v0",
+                "status": "failed",
+                "reason": "compile_failed",
+                "runId": run_id,
+                "workflowId": "w0-migration-v0",
+                "summary": "compile failed",
+                "diagnostics": [
+                    {"filePath": java_path, "message": "cannot find symbol"},
+                ],
+            }
+            MockHarnessHandler.state = state
+
+            orchestrator_server, runner = self._create_orchestrator(host, mock_port)
+            # Broken source — differs from the proposed repaired source so proposal_files is non-empty
+            current_java_source = (
+                "package com.c2c.generated;\n"
+                "public class CASE01 {\n"
+                "    public static void main(String[] args) {}\n"
+                "}\n"
+            )
+            _seed_manual_compile_repair_run(
+                runner,
+                run_id=run_id,
+                program_id="CASE01",
+                java_path=java_path,
+                java_source=current_java_source,
+            )
+            runner.artifact_store.write_json(
+                run_id,
+                "w0-migration-v0",
+                "build-test-result.json",
+                dict(prior_failure),
+                kind=KIND_BUILD_TEST_RESULT,
+            )
+            _stub_manual_compile_repair_artifact_refs(runner, run_id=run_id)
+            orchestrator_port = orchestrator_server.server_port
+            threading.Thread(target=orchestrator_server.serve_forever, daemon=True).start()
+
+            # Drive: preview → diagnose → reject (proposal is review_pending after diagnose)
+            preview_body = _request_manual_compile_preview(
+                host, orchestrator_port,
+                run_id=run_id,
+                entry_file_path=java_path,
+                java_source=current_java_source,
+                headers=self.JSON_AUTH_HEADERS,
+            )
+            _, diagnose_body = _post_json(
+                host, orchestrator_port,
+                f"/v0/runs/{run_id}/manual-compile-repair/diagnose/request",
+                {"runId": run_id, "previewId": preview_body["previewId"]},
+                self.JSON_AUTH_HEADERS,
+            )
+            proposal = diagnose_body["proposal"]
+            self.assertIsNotNone(proposal)
+
+            reject_status, reject_body = _post_json(
+                host, orchestrator_port,
+                f"/v0/runs/{run_id}/manual-compile-repair/reject/request",
+                {
+                    "runId": run_id,
+                    "proposalId": proposal["proposalId"],
+                },
+                self.JSON_AUTH_HEADERS,
+            )
+            self.assertEqual(reject_status, 200)
+
+            # Read the rejection artifact back from the artifact store directly
+            proposal_id = proposal["proposalId"]
+            rejection_artifact = runner.artifact_store.read_json(
+                run_id,
+                f"manual-compile-repair/approval-{proposal_id}.json",
+            )
+
+            self.assertIsNotNone(rejection_artifact, "rejection artifact must exist on disk after reject")
+            self.assertEqual(rejection_artifact["decision"], "rejected")
+            self.assertEqual(rejection_artifact["proposalId"], proposal_id)
+            self.assertEqual(rejection_artifact["runId"], run_id)
+            self.assertIn("rejectedBy", rejection_artifact)
+            self.assertIn("rejectedAt", rejection_artifact)
+            self.assertEqual(rejection_artifact["patchSha256"], proposal["patchSha256"])
+
+            # Verify kind tagging for evidence queries
+            rejection_meta = runner.artifact_store.find_by_kind(run_id, "manual-compile-repair-approval")
+            artifact_paths = [m["path"] for m in rejection_meta]
+            self.assertIn(
+                f"manual-compile-repair/approval-{proposal_id}.json",
+                artifact_paths,
+            )
+
+            # HTTP response shape also reflects the rejection
+            self.assertEqual(reject_body["proposal"]["approvalState"], "rejected")
+            self.assertEqual(reject_body["proposal"]["applicationState"], "rejected")
+        finally:
+            mock_server.shutdown()
+            mock_server.server_close()
+            if orchestrator_server is not None:
+                orchestrator_server.shutdown()
+                orchestrator_server.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()
