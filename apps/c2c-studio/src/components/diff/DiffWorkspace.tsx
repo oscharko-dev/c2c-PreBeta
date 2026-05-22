@@ -54,7 +54,7 @@ export interface DiffWorkspaceProps {
    * COBOL snapshots keyed by runId for this ``sourceKey``. DiffWorkspace
    * resolves the previous/current COBOL pair by looking up the runIds
    * present in ``javaHistory`` so the two diff panes always render the
-   * SAME run pair (Copilot review #282 — failed runs between successes
+   * SAME run pair (#282 — failed runs between successes
    * must not desync the panes).
    */
   cobolSnapshotsByRun: Record<string, CobolSnapshot> | undefined;
@@ -291,7 +291,7 @@ function DiffWorkspaceBody({
       "DiffWorkspaceBody invariant: previousJava must be populated",
     );
   }
-  // Studio-IDE-7 review-finding (Copilot, PR #282): pair the COBOL
+  // Studio-IDE-7 review-finding (PR #282): pair the COBOL
   // snapshots by the Java runIds rather than maintaining a separate
   // previous/current sliding window. If a failed run sits between the
   // two displayed runs the lookup naturally skips it instead of
@@ -467,7 +467,7 @@ function DiffWorkspaceBody({
   const handleJavaMount = useCallback(
     ({ editor, monaco }: DiffEditorMountArgs) => {
       javaDiffRef.current = editor;
-      // Studio-IDE-7 review-finding (Copilot, PR #282): F7 / Shift+F7
+      // Studio-IDE-7 review-finding (PR #282): F7 / Shift+F7
       // must work regardless of which side of the diff has focus. We
       // register the same commands on BOTH underlying editors so a
       // user-focused original (left) pane still cycles hunks.
@@ -499,7 +499,7 @@ function DiffWorkspaceBody({
       const onFocus = () => setFocusSide("cobol");
       trackDiffDisposable(modified.onDidFocusEditorWidget(onFocus));
       trackDiffDisposable(original.onDidFocusEditorWidget(onFocus));
-      // Studio-IDE-7 review-finding (Copilot, PR #282): bind on both
+      // Studio-IDE-7 review-finding (PR #282): bind on both
       // sides — see corresponding note in ``handleJavaMount``.
       const goNext = () => jumpToHunk({ editor }, "next");
       const goPrev = () => jumpToHunk({ editor }, "prev");

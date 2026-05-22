@@ -36,7 +36,6 @@ Describe the changes made in this PR and the user, developer, platform, or gover
 
 ## Review Settlement
 
-- [ ] Expected automated GitHub Copilot/Codex reviews completed or a clear blocker is documented.
 - [ ] All actionable review findings are fixed or explicitly dispositioned.
 - [ ] No unresolved actionable review threads remain.
 - [ ] Checks and review settlement were repeated after the latest pushed fixes.

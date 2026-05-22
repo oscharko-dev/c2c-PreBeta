@@ -98,7 +98,7 @@ describe("recordCobolByRun", () => {
   });
 
   it("retains all run-keyed entries (so consumers can look up by either Java runId)", () => {
-    // Studio-IDE-7 review-finding (Copilot, PR #282): the COBOL pane must
+    // Studio-IDE-7 review-finding (PR #282): the COBOL pane must
     // remain consistent with the Java pane even when a failed run sits
     // between two successful runs. Keying by runId guarantees the
     // selectors stay aligned.

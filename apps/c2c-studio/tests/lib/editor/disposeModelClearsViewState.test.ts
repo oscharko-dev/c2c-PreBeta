@@ -64,7 +64,7 @@ function createMockMonaco(): MonacoLifecycleSurface {
   };
 }
 
-describe("disposeModel <-> view-state lifecycle symmetry (#258 Copilot review)", () => {
+describe("disposeModel <-> view-state lifecycle symmetry (#258)", () => {
   beforeEach(() => {
     __resetLifecycleForTests();
   });

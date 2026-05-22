@@ -43,7 +43,7 @@ Describe the goal of this issue and the user, developer, platform, or governance
 
 ## Review Settlement and Formal Issue Completion
 
-- [ ] The implementation PR waits for required GitHub checks and expected automated GitHub Copilot/Codex reviews before merge.
+- [ ] The implementation PR waits for required GitHub checks before merge.
 - [ ] All actionable review findings are fixed or explicitly dispositioned in the PR before merge.
 - [ ] Acceptance Criteria and Expected Verification checkboxes are updated only when evidence exists.
 - [ ] Required documentation, PR evidence, issue comments, migration notes, screenshots, logs, or follow-up issues are completed when requested by this issue.

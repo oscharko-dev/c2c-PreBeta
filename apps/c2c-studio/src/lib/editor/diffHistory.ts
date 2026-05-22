@@ -16,7 +16,7 @@
 // ``cobolSnapshotsByRun[javaHistory.current.runId]`` so the two panes
 // always reference the SAME run pair. Without this, a failed run between
 // two successes would shift the COBOL slot but not the Java slot, leaving
-// the displayed cause/effect pair mismatched (Copilot review #282).
+// the displayed cause/effect pair mismatched (#282).
 //
 // Semantics:
 //   - The first Java snapshot for a (sourceKey, filePath) becomes
