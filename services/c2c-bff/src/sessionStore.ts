@@ -27,6 +27,8 @@
 
 import { randomBytes } from "node:crypto";
 
+import { TRUST_CASE_ID_PATTERN } from "./trust-cases";
+
 // Length of the cryptographically random ``draftKeyWrappingSecret``.
 // ADR 0005 §2 specifies 32 bytes; the HKDF-SHA-256 input keying
 // material is at least that wide to give the derived AES-GCM key the
@@ -269,6 +271,15 @@ export function createSessionStore(
         trustCaseId.length === 0
       ) {
         return null;
+      }
+      // Write-boundary allow-list: the read path resolves preferences
+      // against the catalog, but an unguarded write would let a malformed
+      // id be persisted and surfaced later. Reject anything outside the
+      // trust-case id pattern loudly.
+      if (!TRUST_CASE_ID_PATTERN.test(trustCaseId)) {
+        throw new SessionIdentifierError(
+          "trustCaseId must match the trust-case identifier pattern",
+        );
       }
       record.trustCasePreferences[programId] = trustCaseId;
       return record;

@@ -132,6 +132,27 @@ function hasTrustCaseIdentityFields(payload: Record<string, unknown>): boolean {
   );
 }
 
+// The workflow envelope serializes the BFF ``TrustCaseSnapshot`` shape with
+// un-prefixed, always-present string fields. Validating the actual wire names
+// keeps this guard meaningful — the prefixed ``hasTrustCaseIdentityFields``
+// check only applies to ``RunSummary``-style payloads.
+function isTrustCaseWorkflowSnapshotPayload(
+  payload: unknown,
+): payload is RunWorkflowView["trustCase"] {
+  return (
+    isRecord(payload) &&
+    isString(payload.trustCaseId) &&
+    isString(payload.version) &&
+    isString(payload.catalogVersion) &&
+    isString(payload.catalogHash) &&
+    isString(payload.configurationDigest) &&
+    isString(payload.sourceReferenceFixtureId) &&
+    isString(payload.sourceReferenceMode) &&
+    isString(payload.environmentProfileId) &&
+    isString(payload.comparisonPolicyVersion)
+  );
+}
+
 function isTrustCaseSummary(payload: unknown): payload is TrustCaseSummary {
   return (
     isRecord(payload) &&
@@ -1428,8 +1449,7 @@ function isRunWorkflowViewPayload(
     (payload.activeAgent === null || isW02ActiveAgent(payload.activeAgent)) &&
     (payload.trustCase === undefined ||
       payload.trustCase === null ||
-      (isRecord(payload.trustCase) &&
-        hasTrustCaseIdentityFields(payload.trustCase))) &&
+      isTrustCaseWorkflowSnapshotPayload(payload.trustCase)) &&
     isNonNegativeInteger(payload.agentAttemptCount) &&
     (payload.repairBudget === null ||
       isRepairBudgetPayload(payload.repairBudget)) &&

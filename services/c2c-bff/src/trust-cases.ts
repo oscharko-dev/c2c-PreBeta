@@ -98,7 +98,7 @@ export interface TrustCaseCatalog {
   defaultForProgram(programId: string): TrustCaseSummary | undefined;
 }
 
-const TRUST_CASE_ID_PATTERN = /^[A-Z][A-Z0-9-]{1,63}$/u;
+export const TRUST_CASE_ID_PATTERN = /^[A-Z][A-Z0-9-]{1,63}$/u;
 const SAFE_VERSION_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/u;
 const SAFE_PROFILE_VARIABLE_KEY = /^[A-Z][A-Z0-9_]{0,63}$/u;
 const SAFE_PROFILE_VARIABLE_VALUE = /^[A-Za-z0-9._:/=+\-]{0,256}$/u;
