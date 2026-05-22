@@ -23,13 +23,20 @@ truth. Architectural decision context lives in
   only.
 - Repair proposals require explicit developer approval before application, and
   the approval is bound to the authenticated identity of the run owner as well
-  as to the exact patch payload hash that Studio rendered.
+  as to the exact patch payload hash that Studio rendered, the immutable
+  generated-Java candidate identity, and the base-revision digest/ref that
+  Studio rendered.
 - Parity and repair trigger endpoints exposed through the BFF are reachable
   only through an authenticated session; the authenticated identity of that
   session becomes the run owner, and unauthenticated callers are rejected
   before Orchestrator dispatch.
-- Evidence captures the mode labels, approvals, approver identity, outputs,
-  hashes, diagnostics, comparisons, and provenance needed for audit.
+- All run-scoped read, control, and export endpoints exposed through the BFF
+  must authorize against the same authenticated tenant/run-owner context
+  captured at trigger time and reject before any artifact resolution or
+  download is attempted.
+- Evidence captures the mode labels, approvals, approver identity, reviewed
+  candidate/base-revision identity, outputs, hashes, diagnostics,
+  comparisons, and provenance needed for audit.
 - The Orchestrator projects deterministic comparison lineage from the Java
   runner output into additive contract surfaces rather than recomputing
   parity independently.
@@ -86,9 +93,10 @@ capture, and completion as recorded progress phases for polling consumers.
 control/read path; it must not become a browser-authored runtime configuration
 surface for the Studio parity launcher.
 
-For Issue #354 consumers must treat the Java runner payload as the comparison
-source of truth. The Orchestrator may persist or relay additive projection
-objects such as workflow-contract `parityComparison` and evidence
+Consumers must treat the Java runner payload as the authoritative comparison
+artifact lineage for projections. The Orchestrator remains the workflow and
+parity authority; it may persist or relay additive projection objects such as
+workflow-contract `parityComparison` and evidence
 `artifacts.parityComparison`, but those surfaces only re-express the runner's
 comparison policy/version, execution/comparison result refs, and diff refs.
 
@@ -102,10 +110,14 @@ The repair loop begins only after deterministic failure detection:
 4. Studio renders the patch proposal in a developer-reviewable sandbox.
 5. The developer approves or rejects the proposal explicitly.
 6. Approval captures the exact patch payload hash that Studio rendered for
-   review and the authenticated identity of the approving developer; the
-   approving identity must match the run owner.
-7. Only an approved patch whose payload matches the recorded approval hash and
-   whose approving identity matches the run owner may be applied.
+   review, the immutable generated-Java candidate identity and base-revision
+   digest/ref that Studio rendered, and the authenticated identity of the
+   approving developer; the approving identity must match the run owner.
+7. Only an approved patch whose payload matches the recorded approval hash,
+   whose reviewed candidate/base-revision identity matches the recorded
+   immutable
+   candidate identity and base-revision digest/ref, and whose approving
+   identity matches the run owner may be applied.
 8. Repair application is limited to the generated Java candidate and its
    reviewable patch artifact. It must not modify reference fixtures,
    comparison/normalization logic, evidence logic, or policy surfaces.
@@ -201,6 +213,10 @@ The export contract is intentionally conservative:
   gate Evidence storage before they are made available for download; any value
   rejected by those checks must be excluded or replaced with a redacted
   content-addressed reference.
+- Browser-facing diagnostics, diffs, patch previews, and artifact previews
+  must apply the same secret, credential, and path redaction policy before
+  rendering, and they should prefer content-addressed references when raw
+  payloads are unnecessary.
 - Generated scaffold paths must avoid overwriting developer-maintained tests
   unless the developer later promotes the scaffold deliberately.
 
@@ -262,8 +278,9 @@ The first trust workflow must preserve at least these evidence classes:
   comparison, and diff references;
 - mode labels presented to the developer;
 - repair proposal metadata, the approved patch payload hash, the authenticated
-  identity of the approving developer, approval or rejection decision, and any
-  applied patch provenance;
+  identity of the approving developer, the reviewed generated-Java candidate
+  identity and base-revision digest/ref, approval or rejection decision, and
+  any applied patch provenance;
 - final run classification and any evidence completeness warnings.
 
 ## Evidence Storage Boundary
@@ -278,7 +295,7 @@ required for audit, replay, or deterministic verification:
 | Deterministic artifacts | source COBOL references, input fixture references, reference artifact references, generated Java candidate references, build/test result references, runtime version references, harness event references, trajectory ledger references, and unsupported-feature references                                        |
 | Comparison results      | normalized comparison outputs, parity status, oracle comparison references, workflow/evidence `parityComparison` projections, comparison policy version/reference, execution/comparison result refs, diff refs, matched/mismatched outcome, and the hashes or byte sizes needed to verify the referenced artifacts |
 | Assist lineage          | `assistDecision` outcome, reason code, selected agent role, decision timestamp, budget snapshots, and affected artifact references                                                                                                                                                                                 |
-| Repair lineage          | `repairAttempts` metadata, decision refs, model invocation refs, approved patch payload hash, approving developer identity, approval or rejection decision, and applied patch provenance                                                                                                                           |
+| Repair lineage          | `repairAttempts` metadata, decision refs, model invocation refs, approved patch payload hash, reviewed generated-Java candidate identity, reviewed base-revision digest/ref, approving developer identity, approval or rejection decision, and applied patch provenance                                     |
 | Manual-edit provenance  | `manualEditsCarriedOver`, `manualDriftRegionCount`, and the `manualEditOverlay` reference when manual edits are present                                                                                                                                                                                            |
 | Governance context      | open assumptions that are safe to retain, validation summaries, and other non-secret audit metadata that can be represented as references or bounded text                                                                                                                                                          |
 
@@ -309,12 +326,17 @@ promoted to a release-gated workflow.
 
 - productive model calls go through the Model Gateway only;
 - repair proposals remain reviewable and are not applied automatically;
+- browser-facing diagnostics, diffs, patch previews, and artifact previews
+  must apply the same secret, credential, and path redaction policy before
+  rendering, and they should prefer content-addressed references when raw
+  payloads are unnecessary;
 - generated Java build and execution stay inside controlled product execution
   substrates;
 - generated or repaired Java executes in an isolated runner contract enforced
-  by the Harness with no outbound network by default, no secret-bearing
-  environment variables, least-privilege filesystem access, and no direct write
-  path into evidence storage;
+  by the Harness with no outbound network access for the W0 trust slice unless
+  a later ADR or contract explicitly changes that requirement, no
+  secret-bearing environment variables, least-privilege filesystem access, and
+  no direct write path into evidence storage;
 - the isolated runner enforces a bounded resource envelope, which the Harness
   runner contract expresses as separately measured caps: a maximum wall-clock
   duration, a maximum resident set size (RSS) for the runner process, a
@@ -323,12 +345,18 @@ promoted to a release-gated workflow.
   generated Java program from exhausting runner capacity or evidence storage,
   and the concrete cap values are versioned alongside the comparison policy;
 - parity and repair trigger endpoints exposed through the BFF require an
-  authenticated session; unauthenticated callers must be rejected before any
-  Orchestrator work is dispatched;
+  authenticated session whose identity binds the run owner; unauthenticated
+  callers must be rejected before any Orchestrator work is dispatched;
+- all run-scoped read, control, and export endpoints exposed through the BFF
+  must authorize against the same authenticated tenant/run-owner context
+  captured at trigger time and reject before any artifact resolution or
+  download is attempted;
 - repair approvals are bound to the exact patch payload hash that Studio
-  reviewed and to the authenticated identity of the approving developer; the
-  approving identity must match the run owner, and apply must reject either a
-  non-matching patch hash or a non-matching approving identity;
+  reviewed, to the immutable generated-Java candidate identity and
+  base-revision digest/ref that Studio reviewed, and to the authenticated
+  identity of the approving developer; the approving identity must match the
+  run owner, and apply must reject any patch hash mismatch, any candidate or
+  base-revision drift, or any non-matching approving identity;
 - repair scope is limited to the generated Java candidate and may not alter
   reference artifacts, comparison logic, evidence logic, or policy surfaces;
 - policy, redaction, and approval metadata are preserved in the evidence path;
