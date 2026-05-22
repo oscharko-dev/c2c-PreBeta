@@ -6610,13 +6610,15 @@ export function createApp(deps: ServerDeps): http.RequestListener {
       const evidenceExportMatch =
         /^\/api\/v0\/runs\/([^\/]+)\/evidence\/export$/.exec(pathname);
       if (evidenceExportMatch && method === "POST") {
-        let body: unknown;
-        try {
-          body = await readJsonBody(req, config.transformSourceMaxBytes);
-        } catch (err) {
-          jsonResponse(res, 400, {
-            error: err instanceof Error ? err.message : "Invalid JSON body.",
-          });
+        if (
+          rejectUnauthenticatedStudioJsonRequest({
+            req,
+            res,
+            allowedOrigins: config.studioCorsOrigins,
+            sessionStore,
+            forceSecureSessionCookies: config.forceSecureSessionCookies,
+          })
+        ) {
           return;
         }
         const runId = decodeURIComponent(evidenceExportMatch[1] ?? "");
@@ -6639,10 +6641,36 @@ export function createApp(deps: ServerDeps): http.RequestListener {
           });
           return;
         }
+        const authSession = resolveEditorAssistSession(
+          req,
+          res,
+          sessionStore,
+          config.forceSecureSessionCookies,
+        );
+        if (!authSession.ok) {
+          jsonResponse(res, 401, { error: authSession.message });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJsonBody(req, config.transformSourceMaxBytes);
+        } catch (err) {
+          jsonResponse(res, 400, {
+            error: err instanceof Error ? err.message : "Invalid JSON body.",
+          });
+          return;
+        }
+        const exportName = asString(asRecord(body)?.exportName);
+        const exportRequest: Record<string, unknown> = {
+          requester: `studio:${authSession.record.tenantId}:${authSession.record.userId}`,
+        };
+        if (exportName) {
+          exportRequest.exportName = exportName;
+        }
         try {
           const upstream = await orchestrator.exportParityRegression?.(
             liveRunId,
-            body ?? {},
+            exportRequest,
           );
           if (!upstream) {
             jsonResponse(res, 503, {

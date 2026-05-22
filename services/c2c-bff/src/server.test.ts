@@ -2959,9 +2959,53 @@ test("POST /api/v0/runs/:runId/evidence/export proxies the orchestrator export r
     assert.deepEqual(calls.exportParityRegression, [
       {
         runId: "live-run-1",
-        payload: { exportName: "hello-regression" },
+        payload: {
+          requester: "studio:tenant-a:user-a",
+          exportName: "hello-regression",
+        },
       },
     ]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/v0/runs/:runId/evidence/export rejects unauthenticated requests", async () => {
+  const samples = stubSamples([FIXED_SAMPLE]);
+  const runStore = createRunStore();
+  const auth = createRouteAuth();
+  const { client: orch, calls } = stubOrchestrator({
+    exportParityRegression: {
+      status: 200,
+      body: { runId: "live-run-1", status: "created", export: {} },
+    },
+  });
+  const handler = createApp({
+    config: { ...baseConfig, orchestratorUrl: "http://upstream" },
+    samples,
+    orchestrator: orch,
+    evidence: liveEvidence(),
+    runStore,
+    sessionStore: auth.sessionStore,
+  });
+  const server = await startTestServer(handler);
+  try {
+    const started = await fetchJson(`${server.baseUrl}/api/v0/runs`, {
+      method: "POST",
+      headers: auth.headers,
+      body: { programId: "BRNCH01" },
+    });
+    const startedBody = started.body as { runId: string };
+    const exported = await fetchJson(
+      `${server.baseUrl}/api/v0/runs/${startedBody.runId}/evidence/export`,
+      {
+        method: "POST",
+        headers: { origin: "http://127.0.0.1:3000" },
+        body: { exportName: "hello-regression" },
+      },
+    );
+    assert.equal(exported.status, 401);
+    assert.deepEqual(calls.exportParityRegression, []);
   } finally {
     await server.close();
   }

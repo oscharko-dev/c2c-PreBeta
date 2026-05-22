@@ -1426,6 +1426,10 @@ class W0WorkflowRunner:
             )
             if marker is None:
                 return root, export_slug
+            if attempt >= 100:
+                raise OrchestratorError(
+                    "export blocked: too many conflicting export slugs for this run"
+                )
             attempt += 1
 
     @staticmethod
@@ -1703,7 +1707,7 @@ class W0WorkflowRunner:
             effective_trust_state = "parity_passed"
         qualification = "clean"
         warning_codes = trust_summary.get("warningCodes")
-        if evidence_status == "stale" and trust_state != "blocked":
+        if evidence_status == "stale":
             qualification = "stale_evidence"
         elif _text(trust_summary.get("repairStatus")) == "repair_verified":
             qualification = "repair_verified"
@@ -1738,7 +1742,6 @@ class W0WorkflowRunner:
         )
 
         generated_at = _iso_now()
-        program_id = _text(trust_summary.get("trustCase", {}).get("trustCaseId")) if isinstance(trust_summary.get("trustCase"), Mapping) else ""
         program_key = _text((self.artifact_store.read_summary(run_id) or {}).get("programId")) or class_name
         project_root, export_slug = self._reserve_parity_export_root(
             run_id,
