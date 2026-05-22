@@ -102,11 +102,14 @@ contract for the first supported repair loop is:
 4. Studio shows the failure class, the proposed patch, and the patch context in
    a reviewable sandbox.
 5. The developer explicitly approves or rejects the patch proposal.
-6. Approval records the exact patch payload hash that was reviewed and the
-   authenticated identity of the approving developer; the approving identity
-   must match the run owner.
-7. Only an approved patch whose payload matches the recorded approval hash and
-   whose approving identity matches the run owner may be applied.
+6. Approval records the exact patch payload hash that was reviewed, the
+   immutable generated-Java candidate identity and base-revision digest/ref
+   that were reviewed, and the authenticated identity of the approving
+   developer; the approving identity must match the run owner.
+7. Only an approved patch whose payload matches the recorded approval hash,
+   whose reviewed candidate/base revision matches the recorded immutable
+   candidate identity and base-revision digest/ref, and whose approving
+   identity matches the run owner may be applied.
 8. Repair application is limited to the generated Java candidate and its
    reviewable patch artifact. It must not modify reference fixtures, comparison
    logic, evidence wiring, policy code, or other trust-governing surfaces.
@@ -159,28 +162,37 @@ identity binding:
 - all productive model calls go through the Model Gateway;
 - model-bound context is previewable, policy-controlled, and redacted before
   invocation where required by existing ADRs;
+- browser-facing diagnostics, diffs, patch previews, and artifact previews
+  must apply the same secret, credential, and path redaction policy before
+  rendering, and they should prefer content-addressed references when raw
+  payloads are unnecessary;
 - generated Java build and execution happen only in controlled product
   substrates;
 - repair proposals are isolated to a sandboxed review/apply flow;
 - repair approvals are bound to the exact patch payload hash that Studio
-  reviewed and to the authenticated identity of the approving developer; the
-  approving identity must match the run owner, and apply must reject either a
-  non-matching patch hash or a non-matching approving identity;
+  reviewed, to the immutable generated-Java candidate identity and
+  base-revision digest/ref that Studio reviewed, and to the authenticated
+  identity of the approving developer; the approving identity must match the
+  run owner, and apply must reject any patch hash mismatch, any candidate or
+  base-revision drift, or any non-matching approving identity;
 - repair scope is limited to the generated Java candidate and may not alter
   reference artifacts, comparison logic, evidence logic, or policy surfaces;
-- runner isolation is Harness-enforced with no outbound network by default, no
-  secret-bearing environment variables, least-privilege filesystem access, no
-  direct write path into evidence storage, and a bounded runner resource
-  envelope expressed as separately measured caps: a maximum wall-clock
-  duration, a maximum resident set size (RSS) for the runner process, a
-  maximum JVM heap size for the generated-Java process, and a bounded
-  stdout/stderr capture, so that a malformed or adversarial generated Java
-  program cannot exhaust runner capacity or evidence storage;
-- parity and repair trigger endpoints exposed through the BFF require an
-  authenticated session whose identity binds the run owner; unauthenticated
-  callers must be rejected before any Orchestrator work is dispatched;
-- evidence records capture approvals, patch provenance, the approving identity,
-  and the mode labels used for the run;
+- runner isolation is Harness-enforced with no outbound network access for the
+  W0 trust slice unless a later ADR or contract explicitly changes that
+  requirement, no secret-bearing environment variables, least-privilege
+  filesystem access, no direct write path into evidence storage, and a
+  bounded runner resource envelope expressed as separately measured caps: a
+  maximum wall-clock duration, a maximum resident set size (RSS) for the
+  runner process, a maximum JVM heap size for the generated-Java process, and
+  a bounded stdout/stderr capture, so that a malformed or adversarial
+  generated Java program cannot exhaust runner capacity or evidence storage;
+- all run-scoped read, control, and export endpoints exposed through the BFF
+  must authorize against the same authenticated tenant/run-owner context
+  captured at trigger time and reject before any artifact resolution or
+  download is attempted;
+- evidence records capture approvals, patch provenance, the approving
+  identity, the reviewed generated-Java candidate identity and base-revision
+  digest/ref, and the mode labels used for the run;
 - deterministic results remain the authority even when a model explanation or
   repair proposal is present.
 
