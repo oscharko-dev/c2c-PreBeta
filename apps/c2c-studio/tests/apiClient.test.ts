@@ -329,6 +329,16 @@ describe("apiClient", () => {
       ok: false,
       details: { kind: "contract" },
     });
+    expect(fetch).toHaveBeenCalledWith("/api/v0/transform", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceText: "      IDENTIFICATION DIVISION.",
+        programId: "P1",
+        sourceName: "sample.cbl",
+      }),
+    });
   });
 
   it("rejects malformed run payloads with invalid status values", async () => {

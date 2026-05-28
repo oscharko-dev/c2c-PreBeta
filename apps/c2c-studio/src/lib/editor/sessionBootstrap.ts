@@ -67,6 +67,7 @@ export class SessionBootstrapError extends Error {
 }
 
 const BOOTSTRAP_PATH = "/api/v0/session/bootstrap";
+const SIGN_IN_PATH = "/api/v0/session/sign-in";
 
 // Identifier validator — same allow-list the BFF enforces. Repeating
 // it here lets the Studio reject a malformed response without an
@@ -122,6 +123,25 @@ export function clearSessionBootstrap(): void {
   activeDeps = null;
 }
 
+export async function ensureSessionBootstrap(
+  deps: SessionBootstrapDeps = {},
+): Promise<SessionBootstrap> {
+  try {
+    return await getSessionBootstrap(deps);
+  } catch (cause) {
+    if (
+      !(cause instanceof SessionBootstrapError) ||
+      cause.kind !== "Unauthenticated"
+    ) {
+      throw cause;
+    }
+  }
+
+  await signInForBootstrap(deps);
+  clearSessionBootstrap();
+  return getSessionBootstrap(deps);
+}
+
 // Tests reset module-private state directly via this helper rather
 // than poking at the cache through `clearSessionBootstrap`, so a
 // future refactor that adds more module-private fields stays
@@ -148,21 +168,7 @@ async function fetchBootstrap(
       "fetch is not available in this environment",
     );
   }
-  let baseUrl = deps.baseUrl;
-  if (baseUrl === undefined) {
-    // Lazy import so test environments that mock the apiBaseUrl
-    // module pick up the mock; ``test.fetch`` overrides skip this
-    // path entirely.
-    const { resolveApiBaseUrl } = await import("@/lib/apiBaseUrl");
-    const result = resolveApiBaseUrl();
-    if (!result.ok) {
-      throw new SessionBootstrapError(
-        "InvalidResponse",
-        `Failed to resolve BFF base URL: ${result.message}`,
-      );
-    }
-    baseUrl = result.data;
-  }
+  const baseUrl = await resolveSessionBaseUrl(deps);
   const url = `${baseUrl}${BOOTSTRAP_PATH}`;
   let response: Response;
   try {
@@ -203,6 +209,59 @@ async function fetchBootstrap(
     );
   }
   return parseBootstrapResponse(body);
+}
+
+async function signInForBootstrap(deps: SessionBootstrapDeps): Promise<void> {
+  const fetchImpl = deps.fetch ?? globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    throw new SessionBootstrapError(
+      "NetworkError",
+      "fetch is not available in this environment",
+    );
+  }
+  const baseUrl = await resolveSessionBaseUrl(deps);
+  let response: Response;
+  try {
+    response = await fetchImpl(`${baseUrl}${SIGN_IN_PATH}`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+  } catch (cause) {
+    throw new SessionBootstrapError(
+      "NetworkError",
+      `session sign-in fetch failed: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+  if (!response.ok) {
+    throw new SessionBootstrapError(
+      response.status === 401 ? "Unauthenticated" : "InvalidResponse",
+      `session sign-in returned ${response.status}`,
+    );
+  }
+}
+
+async function resolveSessionBaseUrl(
+  deps: SessionBootstrapDeps,
+): Promise<string> {
+  if (deps.baseUrl !== undefined) return deps.baseUrl;
+  // Lazy import so test environments that mock the apiBaseUrl module pick up
+  // the mock; injected fetches and base URLs skip this path entirely.
+  const { resolveApiBaseUrl } = await import("@/lib/apiBaseUrl");
+  const result = resolveApiBaseUrl();
+  if (!result.ok) {
+    throw new SessionBootstrapError(
+      "InvalidResponse",
+      `Failed to resolve BFF base URL: ${result.message}`,
+    );
+  }
+  return result.data;
 }
 
 function parseBootstrapResponse(raw: unknown): SessionBootstrap {

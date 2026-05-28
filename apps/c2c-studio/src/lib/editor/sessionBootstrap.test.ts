@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   __resetSessionBootstrapForTests,
   getSessionBootstrap,
+  ensureSessionBootstrap,
   clearSessionBootstrap,
   SessionBootstrapError,
 } from "./sessionBootstrap";
@@ -143,6 +144,59 @@ describe("sessionBootstrap", () => {
     await expect(getSessionBootstrap({ fetch })).rejects.toMatchObject({
       name: "SessionBootstrapError",
       kind: "Unauthenticated",
+    });
+  });
+
+  it("mints a fixture session and retries bootstrap when no cookie exists", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const responses = [
+      new Response(JSON.stringify({ error: "session cookie missing" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+      new Response(
+        JSON.stringify({ tenantId: "tenant-A", userId: "user-1" }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+      new Response(
+        JSON.stringify({
+          tenantId: "tenant-A",
+          userId: "user-1",
+          draftKeyWrappingSecret: freshSecret(),
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    ];
+    const fetchImpl: typeof globalThis.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      calls.push({ url, init });
+      const response = responses.shift();
+      if (!response) throw new Error("unexpected fetch");
+      return response;
+    };
+
+    const record = await ensureSessionBootstrap({ fetch: fetchImpl });
+
+    expect(record.tenantId).toBe("tenant-A");
+    expect(calls.map((call) => call.url)).toEqual([
+      "/api/v0/session/bootstrap",
+      "/api/v0/session/sign-in",
+      "/api/v0/session/bootstrap",
+    ]);
+    expect(calls[1].init).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
     });
   });
 
