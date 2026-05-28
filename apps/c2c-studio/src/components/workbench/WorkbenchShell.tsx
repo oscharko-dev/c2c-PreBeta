@@ -18,6 +18,7 @@ import {
   editorPersistence,
   getCurrentDraftScope,
 } from "@/lib/editor/editorPersistence";
+import { ensureSessionBootstrap } from "@/lib/editor/sessionBootstrap";
 import { OriginOverlayProvider } from "@/lib/editor/originOverlay";
 import { MarkerNavigationProvider } from "@/lib/editor/markerNavigation";
 import { JavaEditorActionsProvider } from "@/stores/javaEditorActions";
@@ -64,6 +65,16 @@ export function WorkbenchShell() {
     return () => {
       active = false;
     };
+  }, [apiState.health, apiState.loading]);
+
+  useEffect(() => {
+    if (apiState.loading || apiState.health === null) {
+      return;
+    }
+    void ensureSessionBootstrap().catch(() => {
+      // Product deployments can disable fixture sign-in; the first guarded API
+      // call will surface the auth state through the existing error channel.
+    });
   }, [apiState.health, apiState.loading]);
 
   return (

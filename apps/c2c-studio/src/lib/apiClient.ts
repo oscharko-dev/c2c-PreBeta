@@ -2469,6 +2469,7 @@ export const apiClient = {
   transform: (request: TransformRequest) =>
     fetchJson("/api/v0/transform", parseTransformResponse, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
@@ -2482,6 +2483,7 @@ export const apiClient = {
   generate: (request: TransformRequest) =>
     fetchJson("/api/v0/generate", parseGenerateResponse, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
