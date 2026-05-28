@@ -15,6 +15,7 @@ Desktop.ini
 # -------------------------------
 # IDE / editor
 # -------------------------------
+CLAUDE.md
 .idea/
 .vscode/
 !.vscode/extensions.json
@@ -267,3 +268,4 @@ apps/c2c-studio/dist-test/
 # Markdown link-checker cache (regenerated on every lychee run)
 .lycheecache
 /qodana/
+/CLAUDE.md
